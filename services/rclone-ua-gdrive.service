@@ -1,0 +1,30 @@
+[Unit]
+Description=Rclone mount for UA Google Drive
+Documentation=https://rclone.org/drive/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rclone mount ua_gdrive: %h/Cloud/UA_GoogleDrive \
+  --config %h/.config/rclone/rclone.conf \
+  --vfs-cache-mode full \
+  --vfs-cache-max-age 168h \
+  --vfs-cache-max-size 20G \
+  --vfs-cache-poll-interval 5m \
+  --cache-dir %h/.cache/rclone-vfs/ua-gdrive \
+  --dir-cache-time 5m \
+  --timeout 10s \
+  --contimeout 5s \
+  --low-level-retries 1 \
+  --retries 1 \
+  --retries-sleep 5s \
+  --umask 002 \
+  --log-level INFO
+ExecStop=/bin/fusermount3 -uz %h/Cloud/UA_GoogleDrive
+ExecStopPost=-/bin/fusermount3 -uz %h/Cloud/UA_GoogleDrive
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

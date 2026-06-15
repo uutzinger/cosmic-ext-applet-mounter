@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE="vpnagentd.service"
+
+echo "Cisco Secure Client VPN agent:"
+echo "  enabled: $(systemctl is-enabled "$SERVICE" 2>/dev/null || true)"
+echo "  active:  $(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+
+echo
+echo "Cisco GUI processes:"
+pgrep -a -f '/opt/cisco/secureclient/bin/vpnui|Cisco Secure Client|vpnui' || echo "  none"
+
+echo
+echo "VPN tunnel/interface check:"
+if ip addr | grep -Eiq 'cscotun|vpn|tun|utun'; then
+    ip addr | grep -Ei 'cscotun|vpn|tun|utun'
+else
+    echo "  no obvious Cisco tunnel interface found"
+fi
+
+echo
+echo "VPN route check:"
+if ip route | grep -Eiq 'cisco|tun|vpn|172\.|10\.|128\.196|150\.135'; then
+    ip route | grep -Ei 'cisco|tun|vpn|172\.|10\.|128\.196|150\.135'
+else
+    echo "  no obvious VPN/private/UA routes found"
+fi
+
+echo
+echo "Connection guess:"
+if ip addr | grep -Eiq 'cscotun|vpn|tun|utun' || \
+   ip route | grep -Eiq 'cisco|tun|vpn|172\.|10\.|128\.196|150\.135'; then
+    echo "  likely connected or partially connected"
+else
+    echo "  likely not connected"
+fi
+
+echo
+echo "Recent Cisco VPN log:"
+journalctl -b -u "$SERVICE" --no-pager | tail -50

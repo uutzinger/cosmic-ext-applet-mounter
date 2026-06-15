@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+/home/uutzinger/.local/bin/ua-engr-mount stop-all
+echo
+read -r -p "Press Enter to close..."

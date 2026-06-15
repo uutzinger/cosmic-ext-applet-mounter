@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -u
+
+SERVICE="rclone-ua-engr.service"
+MOUNTPOINT="$HOME/Cloud/UA_ENGR"
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $*"
+}
+
+notify() {
+    local msg="$1"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "UA_ENGR mount" "$msg"
+    fi
+    log "$msg"
+}
+
+CISCO_SERVICE="vpnagentd.service"
+
+cisco_is_running() {
+    systemctl is-active --quiet "$CISCO_SERVICE"
+}
+
+start_cisco_vpn_agent() {
+    if cisco_is_running; then
+        log "Cisco VPN agent already running."
+        open_cisco_vpn_client
+        return 0
+    fi
+
+    notify "Starting Cisco VPN agent..."
+    sudo systemctl start "$CISCO_SERVICE"
+
+    if cisco_is_running; then
+        notify "Cisco VPN agent started. Connect in Cisco Secure Client if not already connected."
+        open_cisco_vpn_client
+        return 0
+    else
+        notify "ERROR: Cisco VPN agent did not start."
+        return 1
+    fi
+}
+
+stop_cisco_vpn_agent() {
+    notify "Stopping Cisco VPN agent..."
+    sudo systemctl stop "$CISCO_SERVICE" || true
+
+    if cisco_is_running; then
+        notify "WARNING: Cisco VPN agent is still running."
+        return 1
+    else
+        notify "Cisco VPN agent stopped."
+        return 0
+    fi
+}
+
+show_cisco_vpn_status() {
+    systemctl status "$CISCO_SERVICE" --no-pager || true
+}
+
+open_cisco_vpn_client() {
+    if [ -x /opt/cisco/secureclient/bin/vpnui ]; then
+        notify "Opening Cisco Secure Client..."
+        nohup /opt/cisco/secureclient/bin/vpnui >/dev/null 2>&1 &
+    elif command -v gtk-launch >/dev/null 2>&1; then
+        notify "Opening Cisco Secure Client..."
+        gtk-launch com.cisco.secureclient.gui >/dev/null 2>&1 &
+    else
+        notify "Cisco Secure Client GUI command not found. Open it from the app launcher."
+    fi
+}
+
+is_mounted() {
+    findmnt -rn --mountpoint "$MOUNTPOINT" >/dev/null 2>&1
+}
+
+service_state() {
+    systemctl --user is-active "$SERVICE" 2>/dev/null || true
+}
+
+show_status() {
+    echo
+    log "UA_ENGR mount status:"
+    echo
+
+    if is_mounted; then
+        echo "  mounted     $MOUNTPOINT"
+    else
+        echo "  not mounted $MOUNTPOINT"
+    fi
+
+    echo
+    log "User service status:"
+    echo "  $SERVICE    $(service_state)"
+    echo
+}
+
+wait_for_state() {
+    local desired="$1"
+    local timeout="${2:-30}"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if [ "$desired" = "mounted" ] && is_mounted; then
+            return 0
+        fi
+
+        if [ "$desired" = "unmounted" ] && ! is_mounted; then
+            return 0
+        fi
+
+        if [ "$desired" = "mounted" ]; then
+            log "Waiting for UA_ENGR to mount..."
+            log "  still not mounted: $MOUNTPOINT"
+        else
+            log "Waiting for UA_ENGR to unmount..."
+            log "  still mounted:     $MOUNTPOINT"
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
+mount_ua_engr() {
+    mkdir -p "$MOUNTPOINT"
+
+    notify "Mounting UA_ENGR..."
+
+    start_cisco_vpn_agent
+
+    log "Resetting failed state: $SERVICE"
+    systemctl --user reset-failed "$SERVICE" 2>/dev/null || true
+
+    log "Starting: $SERVICE"
+    if ! systemctl --user start "$SERVICE"; then
+        notify "ERROR: failed to start $SERVICE. Is Cisco VPN connected?"
+        show_status
+        exit 1
+    fi
+
+    if wait_for_state mounted 45; then
+        notify "UA_ENGR mounted."
+        show_status
+
+        if command -v cosmic-files >/dev/null 2>&1; then
+            log "Opening folder in COSMIC Files..."
+            nohup cosmic-files "$MOUNTPOINT" >/dev/null 2>&1 &
+        fi
+
+        exit 0
+    else
+        notify "ERROR: UA_ENGR did not become mounted. Is Cisco VPN connected?"
+        show_status
+
+        log "Recent service log:"
+        journalctl --user -u "$SERVICE" -n 30 --no-pager || true
+
+        exit 1
+    fi
+}
+
+unmount_ua_engr() {
+    notify "Unmounting UA_ENGR..."
+
+    log "Stopping: $SERVICE"
+    systemctl --user stop "$SERVICE" || log "WARNING: failed to stop $SERVICE"
+
+    if is_mounted; then
+        log "Unmounting: $MOUNTPOINT"
+        if fusermount3 -u "$MOUNTPOINT" 2>/dev/null; then
+            log "Unmounted cleanly: $MOUNTPOINT"
+        else
+            log "Clean unmount failed, trying lazy unmount: $MOUNTPOINT"
+            fusermount3 -uz "$MOUNTPOINT" 2>/dev/null || true
+        fi
+    else
+        log "Already not mounted: $MOUNTPOINT"
+    fi
+
+    if wait_for_state unmounted 15; then
+        notify "UA_ENGR unmounted."
+        show_status
+        exit 0
+    else
+        notify "ERROR: UA_ENGR is still mounted."
+        show_status
+
+        if command -v fuser >/dev/null 2>&1; then
+            log "Processes using $MOUNTPOINT:"
+            fuser -vm "$MOUNTPOINT" || true
+        else
+            log "Install psmisc to see busy processes: sudo apt install psmisc"
+        fi
+
+        exit 1
+    fi
+}
+
+mode="${1:-toggle}"
+
+case "$mode" in
+    status)
+        show_status
+        ;;
+    mount|start)
+        mount_ua_engr
+        ;;
+    unmount|stop)
+        unmount_ua_engr
+        ;;
+    toggle)
+        if is_mounted; then
+            log "Current state: mounted"
+            unmount_ua_engr
+        else
+            log "Current state: not mounted"
+            mount_ua_engr
+        fi
+        ;;
+    vpn-start)
+        start_cisco_vpn_agent
+        ;;
+    vpn-stop)
+        stop_cisco_vpn_agent
+        ;;
+    vpn-status)
+        show_cisco_vpn_status
+        ;;
+    stop-all|unmount-and-stop-vpn)
+        unmount_ua_engr
+        stop_cisco_vpn_agent
+        ;;
+
+    *)
+        echo "Usage: $0 [status|mount|unmount|toggle|vpn-start|vpn-stop|vpn-status|stop-all]"
+        exit 2
+        ;;
+esac

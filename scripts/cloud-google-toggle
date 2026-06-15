@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+set -u
+
+RCLONE_SERVICES=(
+  "rclone-ua-gdrive.service"
+  "rclone-uutzinger-gdrive.service"
+)
+
+MOUNTPOINTS=(
+  "$HOME/Cloud/UA_GoogleDrive"
+  "$HOME/Cloud/uutzinger_GoogleDrive"
+)
+
+TITLE="Google Drive mounts"
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $*"
+}
+
+notify() {
+    local msg="$1"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "$TITLE" "$msg"
+    fi
+    log "$msg"
+}
+
+is_mounted() {
+    findmnt -rn --mountpoint "$1" >/dev/null 2>&1
+}
+
+count_mounted() {
+    local count=0
+    for mp in "${MOUNTPOINTS[@]}"; do
+        if is_mounted "$mp"; then
+            count=$((count + 1))
+        fi
+    done
+    echo "$count"
+}
+
+mount_state() {
+    local mounted total
+    mounted="$(count_mounted)"
+    total="${#MOUNTPOINTS[@]}"
+
+    if [ "$mounted" -eq 0 ]; then
+        echo "none"
+    elif [ "$mounted" -eq "$total" ]; then
+        echo "all"
+    else
+        echo "partial"
+    fi
+}
+
+show_status() {
+    echo
+    log "$TITLE status:"
+    echo
+
+    for mp in "${MOUNTPOINTS[@]}"; do
+        if is_mounted "$mp"; then
+            printf "  mounted     %s\n" "$mp"
+        else
+            printf "  not mounted %s\n" "$mp"
+        fi
+    done
+
+    echo
+    log "User service status:"
+    echo
+
+    for svc in "${RCLONE_SERVICES[@]}"; do
+        state="$(systemctl --user is-active "$svc" 2>/dev/null || true)"
+        printf "  %-55s %s\n" "$svc" "$state"
+    done
+
+    echo
+}
+
+wait_for_state() {
+    local desired="$1"
+    local timeout="${2:-15}"
+    local elapsed=0
+    local state
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        state="$(mount_state)"
+
+        if [ "$desired" = "all" ] && [ "$state" = "all" ]; then
+            return 0
+        fi
+
+        if [ "$desired" = "none" ] && [ "$state" = "none" ]; then
+            return 0
+        fi
+
+        log "Waiting for desired state: $desired ; current state: $state"
+
+        for mp in "${MOUNTPOINTS[@]}"; do
+            if [ "$desired" = "all" ]; then
+                if ! is_mounted "$mp"; then
+                    log "  still not mounted: $mp"
+                fi
+            elif [ "$desired" = "none" ]; then
+                if is_mounted "$mp"; then
+                    log "  still mounted:     $mp"
+                fi
+            fi
+        done
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
+start_mounts() {
+    notify "Mounting Google Drives..."
+
+    for svc in "${RCLONE_SERVICES[@]}"; do
+        log "Resetting failed state: $svc"
+        systemctl --user reset-failed "$svc" || true
+
+        log "Starting: $svc"
+        systemctl --user start "$svc" || log "ERROR: failed to start $svc"
+    done
+
+    if wait_for_state all 45; then
+        notify "Google Drives are mounted."
+        show_status
+        exit 0
+    else
+        notify "ERROR: Google Drives did not mount."
+        show_status
+        exit 1
+    fi
+}
+
+stop_mounts() {
+    notify "Unmounting Google Drives..."
+
+    for svc in "${RCLONE_SERVICES[@]}"; do
+        log "Stopping: $svc"
+        systemctl --user stop "$svc" || log "WARNING: failed to stop $svc"
+    done
+
+    log "Cleaning up remaining FUSE mounts..."
+    for mp in "${MOUNTPOINTS[@]}"; do
+        if is_mounted "$mp"; then
+            log "Unmounting: $mp"
+            if fusermount3 -u "$mp" 2>/dev/null; then
+                log "Unmounted cleanly: $mp"
+            else
+                log "Clean unmount failed, trying lazy unmount: $mp"
+                fusermount3 -uz "$mp" 2>/dev/null || true
+            fi
+        else
+            log "Already not mounted: $mp"
+        fi
+    done
+
+    if wait_for_state none 15; then
+        notify "Google Drives are unmounted."
+        show_status
+        exit 0
+    else
+        notify "ERROR: some Google Drives are still mounted."
+        show_status
+
+        echo
+        log "Possible busy mounts:"
+        for mp in "${MOUNTPOINTS[@]}"; do
+            if is_mounted "$mp"; then
+                echo
+                log "Still mounted: $mp"
+                findmnt "$mp" || true
+
+                if command -v fuser >/dev/null 2>&1; then
+                    log "Processes using $mp:"
+                    fuser -vm "$mp" || true
+                else
+                    log "Install psmisc to see busy processes: sudo apt install psmisc"
+                fi
+            fi
+        done
+
+        exit 1
+    fi
+}
+
+mode="${1:-toggle}"
+
+case "$mode" in
+    status)
+        show_status
+        ;;
+    mount|start)
+        start_mounts
+        ;;
+    unmount|stop)
+        stop_mounts
+        ;;
+    toggle)
+        state="$(mount_state)"
+        log "Current mount state: $state"
+
+        case "$state" in
+            all)
+                stop_mounts
+                ;;
+            none)
+                start_mounts
+                ;;
+            partial)
+                notify "Partial mount state detected. Repairing by mounting Google Drives."
+                start_mounts
+                ;;
+        esac
+        ;;
+    *)
+        echo "Usage: $0 [status|mount|unmount|toggle]"
+        exit 2
+        ;;
+esac
+

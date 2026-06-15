@@ -1,0 +1,30 @@
+[Unit]
+Description=Rclone mount for UA Engineering Research storage
+Documentation=https://rclone.org/commands/rclone_mount/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=/bin/mkdir -p /home/uutzinger/Cloud/UA_ENGR
+ExecStart=/usr/bin/rclone mount ua_engr:Research /home/uutzinger/Cloud/UA_ENGR \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 20G \
+  --vfs-cache-max-age 168h \
+  --dir-cache-time 5m \
+  --timeout 10s \
+  --contimeout 5s \
+  --low-level-retries 1 \
+  --retries 1 \
+  --retries-sleep 5s \
+  --poll-interval 0 \
+  --cache-dir /home/uutzinger/.cache/rclone-ua-engr \
+  --log-level INFO \
+  --log-file /home/uutzinger/.cache/rclone-ua-engr.log
+ExecStop=/bin/fusermount3 -uz /home/uutzinger/Cloud/UA_ENGR
+ExecStopPost=-/bin/fusermount3 -uz /home/uutzinger/Cloud/UA_ENGR
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
