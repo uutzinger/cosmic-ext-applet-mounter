@@ -32,6 +32,24 @@ pauses on metered networks by default.
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
+## Dependencies
+
+The applet detects dependencies and provides guidance, but does not install or
+upgrade them.
+
+| Dependency | Purpose | Minimum for this project |
+|---|---|---|
+| `rclone` | Google Drive, Box, and SMB mounts and mirrors | 1.74.3 |
+| `onedriver` by jstaf | OneDrive Online mount | 0.15.0 |
+| `onedrive` by abraunegg | OneDrive Offline mirror | 2.5.10 |
+| FUSE 3 / `fusermount3` | Online mounts | Required |
+| NetworkManager / `nmcli` | Network and VPN readiness | Required |
+| Cisco Secure Client | Optional Cisco VPN support | 5.1.10 tested |
+| `fuser` from `psmisc` | Optional busy-mount diagnostics | Recommended |
+
+Install and upgrade guidance is in
+[Dependency Installation.md](Dependency%20Installation.md).
+
 ## Data Integrity Warning
 
 Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
@@ -151,24 +169,6 @@ Removing an applet-owned connection removes only applet-owned generated unit
 files. Credentials, cloud data, local mirror data, caches, recovery
 directories, and original legacy service files are preserved unless a separate,
 explicitly confirmed cleanup action says otherwise.
-
-## Dependencies
-
-The applet detects dependencies and provides guidance, but does not install or
-upgrade them.
-
-| Dependency | Purpose | Minimum for this project |
-|---|---|---|
-| `rclone` | Google Drive, Box, and SMB mounts and mirrors | 1.74.3 |
-| `onedriver` by jstaf | OneDrive Online mount | 0.15.0 |
-| `onedrive` by abraunegg | OneDrive Offline mirror | 2.5.10 |
-| FUSE 3 / `fusermount3` | Online mounts | Required |
-| NetworkManager / `nmcli` | Network and VPN readiness | Required |
-| Cisco Secure Client | Optional Cisco VPN support | 5.1.10 tested |
-| `fuser` from `psmisc` | Optional busy-mount diagnostics | Recommended |
-
-Install and upgrade guidance is in
-[Dependency Installation.md](Dependency%20Installation.md).
 
 ## Build from Source
 
