@@ -1,11 +1,31 @@
 # COSMIC Cloud Mounter Applet Task List
 
-**Status:** Draft for user review  
-**Execution environment:** VS Code with Codex  
-**Development state:** On hold pending final specification approval
+This document tracks the complete work-item checklist, including historical,
+superseded, completed, and current tasks. Detailed execution evidence, manual
+test notes, command output summaries, and completion commentary are kept in
+`Task List Completion Notes.md` using a parallel phase/gate structure.
+
+**Status:** Current Gate 1 is approved. Current Phase 9 UI/runtime completion,
+Current Phase 10 integrated manual testing, and Current Phase 11 documentation
+and packaging recheck are complete. Current Gate 2 remains open pending final
+release-candidate checks and user approval.
+
+**Execution environment:** VS Code with Codex
 
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
+
+## Codex Working Rules
+
+- [x] Work one phase at a time and keep this list current.
+- [x] Inspect current files and preserve unrelated user changes.
+- [x] Use small, reviewable patches.
+- [x] Never place real credentials, tokens, or organization-specific secrets in
+  source or fixtures.
+- [x] Use temporary directories and fake adapters for automated tests.
+- [x] Run each phase's verification before reporting completion.
+- [x] Report changed files, tests, failures, and remaining risks.
+- [x] Stop at each approval gate and wait for explicit approval.
 
 ## Gate 0: Review and Approval
 
@@ -22,304 +42,829 @@ description is `Applet Description.md`.
   confirmation; block it when writes are pending.
 - [x] Disconnect only applet-activated VPNs after all dependent connections are
   inactive.
-- [ ] Review the revised requirements and this task list.
-- [ ] Record explicit user approval to begin development.
-
-**HOLD:** Codex shall not scaffold the application, change system configuration,
-start services, connect VPNs, mount storage, synchronize data, or access cloud
-accounts before Gate 0 is approved.
+- [x] Review the revised requirements and this task list.
+- [x] Record explicit user approval to begin development.
 
 ## Phase 1: Baseline and Scaffold
 
-- [ ] Inventory the supplied applet template, scripts, service fixtures, and
+- [x] Inventory the supplied applet template, scripts, service fixtures, and
   available local tool versions.
-- [ ] Lock a compatible libcosmic revision and Rust toolchain.
-- [ ] Instantiate the template as `cosmic-ext-applet-mounter`.
-- [ ] Set app ID `io.github.uutzinger.cosmic-ext-applet-mounter`.
-- [ ] Add MIT license and authors Urs Utzinger and OpenAI Codex.
-- [ ] Set the planned repository URL without creating or publishing the
-  repository.
-- [ ] Create the approved module layout.
-- [ ] Add formatting, lint, build, run, test, and staged-install recipes.
-- [ ] Add a developer README for VS Code and command-line workflows.
-- [ ] Initialize Git only after separate user approval.
-- [ ] Run a COSMIC popup smoke test.
+- [x] Lock a compatible libcosmic revision and Rust toolchain.
+- [x] Instantiate the template as `cosmic-ext-applet-mounter`.
+- [x] Set app ID `io.github.uutzinger.cosmic-ext-applet-mounter`.
+- [x] Add MIT license and authors Urs Utzinger and OpenAI Codex.
+- [x] Set the user-created repository URL without creating or publishing the
+  repository from Codex.
+- [x] Create the approved module layout.
+- [x] Add formatting, lint, build, run, test, and staged-install recipes.
+- [x] Add a developer README for VS Code and command-line workflows.
+- [x] Use the existing user-created Git repository without reinitializing it.
+- [x] Run a manual COSMIC popup open/close smoke test.
 
 ### Phase 1 verification
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo check --all-targets`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --all-targets`
-- [ ] Manual popup open/close test.
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo check --all-targets`
+- [x] `cargo clippy --all-targets --all-features -- -D warnings`
+- [x] `cargo test --all-targets`
+- [x] Manual popup open/close test.
 
 ## Phase 2: Domain Model and Configuration
 
-- [ ] Define providers, modes, connections, VPN profiles, operations, conflicts,
+- [x] Define providers, modes, connections, VPN profiles, operations, conflicts,
   recovery records, and status types.
-- [ ] Implement stable UUID connection identities.
-- [ ] Implement versioned COSMIC configuration.
-- [ ] Implement atomic writes, rollback, migration, and malformed-data recovery.
-- [ ] Validate local and remote paths.
-- [ ] Reject mount/mirror reuse, nested mirrors, recursive sync trees, duplicate
+- [x] Implement stable UUID connection identities.
+- [x] Implement versioned COSMIC configuration.
+- [x] Implement atomic writes, rollback, migration, and malformed-data recovery.
+- [x] Validate local and remote paths.
+- [x] Reject mount/mirror reuse, nested mirrors, recursive sync trees, duplicate
   targets, and unsafe system paths.
-- [ ] Add configuration fixtures without real credentials.
+- [x] Add configuration fixtures without real credentials.
 
 ### Phase 2 verification
 
-- [ ] Test serialization, migration, defaults, and invalid data.
-- [ ] Test all path-overlap and mode-separation rules.
-- [ ] Confirm configuration contains no secret fields.
+- [x] Test serialization, migration, defaults, and invalid data.
+- [x] Test all path-overlap and mode-separation rules.
+- [x] Confirm configuration contains no secret fields.
 
 ## Phase 3: Process, Dependency, and Diagnostics Layer
 
-- [ ] Define an asynchronous typed command-runner interface.
-- [ ] Invoke fixed executables with separate validated arguments.
-- [ ] Bound output, duration, retries, and cancellation.
-- [ ] Redact credentials, tokens, URLs, and sensitive arguments.
-- [ ] Detect rclone, onedriver, `abraunegg/onedrive`, FUSE, NetworkManager, Cisco,
+- [x] Define an asynchronous typed command-runner interface.
+- [x] Invoke fixed executables with separate validated arguments.
+- [x] Bound output, duration, retries, and cancellation.
+- [x] Redact credentials, tokens, URLs, and sensitive arguments.
+- [x] Detect rclone, `jstaf/onedriver`, `abraunegg/onedrive`, FUSE, NetworkManager, Cisco,
   and optional diagnostics tools.
-- [ ] Validate required capabilities as well as versions.
-- [ ] Reject rclone `1.60.1` and provide current-stable upgrade guidance.
-- [ ] Add fake runners and dependency inventories.
+- [x] Validate required capabilities as well as versions.
+- [x] Reject rclone `1.60.1` and provide current-stable upgrade guidance.
+- [x] Add fake runners and dependency inventories.
 
 ### Phase 3 verification
 
-- [ ] Test missing, outdated, and capability-incomplete tools.
-- [ ] Test timeout, nonzero exit, invalid UTF-8, large output, and cancellation.
-- [ ] Security-review all external command construction.
+- [x] Test missing, outdated, and capability-incomplete tools.
+- [x] Test timeout, nonzero exit, invalid UTF-8, large output, and cancellation.
+- [x] Security-review all external command construction.
 
 ## Phase 4: Systemd and Runtime Infrastructure
 
-- [ ] Define service and timer manager interfaces.
-- [ ] Render deterministic applet-owned units with UUID markers.
-- [ ] Install, validate, update, roll back, and remove units atomically.
-- [ ] Implement daemon reload, enable, disable, start, stop, reset-failed, and
+- [x] Define service and timer manager interfaces.
+- [x] Render deterministic applet-owned units with UUID markers.
+- [x] Install, validate, update, roll back, and remove units atomically.
+- [x] Implement daemon reload, enable, disable, start, stop, reset-failed, and
   status.
-- [ ] Define mount-table and sync-runtime interfaces.
-- [ ] Implement per-connection operation serialization.
-- [ ] Build fake systemd, mount-table, and timer implementations.
+- [x] Define mount-table and sync-runtime interfaces.
+- [x] Implement per-connection operation serialization.
+- [x] Build fake systemd, mount-table, and timer implementations.
 
 ### Phase 4 verification
 
-- [ ] Snapshot-test generated units and timers.
-- [ ] Test ownership checks and rollback.
-- [ ] Confirm tests never change the real user manager.
+- [x] Snapshot-test generated units and timers.
+- [x] Test ownership checks and rollback.
+- [x] Confirm tests never change the real user manager.
 
 ## Phase 5: Online Mount Engines
 
 ### Rclone mount
 
-- [ ] Enumerate and validate Google Drive, Box, and SMB remotes.
-- [ ] Implement provider-specific remote/subtree configuration.
-- [ ] Render rclone mount services with full VFS caching.
-- [ ] Apply the configurable 20 GiB default cache limit.
-- [ ] Apply bounded timeout and retry defaults.
-- [ ] Enable VFS queue and cache health inspection.
-- [ ] Detect queued uploads, active uploads, cache errors, and cache exhaustion.
+- [x] Enumerate and validate Google Drive, Box, and SMB remotes.
+- [x] Implement provider-specific remote/subtree configuration.
+- [x] Render rclone mount services with full VFS caching.
+- [x] Apply the configurable 20 GiB default cache limit.
+- [x] Apply bounded timeout and retry defaults.
+- [x] Enable VFS queue and cache health inspection.
+- [x] Detect queued uploads, active uploads, cache errors, and cache exhaustion.
 
-### Onedriver
+### `jstaf/onedriver`
 
-- [ ] Detect current onedriver capabilities and authentication state.
-- [ ] Implement OneDrive Online mount setup and service management.
-- [ ] Detect cached read-only offline behavior and mount health.
+- [x] Detect current `jstaf/onedriver` capabilities and authentication state.
+- [x] Implement OneDrive Online mount setup and service management.
+- [x] Detect cached read-only offline behavior and mount health.
 
 ### Connectivity recovery
 
-- [ ] Monitor network, VPN, provider, service, and actual mount state.
-- [ ] Safely auto-detach rclone mounts only when no writes are pending.
-- [ ] Preserve cache and expose recovery when writes are pending.
-- [ ] Implement automatic remount for enabled connections after readiness returns.
-- [ ] Add bounded exponential remount backoff.
-- [ ] Implement clean unmount and busy-mount diagnostics.
-- [ ] Offer warned, explicit-confirmation lazy unmount after clean unmount fails.
-- [ ] Block lazy unmount while writes are queued or in progress.
+- [x] Monitor network, VPN, provider, service, and actual mount state.
+- [x] Safely auto-detach rclone mounts only when no writes are pending.
+- [x] Preserve cache and expose recovery when writes are pending.
+- [x] Implement automatic remount for enabled connections after readiness returns.
+- [x] Add bounded exponential remount backoff.
+- [x] Implement clean unmount and busy-mount diagnostics.
+- [x] Offer warned, explicit-confirmation lazy unmount after clean unmount fails.
+- [x] Block lazy unmount while writes are queued or in progress.
 
 ### Phase 5 verification
 
-- [ ] Test clean mount/unmount and partial service/mount states.
-- [ ] Test safe detach, blocked detach, cache error, and reconnect/remount.
-- [ ] Test file-manager-facing operations return within configured bounds during
+- [x] Test clean mount/unmount and partial service/mount states.
+- [x] Test safe detach, blocked detach, cache error, and reconnect/remount.
+- [x] Test file-manager-facing operations return within configured bounds during
   simulated connectivity failure.
 
 ## Phase 6: Offline Mirror Engines
 
 ### Shared synchronization behavior
 
-- [ ] Select whole remote or remote subtree.
-- [ ] Estimate remote size and local free-space requirements.
-- [ ] Generate a dry preview of upload, download, delete, conflict, skip, and
+- [x] Select whole remote or remote subtree.
+- [x] Estimate remote size and local free-space requirements.
+- [x] Generate a dry preview of upload, download, delete, conflict, skip, and
   transfer totals.
-- [ ] Require explicit confirmation before initial synchronization.
-- [ ] Implement Sync Now, Pause, Resume, and automatic reconnect sync.
-- [ ] Schedule non-continuous engines every 15 minutes after completion.
-- [ ] Prevent concurrent runs.
-- [ ] Pause automatic sync on metered networks by default.
-- [ ] Implement per-connection metered override.
-- [ ] Propagate creates, modifications, renames, and deletions bidirectionally.
-- [ ] Preserve both conflict versions and report them.
-- [ ] Retain deleted and overwritten files for 30 days.
-- [ ] Keep cache, work, and recovery directories outside the mirror tree.
-- [ ] Implement interrupted-run recovery without routine destructive resync.
-- [ ] Require preview and confirmation for any state rebuild or resync.
+- [x] Require explicit confirmation before initial synchronization.
+- [x] Implement Sync Now, Pause, Resume, and automatic reconnect sync.
+- [x] Schedule non-continuous engines every 15 minutes after completion.
+- [x] Prevent concurrent runs.
+- [x] Pause automatic sync on metered networks by default.
+- [x] Implement per-connection metered override.
+- [x] Propagate creates, modifications, renames, and deletions bidirectionally.
+- [x] Preserve both conflict versions and report them.
+- [x] Retain deleted and overwritten files for 30 days.
+- [x] Keep cache, work, and recovery directories outside the mirror tree.
+- [x] Implement interrupted-run recovery without routine destructive resync.
+- [x] Require preview and confirmation for any state rebuild or resync.
 
 ### Rclone bisync
 
-- [ ] Implement dedicated work state per connection.
-- [ ] Require supported access checks and resilient/recovery capabilities.
-- [ ] Configure conflict-loser preservation and recovery directories.
-- [ ] Implement Google Drive cloud-native document exclusion and reporting.
-- [ ] Add Google Drive, Box, and SMB adapters.
+- [x] Implement dedicated work state per connection.
+- [x] Require supported access checks and resilient/recovery capabilities.
+- [x] Configure conflict-loser preservation and recovery directories.
+- [x] Implement Google Drive cloud-native document exclusion and reporting.
+- [x] Add Google Drive, Box, and SMB adapters.
 
 ### OneDrive mirror
 
-- [ ] Detect current `abraunegg/onedrive` capabilities.
-- [ ] Create isolated configuration and sync directories per connection.
-- [ ] Implement supported browser authentication.
-- [ ] Use monitor mode for continuous synchronization where supported.
-- [ ] Map native conflict, recovery, status, and resync-required states into the
+- [x] Detect current `abraunegg/onedrive` capabilities.
+- [x] Detect and block overlap with configured or active `jstaf/onedriver` accounts and
+  remote subtrees.
+- [x] Create isolated configuration and sync directories per connection.
+- [x] Implement supported browser authentication.
+- [x] Use monitor mode for continuous synchronization where supported.
+- [x] Map native conflict, recovery, status, and resync-required states into the
   applet model.
 
 ### Phase 6 verification
 
-- [ ] Test initial empty/local/remote/both-populated cases.
-- [ ] Test offline local edits followed by reconnect.
-- [ ] Test remote-only changes and deletions.
-- [ ] Test simultaneous same-file edits preserving both versions.
-- [ ] Test interrupted runs and non-destructive recovery.
-- [ ] Test 30-day recovery cleanup boundaries.
-- [ ] Test low disk space and metered-network behavior.
-- [ ] Test Google cloud-native document exclusion.
+- [x] Test initial empty/local/remote/both-populated cases.
+- [x] Test offline local edits followed by reconnect.
+- [x] Test remote-only changes and deletions.
+- [x] Test simultaneous same-file edits preserving both versions.
+- [x] Test interrupted runs and non-destructive recovery.
+- [x] Test 30-day recovery cleanup boundaries.
+- [x] Test low disk space and metered-network behavior.
+- [x] Test Google cloud-native document exclusion.
 
 ## Phase 7: VPN Integration
 
 ### NetworkManager
 
-- [ ] Enumerate visible VPN profiles.
-- [ ] Implement activation, state, and deactivation through D-Bus.
-- [ ] Document and test any fixed-argument fallback.
+- [x] Enumerate visible VPN profiles.
+- [x] Implement activation, state, and deactivation through a typed
+  NetworkManager adapter.
+- [x] Document and test the fixed-argument `nmcli` fallback; direct D-Bus
+  remains the preferred future transport.
 
 ### Cisco Secure Client
 
-- [ ] Detect agent, GUI, interface, and tunnel state.
-- [ ] Implement authorized agent startup without storing sudo credentials.
-- [ ] Open the Cisco GUI for interactive authentication.
+- [x] Detect agent, GUI, interface, and tunnel state.
+- [x] Implement authorized agent startup without storing sudo credentials.
+- [x] Open the Cisco GUI for interactive authentication.
 
 ### Coordination
 
-- [ ] Implement interface, route, DNS, endpoint, and NetworkManager readiness
+- [x] Implement interface, route, DNS, endpoint, and NetworkManager readiness
   checks.
-- [ ] Block mount and sync until readiness succeeds or times out.
-- [ ] Reference-count shared VPN dependencies.
-- [ ] Track whether the applet activated each VPN.
-- [ ] Never disconnect a VPN still used by another connection.
-- [ ] Disconnect an unused VPN automatically only when the applet activated it.
+- [x] Block mount and sync until readiness succeeds or times out.
+- [x] Reference-count shared VPN dependencies.
+- [x] Track whether the applet activated each VPN.
+- [x] Never disconnect a VPN still used by another connection.
+- [x] Disconnect an unused VPN automatically only when the applet activated it.
 
 ### Phase 7 verification
 
-- [ ] Test shared, pre-existing, applet-activated, failed, and timed-out VPNs with
+- [x] Test shared, pre-existing, applet-activated, failed, and timed-out VPNs with
   fakes.
-- [ ] Test mount and sync failure after successful VPN activation.
-- [ ] Do not activate a real VPN before the manual-test gate.
+- [x] Test mount and sync failure after successful VPN activation.
+- [x] Do not activate a real VPN before the manual-test gate.
 
 ## Phase 8: Legacy Service Import
 
-- [ ] Scan `~/.config/systemd/user/` by default.
-- [ ] Parse the compatible subset of rclone and onedriver units as structured
+- [x] Scan `~/.config/systemd/user/` by default.
+- [x] Parse the compatible subset of rclone and `jstaf/onedriver` units as structured
   data.
-- [ ] Never execute imported text.
-- [ ] Display provider, remote, target, cache, startup, and unsupported options.
-- [ ] Detect active-service and local-target conflicts.
-- [ ] Require confirmation before creating an applet-owned replacement.
-- [ ] Preserve original units by default.
-- [ ] Offer a separate confirmed action to disable an imported original.
-- [ ] Test against copies of all files in repository `services/`.
+- [x] Never execute imported text.
+- [x] Display provider, remote, target, cache, startup, and unsupported options.
+- [x] Detect active-service and local-target conflicts.
+- [x] Require confirmation before creating an applet-owned replacement.
+- [x] Preserve original units by default.
+- [x] Offer a separate confirmed action to disable an imported original.
+- [x] Test against copies of all files in repository `services/`.
 
 ### Phase 8 verification
 
-- [ ] Confirm fixture and original units remain unchanged.
-- [ ] Confirm import cannot inject commands or copy credentials.
-- [ ] Test malformed, unsupported, duplicate, and conflicting units.
+- [x] Confirm fixture and original units remain unchanged.
+- [x] Confirm import cannot inject commands or copy credentials.
+- [x] Test malformed, unsupported, duplicate, and conflicting units.
 
 ## Phase 9: Operation Controller and UI
 
-- [ ] Implement separate Online mount and Offline mirror state machines.
-- [ ] Restore status from configuration, systemd, mount tables, sync state,
+- [x] Implement separate Online mount and Offline mirror state machines.
+- [x] Restore status from configuration, systemd, mount tables, sync state,
   connectivity, and VPN state.
-- [ ] Implement popup aggregate state and connection rows.
-- [ ] Implement mount/unmount, Sync Now, Pause/Resume, retry, repair, and details.
-- [ ] Implement provider- and mode-specific settings.
-- [ ] Implement disk estimate and initial-sync preview/confirmation.
-- [ ] Implement pending-write, conflict, recovery, low-space, and metered states.
-- [ ] Implement dependency setup and upgrade guidance.
-- [ ] Implement legacy import UI.
-- [ ] Add sanitized logs and optional notifications.
-- [ ] Add keyboard navigation, accessible names, and localization.
+- [x] Implement popup aggregate state and connection rows.
+- [x] Implement UI-facing operation model and labels for mount/unmount, Sync
+  Now, Pause/Resume, retry, repair, and details.
+- [x] Implement provider- and mode-specific settings data in the domain model.
+- [x] Implement disk estimate and initial-sync preview/confirmation models.
+- [x] Implement pending-write, conflict, recovery, low-space, and metered states.
+- [x] Implement dependency setup and upgrade guidance messages.
+- [x] Implement legacy import preview display.
+- [x] Add sanitized logs and optional notifications.
+- [x] Add accessible labels and localization for implemented popup views.
 
 ### Phase 9 verification
 
-- [ ] Test UI model updates with fake backends.
-- [ ] Check narrow and wide panel layouts.
-- [ ] Check keyboard-only operation.
-- [ ] Check that every state is understandable without color.
+- [x] Test UI model updates with fake backends.
+- [x] Check narrow and wide panel layouts.
+- [x] Check keyboard-only operation.
+- [x] Check that every state is understandable without color.
 
-## Gate 1: Isolated Release Candidate
+### Phase 9 UI/settings addendum
 
-- [ ] All formatting, lint, unit, integration, and snapshot tests pass.
-- [ ] No test has touched real services, mounts, VPNs, credentials, or cloud data.
-- [ ] Review generated units, timers, logs, and fixtures for secret leakage.
-- [ ] Review sync deletion, conflict, and recovery behavior for data-loss risks.
-- [ ] Review detach and VPN policies against the approved specification.
-- [ ] Obtain user approval for controlled real-system testing.
+- [x] Add a popup Settings control that opens the settings window.
+- [x] Add an empty-state Add connection control that opens settings in
+  add-connection mode.
+- [x] Implement settings window lifecycle, close behavior, and navigation.
+- [x] Implement settings connection list with Add, Edit, Test, Enable, Disable,
+  Import, and Remove actions.
+- [x] Implement provider- and mode-specific settings forms for provider, mode,
+  account/remote, remote subtree, local mountpoint or mirror directory, display
+  name, and enablement.
+- [x] Implement Online mount settings for manual startup default, optional
+  startup at login, 20 GiB default rclone VFS cache limit, timeouts, retries,
+  bandwidth, safe detach behavior, and lazy-unmount confirmation policy.
+- [x] Implement Offline mirror settings for whole-drive or subtree selection,
+  disk estimate, initial-sync preview, sync interval, Sync Now, Pause/Resume,
+  metered-network behavior, recovery location, 30-day retention, conflict
+  preservation, and resync/state-rebuild confirmation.
+- [x] Implement VPN settings for NetworkManager or Cisco dependency selection,
+  readiness checks, startup behavior, and shutdown limited to applet-activated
+  VPNs.
+- [x] Implement dependency settings showing executable detection, versions,
+  unsupported or outdated tools, authentication/setup guidance, and upgrade
+  guidance without installing dependencies.
+- [x] Implement legacy import settings workflow for scanning
+  `~/.config/systemd/user/`, previewing compatible services, showing conflicts,
+  confirming applet-owned replacement creation, preserving originals by default,
+  and separately confirming original disablement.
+- [x] Implement confirmation dialogs for initial synchronization, state rebuild,
+  destructive resync, removal, disabling imported originals, lazy unmount, and
+  cleanup.
+- [x] Replace text-only popup operation labels with clickable row controls for
+  Mount, Unmount, Sync Now, Pause, Resume, Retry, Repair, and Details.
+- [x] Show disabled or unavailable popup actions with visible reasons.
+- [x] Wire popup and settings controls to typed operation requests without
+  blocking the COSMIC event loop.
+- [x] Add keyboard navigation, accessible names, localization, and non-color
+  state cues for settings and popup action controls.
 
-## Phase 10: Controlled Manual Testing
+### Phase 9 addendum verification
 
-Use disposable connections and non-critical data. Record results and cleanup.
+- [x] Manually test that popup Settings opens settings and closing settings does not
+  interrupt active operations.
+- [x] Manually test that empty-state Add connection opens settings in add-connection
+  mode.
+- [x] Test settings add, edit, test, enable, disable, import, and remove flows
+  with fake backends.
+- [x] Test that settings expose all approved provider, mode, local path, cache,
+  sync, metered, VPN, dependency, import, recovery, and confirmation options.
+- [x] Test popup action controls for Online mount and Offline mirror rows,
+  including disabled-state explanations.
+- [x] Manually check keyboard-only operation and accessible labels for settings and popup
+  action controls.
+- [x] Check that action dispatch remains asynchronous and does not block UI
+  rendering.
 
-- [ ] Verify dependency detection and outdated-version guidance.
-- [ ] Test a disposable rclone Online mount.
-- [ ] Test safe connectivity-loss detach and automatic remount.
-- [ ] Test pending-write protection during connectivity loss.
-- [ ] Test onedriver Online mount and offline cached read-only behavior.
-- [ ] Test a local-to-local rclone bisync mirror.
-- [ ] Test one approved Google Drive or Box Offline mirror.
-- [ ] Test offline editing followed by reconnect synchronization.
-- [ ] Test conflict preservation, deletion propagation, and recovery.
-- [ ] Test metered pause and Sync Now.
-- [ ] Test `abraunegg/onedrive` with a non-critical account or subtree.
-- [ ] Test NetworkManager VPN readiness.
-- [ ] Test Cisco interactive authentication when installed.
-- [ ] Test import preview and confirmed import from the real user service folder.
-- [ ] Verify removal preserves credentials, data, cache, recovery, and originals.
+### UI Design Completion
 
-## Phase 11: Documentation and Packaging
+- [x] Replace fake-backend-only UI notices for Refresh, Import preview, Test,
+  Enable, Disable, and Remove with managed backend integration.
+- [x] Connect Refresh to configuration reload.
+- [x] Connect Import to real `~/.config/systemd/user/` legacy service scan and
+  structured import previews.
+- [x] Connect Test to managed service/timer plan construction and structural
+  validation for Online mount and Offline mirror connections.
+- [x] Connect Enable/Disable to validated COSMIC configuration writeback.
+- [x] Connect Remove to a two-step validated configuration removal that preserves
+  credentials, local data, cache, recovery data, and external services.
+- [x] Replace the global Settings primary entry point with one Add Connection
+  control, per-row Edit controls, Refresh, and Add-window Import.
+- [x] Implement the main popup as an operational dashboard: aggregate status,
+  connection rows, and bottom Add Connection plus Refresh controls.
+- [x] For each existing connection row, display name, provider, mode, engine,
+  local target, remote/subtree, VPN dependency, enabled state, runtime state,
+  last sync where applicable, warnings, and operation buttons.
+- [x] Keep Import previews out of the main connection status list until the user
+  confirms creating applet-managed connections.
+- [x] Implement Add/Modify wizard provider selection for OneDrive, Google Drive,
+  Box, and SMB.
+- [x] Implement Add/Modify wizard mode selection for Online mount versus Offline
+  mirror, constrained by the approved provider/mode matrix.
+- [x] Implement Add/Modify wizard account or remote selection, including
+  `jstaf/onedriver` account, `abraunegg/onedrive` account, rclone remote, and SMB rclone
+  remote.
+- [x] Implement Add/Modify wizard whole remote versus remote subtree selection.
+- [x] Implement Add/Modify wizard local mountpoint or mirror directory selection
+  with mount/mirror separation validation.
+- [x] Implement Add/Modify wizard mode-specific settings for Online mount and
+  Offline mirror.
+- [x] Implement Add/Modify wizard per-connection VPN dependency, readiness
+  checks, applet activation permission, and applet-owned disconnect policy.
+- [x] Implement Add/Modify wizard dependency status, generated unit/command
+  preview, disk estimate or mount validation, safety warnings, and confirmation.
+- [x] Save Add/Modify wizard results through validated configuration and managed
+  unit planning.
+- [x] Implement Import as a dedicated workflow that maps each compatible legacy
+  service preview into the Add/Modify wizard fields before confirmation.
+- [x] Implement confirmed Import replacement creation through the managed unit
+  backend.
+- [x] Implement confirmed removal of applet-owned generated units after the
+  configuration removal confirmation flow is extended for unit cleanup.
+- [x] Replace standalone Help controls with attached per-field tooltip help and
+  keep longer dependency, safety, and troubleshooting guidance in documentation.
+- [x] Update Phase 9 and Gate 2 verification criteria after UI Design Completion
+  is approved.
 
-- [ ] Document installation and current-version requirements for every engine.
-- [ ] Document the Online mount versus Offline mirror tradeoff.
-- [ ] Document synchronization conflicts, deletions, recovery, and backup limits.
-- [ ] Document authentication and VPN behavior.
-- [ ] Document generated files, legacy imports, and uninstall behavior.
-- [ ] Add MIT license and author attribution.
-- [ ] Finalize desktop entry, metainfo, and icon.
-- [ ] Test staged installation and uninstallation.
-- [ ] Prepare release notes and known limitations.
+### Main Applet UI User-Guided Cleanup
 
-## Gate 2: Version 0.1 Completion
+- [x] Verify the popup behaves with enough configured connections to exceed the
+  available panel popup height.
+- [x] Add a scrollable connection-list region so every configured connection can
+  be reached when the list is longer than the popup.
+- [x] Keep the title and aggregate status visible above the scrollable
+  connection-list region.
+- [x] Keep the main popup aggregate status to three concise lines: active
+  connection count, notification state, and VPN summary/state.
+- [x] Decide whether Add Connection and Refresh stay at the bottom or move below
+  the status text at the top to make the remaining popup area a simpler
+  scrollable connection list.
+- [x] If Add Connection and Refresh move to the top, update the approved main
+  popup layout notes and remove stale references to a bottom action row.
+- [x] Replace the current multi-line popup connection rows with a compact
+  single-line row model: clickable name opens Modify, one compact state control
+  handles Mount/Unmount for Online Mount and Start/Stop for Offline Mirror, and
+  detailed state is conveyed by label/color/non-color cue/tooltip/disabled
+  reason rather than a separate wide status chip.
+- [x] Move Offline Mirror secondary actions Preview and Sync Now out of the
+  cramped main popup and into the Add/Modify connection action area or a
+  per-connection diagnostics/action surface.
+- [x] Re-check compact control sizing, text wrapping/elision, and clipped text
+  with long connection names and multiple connection rows.
+- [x] Reinstall the applet and complete user-guided visual review of the main
+  popup before returning to provider/runtime work.
 
-- [ ] Every acceptance criterion is demonstrated.
-- [ ] Required automated and approved manual tests pass.
-- [ ] No unresolved high-severity security, data-loss, or privilege issue remains.
-- [ ] Known limitations are documented.
-- [ ] User approves the release candidate.
+### Settings (Add/Modify) UI User-Guided Cleanup
 
-## Codex Working Rules
+- [x] Update the Add Connection instruction/notice text to say: "Choose
+  provider, mode, remote/subtree, local target, VPN, and start at login." Reuse
+  the same top notice area for later instructions, validation results, and
+  operation status messages.
+- [x] Reduce the horizontal gap between each section title and its controls.
+- [x] Top-align section titles with the first control in their section instead
+  of vertically centering the title across tall multi-control sections.
+- [x] Align the Provider button row with the Access mode button row. The
+  OneDrive provider button should visually line up with Online mount and
+  Offline mirror rather than sitting on a different horizontal grid.
+- [x] Move Connection-section controls left so remote/account/subtree fields
+  align with the Access mode controls.
+- [x] Move Mountpoint and Mirror directory text boxes left so they align with
+  the other main input fields.
+- [x] Move Start at login and cache-size controls left so they align with the
+  other main input fields.
+- [x] Replace the Start at login Yes/No button with the same COSMIC toggler
+  style used in the main popup.
+- [x] Move "No detected Box rclone remotes..." and equivalent provider-empty
+  guidance into the Detect Rclone Remotes tooltip or notice area instead of
+  leaving it as inline body text.
+- [x] Move Create Box Remote and Create Google Drive Remote browser/OAuth
+  guidance into the Create Remote tooltip or top notice area.
+- [x] Hide Create Box Remote, Create Google Drive Remote, and Create SMB Remote
+  when modifying an existing connection. Provider remote creation belongs to Add
+  Connection only.
+- [x] Move Create Remote actions into the top action row alongside Test
+  Connection.
+- [x] Move Detect rclone remotes into the top action row alongside Test
+  Connection, and show it only in Add Connection mode, not Modify mode.
+- [x] Make Test Connection and Save Connection visually non-primary until the
+  required Create Remote flow succeeds or an existing valid remote is selected.
+- [x] Remove inline "Box setup: use existing..." and equivalent random-looking
+  setup paragraphs from the Connection section. Keep necessary guidance in the
+  top notice area or attached tooltips.
+- [x] Supersede the earlier Create SMB Remote bottom-of-section placement:
+  Create SMB Remote now follows the unified Add-mode top action row policy.
+- [x] Remove or tooltip-integrate extra SMB setup guidance text in the
+  Connection section while keeping the SMB host/user/domain fields available in
+  Add mode.
+- [x] Remove or tooltip-integrate extra OneDrive Online Mount and OneDrive
+  Offline Mirror guidance text in the Connection section.
+- [x] Remove or tooltip-integrate extra OneDrive Offline Mirror guidance text in
+  Offline mirror settings.
+- [x] Simplify the VPN selector: remove visible group titles for NetworkManager
+  and Cisco, arrange VPN choices horizontally where space allows, and place
+  Detect VPNs last on the same selector line.
+- [x] Ensure Cisco remains self-labeled as Cisco and NetworkManager profiles are
+  understandable from their profile names/tooltips without extra visible group
+  headers.
+- [x] Widen the standalone Add/Modify settings window enough that the top action
+  row, including Import, is not clipped in the default window size.
+- [x] Move OneDrive setup actions into the top action row: Start OneDrive Setup,
+  Start OneDrive Mirror Setup, and Use Manual Auth Handoff.
+- [x] Split Modify-mode action buttons into two rows only for OneDrive Offline
+  Mirror connections, so OneDrive setup actions do not crowd Preview, Sync Now,
+  Disable, and Remove in the default settings window width while other
+  connection types keep a single action row.
+- [x] Make Test Connection and Save Connection visually non-primary for OneDrive
+  drafts until the app-owned OneDrive setup/authentication artifact exists.
+- [x] Add app/window identity metadata so the task switcher and right-click
+  taskbar menu can resolve the app name instead of `Cosmic - Iced` or
+  `Cosmic, Iced`.
+- [x] User-verify app/window identity in the task switcher and right-click
+  taskbar menu after reopening the installed applet/settings window.
+- [x] Reinstall the applet/settings binary after the Add/Modify UI cleanup.
+- [x] Complete user-guided visual review of the Add/Modify window.
+- [x] Complete user-guided tooltip content review using `Tooltip Review.md`,
+  then incorporate approved wording back into the applet.
 
-- [ ] Work one phase at a time and keep this list current.
-- [ ] Inspect current files and preserve unrelated user changes.
-- [ ] Use small, reviewable patches.
-- [ ] Never place real credentials, tokens, or organization-specific secrets in
-  source or fixtures.
-- [ ] Use temporary directories and fake adapters for automated tests.
-- [ ] Run each phase's verification before reporting completion.
-- [ ] Report changed files, tests, failures, and remaining risks.
-- [ ] Stop at each approval gate and wait for explicit approval.
+### Add/Modify Settings Workflow Redesign
+
+#### Resolved Setup Decisions
+
+- [x] Decide rclone setup policy: prefer applet-driven setup. The applet shall
+  create/configure rclone remotes, start the authentication flow, and verify the
+  selected provider/subtree before saving. Existing rclone remotes remain
+  importable/selectable as a fallback.
+- [x] Define rclone verification behavior: the applet verifies that the remote
+  exists, uses the expected backend, is authenticated, and can access the
+  selected subtree without storing provider credentials.
+- [x] Decide OneDrive Online mount setup policy for `jstaf/onedriver`: prefer
+  applet-guided setup by launching or integrating with the `jstaf/onedriver` account
+  setup flow, then verifying that the selected mount can start. Existing
+  `jstaf/onedriver` account/mount configuration remains selectable as a fallback.
+- [x] Define `jstaf/onedriver` verification behavior: the applet verifies that the
+  selected OneDrive account is authenticated, that the mountpoint can be
+  started, and that it does not overlap with an Offline mirror.
+- [x] Decide OneDrive Offline mirror setup policy for `abraunegg/onedrive`:
+  prefer applet-guided setup using isolated per-connection config and sync
+  directories plus the supported authorization flow. External authorization
+  remains available when Microsoft tenant policy or authentication requirements
+  prevent in-applet completion.
+- [x] Define `abraunegg/onedrive` verification behavior: the applet verifies
+  authorization, selected subtree/syncdir, monitor support, and no overlap with
+  `jstaf/onedriver` before saving/enabling.
+- [x] Decide VPN selection UX: list detected NetworkManager and Cisco options,
+  allow no VPN, and expose whether the applet may activate the selected VPN and
+  later disconnect only VPNs it activated.
+- [x] Decide NetworkManager VPN behavior: the applet enumerates existing
+  NetworkManager VPN profiles, allows associating one profile with a storage
+  connection, and may start/stop that profile through NetworkManager when the
+  user permits applet activation. The applet does not create or edit
+  NetworkManager VPN profiles or store VPN credentials.
+- [x] Decide Cisco VPN behavior: the applet may detect/start the Cisco agent and
+  open the Cisco client UI, but the user selects the account/profile and
+  completes authentication interactively in Cisco. The applet verifies tunnel
+  readiness before mount/sync and may disconnect only Cisco sessions it
+  activated, after no dependent connection still needs them.
+- [x] Decide per-field help behavior: attach COSMIC/libcosmic hover tooltips to
+  the relevant field or button. Do not show visible help buttons in the default
+  UI; reserve them only for future controls that cannot reasonably carry their
+  own tooltip. Position tooltips above or to the side so they do not obscure the
+  field or button being explained. This replaces the separate Help button for
+  settings guidance.
+
+#### Add/Modify UI Implementation Tasks
+
+- [x] Use one shared Add/Modify connection window. Add opens the window with
+  defaults; Modify opens the same window prepopulated from the selected
+  connection.
+- [x] Launch Add/Modify/Import as a standalone COSMIC settings application
+  window titled `Cloud Mounter Connection Settings`, following the same pattern
+  used by other COSMIC applets for larger settings surfaces.
+- [x] Remove the top navigation row from the Modify window. Do not show Add
+  Connection, Import, Refresh, or Help at the top while editing an existing
+  connection.
+- [x] Add a top action row for Add/Modify:
+  - Add mode baseline: Test Connection, Save Connection, Import.
+  - Add mode for rclone providers: also Detect rclone remotes and the
+    provider-specific Create Remote action.
+  - Modify mode: Test Connection, Save Connection, Disable or Enable, Remove.
+  - Saved Offline Mirror Modify mode: also Preview and Sync Now.
+- [x] Combine Test Plan and Test Existing into one Test Connection action that
+  validates the current form values and reports the result in the window.
+- [x] Remove the Enable Yes/No toggle from Online mount settings if the top
+  Enable/Disable action controls the same `enabled` field.
+- [x] Keep Remove as a Modify-window action with two-step confirmation; do not
+  expose Remove on the main popup.
+- [x] Move Import into the Add-mode action row only. Import shall scan legacy
+  services, map a selected preview into the same Add/Modify fields, and require
+  Save Connection before creating the applet-managed connection.
+- [x] Replace the settings Help button with attached per-field tooltip help for
+  provider, access mode, remote/account, subtree, local target, mode-specific
+  options, VPN dependency, test, save, import, disable, and remove. Prefer
+  hover tooltips attached to the field or action itself; reserve visible help
+  buttons only for cases where attached help is not practical. Tooltips shall
+  appear above or to the side of the source control rather than covering it.
+- [x] Remove nested tooltip wrappers so controls such as Detect VPNs,
+  NetworkManager VPN profile choices, and Cisco Secure Client choices display
+  only one tooltip at a time.
+- [x] Write concise tooltip help text for each supported field/action and keep
+  longer background material in README/documentation.
+- [x] Implement VPN dependency selection as a real field backed by detected or
+  configured VPN profiles, including no VPN, profile choice, readiness behavior,
+  applet activation permission, and disconnect-at-unmount/unused behavior.
+- [x] Implement provider-specific rclone remote/account selection for Google
+  Drive, Box, and SMB. Detect existing rclone remotes with `rclone config dump`,
+  keep only remote names and backend types, filter choices by provider backend,
+  and allow selecting a matching remote from the Add/Modify wizard.
+- [x] Add validation messages for missing rclone remotes, wrong backend type,
+  inaccessible subtree, authentication/authorization failures, and network/VPN
+  readiness failures during rclone access tests.
+- [x] Update Add/Modify verification to cover add, modify, import, test,
+  enable/disable, remove, VPN selection, rclone verification, and attached
+  tooltip help.
+
+#### Rclone Provider Runtime Verification
+
+- [x] Implement Save Connection side effects for rclone Online Mount
+  connections: after validated configuration save, create or update the
+  applet-owned systemd user service for the saved connection without starting
+  it automatically.
+- [x] Implement popup Mount for saved rclone Online Mount connections by
+  starting the applet-owned systemd user service and refreshing actual service
+  and mount state.
+- [x] Implement popup Unmount for saved rclone Online Mount connections by
+  performing the approved clean stop/unmount path, preserving cache and local
+  mountpoint, and refreshing state.
+- [x] Verify the first full vertical slice with Box Online Mount:
+  remote `ua_box`, subtree `Utzinger/cosmic-mounter-ui-test`, and a disposable
+  mountpoint such as `/home/uutzinger/Cloud/cosmic-mounter-box-test`.
+  Required checks: Test Connection passes, Save creates an applet-owned unit,
+  main popup shows the connection, Mount exposes the remote folder as a
+  filesystem, Unmount removes the mount, and Modify reopens with saved values.
+- [x] Repeat rclone Online Mount runtime verification with Google Drive using
+  remote `uutzinger_gdrive`, subtree `cosmic-mounter-ui-test`, and a disposable
+  local mountpoint.
+- [x] Repeat rclone Online Mount runtime verification with SMB using remote
+  `ua_engr`, subtree `Research/Utzinger/cosmic-mounter-ui-test`, a disposable
+  local mountpoint, and Cisco VPN readiness.
+- [x] Implement Save Connection side effects for rclone Offline Mirror
+  connections: create or update applet-owned sync service and timer without
+  starting destructive synchronization automatically.
+- [x] Implement Offline Mirror preview/Sync Now using the managed backend,
+  preserving dry-run preview and confirmation before initial synchronization.
+  These actions were initially exposed in the popup and are now exposed from
+  the saved connection's Modify action row.
+- [x] Implement Offline Mirror Start/Stop as the primary popup action, using
+  the applet-owned timer or monitor for background synchronization after
+  successful preview and confirmed initial Sync Now. Keep Sync Now and Preview
+  as secondary one-shot actions.
+- [x] Complete readiness and policy gating for automatic background
+  synchronization start: honor network/VPN readiness, metered-network policy,
+  and Pause/Resume state before enabling or starting timers/monitors.
+- [x] Verify Box Offline Mirror with remote `ua_box`, subtree
+  `Utzinger/cosmic-mounter-ui-test`, and disposable mirror/work/recovery
+  directories.
+- [x] Verify Google Drive Offline Mirror with remote `uutzinger_gdrive`, subtree
+  `cosmic-mounter-ui-test`, and disposable mirror/work/recovery directories.
+- [x] Verify SMB Offline Mirror with remote `ua_engr`, subtree
+  `Research/Utzinger/cosmic-mounter-ui-test`, disposable mirror/work/recovery
+  directories, and Cisco VPN readiness.
+
+#### OneDrive Provider Runtime Verification
+
+- [x] Implement Save Connection side effects for OneDrive Online Mount
+  connections: create or update the applet-owned `jstaf/onedriver` service without
+  disturbing an existing user-managed `jstaf/onedriver` setup.
+- [x] Implement popup Mount for saved OneDrive Online Mount connections by
+  starting the applet-owned `jstaf/onedriver` service and refreshing actual service and
+  mount state.
+- [x] Implement popup Unmount for saved OneDrive Online Mount connections by
+  performing the clean unmount/stop path while preserving credentials, cache,
+  and local mountpoint.
+- [x] Record controlled `jstaf/onedriver` baseline verification using the existing
+  corporate OneDrive account: isolated mount/cache, disposable marker
+  write/read/remove, clean unmount, and cached read-only offline behavior.
+- [x] Verify the full app-managed OneDrive Online Mount vertical slice with
+  `jstaf/onedriver` using a disposable mountpoint and non-critical test folder:
+  Save creates an applet-owned unit, popup Mount exposes the OneDrive folder,
+  Unmount detaches it, and the app-managed service preserves existing
+  user-managed `jstaf/onedriver` setup.
+- [x] Implement Save Connection side effects for OneDrive Offline Mirror
+  connections: create isolated `abraunegg/onedrive` config/sync/recovery
+  directories and an applet-owned monitor or sync service without starting
+  synchronization automatically.
+- [x] Implement OneDrive Offline Mirror preview and Sync Now using
+  `abraunegg/onedrive --dry-run` and explicit confirmation before initial
+  synchronization; these actions were initially exposed in the popup and are now
+  exposed from the saved connection Modify action row.
+- [x] Verify `abraunegg/onedrive` Offline Mirror with a non-critical personal
+  Microsoft account or disposable subtree: isolated `--confdir`, isolated
+  `--syncdir`, dry-run preview, initial sync, normal sync, and no interaction
+  with `jstaf/onedriver`.
+- [x] Document how to create and authorize a private personal OneDrive test
+  account for `abraunegg/onedrive` verification, including account isolation
+  from existing corporate browser sessions.
+
+#### Provider Setup Flow Implementation
+
+- [x] Implement applet-driven rclone remote creation/configuration for Google
+  Drive, Box, and SMB after the existing-remote vertical slices are stable.
+  - [x] Implement SMB rclone remote creation from the Add/Modify window using
+    remote name, SMB host, optional username, and optional domain/workgroup.
+    The applet creates the remote with fixed `rclone config create ... smb`
+    arguments, `--non-interactive`, duplicate-name checks, and redacted
+    diagnostics. Password handling remains with rclone rather than applet
+    storage.
+  - [x] Verify SMB rclone remote creation against a disposable/non-critical
+    NetworkManager/Cisco-ready share and confirm Test Connection, Save
+    Connection, Online Mount, and Offline Mirror paths still work with the
+    created remote.
+  - [x] Implement Box OAuth remote creation/configuration through rclone.
+  - [x] Implement Google Drive OAuth remote creation/configuration through
+    rclone.
+  - [x] Live-verify Box OAuth remote creation with a disposable/non-critical
+    remote name, then verify Test Connection, Save Connection, and Online Mount
+    with the created remote.
+  - [x] Live-verify Box Offline Mirror with the applet-created Box OAuth remote.
+  - [x] Live-verify Google Drive OAuth remote creation with a disposable/non-critical
+    remote name, then verify Test Connection, Save Connection, Online Mount, and
+    Offline Mirror with the created remote.
+- [x] Implement applet-driven OneDrive Online Mount setup/configuration for
+  `jstaf/onedriver`.
+  - [x] Live-verify applet-driven OneDrive Online Mount setup by starting
+    `jstaf/onedriver` authentication from the Add/Modify window with a
+    disposable/non-critical mountpoint, then confirming Test Connection and Save
+    Connection use the same app-owned config/cache paths.
+- [x] Implement applet-driven OneDrive Offline Mirror setup/configuration for
+  `abraunegg/onedrive`.
+  - [x] Live-verify applet-driven OneDrive Offline Mirror setup/authentication
+    by starting
+    `abraunegg/onedrive` authentication from the Add/Modify window with a
+    disposable/non-critical local mirror directory, completing the applet
+    auth-files handoff, then confirming authentication and dry-run validation
+    preview use the same app-owned confdir/syncdir/recovery paths.
+  - [x] Live-verify OneDrive Offline Mirror Test Connection, Save Connection,
+    initial preview, Sync Now, and generated service/timer paths with the
+    app-owned confdir/syncdir/recovery paths.
+  - [x] Improve `abraunegg/onedrive` Offline Mirror authorization so the applet
+    can capture or receive the Microsoft redirect more gracefully than the
+    current browser-history/manual paste flow.
+    - [x] Investigate whether `abraunegg/onedrive` can complete authorization
+      through a local redirect listener, device-code flow, external browser
+      integration, or another supported upstream mechanism.
+    - [x] Implement the supported upstream local-redirect path as the primary
+      applet action: `Start OneDrive Mirror Setup` now runs
+      `onedrive --reauth` against the app-owned confdir and lets
+      `abraunegg/onedrive` open the browser and receive the local callback.
+    - [x] Prototype a separate WebKitGTK auth helper launched from Manual Auth
+      Handoff. The helper reads the generated auth URL file, opens Microsoft
+      sign-in in a GTK/WebKit window, watches for the final native-client
+      redirect, and writes that URL to the transient response file.
+    - [x] Preserve the selectable instruction/command dialog and explicit
+      response URL field as a fallback when the WebKitGTK helper is unavailable
+      or cannot capture the redirect.
+    - [x] Preserve the existing auth-files paste flow as a live-tested fallback for
+      tenant/browser environments where automatic redirect capture fails.
+    - [x] Live-verify the WebKitGTK helper with a disposable/non-critical
+      OneDrive Offline Mirror connection. Confirm whether the helper captures
+      the native-client redirect automatically. If it fails, verify that manual
+      paste fallback remains usable.
+
+## Historical Gate 1: Isolated Release Candidate (Superseded)
+
+- [x] All formatting, lint, unit, integration, and snapshot tests pass.
+- [x] No test has touched real services, mounts, VPNs, credentials, or cloud data.
+- [x] Review generated units, timers, logs, and fixtures for secret leakage.
+- [x] Review sync deletion, conflict, and recovery behavior for data-loss risks.
+- [x] Review detach and VPN policies against the approved specification.
+- [x] Obtain user approval for controlled real-system testing.
+
+## Current Gate 1 Recheck: Integrated Release Candidate
+
+- [x] Current formatting, lint, unit, integration, and snapshot tests pass.
+- [x] Review generated units/timers after latest Online Mount, Offline Mirror,
+  Start/Stop, OAuth, and import changes.
+- [x] Review real-system side effects and cleanup plan for disposable test
+  connections, remotes, services, timers, mirrors, caches, and recovery paths.
+- [x] Review sync deletion, conflict, and recovery behavior against the current
+  UI/runtime implementation.
+- [x] Review detach, background sync readiness/metered policy, and VPN policies
+  against the current specification.
+- [x] Obtain user approval for current controlled integrated manual testing.
+
+## Historical Phase 10: Controlled Manual Testing Evidence (Superseded)
+
+- [x] Verify dependency detection and outdated-version guidance.
+- [x] Test a disposable rclone Online mount.
+- [x] Test safe connectivity-loss detach and automatic remount.
+- [x] Test pending-write protection during connectivity loss.
+- [x] Test `jstaf/onedriver` Online mount.
+- [x] Test `jstaf/onedriver` offline cached read-only behavior.
+- [x] Test a local-to-local rclone bisync mirror.
+- [x] Test one approved Google Drive or Box Offline mirror.
+- [x] Test offline editing followed by reconnect synchronization.
+- [x] Test conflict preservation, deletion propagation, and recovery.
+- [x] Test metered pause and Sync Now.
+- [x] Test `abraunegg/onedrive` with a non-critical account or subtree.
+- [x] Test NetworkManager VPN readiness.
+- [x] Test Cisco interactive authentication when installed.
+- [x] Test import preview from the real user service folder.
+- [x] Test confirmed import from the real user service folder.
+- [x] Verify removal preserves credentials, data, cache, recovery, and originals.
+
+## Current Phase 10: Integrated Manual Testing Recheck
+
+- [x] Verify dependency detection and upgrade guidance in the current UI.
+- [x] Test applet-created rclone OAuth remotes for Box and Google Drive from
+  the Add/Modify workflow or documented equivalent.
+- [x] Test rclone Online Mount Start/Stop/Unmount flows for Box, Google Drive,
+  and SMB as applicable.
+  - [x] Box Online Mount Start/Stop/Unmount recheck.
+  - [x] Google Drive Online Mount Start/Stop/Unmount recheck.
+  - [x] SMB Online Mount Start/Stop/Unmount recheck with VPN readiness.
+- [x] Test rclone Offline Mirror Preview, Sync Now, Start, Stop, and
+  timer/service state for Box, Google Drive, and SMB.
+  - [x] Box Offline Mirror Preview, Sync Now, Start, Stop, and timer/service
+    state recheck.
+  - [x] Google Drive Offline Mirror Preview, Sync Now, Start, Stop, and
+    timer/service state recheck.
+  - [x] SMB Offline Mirror recheck with VPN readiness.
+- [x] Test OneDrive Online Mount setup/mount/unmount with the existing
+  corporate account without disturbing the existing onedriver setup.
+- [x] Test OneDrive Offline Mirror setup/preview/sync with the personal account
+  and document the manual auth fallback.
+- [x] Test NetworkManager and Cisco VPN selection/readiness with no credential
+  storage and no unintended disconnect.
+- [x] Test import preview and confirmed import replacement creation from the
+  real user service folder.
+- [x] Test removal cleanup policy for applet-owned generated units while
+  preserving data, cache, recovery, credentials, and original legacy files.
+- [x] Test keyboard-only navigation and accessible labels in the popup and
+  Add/Modify windows.
+  - [x] Automated accessible/non-color label tests.
+  - [x] Manual keyboard-only traversal and activation check in the current
+    slider-based popup and Add/Modify windows.
+- [x] Verify disposable local/remote test data and generated units/timers are
+  either intentionally retained for inspection or cleaned up.
+
+## Historical Phase 11: Documentation and Packaging (Superseded)
+
+- [x] Document installation and current-version requirements for every engine.
+- [x] Document the Online mount versus Offline mirror tradeoff.
+- [x] Document synchronization conflicts, deletions, recovery, and backup limits.
+- [x] Document authentication and VPN behavior.
+- [x] Document generated files, legacy imports, and uninstall behavior.
+- [x] Add MIT license and author attribution.
+- [x] Finalize desktop entry, metainfo, and icon.
+- [x] Test staged installation and uninstallation.
+- [x] Prepare release notes and known limitations.
+
+## Current Phase 11: Documentation and Packaging Recheck
+
+- [x] Update README for the current popup layout, Add/Modify workflow,
+  Start/Stop versus Sync Now/Preview behavior, and active/VPN summary behavior.
+- [x] Update dependency docs for applet-driven rclone, onedriver, and onedrive
+  setup flows.
+- [x] Document generated services/timers, background sync gating, cleanup/removal
+  behavior, and known limitations.
+- [x] Document the current import workflow and remaining import limitations.
+- [x] Document OAuth/security behavior without storing credentials.
+- [x] Update release notes and known limitations.
+- [x] Re-run desktop/metainfo validation.
+- [x] Re-test staged install/uninstall on current artifacts.
+- [x] Prepare final user-facing cleanup instructions for disposable verification
+  connections, remotes, services, timers, mirrors, caches, and recovery paths.
+
+## Historical Gate 2: Version 0.1 Completion (Superseded)
+
+- [x] Every acceptance criterion is demonstrated.
+- [x] Required automated and approved manual tests pass.
+- [x] No unresolved high-severity security, data-loss, or privilege issue remains.
+- [x] Known limitations are documented.
+- [x] User approves the release candidate.
+
+## Current Gate 2: Version 0.1 Release Candidate
+
+- [x] Phase 9 UI/runtime completion is complete.
+- [x] Current Gate 1 recheck is approved.
+- [x] Current Phase 10 integrated manual testing passes.
+- [x] Current Phase 11 documentation and packaging recheck passes.
+- [x] Popup mount, unmount, Start, Stop, Sync Now, Preview, retry/repair/details
+  behavior is demonstrated with fake or approved disposable backends.
+  - [x] Implement visible lazy-unmount confirmation/recovery after
+    clean onedriver/FUSE unmount fails and leaves a stale mount attached.
+  - [x] Verify failed service plus lingering FUSE mount reports Error, not
+    Mounted.
+  - [x] Verify Error rows use Repair as the primary popup action.
+  - [x] Live-verify the two-click Repair confirmation/recovery in COSMIC after
+    a clean onedriver/FUSE unmount failure.
+- [x] Settings workflows cover all approved user-configurable items.
+- [x] Required automated and approved manual UI tests pass.
+- [x] No unresolved high-severity security, data-loss, cleanup, credential, or
+  privilege issue remains.
+- [x] Known limitations are documented.
+- [ ] User approves the current release candidate.

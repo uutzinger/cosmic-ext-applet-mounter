@@ -1,0 +1,24 @@
+(
+    schema_version: 2,
+    notifications_enabled: true,
+    connections: [
+        (
+            id: "2a3f5d45-e867-47e7-943f-66cf60e777ad",
+            name: "Example Google Drive",
+            provider: GoogleDrive,
+            mode: OfflineMirror((
+                recovery_directory: "/home/example/.local/share/cosmic-mounter/recovery/google",
+                sync_interval_minutes: 15,
+                sync_on_metered: false,
+            )),
+            remote_reference: "example-gdrive",
+            remote_subpath: Some("Projects"),
+            local_path: "/home/example/Cloud/Google",
+            enabled: true,
+            vpn_profile_id: None,
+            disconnect_vpn_when_unused: false,
+            tuning_profile: Balanced,
+        ),
+    ],
+    vpn_profiles: [],
+)

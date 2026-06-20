@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.uutzinger.cosmic-ext-applet-mounter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>COSMIC Cloud Mounter</name>
+  <summary>Manage online storage mounts and offline storage mirrors</summary>
+  <description>
+    <p>
+      Manage supported cloud and network storage from the COSMIC panel using
+      online mounts or bidirectionally synchronized offline mirrors.
+    </p>
+  </description>
+  <developer id="io.github.uutzinger">
+    <name>Urs Utzinger and OpenAI Codex</name>
+  </developer>
+  <url type="homepage">https://github.com/uutzinger/cosmic-ext-applet-mounter</url>
+  <url type="vcs-browser">https://github.com/uutzinger/cosmic-ext-applet-mounter</url>
+  <launchable type="desktop-id">io.github.uutzinger.cosmic-ext-applet-mounter.desktop</launchable>
+  <provides>
+    <id>com.system76.CosmicApplet</id>
+    <binary>cosmic-ext-applet-mounter</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>

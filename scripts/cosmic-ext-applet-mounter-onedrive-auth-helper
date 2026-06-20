@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+
+"""WebKitGTK helper for abraunegg/onedrive auth-files OAuth handoff.
+
+This helper intentionally runs as a separate GTK process so the COSMIC/libcosmic
+applet does not need to host a WebKit widget or GTK event loop.
+"""
+
+from __future__ import annotations
+
+import os
+import pathlib
+import sys
+import time
+import urllib.parse
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("WebKit2", "4.1")
+
+from gi.repository import GLib, Gtk, WebKit2  # noqa: E402
+
+NATIVECLIENT_PREFIX = "https://login.microsoftonline.com/common/oauth2/nativeclient"
+
+
+def usage() -> int:
+    print(
+        "usage: cosmic-ext-applet-mounter-onedrive-auth-helper "
+        "<auth-url-file> <response-url-file>",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def wait_for_auth_url(path: pathlib.Path, timeout_seconds: float = 120.0) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        except OSError as error:
+            last_error = error
+        time.sleep(0.25)
+    if last_error is not None:
+        raise RuntimeError(f"auth URL file was not ready at {path}: {last_error}")
+    raise RuntimeError(f"auth URL file was not ready at {path}")
+
+
+def is_auth_response_uri(uri: str | None) -> bool:
+    if not uri or not uri.startswith(NATIVECLIENT_PREFIX):
+        return False
+    parsed = urllib.parse.urlparse(uri)
+    query = urllib.parse.parse_qs(parsed.query)
+    return "code" in query
+
+
+def write_response(path: pathlib.Path, uri: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(uri)
+
+
+class AuthWindow:
+    def __init__(self, auth_url: str, response_file: pathlib.Path) -> None:
+        self.response_file = response_file
+        self.completed = False
+
+        self.window = Gtk.Window(title="OneDrive Authorization")
+        self.window.set_default_size(980, 760)
+        self.window.connect("destroy", Gtk.main_quit)
+
+        self.webview = WebKit2.WebView()
+        self.webview.connect("decide-policy", self.on_decide_policy)
+        self.webview.connect("load-changed", self.on_load_changed)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        header = Gtk.Label(
+            label=(
+                "Sign in with Microsoft. This helper captures only the final "
+                "native-client redirect URL and writes it to onedrive's "
+                "transient response file."
+            )
+        )
+        header.set_line_wrap(True)
+        header.set_margin_start(12)
+        header.set_margin_end(12)
+        header.set_margin_top(8)
+        header.set_margin_bottom(8)
+        box.pack_start(header, False, False, 0)
+        box.pack_start(self.webview, True, True, 0)
+
+        self.window.add(box)
+        self.window.show_all()
+        self.webview.load_uri(auth_url)
+
+    def capture_if_response(self, uri: str | None) -> bool:
+        if self.completed or not is_auth_response_uri(uri):
+            return False
+        assert uri is not None
+        write_response(self.response_file, uri)
+        self.completed = True
+        dialog = Gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="OneDrive authorization captured",
+        )
+        dialog.format_secondary_text(
+            "The response URL was written to onedrive's transient handoff file. "
+            "You can close this window and return to COSMIC Cloud Mounter."
+        )
+        dialog.connect("response", lambda *_args: Gtk.main_quit())
+        dialog.show_all()
+        GLib.timeout_add_seconds(2, Gtk.main_quit)
+        return True
+
+    def on_decide_policy(self, _webview, decision, decision_type) -> bool:
+        if decision_type != WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
+            return False
+        action = decision.get_navigation_action()
+        request = action.get_request()
+        uri = request.get_uri()
+        if self.capture_if_response(uri):
+            decision.ignore()
+            return True
+        return False
+
+    def on_load_changed(self, webview, _load_event) -> None:
+        self.capture_if_response(webview.get_uri())
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 3:
+        return usage()
+
+    auth_url_file = pathlib.Path(argv[1])
+    response_url_file = pathlib.Path(argv[2])
+    try:
+        auth_url = wait_for_auth_url(auth_url_file)
+        if not auth_url.startswith("https://login.microsoftonline.com/"):
+            raise RuntimeError("auth URL is not a recognized Microsoft login URL")
+        AuthWindow(auth_url, response_url_file)
+        Gtk.main()
+    except Exception as error:  # noqa: BLE001
+        print(f"OneDrive auth helper failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

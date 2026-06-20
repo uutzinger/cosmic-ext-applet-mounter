@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=COSMIC Cloud Mounter
+Comment=Manage online storage mounts and offline storage mirrors
+Type=Application
+Icon=io.github.uutzinger.cosmic-ext-applet-mounter
+Exec=cosmic-ext-applet-mounter
+Terminal=false
+StartupNotify=true
+StartupWMClass=io.github.uutzinger.cosmic-ext-applet-mounter
+Categories=Utility;
+Keywords=COSMIC;cloud;mount;mirror;storage;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
