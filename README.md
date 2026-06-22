@@ -7,7 +7,7 @@ connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct Onli
 mounts and Offline mirrors with background synchronization.
 
 The applet was developed so users can turn cloud storage connections on and off
-to reduce file manager stalls when the network is slow or unavailable.
+to reduce file manager stalls when the network is slow or unavailable. It should also simplify mounting cloud storage.
 
 ## Modes and Providers
 
