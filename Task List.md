@@ -893,104 +893,112 @@ auditable.
 - [x] If access-mode changes remain disallowed in Modify mode, disable Online
   mount and Offline mirror controls visually and expose a tooltip explaining
   that mode changes require creating or duplicating a connection.
-- [ ] If a provider or access-mode conversion flow is later approved, define
+- [x] If a provider or access-mode conversion flow is later approved, define
   provider-specific validation, generated-unit replacement, credential reuse,
   cache/mirror migration, and rollback behavior before implementation.
+  - Deferred for version 0.2. Version 0.2 Modify mode shall not support provider
+    or access-mode conversion. Any future conversion feature must be specified
+    as a separate Duplicate or Convert Connection workflow before
+    implementation.
 
 ### Version 0.2 Main Popup UI
 
-- [ ] Move operation result/status text out of the top of the connection list
+- [x] Move operation result/status text out of the top of the connection list
   into a separate status row immediately above the `Add Connection` and
   `Refresh` button row.
-- [ ] Ensure the popup height follows the connection-list height until roughly
+- [x] Ensure the popup height follows the connection-list height until roughly
   75 percent of screen height, then constrains the connection list and enables
   scrolling.
-- [ ] Re-check popup height calculation with and without operation result text
+  - Implemented with tunable popup constants: the list uses natural row-count
+    height until `POPUP_CONNECTION_LIST_MAX_HEIGHT`, then scrolls.
+- [x] Re-check popup height calculation with and without operation result text
   so notices do not push the popup beyond the screen.
 
 ### Version 0.2 Modify Connection UI
 
-- [ ] Choose and apply a non-grey color treatment for `Disable` that is distinct
+- [x] Choose and apply a non-grey color treatment for `Disable` that is distinct
   from primary blue actions and destructive red actions.
-- [ ] Disable provider selection in Modify mode unless a later conversion flow
+  - Implemented as a theme-derived soft destructive button that brightens the
+    COSMIC destructive button color while keeping `Remove` as full destructive.
+- [x] Disable provider selection in Modify mode unless a later conversion flow
   is explicitly approved.
-- [ ] Disable access-mode selection in Modify mode unless a later conversion
+- [x] Disable access-mode selection in Modify mode unless a later conversion
   flow is explicitly approved.
-- [ ] Preserve original remote/account field values when switching disabled or
+- [x] Preserve original remote/account field values when switching disabled or
   preview-only provider controls is impossible; do not allow provider toggles to
   corrupt the saved rclone remote or OneDrive account fields.
-- [ ] Validate renamed connections so a connection name cannot duplicate another
+- [x] Validate renamed connections so a connection name cannot duplicate another
   existing connection.
-- [ ] Validate changed local mountpoint or mirror directory against every other
+- [x] Validate changed local mountpoint or mirror directory against every other
   connection; reject duplicate targets, nested targets, and paths inside another
   configured mount or mirror tree.
-- [ ] When a selected account or rclone remote is already used by another saved
+- [x] When a selected account or rclone remote is already used by another saved
   connection, require explicit user acknowledgement before saving if the
   provider/mode combination permits shared credentials safely.
 
 ### Version 0.2 Add Connection UI
 
-- [ ] Remove the `Import` button from the default Add Connection action row, or
+- [x] Remove the `Import` button from the default Add Connection action row, or
   move legacy import behind a less prominent advanced entry point.
-- [ ] In OneDrive Online mount mode, label the account/setup field as
+- [x] In OneDrive Online mount mode, label the account/setup field as
   `onedriver` rather than generic `onedrive`.
-- [ ] In OneDrive Offline mirror mode, label the account/setup field as
+- [x] In OneDrive Offline mirror mode, label the account/setup field as
   `onedrive` or `abraunegg/onedrive` consistently.
-- [ ] Update OneDrive Online mount tooltip text to warn: "Do not reuse this
+- [x] Update OneDrive Online mount tooltip text to warn: "Do not reuse this
   mountpoint for a OneDrive mirror."
-- [ ] Update OneDrive Offline mirror tooltip text to warn: "Do not reuse this
+- [x] Update OneDrive Offline mirror tooltip text to warn: "Do not reuse this
   mirror directory for a OneDrive Online mount."
-- [ ] Validate Add Connection names so a new connection name cannot duplicate an
+- [x] Validate Add Connection names so a new connection name cannot duplicate an
   existing connection.
-- [ ] Validate Add Connection local mountpoint or mirror directory against every
+- [x] Validate Add Connection local mountpoint or mirror directory against every
   other configured connection; reject duplicate targets, nested targets, and
   paths inside another configured mount or mirror tree.
-- [ ] When a selected account or rclone remote is already used by another saved
+- [x] When a selected account or rclone remote is already used by another saved
   connection, require explicit user acknowledgement before saving if the
   provider/mode combination permits shared credentials safely.
-- [ ] Change the Add Connection display-name field from prefilled text to
+- [x] Change the Add Connection display-name field from prefilled text to
   placeholder/suggested text, so activating the field starts with an empty input
   rather than requiring the user to remove generated text.
 
 ### Version 0.2 Rclone Remote Management UI
 
-- [ ] Add a way to remove unused rclone remotes created during setup/testing.
-- [ ] Prevent removal of any rclone remote currently referenced by a saved
+- [x] Add a way to remove unused rclone remotes created during setup/testing.
+- [x] Prevent removal of any rclone remote currently referenced by a saved
   connection.
-- [ ] Require explicit confirmation before deleting an rclone remote, and state
+- [x] Require explicit confirmation before deleting an rclone remote, and state
   that this affects rclone configuration rather than only applet configuration.
-- [ ] Decide whether rclone remote removal is hidden behind an advanced action
+- [x] Decide whether rclone remote removal is hidden behind an advanced action
   such as Shift-click, a context action, or a dedicated advanced management
   surface.
-- [ ] Wrap detected rclone remote buttons across multiple rows when they exceed
+- [x] Wrap detected rclone remote buttons across multiple rows when they exceed
   the settings window width.
-- [ ] Estimate remote-button row capacity from available width rather than
+- [x] Estimate remote-button row capacity from available width rather than
   allowing buttons to overflow or clip.
 
 ### Version 0.2 OneDrive Setup Help Text
 
-- [ ] Rewrite `Start OneDrive Setup` tooltip/help text to say that all required
+- [x] Rewrite `Start OneDrive Setup` tooltip/help text to say that all required
   fields must be completed before setup and that the user must complete browser
   authentication.
-- [ ] Rewrite `Start OneDrive Mirror Setup` tooltip/help text to say that all
+- [x] Rewrite `Start OneDrive Mirror Setup` tooltip/help text to say that all
   required fields must be completed before setup and that the user must complete
   browser authentication.
-- [ ] Remove storage-engine internals and authorization-storage details from
+- [x] Remove storage-engine internals and authorization-storage details from
   OneDrive setup tooltips; keep those details in README or dependency
   documentation.
 
 ### Version 0.2 Verification
 
-- [ ] Verify main popup status-row placement, dynamic height, and scrolling with
+- [x] Verify main popup status-row placement, dynamic height, and scrolling with
   zero, few, and many configured connections.
-- [ ] Verify Modify mode cannot accidentally change provider, access mode,
+- [x] Verify Modify mode cannot accidentally change provider, access mode,
   remote/account field, or generated engine state unless a conversion flow is
   explicitly implemented.
-- [ ] Verify Add and Modify validation for duplicate names, duplicate local
+- [x] Verify Add and Modify validation for duplicate names, duplicate local
   targets, nested paths, and shared account/remote acknowledgement.
-- [ ] Verify rclone remote removal refuses in-use remotes and removes only the
+- [x] Verify rclone remote removal refuses in-use remotes and removes only the
   selected unused remote after confirmation.
-- [ ] Verify detected rclone remotes wrap cleanly at the default settings window
+- [x] Verify detected rclone remotes wrap cleanly at the default settings window
   width.
 - [ ] Complete user-guided visual review of the Version 0.2 Add/Modify and main
   popup changes.

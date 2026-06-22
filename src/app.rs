@@ -15,8 +15,9 @@ use std::time::Duration;
 
 use crate::fl;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
+use cosmic::iced::Background;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
-use cosmic::iced::{Alignment, Length, Limits, window::Id};
+use cosmic::iced::{Alignment, Color, Length, Limits, window::Id};
 use cosmic::prelude::*;
 use cosmic::widget;
 use cosmic_ext_applet_mounter::config::{APP_ID, Config};
@@ -62,18 +63,20 @@ use uuid::Uuid;
 
 const CONNECTION_SETTINGS_TITLE: &str = "Cloud Mounter Connection Settings";
 const APP_DISPLAY_NAME: &str = "COSMIC Cloud Mounter";
-const POPUP_HEIGHT_BUDGET: f32 = 760.0;
-const POPUP_FIXED_HEADER_ESTIMATE: f32 = 164.0;
-const POPUP_NOTICE_LINE_CHARS: usize = 46;
-const POPUP_NOTICE_LINE_HEIGHT: f32 = 28.0;
-const POPUP_NOTICE_VERTICAL_PADDING: f32 = 18.0;
-const POPUP_SCROLL_MAX_HEIGHT: f32 = 540.0;
+const POPUP_CONNECTION_LIST_MAX_HEIGHT: f32 = 640.0;
 const POPUP_CONNECTION_NAME_MAX_CHARS: usize = 36;
-const POPUP_CONNECTION_ROW_HEIGHT: f32 = 48.0;
+const POPUP_CONNECTION_ROW_VERTICAL_PADDING: u16 = 0;
+const POPUP_CONNECTION_ROW_HEIGHT: f32 = 50.0;
 const POPUP_EMPTY_ROW_HEIGHT: f32 = 40.0;
+const POPUP_ACTION_HORIZONTAL_PADDING: u16 = 24;
 const POPUP_CONNECTION_ROW_HORIZONTAL_PADDING: u16 = 0;
 const SETTINGS_SECTION_TITLE_WIDTH: f32 = 150.0;
 const SETTINGS_SECTION_TITLE_TOP_PADDING: u16 = 8;
+const SETTINGS_RCLONE_REMOTE_BUTTONS_PER_ROW: usize = 3;
+const SETTINGS_DISABLE_BUTTON_ACTIVE_LIGHTENING: f32 = 0.35;
+const SETTINGS_DISABLE_BUTTON_HOVER_LIGHTENING: f32 = 0.25;
+const SETTINGS_DISABLE_BUTTON_PRESSED_LIGHTENING: f32 = 0.15;
+const SETTINGS_DISABLE_BUTTON_DISABLED_LIGHTENING: f32 = 0.15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppLaunchMode {
@@ -123,7 +126,7 @@ impl Default for ConnectionDraft {
     fn default() -> Self {
         Self {
             id: None,
-            name: "New storage connection".into(),
+            name: String::new(),
             provider: Provider::GoogleDrive,
             access_mode: AccessMode::OnlineMount,
             remote_reference: String::new(),
@@ -156,6 +159,8 @@ pub struct AppModel {
     rclone_remotes: Vec<RcloneDraftRemote>,
     pending_remove: Option<ConnectionId>,
     pending_repair: Option<ConnectionId>,
+    pending_shared_remote_ack: Option<ConnectionId>,
+    pending_rclone_remote_remove: Option<String>,
     onedrive_auth_open_command: String,
     onedrive_auth_response_url: String,
     last_notice: Option<String>,
@@ -166,7 +171,6 @@ pub enum Message {
     TogglePopup,
     OpenAddConnection,
     OpenModifyConnection(ConnectionId),
-    OpenImport,
     PopupClosed(Id),
     OperationRequested(ConnectionId, Operation),
     OperationCompleted(String),
@@ -196,6 +200,8 @@ pub enum Message {
     BoxRcloneRemoteCreated(Result<String, String>),
     CreateSmbRcloneRemote,
     SmbRcloneRemoteCreated(Result<String, String>),
+    RequestRemoveRcloneRemote(String),
+    RcloneRemoteRemoved(Result<String, String>),
     StartOnedriverSetup,
     OnedriverSetupCompleted(Result<String, String>),
     StartOneDriveMirrorSetup,
@@ -250,6 +256,8 @@ impl cosmic::Application for AppModel {
             rclone_remotes: Vec::new(),
             pending_remove: None,
             pending_repair: None,
+            pending_shared_remote_ack: None,
+            pending_rclone_remote_remove: None,
             onedrive_auth_open_command: String::new(),
             onedrive_auth_response_url: String::new(),
             last_notice: None,
@@ -308,6 +316,8 @@ impl cosmic::Application for AppModel {
                     self.config = Config::load().config;
                     self.pending_remove = None;
                     self.pending_repair = None;
+                    self.pending_shared_remote_ack = None;
+                    self.pending_rclone_remote_remove = None;
                     let id = Id::unique();
                     self.popup = Some(id);
                     let mut settings = self.core.applet.get_popup_settings(
@@ -333,17 +343,16 @@ impl cosmic::Application for AppModel {
             Message::OpenAddConnection => {
                 self.pending_remove = None;
                 self.pending_repair = None;
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.launch_settings_process(AppLaunchMode::AddConnection);
             }
             Message::OpenModifyConnection(connection_id) => {
                 self.pending_remove = None;
                 self.pending_repair = None;
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.launch_settings_process(AppLaunchMode::ModifyConnection(connection_id));
-            }
-            Message::OpenImport => {
-                self.pending_remove = None;
-                self.pending_repair = None;
-                self.launch_settings_process(AppLaunchMode::ImportLegacy);
             }
             Message::PopupClosed(id) if self.popup == Some(id) => {
                 self.popup = None;
@@ -355,24 +364,47 @@ impl cosmic::Application for AppModel {
             Message::OperationCompleted(notice) => {
                 self.config = Config::load().config;
                 self.pending_repair = None;
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.last_notice = Some(notice);
             }
             Message::DraftProvider(provider) => {
+                if matches!(self.window_mode, WindowMode::ModifyConnection(_)) {
+                    self.last_notice = Some(
+                        "Provider changes are disabled while modifying an existing connection."
+                            .into(),
+                    );
+                    return Task::none();
+                }
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.draft.provider = provider;
                 if provider == Provider::OneDrive {
                     self.draft.remote_reference = "onedrive".into();
                 }
             }
             Message::DraftAccessMode(mode) => {
+                if matches!(self.window_mode, WindowMode::ModifyConnection(_)) {
+                    self.last_notice = Some(
+                        "Access mode changes are disabled while modifying an existing connection."
+                            .into(),
+                    );
+                    return Task::none();
+                }
                 self.draft.access_mode = mode;
             }
             Message::DraftName(value) => {
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.draft.name = value;
             }
             Message::DraftRemote(value) => {
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.draft.remote_reference = value;
             }
             Message::DraftSubpath(value) => {
+                self.pending_shared_remote_ack = None;
                 self.draft.remote_subpath = value;
             }
             Message::DraftSmbHost(value) => {
@@ -385,6 +417,8 @@ impl cosmic::Application for AppModel {
                 self.draft.smb_domain = value;
             }
             Message::DraftLocalPath(value) => {
+                self.pending_shared_remote_ack = None;
+                self.pending_rclone_remote_remove = None;
                 self.draft.local_path = value;
             }
             Message::DraftRecoveryDirectory(value) => {
@@ -467,6 +501,25 @@ impl cosmic::Application for AppModel {
                     self.last_notice = Some(format!("Could not create SMB rclone remote: {error}"));
                 }
             },
+            Message::RequestRemoveRcloneRemote(remote_name) => {
+                return self.request_remove_rclone_remote(remote_name);
+            }
+            Message::RcloneRemoteRemoved(result) => match result {
+                Ok(remote_name) => {
+                    self.pending_rclone_remote_remove = None;
+                    if self.draft.remote_reference == remote_name {
+                        self.draft.remote_reference.clear();
+                    }
+                    self.detect_rclone_remotes();
+                    self.last_notice = Some(format!(
+                        "Removed unused rclone remote `{remote_name}` from rclone configuration."
+                    ));
+                }
+                Err(error) => {
+                    self.pending_rclone_remote_remove = None;
+                    self.last_notice = Some(format!("Could not remove rclone remote: {error}"));
+                }
+            },
             Message::StartOnedriverSetup => {
                 return self.start_onedriver_setup();
             }
@@ -528,6 +581,7 @@ impl cosmic::Application for AppModel {
                 };
             }
             Message::DraftSaved(notice) => {
+                self.pending_shared_remote_ack = None;
                 self.last_notice = Some(notice);
             }
             Message::ConfirmImport(index) => {
@@ -581,18 +635,9 @@ impl AppModel {
                 aggregate_label(&state.aggregate),
                 notification_status,
                 self.vpn_summary(&state.rows)
-            )))
-            .add(controls);
+            )));
 
         let mut rows = widget::list_column();
-        if let Some(notice) = &self.last_notice {
-            rows = rows.add(
-                widget::container(widget::text::body(notice.clone()))
-                    .padding([8, 0])
-                    .width(Length::Fill),
-            );
-        }
-
         if state.rows.is_empty() {
             rows = rows.add(widget::text::body(fl!("no-connections")));
         }
@@ -601,17 +646,25 @@ impl AppModel {
             rows = rows.add(self.view_connection_row(row));
         }
 
-        let content =
-            widget::Column::new()
-                .spacing(12)
-                .push(header)
-                .push(widget::scrollable(rows).height(Length::Fixed(
-                    popup_connection_scroll_height(
-                        self.last_notice.as_deref(),
-                        state.rows.len(),
-                        state.rows.is_empty(),
-                    ),
-                )));
+        let mut content = widget::Column::new().spacing(12).push(header);
+
+        if let Some(notice) = &self.last_notice {
+            content = content.push(
+                widget::container(widget::text::body(notice.clone()))
+                    .padding([8, POPUP_ACTION_HORIZONTAL_PADDING])
+                    .width(Length::Fill),
+            );
+        }
+
+        content = content.push(
+            widget::container(controls)
+                .padding([0, POPUP_ACTION_HORIZONTAL_PADDING])
+                .width(Length::Fill),
+        );
+
+        content = content.push(widget::scrollable(rows).height(Length::Fixed(
+            popup_connection_scroll_height(state.rows.len(), state.rows.is_empty()),
+        )));
 
         self.core.applet.popup_container(content).into()
     }
@@ -670,7 +723,10 @@ impl AppModel {
             );
 
         widget::container(row_content)
-            .padding([4, POPUP_CONNECTION_ROW_HORIZONTAL_PADDING])
+            .padding([
+                POPUP_CONNECTION_ROW_VERTICAL_PADDING,
+                POPUP_CONNECTION_ROW_HORIZONTAL_PADDING,
+            ])
             .width(Length::Fill)
             .into()
     }
@@ -735,15 +791,16 @@ impl AppModel {
         &'a self,
         mut content: widget::ListColumn<'a, Message>,
     ) -> widget::ListColumn<'a, Message> {
+        let modify_locked = matches!(self.window_mode, WindowMode::ModifyConnection(_));
         content = content
             .add(section_row_with_help(
                 "Provider",
                 "Choose the storage provider. OneDrive uses OneDrive-specific engines; Google Drive, Box, and SMB use rclone.",
                 choice_row(vec![
-                    provider_choice("OneDrive", Provider::OneDrive, self.draft.provider),
-                    provider_choice("Google Drive", Provider::GoogleDrive, self.draft.provider),
-                    provider_choice("Box", Provider::Box, self.draft.provider),
-                    provider_choice("SMB", Provider::Smb, self.draft.provider),
+                    provider_choice("OneDrive", Provider::OneDrive, self.draft.provider, modify_locked),
+                    provider_choice("Google Drive", Provider::GoogleDrive, self.draft.provider, modify_locked),
+                    provider_choice("Box", Provider::Box, self.draft.provider, modify_locked),
+                    provider_choice("SMB", Provider::Smb, self.draft.provider, modify_locked),
                 ]),
             ))
             .add(section_row_with_help(
@@ -754,11 +811,13 @@ impl AppModel {
                         "Online mount",
                         AccessMode::OnlineMount,
                         self.draft.access_mode,
+                        modify_locked,
                     ),
                     mode_choice(
                         "Offline mirror",
                         AccessMode::OfflineMirror,
                         self.draft.access_mode,
+                        modify_locked,
                     ),
                 ]),
             ))
@@ -767,8 +826,11 @@ impl AppModel {
                 widget::Column::new()
                     .spacing(8)
                     .push(field_with_help(
-                        widget::text_input::text_input("Connection name", &self.draft.name)
-                            .on_input(Message::DraftName),
+                        widget::text_input::text_input(
+                            "suggested: My Cloud Connection",
+                            &self.draft.name,
+                        )
+                        .on_input(Message::DraftName),
                         "Display name shown in the applet popup.",
                     ))
                     .push(self.view_remote_account_fields()),
@@ -893,16 +955,19 @@ impl AppModel {
                         ))
                         .push(self.view_create_rclone_remote_action());
                 }
-                primary_row = primary_row.push(field_with_help(
-                    widget::button::standard("Import").on_press(Message::OpenImport),
-                    "Scan existing user services, preview compatible rclone or onedriver mounts, then map one into this wizard.",
-                ));
             }
             WindowMode::ModifyConnection(connection_id) => {
                 let enable_label = if self.draft.enabled {
                     "Disable"
                 } else {
                     "Enable"
+                };
+                let enable_button: Element<'_, Message> = if self.draft.enabled {
+                    soft_destructive_button(enable_label, Message::DraftEnabled(false))
+                } else {
+                    widget::button::suggested(enable_label)
+                        .on_press(Message::DraftEnabled(true))
+                        .into()
                 };
                 let mut modify_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
                 if self.saved_connection_is_offline_mirror(connection_id) {
@@ -927,8 +992,7 @@ impl AppModel {
                 }
                 modify_row = modify_row
                     .push(field_with_help(
-                        widget::button::standard(enable_label)
-                            .on_press(Message::DraftEnabled(!self.draft.enabled)),
+                        enable_button,
                         "Disable prevents automatic use without deleting credentials, data, cache, recovery, or imported originals.",
                     ))
                     .push(field_with_help(
@@ -964,19 +1028,13 @@ impl AppModel {
             AccessMode::OnlineMount => field_with_help(
                 widget::button::suggested("Start OneDrive Setup")
                     .on_press(Message::StartOnedriverSetup),
-                format!(
-                    "{} Runs `onedriver --auth-only` with this connection's app-owned config file and cache directory. Complete authorization in the browser, then run Test Connection.",
-                    onedrive_setup_guidance(self.draft.access_mode)
-                ),
+                onedrive_setup_guidance(self.draft.access_mode),
             ),
             AccessMode::OfflineMirror => choice_row(vec![
                 field_with_help(
                     widget::button::suggested("Start OneDrive Mirror Setup")
                         .on_press(Message::StartOneDriveMirrorSetup),
-                    format!(
-                        "{} Runs `onedrive --reauth` with this connection's app-owned config directory. Complete authorization in the browser; onedrive should receive the local redirect itself.",
-                        onedrive_setup_guidance(self.draft.access_mode)
-                    ),
+                    onedrive_setup_guidance(self.draft.access_mode),
                 ),
                 field_with_help(
                     widget::button::standard("Use Manual Auth Handoff")
@@ -1179,7 +1237,10 @@ impl AppModel {
                 "Detected {} rclone remotes:",
                 provider_label(provider)
             )));
-            column = column.push(self.view_rclone_remote_choices(matching));
+            column = column.push(self.view_rclone_remote_choices(matching.clone()));
+            if self.window_mode == WindowMode::AddConnection {
+                column = column.push(self.view_rclone_remote_management(matching));
+            }
         }
 
         if provider == Provider::Smb && self.window_mode == WindowMode::AddConnection {
@@ -1234,20 +1295,73 @@ impl AppModel {
         &self,
         remotes: Vec<RcloneDraftRemote>,
     ) -> Element<'static, Message> {
-        let mut row = widget::Row::new().spacing(8).align_y(Alignment::Center);
-        for remote in remotes {
-            let selected = self.draft.remote_reference == remote.name;
-            let label = remote.name.clone();
-            let help = format!(
-                "Use rclone remote `{}` with backend `{}` for this connection.",
-                remote.name, remote.backend
-            );
-            row = row.push(field_with_help(
-                select_button(label, selected, Message::DraftRemote(remote.name)),
-                help,
-            ));
+        let mut column = widget::Column::new().spacing(8);
+        for row_remotes in remotes.chunks(rclone_remote_buttons_per_row()) {
+            let mut row = widget::Row::new().spacing(8).align_y(Alignment::Center);
+            for remote in row_remotes {
+                let selected = self.draft.remote_reference == remote.name;
+                let label = remote.name.clone();
+                let help = format!(
+                    "Use rclone remote `{}` with backend `{}` for this connection.",
+                    remote.name, remote.backend
+                );
+                row = row.push(field_with_help(
+                    select_button(label, selected, Message::DraftRemote(remote.name.clone())),
+                    help,
+                ));
+            }
+            column = column.push(row);
         }
-        row.into()
+        column.into()
+    }
+
+    fn view_rclone_remote_management(
+        &self,
+        remotes: Vec<RcloneDraftRemote>,
+    ) -> Element<'static, Message> {
+        let mut column = widget::Column::new()
+            .spacing(6)
+            .push(widget::text::body("Manage unused rclone remotes:"));
+        for remote in remotes {
+            let in_use = self.rclone_remote_is_referenced(&remote.name);
+            let confirm =
+                self.pending_rclone_remote_remove.as_deref() == Some(remote.name.as_str());
+            let button: Element<'_, Message> = if in_use {
+                widget::button::standard("In use")
+                    .on_press_maybe(None)
+                    .into()
+            } else if confirm {
+                widget::button::destructive("Confirm remove")
+                    .on_press(Message::RequestRemoveRcloneRemote(remote.name.clone()))
+                    .into()
+            } else {
+                widget::button::standard("Remove remote")
+                    .on_press(Message::RequestRemoveRcloneRemote(remote.name.clone()))
+                    .into()
+            };
+            let help = if in_use {
+                format!(
+                    "rclone remote `{}` is referenced by a saved connection and cannot be removed here.",
+                    remote.name
+                )
+            } else {
+                format!(
+                    "Remove rclone remote `{}` from rclone configuration. This does not remove applet connections, local data, or cloud files.",
+                    remote.name
+                )
+            };
+            column = column.push(
+                widget::Row::new()
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(widget::text::body(format!(
+                        "{} ({})",
+                        remote.name, remote.backend
+                    )))
+                    .push(field_with_help(button, help)),
+            );
+        }
+        column.into()
     }
 
     fn view_vpn_choices(&self) -> Element<'static, Message> {
@@ -1409,6 +1523,7 @@ impl AppModel {
             self.last_notice = Some("Connection is no longer available.".into());
             return;
         };
+        self.pending_shared_remote_ack = None;
         self.draft = draft_from_connection(connection);
         self.last_notice = Some(format!("Modify {}.", connection.name));
     }
@@ -1424,6 +1539,19 @@ impl AppModel {
         if let Err(error) = managed_plan_summary(&connection) {
             self.last_notice = Some(format!("Plan validation failed: {error}"));
             return Task::none();
+        }
+        if let Err(error) = self.validate_connection_edit(&connection) {
+            self.last_notice = Some(error);
+            return Task::none();
+        }
+        if let Some(warning) = self.shared_remote_warning(&connection) {
+            if self.pending_shared_remote_ack != Some(connection.id) {
+                self.pending_shared_remote_ack = Some(connection.id);
+                self.last_notice = Some(format!(
+                    "{warning} Press Save Connection again to confirm this shared account/remote choice."
+                ));
+                return Task::none();
+            }
         }
         if connection.provider == Provider::OneDrive {
             self.last_notice = Some(format!("Validating {} before saving...", connection.name));
@@ -1524,6 +1652,81 @@ impl AppModel {
         }
     }
 
+    fn validate_connection_edit(&self, connection: &Connection) -> Result<(), String> {
+        if let Some(saved) = self
+            .config
+            .document
+            .connections
+            .iter()
+            .find(|saved| saved.id == connection.id)
+        {
+            if saved.provider != connection.provider {
+                return Err(
+                    "Provider changes are disabled for existing connections. Create or duplicate a connection to use a different provider."
+                        .into(),
+                );
+            }
+            if access_mode_for_connection(saved) != access_mode_for_connection(connection) {
+                return Err(
+                    "Access mode changes are disabled for existing connections. Create or duplicate a connection to switch between Online mount and Offline mirror."
+                        .into(),
+                );
+            }
+        }
+
+        if let Some(other) = self.config.document.connections.iter().find(|saved| {
+            saved.id != connection.id
+                && saved
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case(connection.name.trim())
+        }) {
+            return Err(format!(
+                "Connection name `{}` is already used by `{}`. Choose a unique name.",
+                connection.name, other.name
+            ));
+        }
+
+        if let Some(other) = self.config.document.connections.iter().find(|saved| {
+            saved.id != connection.id
+                && (paths_overlap(&saved.local_path, &connection.local_path)
+                    || paths_overlap(&connection.local_path, &saved.local_path))
+        }) {
+            return Err(format!(
+                "Local target `{}` overlaps `{}` used by `{}`. Choose a separate mountpoint or mirror directory.",
+                connection.local_path.display(),
+                other.local_path.display(),
+                other.name
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn shared_remote_warning(&self, connection: &Connection) -> Option<String> {
+        self.config
+            .document
+            .connections
+            .iter()
+            .find(|saved| {
+                saved.id != connection.id
+                    && saved.provider == connection.provider
+                    && saved
+                        .remote_reference
+                        .trim()
+                        .eq_ignore_ascii_case(connection.remote_reference.trim())
+            })
+            .map(|other| {
+                format!(
+                    "`{}` uses the same {} account/remote `{}` as `{}`.",
+                    connection.name,
+                    provider_label(connection.provider),
+                    connection.remote_reference,
+                    other.name
+                )
+            })
+    }
+
     fn detect_and_import_vpns(&mut self) {
         let detection = detect_vpn_profiles();
         let storage = match config_storage() {
@@ -1616,6 +1819,41 @@ impl AppModel {
                 self.last_notice = Some(format!("Could not run rclone config dump: {error}"));
             }
         }
+    }
+
+    fn rclone_remote_is_referenced(&self, remote_name: &str) -> bool {
+        self.config.document.connections.iter().any(|connection| {
+            connection.provider != Provider::OneDrive
+                && connection
+                    .remote_reference
+                    .eq_ignore_ascii_case(remote_name)
+        })
+    }
+
+    fn request_remove_rclone_remote(
+        &mut self,
+        remote_name: String,
+    ) -> Task<cosmic::Action<Message>> {
+        if self.rclone_remote_is_referenced(&remote_name) {
+            self.pending_rclone_remote_remove = None;
+            self.last_notice = Some(format!(
+                "Cannot remove rclone remote `{remote_name}` because a saved connection still uses it."
+            ));
+            return Task::none();
+        }
+        if self.pending_rclone_remote_remove.as_deref() != Some(remote_name.as_str()) {
+            self.pending_rclone_remote_remove = Some(remote_name.clone());
+            self.last_notice = Some(format!(
+                "Click Confirm remove for `{remote_name}` to delete it from rclone configuration. This affects rclone, not only this applet."
+            ));
+            return Task::none();
+        }
+
+        self.last_notice = Some(format!("Removing rclone remote `{remote_name}`..."));
+        Task::perform(
+            async move { remove_rclone_remote_result(remote_name).await },
+            |result| cosmic::Action::App(Message::RcloneRemoteRemoved(result)),
+        )
     }
 
     fn create_smb_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
@@ -2281,29 +2519,12 @@ fn popup_connection_display_name(name: &str) -> String {
     display
 }
 
-fn popup_connection_scroll_height(
-    notice: Option<&str>,
-    connection_count: usize,
-    show_empty_state: bool,
-) -> f32 {
-    let notice_height = notice.map_or(0.0, |text| {
-        let lines = text
-            .lines()
-            .map(|line| (line.chars().count() / POPUP_NOTICE_LINE_CHARS) + 1)
-            .sum::<usize>()
-            .max(1) as f32;
-        (lines * POPUP_NOTICE_LINE_HEIGHT) + POPUP_NOTICE_VERTICAL_PADDING
-    });
-    let row_height = if show_empty_state {
-        POPUP_EMPTY_ROW_HEIGHT
-    } else {
-        connection_count as f32 * POPUP_CONNECTION_ROW_HEIGHT
-    };
-    let content_height = notice_height + row_height;
-    let max_height = (POPUP_HEIGHT_BUDGET - POPUP_FIXED_HEADER_ESTIMATE)
-        .clamp(POPUP_EMPTY_ROW_HEIGHT, POPUP_SCROLL_MAX_HEIGHT);
+fn popup_connection_scroll_height(connection_count: usize, show_empty_state: bool) -> f32 {
+    if show_empty_state {
+        return POPUP_EMPTY_ROW_HEIGHT;
+    }
 
-    content_height.clamp(POPUP_EMPTY_ROW_HEIGHT, max_height)
+    (connection_count as f32 * POPUP_CONNECTION_ROW_HEIGHT).min(POPUP_CONNECTION_LIST_MAX_HEIGHT)
 }
 
 fn settings_executable_path() -> Option<PathBuf> {
@@ -2345,6 +2566,13 @@ fn window_mode_notice(mode: WindowMode) -> String {
         WindowMode::ImportLegacy => {
             "Import selected. Scan ~/.config/systemd/user, preview compatible services, and confirm replacements before any changes.".into()
         }
+    }
+}
+
+fn access_mode_for_connection(connection: &Connection) -> AccessMode {
+    match connection.mode {
+        ConnectionMode::OnlineMount(_) => AccessMode::OnlineMount,
+        ConnectionMode::OfflineMirror(_) => AccessMode::OfflineMirror,
     }
 }
 
@@ -2538,6 +2766,10 @@ fn choice_row(choices: Vec<Element<'static, Message>>) -> Element<'static, Messa
         row = row.push(choice);
     }
     row.into()
+}
+
+fn rclone_remote_buttons_per_row() -> usize {
+    SETTINGS_RCLONE_REMOTE_BUTTONS_PER_ROW.max(1)
 }
 
 #[derive(Default)]
@@ -3092,11 +3324,14 @@ fn provider_choice(
     label: &'static str,
     provider: Provider,
     selected: Provider,
+    locked: bool,
 ) -> Element<'static, Message> {
-    select_button(
+    locked_select_button(
         label,
         provider == selected,
         Message::DraftProvider(provider),
+        locked,
+        "Provider changes are disabled while modifying an existing connection. Create or duplicate a connection to use a different provider.",
     )
 }
 
@@ -3104,8 +3339,15 @@ fn mode_choice(
     label: &'static str,
     mode: AccessMode,
     selected: AccessMode,
+    locked: bool,
 ) -> Element<'static, Message> {
-    select_button(label, mode == selected, Message::DraftAccessMode(mode))
+    locked_select_button(
+        label,
+        mode == selected,
+        Message::DraftAccessMode(mode),
+        locked,
+        "Access mode changes are disabled while modifying an existing connection. Create or duplicate a connection to switch between Online mount and Offline mirror.",
+    )
 }
 
 fn select_button<'a>(
@@ -3120,6 +3362,30 @@ fn select_button<'a>(
     }
 }
 
+fn locked_select_button<'a>(
+    label: impl Into<std::borrow::Cow<'a, str>>,
+    selected: bool,
+    message: Message,
+    locked: bool,
+    locked_help: &'a str,
+) -> Element<'a, Message> {
+    let button: Element<'a, Message> = if selected {
+        widget::button::suggested(label)
+            .on_press_maybe((!locked).then_some(message))
+            .into()
+    } else {
+        widget::button::standard(label)
+            .on_press_maybe((!locked).then_some(message))
+            .into()
+    };
+
+    if locked {
+        field_with_help(button, locked_help)
+    } else {
+        button
+    }
+}
+
 fn action_button<'a>(
     label: impl Into<std::borrow::Cow<'a, str>>,
     primary: bool,
@@ -3129,6 +3395,73 @@ fn action_button<'a>(
         widget::button::suggested(label).on_press(message).into()
     } else {
         widget::button::standard(label).on_press(message).into()
+    }
+}
+
+fn soft_destructive_button<'a>(
+    label: impl Into<std::borrow::Cow<'a, str>>,
+    message: Message,
+) -> Element<'a, Message> {
+    widget::button::standard(label)
+        .class(cosmic::theme::Button::Custom {
+            active: Box::new(|focused, theme| {
+                let destructive = cosmic::theme::Button::Destructive;
+                let mut style = <cosmic::Theme as widget::button::Catalog>::active(
+                    theme,
+                    focused,
+                    false,
+                    &destructive,
+                );
+                soften_button_background(&mut style, SETTINGS_DISABLE_BUTTON_ACTIVE_LIGHTENING);
+                style
+            }),
+            disabled: Box::new(|theme| {
+                let destructive = cosmic::theme::Button::Destructive;
+                let mut style =
+                    <cosmic::Theme as widget::button::Catalog>::disabled(theme, &destructive);
+                soften_button_background(&mut style, SETTINGS_DISABLE_BUTTON_DISABLED_LIGHTENING);
+                style
+            }),
+            hovered: Box::new(|focused, theme| {
+                let destructive = cosmic::theme::Button::Destructive;
+                let mut style = <cosmic::Theme as widget::button::Catalog>::hovered(
+                    theme,
+                    focused,
+                    false,
+                    &destructive,
+                );
+                soften_button_background(&mut style, SETTINGS_DISABLE_BUTTON_HOVER_LIGHTENING);
+                style
+            }),
+            pressed: Box::new(|focused, theme| {
+                let destructive = cosmic::theme::Button::Destructive;
+                let mut style = <cosmic::Theme as widget::button::Catalog>::pressed(
+                    theme,
+                    focused,
+                    false,
+                    &destructive,
+                );
+                soften_button_background(&mut style, SETTINGS_DISABLE_BUTTON_PRESSED_LIGHTENING);
+                style
+            }),
+        })
+        .on_press(message)
+        .into()
+}
+
+fn soften_button_background(style: &mut widget::button::Style, amount: f32) {
+    if let Some(Background::Color(color)) = style.background {
+        style.background = Some(Background::Color(lighten_color(color, amount)));
+    }
+}
+
+fn lighten_color(color: Color, amount: f32) -> Color {
+    let amount = amount.clamp(0.0, 1.0);
+    Color {
+        r: color.r + ((1.0 - color.r) * amount),
+        g: color.g + ((1.0 - color.g) * amount),
+        b: color.b + ((1.0 - color.b) * amount),
+        a: color.a,
     }
 }
 
@@ -3175,7 +3508,7 @@ fn rclone_remote_help(provider: Provider) -> &'static str {
 fn onedrive_account_placeholder(mode: AccessMode) -> &'static str {
     match mode {
         AccessMode::OnlineMount => "onedriver account/setup reference",
-        AccessMode::OfflineMirror => "abraunegg/onedrive account/setup reference",
+        AccessMode::OfflineMirror => "onedrive account/setup reference",
     }
 }
 
@@ -3192,11 +3525,9 @@ fn onedrive_account_help(mode: AccessMode) -> &'static str {
 
 fn onedrive_account_safety_warning(mode: AccessMode) -> &'static str {
     match mode {
-        AccessMode::OnlineMount => {
-            "Do not reuse this mountpoint as an abraunegg/onedrive sync directory."
-        }
+        AccessMode::OnlineMount => "Do not reuse this mountpoint for a OneDrive mirror.",
         AccessMode::OfflineMirror => {
-            "Do not run onedriver and abraunegg/onedrive against overlapping OneDrive trees."
+            "Do not reuse this mirror directory for a OneDrive Online mount."
         }
     }
 }
@@ -3204,10 +3535,10 @@ fn onedrive_account_safety_warning(mode: AccessMode) -> &'static str {
 fn onedrive_setup_guidance(mode: AccessMode) -> &'static str {
     match mode {
         AccessMode::OnlineMount => {
-            "Setup guidance: Online Mount uses jstaf/onedriver with app-owned config/cache paths. Test Connection and Save validate setup metadata and mountpoint safety; credentials remain with onedriver."
+            "Complete all required fields before setup, then finish onedriver authorization in the browser. After authorization, run Test Connection and Save Connection."
         }
         AccessMode::OfflineMirror => {
-            "Setup guidance: Offline Mirror uses abraunegg/onedrive with app-owned confdir/syncdir/recovery paths. Test Connection and Save validate auth state and run a dry-run preview; credentials remain with onedrive."
+            "Complete all required fields before setup, then finish OneDrive authorization in the browser. After authorization, run Test Connection and Save Connection."
         }
     }
 }
@@ -3374,6 +3705,30 @@ async fn create_smb_rclone_remote_with(
         .await
         .map_err(|error| rclone_setup_command_error("config create", error))?;
     Ok(setup.name)
+}
+
+async fn remove_rclone_remote_result(remote_name: String) -> Result<String, String> {
+    remove_rclone_remote_with(&SystemCommandRunner, remote_name).await
+}
+
+async fn remove_rclone_remote_with(
+    runner: &dyn CommandRunner,
+    remote_name: String,
+) -> Result<String, String> {
+    validate_rclone_remote_create_name(&remote_name)?;
+    if runner.resolve(Executable::Rclone).is_none() {
+        return Err(
+            "rclone is missing. Install rclone 1.74.3 or newer before removing remotes.".into(),
+        );
+    }
+    runner
+        .run(
+            rclone_config_delete_request(&remote_name)?,
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|error| rclone_setup_command_error("config delete", error))?;
+    Ok(remote_name)
 }
 
 async fn run_onedriver_online_setup_result(connection: Connection) -> Result<String, String> {
@@ -3677,6 +4032,17 @@ fn smb_rclone_config_create_request(setup: &SmbRemoteSetup) -> Result<CommandReq
     }
     request
         .arg("--non-interactive")
+        .map_err(|error| error.to_string())
+        .map(|request| request.with_timeout(Duration::from_secs(30)))
+}
+
+fn rclone_config_delete_request(remote_name: &str) -> Result<CommandRequest, String> {
+    CommandRequest::new(Executable::Rclone)
+        .arg("config")
+        .map_err(|error| error.to_string())?
+        .arg("delete")
+        .map_err(|error| error.to_string())?
+        .arg(remote_name)
         .map_err(|error| error.to_string())
         .map(|request| request.with_timeout(Duration::from_secs(30)))
 }
@@ -5878,26 +6244,16 @@ mod tests {
     use cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile;
 
     #[test]
-    fn popup_scroll_height_accounts_for_notice_length() {
-        let empty = popup_connection_scroll_height(None, 0, true);
-        let short_list = popup_connection_scroll_height(None, 3, false);
-        let full_list = popup_connection_scroll_height(None, 20, false);
-        let with_short_notice =
-            popup_connection_scroll_height(Some("Preview completed."), 3, false);
-        let with_long_notice = popup_connection_scroll_height(
-            Some(
-                "Preview completed for OneDrive primary auth live verify. Preview completed; onedrive reported 1 notable file-change line. Initial sync has not run yet; press Sync Now to confirm and run the initial synchronization.",
-            ),
-            3,
-            false,
-        );
+    fn popup_scroll_height_depends_on_connection_count_not_notice_text() {
+        let empty = popup_connection_scroll_height(0, true);
+        let one_row = popup_connection_scroll_height(1, false);
+        let five_rows = popup_connection_scroll_height(5, false);
+        let full_list = popup_connection_scroll_height(20, false);
 
         assert_eq!(empty, POPUP_EMPTY_ROW_HEIGHT);
-        assert_eq!(short_list, 3.0 * POPUP_CONNECTION_ROW_HEIGHT);
-        assert_eq!(full_list, POPUP_SCROLL_MAX_HEIGHT);
-        assert!(with_short_notice > short_list);
-        assert!(with_long_notice > with_short_notice);
-        assert!(with_long_notice <= POPUP_SCROLL_MAX_HEIGHT);
+        assert_eq!(one_row, POPUP_CONNECTION_ROW_HEIGHT);
+        assert_eq!(five_rows, 5.0 * POPUP_CONNECTION_ROW_HEIGHT);
+        assert_eq!(full_list, POPUP_CONNECTION_LIST_MAX_HEIGHT);
     }
 
     #[test]
@@ -5910,6 +6266,14 @@ mod tests {
             popup_connection_display_name("Google Drive OAuth live verify offline"),
             "Google Drive OAuth live verify of..."
         );
+    }
+
+    #[test]
+    fn rclone_remote_button_rows_have_bounded_capacity() {
+        assert_eq!(rclone_remote_buttons_per_row(), 3);
+        let remote_count = 7usize;
+        let rows = remote_count.div_ceil(rclone_remote_buttons_per_row());
+        assert_eq!(rows, 3);
     }
 
     #[test]
@@ -6334,6 +6698,36 @@ mod tests {
         assert!(!command.contains("files.example.edu"));
         assert!(!command.contains("uutzinger"));
         assert!(!command.contains("UA"));
+    }
+
+    #[tokio::test]
+    async fn remove_rclone_remote_uses_config_delete() {
+        let runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+            .with_resolved([Executable::Rclone]);
+        runner.push(Ok(command_output("")));
+
+        let removed = remove_rclone_remote_with(&runner, "unused_box".into())
+            .await
+            .expect("unused remote should be removed");
+
+        assert_eq!(removed, "unused_box");
+        let requests = runner.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].sanitized_command(),
+            "rclone config delete unused_box"
+        );
+    }
+
+    #[test]
+    fn rclone_remote_removal_blocks_saved_connection_references() {
+        let mut app = AppModel::default();
+        let mut connection = test_connection(Provider::Box);
+        connection.remote_reference = "ua_box".into();
+        app.config.document.connections = vec![connection];
+
+        assert!(app.rclone_remote_is_referenced("UA_BOX"));
+        assert!(!app.rclone_remote_is_referenced("unused_box"));
     }
 
     #[test]
@@ -7016,8 +7410,8 @@ mod tests {
 
     #[test]
     fn onedrive_setup_guidance_matches_modes_and_save_notice_mentions_validation() {
-        assert!(onedrive_setup_guidance(AccessMode::OnlineMount).contains("jstaf/onedriver"));
-        assert!(onedrive_setup_guidance(AccessMode::OfflineMirror).contains("abraunegg/onedrive"));
+        assert!(onedrive_setup_guidance(AccessMode::OnlineMount).contains("onedriver"));
+        assert!(onedrive_setup_guidance(AccessMode::OfflineMirror).contains("authorization"));
         assert!(
             onedrive_account_help(AccessMode::OnlineMount).contains("Test Connection and Save")
         );
@@ -7029,6 +7423,114 @@ mod tests {
             save_notice_name("Test", Some("onedriver setup is present"))
                 .contains("passed validation")
         );
+    }
+
+    #[test]
+    fn modify_validation_rejects_duplicate_name_and_local_overlap() {
+        let mut app = AppModel::default();
+        let mut first = test_connection(Provider::Box);
+        first.id = ConnectionId::from_uuid(
+            Uuid::parse_str("11111111-1111-4111-8111-111111111111").expect("uuid"),
+        );
+        first.name = "Existing Box".into();
+        first.local_path = PathBuf::from("/home/example/Cloud/Box");
+
+        let mut second = test_connection(Provider::GoogleDrive);
+        second.id = ConnectionId::from_uuid(
+            Uuid::parse_str("22222222-2222-4222-8222-222222222222").expect("uuid"),
+        );
+        second.name = "Google".into();
+        second.local_path = PathBuf::from("/home/example/Cloud/Google");
+
+        app.config.document.connections = vec![first.clone(), second.clone()];
+
+        let mut duplicate_name = second.clone();
+        duplicate_name.name = "existing box".into();
+        let error = app
+            .validate_connection_edit(&duplicate_name)
+            .expect_err("duplicate name must fail");
+        assert!(error.contains("already used"));
+
+        let mut nested_path = second;
+        nested_path.local_path = PathBuf::from("/home/example/Cloud/Box/Nested");
+        let error = app
+            .validate_connection_edit(&nested_path)
+            .expect_err("nested local target must fail");
+        assert!(error.contains("overlaps"));
+    }
+
+    #[test]
+    fn add_validation_rejects_duplicate_name_and_local_overlap() {
+        let mut app = AppModel::default();
+        let mut saved = test_connection(Provider::Box);
+        saved.name = "Saved Box".into();
+        saved.local_path = PathBuf::from("/home/example/Cloud/Box");
+        app.config.document.connections = vec![saved];
+
+        let mut duplicate_name = test_connection(Provider::GoogleDrive);
+        duplicate_name.id = ConnectionId::new();
+        duplicate_name.name = "saved box".into();
+        duplicate_name.local_path = PathBuf::from("/home/example/Cloud/Google");
+        let error = app
+            .validate_connection_edit(&duplicate_name)
+            .expect_err("duplicate add name must fail");
+        assert!(error.contains("already used"));
+
+        let mut nested_path = test_connection(Provider::GoogleDrive);
+        nested_path.id = ConnectionId::new();
+        nested_path.name = "New Google".into();
+        nested_path.local_path = PathBuf::from("/home/example/Cloud/Box/Nested");
+        let error = app
+            .validate_connection_edit(&nested_path)
+            .expect_err("nested add local target must fail");
+        assert!(error.contains("overlaps"));
+    }
+
+    #[test]
+    fn modify_validation_rejects_provider_and_mode_changes() {
+        let mut app = AppModel::default();
+        let saved = test_connection(Provider::Box);
+        app.config.document.connections = vec![saved.clone()];
+
+        let mut provider_changed = saved.clone();
+        provider_changed.provider = Provider::GoogleDrive;
+        let error = app
+            .validate_connection_edit(&provider_changed)
+            .expect_err("provider change must fail");
+        assert!(error.contains("Provider changes are disabled"));
+
+        let mut mode_changed = saved;
+        mode_changed.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let error = app
+            .validate_connection_edit(&mode_changed)
+            .expect_err("mode change must fail");
+        assert!(error.contains("Access mode changes are disabled"));
+    }
+
+    #[test]
+    fn shared_remote_requires_acknowledgement_warning() {
+        let mut app = AppModel::default();
+        let mut first = test_connection(Provider::Box);
+        first.id = ConnectionId::from_uuid(
+            Uuid::parse_str("11111111-1111-4111-8111-111111111111").expect("uuid"),
+        );
+        first.name = "Box One".into();
+        first.remote_reference = "shared_box".into();
+
+        let mut second = test_connection(Provider::Box);
+        second.id = ConnectionId::from_uuid(
+            Uuid::parse_str("22222222-2222-4222-8222-222222222222").expect("uuid"),
+        );
+        second.name = "Box Two".into();
+        second.remote_reference = "SHARED_BOX".into();
+
+        app.config.document.connections = vec![first, second.clone()];
+
+        let warning = app
+            .shared_remote_warning(&second)
+            .expect("same provider remote should warn");
+        assert!(warning.contains("same Box account/remote"));
+        assert!(warning.contains("Box One"));
     }
 
     fn test_connection(provider: Provider) -> Connection {

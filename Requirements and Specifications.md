@@ -2,7 +2,9 @@
 
 ## Requirements and Specifications
 
-This document translates `Applet Description.md` and existing scripts, the existing systemd user services and the Could Drive Connections in the archive folder into testable product requirements and a proposed technical design.
+This document translates `Applet Description.md`, existing scripts, existing
+systemd user services, and archived cloud-drive connection examples into
+testable product requirements and a proposed technical design.
 
 `Applet Description.md` is the source of truth when this document and the source description disagree.
 
@@ -33,6 +35,8 @@ mechanism.
 - Mount, unmount, synchronize, pause, resume, and inspect individual
   connections.
 - Configure optional NetworkManager or Cisco VPN dependencies.
+- Detect, create, select, and safely remove unused rclone remotes for Google
+  Drive, Box, and SMB workflows.
 - Generate and manage applet-owned systemd user services and timers.
 - Import compatible existing rclone and `jstaf/onedriver` user services.
 - Preserve both sides of synchronization conflicts and provide recovery copies.
@@ -40,7 +44,7 @@ mechanism.
 - Keep credentials out of applet configuration, generated units, logs, and
   notifications.
 
-## 3. Version 0.1 Scope
+## 3. Current Scope
 
 ### 3.1 Supported provider and mode matrix
 
@@ -58,6 +62,8 @@ Only the providers and engines in this matrix are included.
 - COSMIC panel icon, popup, and standalone connection settings window.
 - Live connection, mount, synchronization, network, and VPN status.
 - Add, edit, validate, test, enable, disable, and remove connections.
+- Applet-driven rclone remote detection, creation, selection, and confirmed
+  removal of unused remotes.
 - Online mount lifecycle and health management.
 - Offline mirror initialization, scheduling, synchronization, conflict
   preservation, deletion propagation, and recovery retention.
@@ -129,7 +135,8 @@ Mounter Connection Settings`.
 ### 5.1 Configure a connection
 
 1. The user selects a provider and one access mode.
-2. The user selects a remote account and optional remote subtree.
+2. The user selects, detects, or creates a remote account and optional remote
+   subtree.
 3. The user selects a mountpoint or local mirror directory.
 4. The applet validates paths, disk space, dependencies, and tool versions.
 5. The applet launches the supported authentication flow or provides exact
@@ -177,15 +184,18 @@ Mounter Connection Settings`.
 
 - **FR-001:** The applet shall provide a COSMIC panel icon and popup.
 - **FR-001A:** The popup shall provide Add Connection and Refresh controls.
+  These controls shall be visually grouped above the connection list and below
+  the aggregate status and current notice area.
 - **FR-001B:** The popup empty state shall provide one Add Connection control
   that opens the Add Connection wizard.
 - **FR-002:** The popup shall show every configured connection.
 - **FR-003:** Each row shall be optimized for the fixed-width COSMIC applet
   popup. It shall prefer a single-line layout with the connection name as the
-  edit entry point and one compact primary state control. The primary control
-  shall indicate and change the connection state: Online mounts use
+  edit entry point and one right-aligned compact state control. The primary
+  control shall indicate and change the connection state: Online mounts use
   Mount/Unmount semantics and Offline mirrors use Start/Stop background-sync
-  semantics.
+  semantics. A slider/toggle-style control is acceptable when it preserves
+  keyboard accessibility and non-color state indication.
 - **FR-003A:** The main popup shall not spend row space on a separate text
   status chip when the same state can be conveyed by the primary control label,
   color, non-color cue, tooltip, and disabled reason.
@@ -225,6 +235,12 @@ Mounter Connection Settings`.
 - **FR-011A:** The Add/Modify wizard shall expose provider and access-mode selection,
   remote/account selection, optional remote subtree selection, and local
   mountpoint or mirror directory selection.
+- **FR-011AA:** Add mode shall start with an empty display-name field using
+  placeholder or suggested text. Modify mode shall prepopulate fields from the
+  existing connection.
+- **FR-011AB:** Modify mode shall not allow provider or access-mode changes
+  unless a future explicit conversion workflow is implemented. Disabled provider
+  and mode controls shall explain this restriction through field help.
 - **FR-011B:** The Add/Modify wizard shall expose Online mount options, including manual
   startup by default, optional startup at login, cache size, bounded timeouts,
   retries, bandwidth limits, and safe detach policy.
@@ -260,6 +276,16 @@ Mounter Connection Settings`.
   an existing connection. Test Connection and Save Connection shall use
   non-primary visual styling until a selected existing remote is detected or a
   remote has been created and selected.
+- **FR-011L:** In Add mode for Google Drive, Box, and SMB, detected rclone
+  remote choices shall wrap across bounded rows at the default settings-window
+  width rather than clipping horizontally.
+- **FR-011M:** In Add mode for Google Drive, Box, and SMB, the UI shall provide
+  an advanced rclone management area for unused remotes. It shall prevent
+  removal of remotes referenced by saved connections, require explicit
+  confirmation before deletion, and state that deletion changes rclone
+  configuration rather than only applet configuration.
+- **FR-011N:** Import shall not be part of the default Add Connection action
+  row. Legacy import shall remain a dedicated workflow or advanced entry point.
 - **FR-012:** Every connection shall have a stable generated UUID.
 - **FR-013:** A connection shall use exactly one access mode.
 - **FR-014:** A path used as an Online mountpoint shall not be used as an
@@ -268,9 +294,14 @@ Mounter Connection Settings`.
   local targets where overlap could cause recursion or data loss.
 - **FR-016:** New Online mounts shall start manually by default.
 - **FR-017:** The user may enable an Online mount at login.
-- **FR-018:** Removing a connection shall preserve credentials, user data,
-  caches, recovery data, and external services unless separate cleanup is
-  explicitly confirmed.
+- **FR-018:** Removing a connection shall remove the applet configuration record
+  and matching applet-owned generated units only. It shall preserve provider
+  credentials, cloud data, local mirror data, caches, recovery data, and
+  external services unless separate cleanup is explicitly confirmed.
+- **FR-018A:** Unit removal shall verify the applet ownership marker and matching
+  connection UUID before deleting generated files. If user-manager reload fails,
+  the applet shall restore the unit file where possible to avoid an inconsistent
+  service state.
 - **FR-019:** Destructive or data-affecting actions shall require confirmation.
 - **FR-020:** Configuration and managed unit changes shall be atomic and
   recoverable.
@@ -294,8 +325,15 @@ Mounter Connection Settings`.
 
 - **FR-027:** Google Drive, Box, and SMB shall use an existing or newly
   configured rclone remote.
+- **FR-027A:** Applet-driven rclone remote creation shall use fixed validated
+  command arguments for the selected provider. Google Drive and Box setup shall
+  delegate OAuth to rclone's browser flow. SMB setup shall create the remote
+  without storing SMB passwords in applet configuration.
 - **FR-028:** The applet shall enumerate rclone remote names without loading
   credentials into applet state.
+- **FR-028A:** The applet may remove an unused rclone remote only after
+  confirmation. It shall refuse to remove any rclone remote referenced by a
+  saved applet connection.
 - **FR-029:** The applet shall verify that a selected remote and subtree exist
   before activation.
 - **FR-030:** Rclone and `jstaf/onedriver` authentication shall be delegated to their
@@ -689,6 +727,21 @@ The generated service and timer shall:
 Every generated file shall include an applet-managed marker and connection UUID.
 Existing unmarked units remain external until explicitly imported.
 
+### 11.5 Rclone remote management
+
+Rclone remotes are owned by rclone configuration, not by the applet
+configuration. The applet may create and remove remotes only through fixed
+`rclone config` commands with validated remote names.
+
+Remote deletion shall:
+
+- require a detected remote name;
+- reject names referenced by saved applet connections;
+- require explicit confirmation;
+- run `rclone config delete <remote>`;
+- preserve applet connections, local data, cloud data, caches, and recovery
+  directories.
+
 ## 12. State and Operation Rules
 
 - Repeated identical requests shall be idempotent.
@@ -711,8 +764,11 @@ Existing unmarked units remain external until explicitly imported.
 
 ### 13.1 Panel popup
 
-- Header with aggregate status.
-- Header controls for Add Connection and Refresh.
+- Header with title, active connection count, notification state, and VPN
+  summary.
+- A current notice/result area below the header when an operation has something
+  useful to report.
+- Header controls for Add Connection and Refresh below the notice/result area.
 - Scrollable connection rows sized for the fixed-width COSMIC applet popup.
 - Each row is a compact card:
   - preferred layout: one line with the connection name on the left and a
@@ -737,11 +793,19 @@ Existing unmarked units remain external until explicitly imported.
   remain previews until the user confirms creating applet-managed connections.
 - Popup actions dispatch typed operation requests and return immediately without
   blocking the COSMIC event loop.
+- The popup shall grow to fit configured rows up to a bounded maximum height.
+  Scrolling shall engage only when the configured rows exceed that bound.
 
 ### 13.2 Add, Modify, Import, and Field Help
 
 - Add Connection opens a wizard, not a generic settings page.
 - Modify opens the same wizard prefilled for an existing connection.
+- Add mode instruction text shall describe the required choices: provider, mode,
+  remote/subtree, local target, VPN, and startup policy. The same notice area
+  shall be reused for validation results and operation feedback.
+- Modify mode shall show connection actions at the top. Most connection types
+  may use one action row. OneDrive Offline mirror and other action-heavy modes
+  may split actions into two rows to avoid clipping.
 - The wizard step order is:
   1. Choose provider: OneDrive, Google Drive, Box, or SMB.
   2. Choose access mode: Online mount or Offline mirror. The provider/mode
@@ -785,6 +849,16 @@ Existing unmarked units remain external until explicitly imported.
   and requires explicit confirmation before creating an applet-managed
   connection. Originals are preserved by default; disabling an original is a
   separate confirmed action.
+- In Add mode for rclone-backed providers, remote controls include:
+  Detect rclone remotes, provider-specific Create Remote, detected remote
+  choices, and a management area for removing unused remotes. Remote creation
+  and removal controls shall not appear while modifying an existing connection.
+  Detected remote choice buttons shall wrap into bounded rows at the default
+  settings-window width.
+- OneDrive setup controls shall use user-facing guidance: complete required
+  fields, finish browser authentication, then run Test Connection and Save
+  Connection. Implementation details about credential file locations belong in
+  documentation and diagnostics, not normal form text.
 - Per-field help opens concise guidance near the relevant setting. The preferred
   behavior is COSMIC/libcosmic hover tooltips attached directly to the relevant
   field, button, choice row, status chip, or VPN chip. Visible help buttons are
@@ -824,6 +898,8 @@ Details shall show:
 - Dependency version and capability checks.
 - Deterministic service and timer rendering.
 - Provider argument construction without shell interpretation.
+- Rclone remote detection, creation request construction, duplicate-name
+  rejection, confirmed removal, and in-use removal blocking.
 - VFS queue states and safe/unsafe auto-detach decisions.
 - Automatic remount readiness and backoff.
 - Initial dry preview and confirmation gate.
@@ -864,6 +940,13 @@ or access real cloud data.
   Settings`.
 - Verify Add/Modify workflows expose all approved provider, mode, local path, cache, sync,
   metered, VPN, dependency, import, recovery, and confirmation options.
+- Verify Add mode starts with an empty display-name field and suggested
+  placeholder text.
+- Verify Modify mode locks provider and access-mode changes unless a future
+  conversion flow is implemented.
+- Verify rclone-backed Add mode can detect remotes, create provider-specific
+  remotes, wrap detected remote choices, refuse removal of in-use remotes, and
+  remove only a selected unused remote after confirmation.
 - Online mount with a disposable rclone remote.
 - Safe connectivity loss with an empty write queue.
 - Connectivity loss while writes are pending.
@@ -879,13 +962,15 @@ or access real cloud data.
 - NetworkManager and Cisco VPN readiness.
 - Import from `~/.config/systemd/user/`.
 - Removal without credential, data, cache, or recovery deletion.
+- Unused rclone remote removal without deleting applet connections or local/cloud
+  data.
 
 Real accounts, VPNs, and remote writes require explicit user authorization for
 each manual test session.
 
-## 15. Version 0.1 Acceptance Criteria
+## 15. Current Acceptance Criteria
 
-Version 0.1 is acceptable when:
+The current implemented scope is acceptable when:
 
 1. The applet builds and runs in the target COSMIC environment.
 2. Every provider in the approved matrix supports its specified modes.
@@ -902,6 +987,9 @@ Version 0.1 is acceptable when:
 11. Missing or outdated dependencies produce actionable guidance.
 12. Logs, units, configuration, and notifications contain no secrets.
 13. Automated tests and approved manual acceptance tests pass.
+14. The v0.2 popup and Add/Modify UI refinements pass user-guided visual review,
+    including compact popup rows, bounded scrolling, action-row layout, help
+    tooltip placement, and rclone remote management.
 
 ## 16. Decisions Required Before Development
 
@@ -937,7 +1025,19 @@ The following decisions are approved and are no longer implementation choices:
    shall prevent lazy unmount.
 9. **VPN shutdown:** Automatically disconnect only a VPN the applet activated,
    and only when no active connection still depends on it.
+10. **Applet-driven rclone setup:** The applet may create Google Drive, Box, and
+    SMB rclone remotes through fixed validated `rclone config create` commands.
+    Provider authentication and SMB password storage remain with rclone.
+11. **Rclone remote removal:** The applet may remove unused rclone remotes from
+    rclone configuration only after explicit confirmation and only when no saved
+    applet connection references the remote.
+12. **Version 0.2 popup UI:** The main popup uses compact connection rows with a
+    clickable name and one primary slider/toggle-style state control. Static
+    provider, mode, local path, and remote details belong in Add/Modify.
+13. **Version 0.2 Add/Modify UI:** Add and Modify share one editor. Modify locks
+    provider and access-mode changes, moves secondary actions such as Preview
+    and Sync Now into the editor, and uses tooltips for field-specific help.
 
-All design decisions required before development are resolved. No application
-code or system configuration shall be created until this specification and
-`Task List.md` receive explicit final approval.
+All current design decisions required for the implemented scope are resolved.
+Future feature work shall update this specification and `Task List.md` before
+implementation.

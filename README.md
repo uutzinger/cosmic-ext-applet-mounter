@@ -6,15 +6,8 @@ COSMIC Cloud Mounter is a COSMIC desktop applet for managing storage
 connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct Online
 mounts and Offline mirrors with background synchronization.
 
-The applet was developed so that the user can turn on/off cloud storage mounts avoiding the filemanager to become unresponsivle if network connection is slow or fails.
-
-## Project Development
-
-This applet was developed with agent-assisted programming. The project starts
-from [Applet Description.md](Applet%20Description.md), which is translated into
-[Requirements and Specifications.md](Requirements%20and%20Specifications.md) including the Functional Requirements. They are reviewed by the author.
-The requirements drive [Task List.md](Task%20List.md), and its execution history is
-documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author supervises each task and its verification.
+The applet was developed so users can turn cloud storage connections on and off
+to reduce file manager stalls when the network is slow or unavailable.
 
 ## Modes and Providers
 
@@ -31,6 +24,11 @@ pauses on metered networks by default.
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
+
+<img src="./resources/Popup.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 150px;">
+<img src="./resources/Add_Connection.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 200px;">
+<img src="./resources/Change_Connection.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 200px;">
+
 
 ## Dependencies
 
@@ -143,17 +141,22 @@ active connection still requires it.
 
 ## Connection Removal
 
-Generated user units contain applet ownership markers:
+Press **Remove** once to request confirmation, then press **Remove** again to
+remove the connection.
 
-```text
-# X-Cosmic-Mounter-Managed=true
-# X-Cosmic-Mounter-Connection=<uuid>
-```
+Removal deletes the applet-managed connection record and any matching
+applet-owned systemd user units. Units that do not carry this applet's ownership
+marker for the selected connection are treated as external and are left
+untouched. If `systemctl --user daemon-reload` fails, the unit file is restored
+to avoid an inconsistent service state.
 
-Removing an applet-owned connection removes only applet-owned generated unit
-files. Credentials, cloud data, local mirror data, caches, recovery
-directories, and original legacy service files are preserved unless a separate,
-explicitly confirmed cleanup action says otherwise.
+Connection removal does **not** delete provider credentials, cloud data, local
+mirror data, caches, recovery directories, or original imported legacy service
+files.
+
+Unused rclone remotes can be removed separately from the Add Connection rclone
+management area. That action requires confirmation and changes rclone
+configuration, not only applet configuration.
 
 ## Build from Source
 
@@ -197,6 +200,14 @@ To test staged uninstall:
 just stage
 just rootdir=target/stage prefix=/usr uninstall
 ```
+
+## Project Development
+
+This applet was developed with agent-assisted programming. The project starts
+from [Applet Description.md](Applet%20Description.md), which is translated into
+[Requirements and Specifications.md](Requirements%20and%20Specifications.md) including the Functional Requirements. They are reviewed by the author.
+The requirements drive [Task List.md](Task%20List.md), and its execution history is
+documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author supervises each task and its verification.
 
 ## Contributing & Feature Requests
 
