@@ -25,10 +25,13 @@ pauses on metered networks by default.
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
-<img src="./resources/Popup.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 150px;">
-<img src="./resources/Add_Connection.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 200px;">
-<img src="./resources/Change_Connection.png" alt="COSMIC Mounter" style="fixed: left; margin-right: 15px; width: 200px;">
-
+<table>
+  <tr>
+    <td><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="150"></td>
+    <td><img src="./resources/Add_Connection.png" alt="Add Connection window" width="200"></td>
+    <td><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="200"></td>
+  </tr>
+</table>
 
 ## Dependencies
 
