@@ -2,10 +2,6 @@
 
 ## Requirements and Specifications
 
-**Document status:** Approved with Phase 9 UI addendum
-**Revision:** 0.4
-**Implementation status:** Phase 9 UI/settings addendum pending before Gate 2 recheck
-
 This document translates `Applet Description.md` and existing scripts, the existing systemd user services and the Could Drive Connections in the archive folder into testable product requirements and a proposed technical design.
 
 `Applet Description.md` is the source of truth when this document and the source description disagree.

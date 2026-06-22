@@ -3,20 +3,20 @@
 <img src="./resources/icon.svg" alt="COSMIC Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
 COSMIC Cloud Mounter is a COSMIC desktop applet for managing storage
-connections to *OneDrive, Google Drive, Box, and SMB*. It supports direct Online
+connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct Online
 mounts and Offline mirrors with background synchronization.
+
+The applet was developed so that the user can turn on/off cloud storage mounts avoiding the filemanager to become unresponsivle if network connection is slow or fails.
 
 ## Project Development
 
-This applet was developed with agent-assisted programming. The project started
-from [Applet Description.md](Applet%20Description.md), which was translated into
-[Requirements and Specifications.md](Requirements%20and%20Specifications.md) including the Functional Requirements.
-Those requirements drove [Task List.md](Task%20List.md), and its execution history is
-documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md).
+This applet was developed with agent-assisted programming. The project starts
+from [Applet Description.md](Applet%20Description.md), which is translated into
+[Requirements and Specifications.md](Requirements%20and%20Specifications.md) including the Functional Requirements. They are reviewed by the author.
+The requirements drive [Task List.md](Task%20List.md), and its execution history is
+documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author supervises each task and its verification.
 
 ## Modes and Providers
-
-Each connection uses exactly one mode.
 
 **Online mount** uses a network-backed FUSE filesystem. It is useful for browsing
 large remote trees without keeping a full local copy.
@@ -53,10 +53,10 @@ Install and upgrade guidance is in
 ## Data Integrity Warning
 
 Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
-are configured incorrectly. Before testing with important data, make an
-independent backup.
+are configured incorrectly. **Before testing with important data, make an
+independent backup**.
 
-Do not:
+**Do not**:
 
 - configure Online mount and Offline mirror simultaneously for the same
   provider account and overlapping remote subtree;
@@ -85,13 +85,10 @@ Each connection row has the connection name and one primary state control:
 - Online mounts use Mount or Unmount.
 - Offline mirrors use Start or Stop for background synchronization.
 
-Clicking the connection name opens `Add/Modify`. Static connection settings are
-shown there, not repeated in the popup. `Preview` and `Sync Now` for Offline
+Clicking the connection name opens `Modify`. `Preview` and `Sync Now` for Offline
 mirrors are available from Modify.
 
-Add and Modify share the same editor. Add mode exposes `Import` and provider
-setup actions where applicable. Modify mode exposes `Test Connection`, `Save
-Connection`, `Preview` and `Sync Now` for Offline mirrors, `Disable` or `Enable`, and
+`Add` and `Modify` share the same editor. Modify mode exposes `Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline mirrors, `Disable` or `Enable`, and
 `Remove`. The Information section summarizes the selected engine, generated unit
 validation, and confirmation policy.
 
@@ -110,9 +107,6 @@ configuration and cache paths. For OneDrive Offline mirror, it uses
 The OneDrive mirror setup first attempts `onedrive --reauth` interactive
 browser authorization. If Microsoft/browser redirect capture fails, the applet
 offers a manual auth handoff/helper fallback.
-
-Do not store Microsoft redirect URLs, tokens, passwords, or rclone secrets in
-the applet configuration, logs, task lists, or documentation.
 
 ## Recovery and Limitations
 
@@ -146,15 +140,6 @@ outside the applet.
 The applet may start a VPN dependency and wait for readiness checks before
 mounting or syncing. It disconnects only a VPN it activated, and only after no
 active connection still requires it.
-
-## Legacy Import
-
-The applet can scan `~/.config/systemd/user/` for compatible legacy rclone mount
-and `jstaf/onedriver` service files. Import parsing is structural; imported unit
-text is never executed.
-
-Confirming an import creates an applet-managed replacement connection and
-generated unit. The original legacy unit is preserved by default.
 
 ## Connection Removal
 
@@ -218,19 +203,19 @@ just rootdir=target/stage prefix=/usr uninstall
 ### Feature Requests
 
 - Download the github repository.
-- Update the Applet Description to include your request.
+- Update the Applet Description to include your request or create a document describing your reuqest and ask you AI agent to include it in the Applet Description.
 - Have your AI agent check and update the Applet Description.
 - Have your AI agent update the Requirements and Specifications based on the Applet Description.
 - Verify the modifications to the Requirements and Specifications.
 - Ask your AI agent to update the Functional Requirements based on your reviewed Requirements and Specifications.
 - Have your AI agent add Tasks to the Task list based on the Specifications.
-- Have your AI agent execute the Task list.
+- Have your AI agent execute the addition to the Task list.
 - Complete the verifications and test your implementation.
 - Submit pull request.
 
 ### Bug Reports
 
-- Submit report on Github
+- Submit report on Github,
 
 ## License
 

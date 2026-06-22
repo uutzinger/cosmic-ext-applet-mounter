@@ -16,7 +16,7 @@ in `README.md`.
 | Cisco Secure Client | optional Cisco VPN dependency | 5.1.10 tested |
 | `fuser` from `psmisc` | optional busy-mount diagnostics | recommended |
 
-After installing dependencies, run:
+If you build from source you can check dependencies with:
 
 ```sh
 cargo run --example dependency_inventory
@@ -127,7 +127,7 @@ References:
 ## Cisco Secure Client
 
 Cisco Secure Client support requires the CLI/GUI binaries and the VPN agent
-service. On the tested machine the service is named `vpnagentd.service`.
+service. On the tested machine the service was named `vpnagentd.service`.
 
 Check:
 
