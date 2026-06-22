@@ -27,9 +27,9 @@ pauses on metered networks by default.
 
 <table>
   <tr>
-    <td><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="150"></td>
-    <td><img src="./resources/Add_Connection.png" alt="Add Connection window" width="200"></td>
-    <td><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="200"></td>
+    <td valign="top"><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="150"></td>
+    <td valign="top"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="200"></td>
+    <td valign="top"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="200"></td>
   </tr>
 </table>
 

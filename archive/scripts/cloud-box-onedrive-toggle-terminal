@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-/home/uutzinger/.local/bin/cloud-box-onedrive-toggle toggle
-echo
-read -r -p "Press Enter to close..."

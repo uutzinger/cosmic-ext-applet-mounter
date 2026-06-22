@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-/home/uutzinger/.local/bin/cloud-google-toggle toggle
-echo
-read -r -p "Press Enter to close..."
