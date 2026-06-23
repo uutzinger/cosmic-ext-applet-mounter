@@ -1,2 +1,4 @@
 /target/
 /archive/
+__pycache__/
+*.pyc

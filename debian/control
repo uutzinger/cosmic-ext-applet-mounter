@@ -1,0 +1,33 @@
+Source: cosmic-ext-applet-mounter
+Section: utils
+Priority: optional
+Maintainer: Urs Utzinger <uutzinger@users.noreply.github.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config,
+ desktop-file-utils,
+ appstream
+Standards-Version: 4.7.0
+Homepage: https://github.com/uutzinger/cosmic-ext-applet-mounter
+Rules-Requires-Root: no
+
+Package: cosmic-ext-applet-mounter
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
+Recommends:
+ rclone,
+ fuse3,
+ psmisc,
+ network-manager,
+ onedriver,
+ onedrive
+Description: COSMIC applet for cloud mounts and offline storage mirrors
+ COSMIC Cloud Mounter manages supported cloud and network storage connections
+ from the COSMIC panel.
+ .
+ It can manage online mounts and offline mirrors for OneDrive, Google Drive,
+ Box, and SMB through external tools such as rclone, onedriver, and onedrive.

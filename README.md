@@ -179,10 +179,12 @@ just fmt
 just check
 just lint
 just test
+just metadata-check
 just verify
 just run
 just stage
 just install-user
+just deb
 ```
 
 Useful read-only examples:
@@ -196,6 +198,11 @@ cargo run --example legacy_import_confirm_dry_run
 `just stage` installs into `target/stage/usr` and does not modify the host
 system. `just install-user` installs the development build under `~/.local` and
 updates desktop metadata and icons for the current user.
+
+`just metadata-check` validates the desktop entry and AppStream metadata without
+network access. `just metadata-check-net` additionally verifies published URLs
+and screenshots. `just deb` builds a local unsigned Debian binary package in the
+parent directory.
 
 To test staged uninstall:
 

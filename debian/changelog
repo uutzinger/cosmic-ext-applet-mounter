@@ -1,0 +1,5 @@
+cosmic-ext-applet-mounter (0.1.0) unstable; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 22 Jun 2026 17:16:20 -0700

@@ -1000,5 +1000,5 @@ auditable.
   selected unused remote after confirmation.
 - [x] Verify detected rclone remotes wrap cleanly at the default settings window
   width.
-- [ ] Complete user-guided visual review of the Version 0.2 Add/Modify and main
+- [x] Complete user-guided visual review of the Version 0.2 Add/Modify and main
   popup changes.

@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export CARGO_TARGET_DIR ?= $(CURDIR)/target/debian
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+override_dh_auto_test:
+	cargo test --locked --all-targets
+	desktop-file-validate resources/app.desktop
+	appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
+
+override_dh_auto_install:
+	install -Dm0755 target/debian/release/cosmic-ext-applet-mounter debian/cosmic-ext-applet-mounter/usr/bin/cosmic-ext-applet-mounter
+	install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper debian/cosmic-ext-applet-mounter/usr/bin/cosmic-ext-applet-mounter-onedrive-auth-helper
+	install -Dm0644 resources/app.desktop debian/cosmic-ext-applet-mounter/usr/share/applications/io.github.uutzinger.cosmic-ext-applet-mounter.desktop
+	install -Dm0644 resources/app.metainfo.xml debian/cosmic-ext-applet-mounter/usr/share/metainfo/io.github.uutzinger.cosmic-ext-applet-mounter.metainfo.xml
+	install -Dm0644 resources/icon.svg debian/cosmic-ext-applet-mounter/usr/share/icons/hicolor/scalable/apps/io.github.uutzinger.cosmic-ext-applet-mounter.svg

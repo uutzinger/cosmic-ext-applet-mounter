@@ -29,6 +29,14 @@ lint:
 test:
     cargo test --all-targets
 
+metadata-check:
+    desktop-file-validate resources/app.desktop
+    appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
+
+metadata-check-net:
+    desktop-file-validate resources/app.desktop
+    appstreamcli validate --pedantic resources/app.metainfo.xml
+
 build *args:
     cargo build {{args}}
 
@@ -38,7 +46,10 @@ build-release *args:
 run *args:
     env RUST_BACKTRACE=1 cargo run {{args}}
 
-verify: fmt-check check lint test
+verify: fmt-check check lint test metadata-check
+
+deb:
+    dpkg-buildpackage -us -uc -b
 
 stage destination='target/stage':
     just rootdir={{absolute_path(destination)}} prefix=/usr install
