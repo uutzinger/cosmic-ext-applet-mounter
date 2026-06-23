@@ -119,10 +119,7 @@ are excluded from rclone Offline mirrors and remain browser-accessible.
 
 Known limitations:
 
-- `abraunegg/onedrive` personal-account Offline mirror testing has covered
-  authorization, disposable subtree creation, dry-run preview, and one-shot
-  upload sync. Conflict, deletion-retention, and long-running monitor behavior
-  need broader manual coverage.
+- `abraunegg/onedrive` requires GTK webview as it does no yet provide a method that hands over the authorization link to this applet.
 - Google Drive Online mount testing previously hit Google Drive API quota/rate
   limiting on the development machine.
 - NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
