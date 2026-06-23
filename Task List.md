@@ -1034,6 +1034,6 @@ authentication behavior.
   error produces a message.
 - [x] Move NetworkManager and Cisco VPN status checks out of popup rendering so
   the applet opens immediately and updates VPN state asynchronously.
-- [ ] Manually verify the installed applet opens promptly with Cisco configured
+- [x] Manually verify the installed applet opens promptly with Cisco configured
   but disconnected, then updates the header to inactive after the async status
   check completes.
