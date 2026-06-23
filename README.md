@@ -61,17 +61,16 @@ independent backup**.
 
 - configure Online mount and Offline mirror simultaneously for the same
   provider account and overlapping remote subtree;
-- use an Online mountpoint as an Offline mirror directory;
-- use an Offline mirror directory as an Online mountpoint;
-- use a `jstaf/onedriver` mountpoint as an `abraunegg/onedrive` sync directory;
-- run `jstaf/onedriver` and `abraunegg/onedrive` concurrently against the same
+- use an Online mount point as an Offline mirror directory;
+- use an Offline mirror directory as an Online mount point;
+- run OneDrive Online mount and OneDrive Offline mirror concurrently against the same
   OneDrive account or overlapping subtree unless the applet has explicitly
   isolated that setup;
 - enable a generic `onedrive.service` for an applet-managed OneDrive mirror;
 - run `onedrive --resync` casually. State rebuilds require preview and
   confirmation when managed by the applet.
 
-Offline mirror mode is the reliable option for uninterrupted local file access.
+Offline **mirror** mode is the reliable option for uninterrupted local file access.
 Online mounts can still block or fail when the provider, VPN, FUSE layer, or
 network stalls.
 
@@ -105,9 +104,6 @@ in applet configuration.
 For OneDrive Online mount, the applet uses `jstaf/onedriver` with applet-owned
 configuration and cache paths. For OneDrive Offline mirror, it uses
 `abraunegg/onedrive` with applet-owned configuration, sync, and recovery paths.
-The OneDrive mirror setup first attempts `onedrive --reauth` interactive
-browser authorization. If Microsoft/browser redirect capture fails, the applet
-offers a manual auth handoff/helper fallback.
 
 ## Recovery and Limitations
 

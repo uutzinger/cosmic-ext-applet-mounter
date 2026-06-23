@@ -631,18 +631,24 @@ fn parse_nmcli_state(output: &str) -> VpnConnectionState {
 fn parse_cisco_stats(output: &str) -> CiscoTunnelState {
     let lower = output.to_ascii_lowercase();
     if lower.contains("cannot contact the vpn service") {
-        CiscoTunnelState::ServiceUnavailable
-    } else if lower.contains("connection state:")
-        && (lower.contains("connected") || lower.contains("connected:"))
-    {
-        CiscoTunnelState::Connected
-    } else if lower.contains("connecting") {
-        CiscoTunnelState::Connecting
-    } else if lower.contains("not available") || lower.contains("disconnected") {
-        CiscoTunnelState::Disconnected
-    } else {
-        CiscoTunnelState::Unknown
+        return CiscoTunnelState::ServiceUnavailable;
     }
+    for line in lower.lines() {
+        let Some((_, state)) = line.split_once("connection state:") else {
+            continue;
+        };
+        let state = state.trim();
+        if state.starts_with("connected") {
+            return CiscoTunnelState::Connected;
+        }
+        if state.starts_with("connecting") {
+            return CiscoTunnelState::Connecting;
+        }
+        if state.starts_with("disconnected") || state.starts_with("not available") {
+            return CiscoTunnelState::Disconnected;
+        }
+    }
+    CiscoTunnelState::Unknown
 }
 
 fn split_nmcli(line: &str) -> Vec<String> {
@@ -1086,6 +1092,20 @@ mod tests {
         assert_eq!(
             parse_cisco_stats("Connection State:            Connected\n"),
             CiscoTunnelState::Connected
+        );
+        assert_eq!(
+            parse_cisco_stats("Connection State:            Disconnected\n"),
+            CiscoTunnelState::Disconnected
+        );
+        assert_eq!(
+            parse_cisco_stats("Connection State:            Not Available\n"),
+            CiscoTunnelState::Disconnected
+        );
+        assert_eq!(
+            parse_cisco_stats(
+                "Cannot contact the VPN service.\nConnection State:            Not Available\n"
+            ),
+            CiscoTunnelState::ServiceUnavailable
         );
         assert_eq!(
             AccessMode::OfflineMirror,

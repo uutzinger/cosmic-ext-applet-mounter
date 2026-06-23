@@ -11,17 +11,17 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::fl;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::dialog::file_chooser;
 use cosmic::iced::Background;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
-use cosmic::iced::{Alignment, Color, Length, Limits, window::Id};
+use cosmic::iced::{Alignment, Color, Length, Limits, Subscription, window::Id};
 use cosmic::prelude::*;
 use cosmic::widget;
-use cosmic_ext_applet_mounter::config::{APP_ID, Config};
+use cosmic_ext_applet_mounter::config::{APP_ID, Config, ConfigDocument};
 use cosmic_ext_applet_mounter::controller::{
     ConnectionRowState, ControllerSnapshot, aggregate_label, decide_operation, operation_label,
     provider_label, restore, status_label,
@@ -56,8 +56,8 @@ use cosmic_ext_applet_mounter::sync::{
     rclone_bisync_preview_request, rclone_bisync_sync_request, sync_now_request,
 };
 use cosmic_ext_applet_mounter::vpn::{
-    CiscoVpn, CommandCiscoVpn, CommandNetworkManagerVpn, CommandReadinessProbe, NetworkManagerVpn,
-    readiness_report,
+    CiscoTunnelState, CiscoVpn, CommandCiscoVpn, CommandNetworkManagerVpn, CommandReadinessProbe,
+    NetworkManagerVpn, readiness_report,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -71,6 +71,7 @@ const POPUP_CONNECTION_ROW_HEIGHT: f32 = 50.0;
 const POPUP_EMPTY_ROW_HEIGHT: f32 = 40.0;
 const POPUP_ACTION_HORIZONTAL_PADDING: u16 = 24;
 const POPUP_CONNECTION_ROW_HORIZONTAL_PADDING: u16 = 0;
+const POPUP_NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 const SETTINGS_SECTION_TITLE_WIDTH: f32 = 150.0;
 const SETTINGS_SECTION_TITLE_TOP_PADDING: u16 = 8;
 const SETTINGS_RCLONE_REMOTE_BUTTONS_PER_ROW: usize = 3;
@@ -165,6 +166,7 @@ pub struct AppModel {
     onedrive_auth_open_command: String,
     onedrive_auth_response_url: String,
     last_notice: Option<String>,
+    last_notice_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +223,7 @@ pub enum Message {
     RemoveConnection(ConnectionId),
     RemoveCompleted(String),
     Refresh,
+    NoticeTick(Instant),
 }
 
 impl cosmic::Application for AppModel {
@@ -264,6 +267,7 @@ impl cosmic::Application for AppModel {
             onedrive_auth_open_command: String::new(),
             onedrive_auth_response_url: String::new(),
             last_notice: None,
+            last_notice_at: None,
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
@@ -308,6 +312,14 @@ impl cosmic::Application for AppModel {
 
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
         self.view_popup()
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        if !self.standalone && self.popup.is_some() && self.last_notice.is_some() {
+            cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick)
+        } else {
+            Subscription::none()
+        }
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
@@ -370,6 +382,7 @@ impl cosmic::Application for AppModel {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
                 self.last_notice = Some(notice);
+                self.last_notice_at = Some(Instant::now());
             }
             Message::DraftProvider(provider) => {
                 if matches!(self.window_mode, WindowMode::ModifyConnection(_)) {
@@ -620,6 +633,17 @@ impl cosmic::Application for AppModel {
                 self.config = Config::load().config;
                 self.pending_remove = None;
                 self.last_notice = Some("Configuration reloaded.".into());
+                self.last_notice_at = Some(Instant::now());
+            }
+            Message::NoticeTick(now) => {
+                if let Some(started_at) = self.last_notice_at {
+                    if now.duration_since(started_at) >= POPUP_NOTICE_TIMEOUT {
+                        self.last_notice = None;
+                        self.last_notice_at = None;
+                    }
+                } else {
+                    self.last_notice_at = Some(now);
+                }
             }
         }
 
@@ -638,7 +662,8 @@ impl AppModel {
         } else {
             fl!("notifications-disabled")
         };
-        let state = self.view_state();
+        let snapshot = self.controller_snapshot();
+        let state = restore(&snapshot);
         let controls = widget::Row::new()
             .spacing(8)
             .align_y(Alignment::Center)
@@ -657,7 +682,7 @@ impl AppModel {
                 "{}\n{}\n{}",
                 aggregate_label(&state.aggregate),
                 notification_status,
-                self.vpn_summary(&state.rows)
+                self.vpn_summary(&state.rows, &snapshot.vpn_ready)
             )));
 
         let mut rows = widget::list_column();
@@ -2316,7 +2341,11 @@ impl AppModel {
             .unwrap_or_else(|| profile_id.to_string())
     }
 
-    fn vpn_summary(&self, rows: &[ConnectionRowState]) -> String {
+    fn vpn_summary(
+        &self,
+        rows: &[ConnectionRowState],
+        vpn_ready: &BTreeMap<VpnProfileId, bool>,
+    ) -> String {
         let configured = rows
             .iter()
             .filter_map(|row| row.vpn_profile_id)
@@ -2324,26 +2353,53 @@ impl AppModel {
         if configured.is_empty() {
             return "No VPN enabled".into();
         }
-        let names = configured
+        let (active, inactive): (Vec<_>, Vec<_>) = configured
             .iter()
-            .map(|profile_id| self.connection_vpn_label(Some(*profile_id)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("VPN configured: {names}")
+            .map(|profile_id| {
+                (
+                    self.connection_vpn_label(Some(*profile_id)),
+                    vpn_ready.get(profile_id).copied().unwrap_or(false),
+                )
+            })
+            .partition(|(_, ready)| *ready);
+        match (active.is_empty(), inactive.is_empty()) {
+            (false, true) => format!(
+                "VPN active: {}",
+                active
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            (true, false) => format!(
+                "VPN inactive: {}",
+                inactive
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            _ => format!("VPN active: {}; inactive: {}", active.len(), inactive.len()),
+        }
     }
 
     fn view_state(&self) -> cosmic_ext_applet_mounter::controller::ControllerViewState {
+        restore(&self.controller_snapshot())
+    }
+
+    fn controller_snapshot(&self) -> ControllerSnapshot {
         let (sync_state, paused_syncs) =
             runtime_offline_mirror_states(&self.config.document.connections);
-        restore(&ControllerSnapshot {
+        ControllerSnapshot {
             config: self.config.document.clone(),
             service_status: runtime_service_statuses(&self.config.document.connections),
             sync_state,
             paused_syncs,
             mount_entries: ProcMountTable::default().entries().unwrap_or_default(),
             import_previews: self.import_previews.clone(),
+            vpn_ready: runtime_vpn_ready_states(&self.config.document),
             ..ControllerSnapshot::default()
-        })
+        }
     }
 }
 
@@ -2366,6 +2422,91 @@ fn runtime_offline_mirror_states(
         states.insert(connection.id, state);
     }
     (states, paused)
+}
+
+fn runtime_vpn_ready_states(config: &ConfigDocument) -> BTreeMap<VpnProfileId, bool> {
+    let referenced = config
+        .connections
+        .iter()
+        .filter_map(|connection| connection.vpn_profile_id)
+        .collect::<BTreeSet<_>>();
+    config
+        .vpn_profiles
+        .iter()
+        .filter(|profile| referenced.contains(&profile.id))
+        .map(|profile| (profile.id, runtime_vpn_profile_ready(profile)))
+        .collect()
+}
+
+fn runtime_vpn_profile_ready(profile: &VpnProfile) -> bool {
+    match profile.kind {
+        VpnKind::NetworkManager => runtime_network_manager_vpn_ready(profile),
+        VpnKind::Cisco => runtime_cisco_vpn_ready(),
+    }
+}
+
+fn runtime_network_manager_vpn_ready(profile: &VpnProfile) -> bool {
+    let Some(profile_id) = profile.external_profile_id.as_deref() else {
+        return false;
+    };
+    let runner = SystemCommandRunner;
+    let Some(nmcli) = runner.resolve(Executable::Nmcli) else {
+        return false;
+    };
+    Command::new(nmcli)
+        .args([
+            "-t",
+            "-f",
+            "GENERAL.STATE",
+            "connection",
+            "show",
+            profile_id,
+        ])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .is_some_and(|output| runtime_nmcli_state_ready(&output))
+}
+
+fn runtime_nmcli_state_ready(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("activated") || lower.contains(":100")
+}
+
+fn runtime_cisco_vpn_ready() -> bool {
+    let runner = SystemCommandRunner;
+    let Some(vpn) = runner.resolve(Executable::CiscoVpn) else {
+        return false;
+    };
+    Command::new(vpn)
+        .arg("stats")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .is_some_and(|output| runtime_cisco_tunnel_state(&output) == CiscoTunnelState::Connected)
+}
+
+fn runtime_cisco_tunnel_state(output: &str) -> CiscoTunnelState {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("cannot contact the vpn service") {
+        return CiscoTunnelState::ServiceUnavailable;
+    }
+    for line in lower.lines() {
+        let Some((_, state)) = line.split_once("connection state:") else {
+            continue;
+        };
+        let state = state.trim();
+        if state.starts_with("connected") {
+            return CiscoTunnelState::Connected;
+        }
+        if state.starts_with("connecting") {
+            return CiscoTunnelState::Connecting;
+        }
+        if state.starts_with("disconnected") || state.starts_with("not available") {
+            return CiscoTunnelState::Disconnected;
+        }
+    }
+    CiscoTunnelState::Unknown
 }
 
 fn runtime_offline_mirror_state(connection: &Connection) -> SyncRuntimeState {
@@ -2486,6 +2627,7 @@ impl AppModel {
         let executable = settings_executable_path();
         let Some(executable) = executable else {
             self.last_notice = Some("Could not locate the settings executable.".into());
+            self.last_notice_at = Some(Instant::now());
             return;
         };
 
@@ -2502,14 +2644,10 @@ impl AppModel {
             }
         }
 
-        self.last_notice = match command.spawn() {
-            Ok(_) => Some(window_mode_notice(match mode {
-                AppLaunchMode::Applet | AppLaunchMode::AddConnection => WindowMode::AddConnection,
-                AppLaunchMode::ModifyConnection(id) => WindowMode::ModifyConnection(id),
-                AppLaunchMode::ImportLegacy => WindowMode::ImportLegacy,
-            })),
-            Err(error) => Some(format!("Could not open connection settings: {error}")),
-        };
+        if let Err(error) = command.spawn() {
+            self.last_notice = Some(format!("Could not open connection settings: {error}"));
+            self.last_notice_at = Some(Instant::now());
+        }
     }
 }
 
@@ -6329,6 +6467,28 @@ mod tests {
         assert_eq!(
             popup_connection_display_name("Google Drive OAuth live verify offline"),
             "Google Drive OAuth live verify of..."
+        );
+    }
+
+    #[test]
+    fn runtime_cisco_tunnel_state_reads_exact_connection_state() {
+        assert_eq!(
+            runtime_cisco_tunnel_state("Connection State:            Connected\n"),
+            CiscoTunnelState::Connected
+        );
+        assert_eq!(
+            runtime_cisco_tunnel_state("Connection State:            Disconnected\n"),
+            CiscoTunnelState::Disconnected
+        );
+        assert_eq!(
+            runtime_cisco_tunnel_state("Connection State:            Not Available\n"),
+            CiscoTunnelState::Disconnected
+        );
+        assert_eq!(
+            runtime_cisco_tunnel_state(
+                "Cannot contact the VPN service.\nConnection State:            Not Available\n"
+            ),
+            CiscoTunnelState::ServiceUnavailable
         );
     }
 
