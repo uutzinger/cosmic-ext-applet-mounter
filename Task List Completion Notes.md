@@ -1364,3 +1364,41 @@ reported no FUSE mounts and the generated service was `inactive (dead)` rather
 than failed.
 
 **Gate 2 remaining item:** user approval of the current release candidate.
+
+## Version 0.3 Planning: Local Path Selection
+
+### Version 0.3 Folder Picker
+
+**Folder picker implementation:** June 23, 2026. The Add/Modify Connection
+window now keeps the existing local target text field and adds a `Browse`
+button for both Online Mount mountpoints and Offline Mirror directories. The
+implementation enables libcosmic's `xdg-portal` feature and uses
+`cosmic::dialog::file_chooser` to request a folder from the user's desktop
+session. The selected local filesystem path is written back into the same draft
+`local_path` field used by manual entry, so existing duplicate-target,
+nested-path, unsafe-path, and mount/mirror overlap validation remains the
+single enforcement point before Test Connection or Save Connection.
+
+**Folder picker verification:** June 23, 2026. Automated verification passed
+with `cargo fmt --all -- --check`, `cargo check --all-targets`, focused test
+`cargo test --all-targets selected_folder_path_reuses_existing_local_target_validation`,
+and full `cargo test --all-targets`. The full test suite passed with 89 library
+tests and 52 application tests. The focused test confirms a folder selected
+under an existing configured local target is rejected by the existing overlap
+validation path.
+
+**User build/install packaging:** June 23, 2026. User ran `just install-user`
+and `just deb` after the folder picker change. This confirms the updated applet
+was installed into the user session and the Debian package target was
+exercised. Manual visual verification remains open for the folder chooser
+itself, specifically whether the session's portal chooser exposes a
+create-folder affordance.
+
+**Version 0.3 release package build:** June 23, 2026. Version metadata was
+updated to 0.3.0 in Cargo, Debian changelog, AppStream release metadata, and
+README package examples. `just metadata-check` passed with
+`desktop-file-validate` and `appstreamcli validate --pedantic --no-net`.
+`just deb` built `../cosmic-ext-applet-mounter_0.3.0_amd64.deb`; package
+metadata reports `Package: cosmic-ext-applet-mounter` and `Version: 0.3.0`.
+Debian build scratch paths under `debian/` were added to `.gitignore` so repeat
+package builds do not appear as untracked source changes.

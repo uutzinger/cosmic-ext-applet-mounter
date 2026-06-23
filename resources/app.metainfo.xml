@@ -64,6 +64,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.3.0" date="2026-06-23">
+      <description>
+        <p>Version 0.3 release candidate.</p>
+        <ul>
+          <li>Added a desktop-portal folder picker for local mountpoints and mirror directories.</li>
+          <li>Preserved manual path entry and existing local target safety validation.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-06-22">
       <description>
         <p>Version 0.2 release candidate.</p>

@@ -213,13 +213,13 @@ just deb
 The package is written to the parent directory, for example:
 
 ```sh
-../cosmic-ext-applet-mounter_0.2.0_amd64.deb
+../cosmic-ext-applet-mounter_0.3.0_amd64.deb
 ```
 
 Install the package:
 
 ```sh
-sudo apt install ./../cosmic-ext-applet-mounter_0.2.0_amd64.deb
+sudo apt install ./../cosmic-ext-applet-mounter_0.3.0_amd64.deb
 ```
 
 Remove the package:

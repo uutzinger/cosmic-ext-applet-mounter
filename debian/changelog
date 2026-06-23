@@ -1,3 +1,11 @@
+cosmic-ext-applet-mounter (0.3.0) unstable; urgency=medium
+
+  * Version 0.3 release candidate.
+  * Add desktop-portal folder picker for Online Mount mountpoints and Offline
+    Mirror directories while preserving manual path entry.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Tue, 23 Jun 2026 15:11:46 -0700
+
 cosmic-ext-applet-mounter (0.2.0) unstable; urgency=medium
 
   * Version 0.2 release candidate.

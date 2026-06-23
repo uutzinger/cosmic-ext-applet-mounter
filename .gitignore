@@ -1,4 +1,9 @@
 /target/
 /archive/
+/debian/.debhelper/
+/debian/cosmic-ext-applet-mounter.substvars
+/debian/cosmic-ext-applet-mounter/
+/debian/debhelper-build-stamp
+/debian/files
 __pycache__/
 *.pyc

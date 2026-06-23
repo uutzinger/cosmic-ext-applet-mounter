@@ -1002,3 +1002,24 @@ auditable.
   width.
 - [x] Complete user-guided visual review of the Version 0.2 Add/Modify and main
   popup changes.
+
+## Version 0.3 Planning: Local Path Selection
+
+These tasks improve Add/Modify usability without changing provider engines or
+authentication behavior.
+
+### Version 0.3 Folder Picker
+
+- [x] Add a folder picker/requestor for the local mountpoint field in Online
+  Mount mode.
+- [x] Add a folder picker/requestor for the local mirror directory field in
+  Offline Mirror mode.
+- [x] Prefer a desktop-portal folder chooser when available so the applet uses
+  the user session's native file/folder selection workflow.
+- [ ] Ensure the folder picker can create a new folder or offers a clear
+  create-folder path through the underlying chooser.
+- [x] Preserve plain text entry as an advanced/manual fallback.
+- [x] Validate picked folders with the existing duplicate-target, nested-path,
+  unsafe-path, and mount/mirror overlap checks before saving.
+- [x] Add focused tests for path normalization and validation after a selected
+  folder is applied to a draft connection.

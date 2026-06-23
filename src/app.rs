@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use crate::fl;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
+use cosmic::dialog::file_chooser;
 use cosmic::iced::Background;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::{Alignment, Color, Length, Limits, window::Id};
@@ -183,6 +184,8 @@ pub enum Message {
     DraftSmbUser(String),
     DraftSmbDomain(String),
     DraftLocalPath(String),
+    OpenLocalFolderPicker,
+    LocalFolderPicked(Result<Option<String>, String>),
     DraftRecoveryDirectory(String),
     DraftCacheLimit(String),
     DraftSyncInterval(String),
@@ -421,6 +424,26 @@ impl cosmic::Application for AppModel {
                 self.pending_rclone_remote_remove = None;
                 self.draft.local_path = value;
             }
+            Message::OpenLocalFolderPicker => {
+                return self.open_local_folder_picker();
+            }
+            Message::LocalFolderPicked(result) => match result {
+                Ok(Some(path)) => {
+                    self.pending_shared_remote_ack = None;
+                    self.pending_rclone_remote_remove = None;
+                    self.draft.local_path = path.clone();
+                    self.last_notice = Some(format!(
+                        "{} selected: {path}",
+                        local_target_label(self.draft.access_mode)
+                    ));
+                }
+                Ok(None) => {
+                    self.last_notice = Some("Folder selection cancelled.".into());
+                }
+                Err(error) => {
+                    self.last_notice = Some(format!("Could not select folder: {error}"));
+                }
+            },
             Message::DraftRecoveryDirectory(value) => {
                 self.draft.recovery_directory = value;
             }
@@ -839,8 +862,7 @@ impl AppModel {
                 local_target_label(self.draft.access_mode),
                 "Do not reuse mountpoints and mirror directories.",
                 "Online mounts use a mountpoint. Offline mirrors use an ordinary local directory.",
-                widget::text_input::text_input("/home/user/Cloud/Example", &self.draft.local_path)
-                    .on_input(Message::DraftLocalPath),
+                self.view_local_target_picker(),
             ));
 
         content = match self.draft.access_mode {
@@ -1043,6 +1065,21 @@ impl AppModel {
                 ),
             ]),
         })
+    }
+
+    fn view_local_target_picker(&self) -> Element<'_, Message> {
+        widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(
+                widget::text_input::text_input("/home/user/Cloud/Example", &self.draft.local_path)
+                    .on_input(Message::DraftLocalPath),
+            )
+            .push(field_with_help(
+                widget::button::standard("Browse").on_press(Message::OpenLocalFolderPicker),
+                "Choose the local mountpoint or mirror directory with the desktop folder picker. Keep using the text field for advanced/manual path entry.",
+            ))
+            .into()
     }
 
     fn view_create_rclone_remote_action(&self) -> Element<'static, Message> {
@@ -1951,6 +1988,14 @@ impl AppModel {
             async move { run_onedriver_online_setup_result(connection).await },
             |result| cosmic::Action::App(Message::OnedriverSetupCompleted(result)),
         )
+    }
+
+    fn open_local_folder_picker(&mut self) -> Task<cosmic::Action<Message>> {
+        let mode = self.draft.access_mode;
+        self.last_notice = Some(format!("Opening {} picker...", local_target_label(mode)));
+        Task::perform(async move { pick_local_folder(mode).await }, |result| {
+            cosmic::Action::App(Message::LocalFolderPicked(result))
+        })
     }
 
     fn start_onedrive_mirror_setup(&mut self) -> Task<cosmic::Action<Message>> {
@@ -3470,6 +3515,25 @@ fn local_target_label(mode: AccessMode) -> &'static str {
         AccessMode::OnlineMount => "Mountpoint",
         AccessMode::OfflineMirror => "Mirror directory",
     }
+}
+
+async fn pick_local_folder(mode: AccessMode) -> Result<Option<String>, String> {
+    let dialog =
+        file_chooser::open::Dialog::new().title(format!("Choose {}", local_target_label(mode)));
+
+    match dialog.open_folder().await {
+        Ok(response) => response
+            .url()
+            .to_file_path()
+            .map(|path| Some(selected_folder_path(&path)))
+            .map_err(|()| "selected folder is not a local filesystem path".to_string()),
+        Err(file_chooser::Error::Cancelled) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn selected_folder_path(path: &Path) -> String {
+    path.display().to_string()
 }
 
 fn rclone_backend_name(provider: Provider) -> Option<&'static str> {
@@ -7483,6 +7547,31 @@ mod tests {
         let error = app
             .validate_connection_edit(&nested_path)
             .expect_err("nested add local target must fail");
+        assert!(error.contains("overlaps"));
+    }
+
+    #[test]
+    fn selected_folder_path_reuses_existing_local_target_validation() {
+        let mut app = AppModel::default();
+        let mut saved = test_connection(Provider::Box);
+        saved.name = "Saved Box".into();
+        saved.local_path = PathBuf::from("/home/example/Cloud/Box");
+        app.config.document.connections = vec![saved];
+
+        let mut draft = ConnectionDraft {
+            name: "New Box".into(),
+            provider: Provider::Box,
+            access_mode: AccessMode::OnlineMount,
+            remote_reference: "new_box".into(),
+            local_path: selected_folder_path(Path::new("/home/example/Cloud/Box/Nested")),
+            ..ConnectionDraft::default()
+        };
+        draft.id = Some(ConnectionId::new());
+        let connection = connection_from_draft(&draft).expect("selected folder draft");
+
+        let error = app
+            .validate_connection_edit(&connection)
+            .expect_err("selected nested folder must fail existing validation");
         assert!(error.contains("overlaps"));
     }
 
