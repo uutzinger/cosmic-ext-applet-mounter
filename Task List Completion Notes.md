@@ -1402,3 +1402,29 @@ README package examples. `just metadata-check` passed with
 metadata reports `Package: cosmic-ext-applet-mounter` and `Version: 0.3.0`.
 Debian build scratch paths under `debian/` were added to `.gitignore` so repeat
 package builds do not appear as untracked source changes.
+
+### Version 0.3 Popup Runtime Status
+
+**Popup notice and VPN runtime status update:** June 23, 2026. The popup header
+no longer reports VPN dependency presence as though the VPN is active. It now
+uses runtime readiness for configured VPN dependencies and displays active or
+inactive state. Transient popup messages above Add Connection/Refresh now clear
+automatically after 10 seconds, and successful Add/Modify settings launches no
+longer leave stale "Modify connection selected" style messages in the main
+popup.
+
+**Cisco VPN parsing repair:** June 23, 2026. Cisco Secure Client status parsing
+now reads the exact `Connection State:` field. This prevents disconnected
+states from being misclassified as connected because the word `Disconnected`
+contains the substring `connected`. Regression coverage was added for
+`Connected`, `Disconnected`, `Not Available`, and `Cannot contact the VPN
+service` status output.
+
+**Non-blocking VPN status follow-up:** June 23, 2026. The first runtime VPN
+status implementation synchronously probed NetworkManager/Cisco during popup
+view construction, which could delay opening the applet. The popup now opens
+with `VPN status: checking` when configured VPN dependencies exist and performs
+NetworkManager/Cisco readiness checks asynchronously. Refresh also reloads
+configuration immediately and updates VPN readiness when the async check
+finishes. Manual installed-applet verification remains open for the exact
+Cisco-configured-but-disconnected case.

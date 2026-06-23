@@ -1023,3 +1023,17 @@ authentication behavior.
   unsafe-path, and mount/mirror overlap checks before saving.
 - [x] Add focused tests for path normalization and validation after a selected
   folder is applied to a draft connection.
+
+### Version 0.3 Popup Runtime Status
+
+- [x] Replace config-only VPN header text with runtime VPN state reporting.
+- [x] Parse Cisco Secure Client `Connection State:` exactly so `Disconnected`
+  and `Not Available` are not misclassified as connected.
+- [x] Clear transient popup messages automatically after 10 seconds.
+- [x] Keep the popup startup/open message empty unless an actual user action or
+  error produces a message.
+- [x] Move NetworkManager and Cisco VPN status checks out of popup rendering so
+  the applet opens immediately and updates VPN state asynchronously.
+- [ ] Manually verify the installed applet opens promptly with Cisco configured
+  but disconnected, then updates the header to inactive after the async status
+  check completes.
