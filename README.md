@@ -191,8 +191,6 @@ Useful read-only examples:
 
 ```sh
 cargo run --example dependency_inventory
-cargo run --example legacy_import_preview
-cargo run --example legacy_import_confirm_dry_run
 ```
 
 `just stage` installs into `target/stage/usr` and does not modify the host
