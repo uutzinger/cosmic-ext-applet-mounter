@@ -10,12 +10,25 @@
       Manage supported cloud and network storage from the COSMIC panel using
       online mounts or bidirectionally synchronized offline mirrors.
     </p>
+    <p>
+      COSMIC Cloud Mounter helps keep file-manager workflows responsive when
+      cloud storage, VPN, or network connectivity is intermittent.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Online mounts and offline mirrors for OneDrive, Google Drive, Box, and SMB.</li>
+      <li>Applet-managed systemd user services and timers.</li>
+      <li>Optional NetworkManager and Cisco Secure Client readiness checks.</li>
+      <li>Dependency checks without storing provider or VPN credentials.</li>
+    </ul>
   </description>
   <developer id="io.github.uutzinger">
     <name>Urs Utzinger and OpenAI Codex</name>
   </developer>
   <url type="homepage">https://github.com/uutzinger/cosmic-ext-applet-mounter</url>
   <url type="vcs-browser">https://github.com/uutzinger/cosmic-ext-applet-mounter</url>
+  <url type="bugtracker">https://github.com/uutzinger/cosmic-ext-applet-mounter/issues</url>
+  <url type="contribute">https://github.com/uutzinger/cosmic-ext-applet-mounter</url>
   <launchable type="desktop-id">io.github.uutzinger.cosmic-ext-applet-mounter.desktop</launchable>
   <provides>
     <id>com.system76.CosmicApplet</id>
@@ -32,5 +45,36 @@
   <categories>
     <category>Utility</category>
   </categories>
+  <branding>
+    <color type="primary" scheme_preference="light">#6f7cff</color>
+    <color type="primary" scheme_preference="dark">#5865f2</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/4809d2c/resources/Popup.png</image>
+      <caption>Manage storage connections from the COSMIC panel popup.</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/4809d2c/resources/Add_Connection.png</image>
+      <caption>Add a storage connection with provider, mode, remote, local target, and VPN options.</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/4809d2c/resources/Change_Connection.png</image>
+      <caption>Modify, test, disable, remove, preview, or synchronize an existing connection.</caption>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.1.0" date="2026-06-22">
+      <description>
+        <p>Initial public development release.</p>
+        <ul>
+          <li>Added COSMIC panel popup and standalone connection settings window.</li>
+          <li>Added rclone-backed Google Drive, Box, and SMB online mount and offline mirror workflows.</li>
+          <li>Added OneDrive online mount and offline mirror setup using supported external engines.</li>
+          <li>Added VPN dependency selection, dependency checks, legacy import, and rclone remote management.</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
   <content_rating type="oars-1.1"/>
 </component>
