@@ -64,14 +64,14 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="0.1.0" date="2026-06-22">
+    <release version="0.2.0" date="2026-06-22">
       <description>
-        <p>Initial public development release.</p>
+        <p>Version 0.2 release candidate.</p>
         <ul>
-          <li>Added COSMIC panel popup and standalone connection settings window.</li>
-          <li>Added rclone-backed Google Drive, Box, and SMB online mount and offline mirror workflows.</li>
-          <li>Added OneDrive online mount and offline mirror setup using supported external engines.</li>
-          <li>Added VPN dependency selection, dependency checks, legacy import, and rclone remote management.</li>
+          <li>Refined the compact COSMIC panel popup and Add/Modify connection workflows.</li>
+          <li>Added applet-driven rclone remote detection, creation, selection, and confirmed unused-remote removal.</li>
+          <li>Added OneDrive online mount and offline mirror setup improvements.</li>
+          <li>Added AppStream metadata and Debian package build support.</li>
         </ul>
       </description>
     </release>

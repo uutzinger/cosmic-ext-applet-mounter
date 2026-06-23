@@ -1,5 +1,7 @@
-cosmic-ext-applet-mounter (0.1.0) unstable; urgency=medium
+cosmic-ext-applet-mounter (0.2.0) unstable; urgency=medium
 
-  * Initial Debian packaging.
+  * Version 0.2 release candidate.
+  * Add compact popup UI, Add/Modify UI refinements, rclone remote management,
+    AppStream metadata, and Debian packaging.
 
- -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 22 Jun 2026 17:16:20 -0700
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 22 Jun 2026 17:36:45 -0700

@@ -204,6 +204,37 @@ network access. `just metadata-check-net` additionally verifies published URLs
 and screenshots. `just deb` builds a local unsigned Debian binary package in the
 parent directory.
 
+## Debian Package
+
+Build the local Debian package from the repository root:
+
+```sh
+just deb
+```
+
+The package is written to the parent directory, for example:
+
+```sh
+../cosmic-ext-applet-mounter_0.2.0_amd64.deb
+```
+
+Install the package:
+
+```sh
+sudo apt install ./../cosmic-ext-applet-mounter_0.2.0_amd64.deb
+```
+
+Remove the package:
+
+```sh
+sudo apt remove cosmic-ext-applet-mounter
+```
+
+Package removal removes the installed binaries, desktop entry, AppStream
+metadata, and icon. It does not remove user configuration, provider
+credentials, cloud data, local mirror data, caches, recovery directories, or
+user-created systemd units.
+
 To test staged uninstall:
 
 ```sh
