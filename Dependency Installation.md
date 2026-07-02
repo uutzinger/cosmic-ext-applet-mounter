@@ -1,8 +1,6 @@
 # Dependency Installation
 
-This file covers installing and checking external tools only. Applet behavior,
-authentication flows, generated units, and provider safety policy are documented
-in `README.md`.
+This document covers installing and checking external dependencies.
 
 ## Required Versions
 
@@ -32,7 +30,7 @@ rclone version
 rclone config file
 ```
 
-If upgrading, first stop active rclone mounts or transfers and back up the
+If you need to upgrade, first stop active rclone mounts or transfers and back up the
 configuration:
 
 ```sh
@@ -42,7 +40,7 @@ pgrep -af '(^|/)rclone( |$)'
 findmnt -rn -t fuse.rclone -o TARGET,SOURCE,FSTYPE,OPTIONS
 ```
 
-Preferred package-aware update:
+Preferred update is the package-aware update:
 
 ```sh
 rclone selfupdate --stable --check
@@ -51,8 +49,7 @@ hash -r
 rclone version
 ```
 
-If the packaged build cannot self-update, use the official installer after
-reviewing it:
+If the packaged build cannot self-update, use the official installer:
 
 ```sh
 curl --fail --show-error --silent \
@@ -75,8 +72,9 @@ References:
 
 ## jstaf/onedriver
 
-Install `onedriver` from the upstream project or a trusted package source that
-provides version 0.15.0 or newer.
+Install `onedriver` from the
+[OpenSUSE Build Service](https://software.opensuse.org/download.html?project=home%3Ajstaf&package=onedriver)
+or a trusted package source that provides version 0.15.0 or newer.
 
 Check:
 
@@ -128,6 +126,9 @@ References:
 
 Cisco Secure Client support requires the CLI/GUI binaries and the VPN agent
 service. On the tested machine the service was named `vpnagentd.service`.
+
+Cisco Secure Client installation instructions are usually provided by the
+organization providing VPN services, such as your employer.
 
 Check:
 

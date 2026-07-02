@@ -3,11 +3,12 @@
 <img src="./resources/icon.svg" alt="COSMIC Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
 COSMIC Cloud Mounter is a COSMIC desktop applet for managing storage
-connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct Online
-mounts and Offline mirrors with background synchronization.
+connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct <u>Online
+mount</u> and <u>Offline mirror</u> with background synchronization.
 
-The applet was developed so users can turn cloud storage connections on and off
-to reduce file manager stalls when the network is slow or unavailable. It should also simplify mounting cloud storage.
+The applet was developed to simplify mounting cloud storage. Users can easily
+turn storage connections on and off to reduce file manager stalls when the
+network is slow or unavailable.
 
 ## Modes and Providers
 
@@ -18,13 +19,16 @@ large remote trees without keeping a full local copy.
 sync requires a dry Preview and confirmed Sync Now. Automatic background sync
 pauses on metered networks by default.
 
+The following connection engines are used to connect to the providers:
+
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| OneDrive | `jstaf/onedriver` | `abraunegg/onedrive` |
-| Google Drive | `rclone mount` | `rclone bisync` |
+| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`abraunegg/onedrive`](https://github.com/abraunegg/onedrive) |
+| Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
+Example screen shots of the applet:
 <table>
   <tr>
     <td valign="top"><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="200"></td>
@@ -32,6 +36,40 @@ pauses on metered networks by default.
     <td valign="top"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
   </tr>
 </table>
+
+## Installation and Removal
+
+Until installation through COSMIC Store is available, install the Debian
+package from the [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest).
+Version 0.3.0 currently provides an `amd64` package:
+
+```sh
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.3.0/cosmic-ext-applet-mounter_0.3.0_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.3.0_amd64.deb
+```
+
+The package installs the applet binary, OneDrive authentication helper, desktop
+entry, AppStream metadata, and icon.
+
+After installation, open **COSMIC Settings > Desktop > Panel > Applets** and add
+**COSMIC Cloud Mounter** to the desired panel or dock. Install the external
+storage engines needed for your providers as described under
+[Dependencies](#dependencies).
+
+Before uninstalling, use the applet to stop active mounts and mirrors. If you
+also want to remove its generated user services and timers, remove each
+connection from the applet first. Removing a connection does not delete cloud
+data, local mirror data, provider credentials, caches, or recovery directories.
+
+Remove COSMIC Cloud Mounter from the panel, then uninstall the package:
+
+```sh
+sudo apt remove cosmic-ext-applet-mounter
+```
+
+Package removal does not delete configuration and data in the user's home
+directory. Any connection records or generated user services not removed
+before uninstalling remain in place for a later reinstall or manual cleanup.
 
 ## Dependencies
 
@@ -48,7 +86,7 @@ upgrade them.
 | Cisco Secure Client | Optional Cisco VPN support | 5.1.10 tested |
 | `fuser` from `psmisc` | Optional busy-mount diagnostics | Recommended |
 
-Install and upgrade guidance is in
+Install and upgrade guidance is provided here:
 [Dependency Installation.md](Dependency%20Installation.md).
 
 ## Data Integrity Warning
@@ -57,7 +95,7 @@ Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
 are configured incorrectly. **Before testing with important data, make an
 independent backup**.
 
-**Do not**:
+To reduce data integrity risks, **do not**:
 
 - configure Online mount and Offline mirror simultaneously for the same
   provider account and overlapping remote subtree;
@@ -66,12 +104,12 @@ independent backup**.
 - run OneDrive Online mount and OneDrive Offline mirror concurrently against the same
   OneDrive account or overlapping subtree unless the applet has explicitly
   isolated that setup;
-- enable a generic `onedrive.service` for an applet-managed OneDrive mirror;
 - run `onedrive --resync` casually. State rebuilds require preview and
   confirmation when managed by the applet.
 
 Offline **mirror** mode is the reliable option for uninterrupted local file access.
-Online mounts can still block or fail when the provider, VPN, FUSE layer, or
+
+Online mounts can block or fail when the provider, VPN, FUSE layer, or
 network stalls.
 
 ## Applet Workflow
@@ -82,11 +120,10 @@ connections.
 
 Each connection row has the connection name and one primary state control:
 
-- Online mounts use Mount or Unmount.
-- Offline mirrors use Start or Stop for background synchronization.
+- Online mount toggle button uses Mount or Unmount.
+- Offline mirror toggle button uses Start or Stop for background synchronization.
 
-Clicking the connection name opens `Modify`. `Preview` and `Sync Now` for Offline
-mirrors are available from Modify.
+Clicking the connection name opens `Modify`.
 
 `Add` and `Modify` share the same editor. Modify mode exposes `Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline mirrors, `Disable` or `Enable`, and
 `Remove`. The Information section summarizes the selected engine, generated unit
@@ -119,9 +156,9 @@ are excluded from rclone Offline mirrors and remain browser-accessible.
 
 Known limitations:
 
-- `abraunegg/onedrive` requires GTK webview as it does no yet provide a method that hands over the authorization link to this applet.
-- Google Drive Online mount testing previously hit Google Drive API quota/rate
-  limiting on the development machine.
+- `abraunegg/onedrive` requires a GTK webview because it does not yet provide a
+  method that hands the authorization redirect to this applet.
+- Google Drive Online mount testing can hit Google Drive API quota/rate limiting.
 - NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
   integration remains future work.
 
@@ -159,7 +196,7 @@ configuration, not only applet configuration.
 Requirements:
 
 - Linux with the COSMIC desktop
-- Rust 1.95.0 through rustup
+- Rust 1.95.0 or later through rustup
 - `just`
 - native development packages required by libcosmic
 
@@ -195,44 +232,6 @@ network access. `just metadata-check-net` additionally verifies published URLs
 and screenshots. `just deb` builds a local unsigned Debian binary package in the
 parent directory.
 
-## Debian Package
-
-Build the local Debian package from the repository root:
-
-```sh
-just deb
-```
-
-The package is written to the parent directory, for example:
-
-```sh
-../cosmic-ext-applet-mounter_0.3.0_amd64.deb
-```
-
-Install the package:
-
-```sh
-sudo apt install ./../cosmic-ext-applet-mounter_0.3.0_amd64.deb
-```
-
-Remove the package:
-
-```sh
-sudo apt remove cosmic-ext-applet-mounter
-```
-
-Package removal removes the installed binaries, desktop entry, AppStream
-metadata, and icon. It does not remove user configuration, provider
-credentials, cloud data, local mirror data, caches, recovery directories, or
-user-created systemd units.
-
-To test staged uninstall:
-
-```sh
-just stage
-just rootdir=target/stage prefix=/usr uninstall
-```
-
 ## Project Development
 
 This applet was developed with agent-assisted programming. The project starts
@@ -245,6 +244,8 @@ documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.m
 
 ### Feature Requests
 
+You can implement additional features to this project using agentic programming;
+
 - Download the github repository.
 - Update the Applet Description to include your request or create a document describing your reuqest and ask you AI agent to include it in the Applet Description.
 - Have your AI agent check and update the Applet Description.
@@ -252,7 +253,7 @@ documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.m
 - Verify the modifications to the Requirements and Specifications.
 - Ask your AI agent to update the Functional Requirements based on your reviewed Requirements and Specifications.
 - Have your AI agent add Tasks to the Task list based on the Specifications.
-- Have your AI agent execute the addition to the Task list.
+- Have your AI agent execute the additions to the Task list.
 - Complete the verifications and test your implementation.
 - Submit pull request.
 
