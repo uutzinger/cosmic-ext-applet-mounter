@@ -1471,3 +1471,22 @@ native applet, or requires unjustified unrestricted host access.
 now includes the selected Flatpak execution architecture and security tradeoffs
 in section 9.4. Implementation of the Flatpak command runner and live
 `flatpak-spawn --host` verification remain open tasks.
+
+**Flatpak host-runner prototype:** July 8, 2026. Branch
+`flatpak-host-runner` adds the initial command-runner support for Flatpak host
+execution. `src/process.rs` now has `FlatpakHostCommandRunner`, which transforms
+typed requests such as `rclone version` into
+`flatpak-spawn --host rclone version` while preserving separate validated
+arguments, retry policy, timeout, output limit, cancellation, and redaction.
+`RuntimeCommandRunner` can select either the unchanged native
+`SystemCommandRunner` path or the Flatpak host-spawn path. The applet is not
+yet wired to use this runtime selector, so native `just install-user` and
+`just deb` behavior remains unchanged.
+
+**Prototype verification:** July 8, 2026. Added unit tests for Flatpak command
+wrapping, sensitive argument redaction, and native command shape preservation.
+Verification passed with `cargo fmt --all -- --check`,
+`cargo check --all-targets`, and `cargo test --all-targets` on the
+`flatpak-host-runner` branch. `flatpak-spawn` is not present on the current host
+PATH outside a Flatpak sandbox, so live `flatpak-spawn --host` execution remains
+open until a local Flatpak manifest/build exists.

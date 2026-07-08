@@ -1091,6 +1091,10 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 - [ ] Add a Flatpak runtime mode that routes approved host commands through
   `flatpak-spawn --host`; preserve the current direct command runner for native
   `.deb` and source installations.
+  - [x] Prototype the runtime command-runner layer with native and
+    `flatpak-spawn --host` modes without wiring it into the installed applet.
+  - [ ] Wire the applet to select the Flatpak runtime runner when executing
+    inside an installed Flatpak.
 - [ ] Start from the accepted COSMIC drives-applet precedent of
   `--talk-name=org.freedesktop.Flatpak` and narrowly justify any additional
   permissions this applet requires.
