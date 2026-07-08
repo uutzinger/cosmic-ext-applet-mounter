@@ -6,13 +6,13 @@ This document covers installing and checking external dependencies.
 
 | Tool | Used For | Required/Tested Version |
 |---|---|---|
-| `rclone` | Google Drive, Box, and SMB Online mount and Offline mirror | 1.74.3 or newer |
-| `onedriver` | OneDrive Online mount | 0.15.0 or newer |
-| `onedrive` | OneDrive Offline mirror | 2.5.10 or newer |
-| `fusermount3` / FUSE 3 | Online mounts | installed |
-| `nmcli` / NetworkManager | network and VPN readiness | installed |
+| [`rclone`](https://rclone.org/) | Google Drive, Box, and SMB Online mount and Offline mirror | 1.74.3 or newer |
+| [`onedriver`](https://github.com/jstaf/onedriver) | OneDrive Online mount | 0.15.0 or newer |
+| [`onedrive`](https://github.com/abraunegg/onedrive) | OneDrive Offline mirror | 2.5.10 or newer |
+| [`fusermount3`](https://github.com/libfuse/libfuse) / FUSE 3 | Online mounts | installed |
+| [`nmcli`](https://github.com/NetworkManager/NetworkManager) / NetworkManager | network and VPN readiness | installed |
 | Cisco Secure Client | optional Cisco VPN dependency | 5.1.10 tested |
-| `fuser` from `psmisc` | optional busy-mount diagnostics | recommended |
+| `fuser` from [`psmisc`](https://gitlab.com/psmisc/psmisc) | optional busy-mount diagnostics | recommended |
 
 If you build from source you can check dependencies with:
 
@@ -128,7 +128,7 @@ Cisco Secure Client support requires the CLI/GUI binaries and the VPN agent
 service. On the tested machine the service was named `vpnagentd.service`.
 
 Cisco Secure Client installation instructions are usually provided by the
-organization providing VPN services, such as your employer.
+organization providing VPN services (e.g. your employer).
 
 Check:
 

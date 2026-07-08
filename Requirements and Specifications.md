@@ -611,6 +611,53 @@ The preferred order is:
 
 Output shall be bounded, decoded safely, and redacted before logging.
 
+### 9.4 Flatpak execution architecture
+
+The native source and Debian installations remain the primary execution model
+for version 0.3. Native installations run approved external commands directly
+through the typed command-runner boundary.
+
+Flatpak installation shall be treated as an additional packaging target, not as
+a replacement for the native package. Because the applet manages host storage,
+host FUSE mounts, host user systemd units, existing host rclone configuration,
+and host VPN state, a sandbox-only design is not acceptable. The Flatpak build
+shall add an explicit Flatpak runtime mode that routes approved host operations
+through `flatpak-spawn --host`.
+
+The Flatpak command-runner mode shall preserve the current safety model:
+
+- fixed executable identities rather than arbitrary shell commands;
+- separate validated arguments;
+- no `sh -c` or command concatenation;
+- bounded stdout and stderr capture;
+- timeout and cancellation behavior equivalent to the native runner;
+- redaction of secrets, OAuth URLs, tokens, and passwords before display or
+  logging.
+
+The following resources are host resources and shall not be silently copied into
+a Flatpak-private credential or configuration store:
+
+- existing rclone remotes and credentials;
+- `jstaf/onedriver` and `abraunegg/onedrive` authentication state;
+- generated user systemd services and timers under the host user session;
+- user-selected mountpoints, mirror directories, cache directories, and
+  recovery directories;
+- NetworkManager and Cisco VPN state.
+
+Flatpak permissions shall start from the accepted COSMIC applet pattern with
+Wayland/session access and `--talk-name=org.freedesktop.Flatpak` for
+`flatpak-spawn --host`. Broader filesystem access, including
+`--filesystem=host`, is permitted only if prototype testing proves narrower
+permissions cannot support user-selected storage targets, generated host
+services, or host-visible FUSE mounts. Any broader permission must be documented
+in the Flatpak manifest notes, README, and submission pull request.
+
+Flatpak publication shall be rejected or postponed if testing shows that the
+package cannot expose mounts to ordinary host applications, cannot manage the
+intended host user services, silently uses different rclone or OneDrive
+credentials than the native applet, or requires unjustified unrestricted host
+access.
+
 ## 10. Configuration Model
 
 Configuration shall use app ID

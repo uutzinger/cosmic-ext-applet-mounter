@@ -1428,3 +1428,46 @@ NetworkManager/Cisco readiness checks asynchronously. Refresh also reloads
 configuration immediately and updates VPN readiness when the async check
 finishes. Manual installed-applet verification remains open for the exact
 Cisco-configured-but-disconnected case.
+
+## Version 0.3 COSMIC Flatpak Repository Publication
+
+### Publication Suitability and Architecture Gate
+
+**Architecture decision:** July 8, 2026. Native source and Debian installations
+remain the primary execution model. The existing `just deb` packaging path is
+kept as the low-friction package for users who need direct host integration.
+Flatpak is treated as an additional distribution target for COSMIC repository
+publication, not as a replacement for the native package.
+
+**Host-integration requirements documented:** July 8, 2026. The Flatpak
+architecture gate now records that the applet depends on host executable
+discovery, host user systemd unit creation/control, host-visible FUSE mounts,
+host NetworkManager/Cisco VPN state, existing rclone configuration, provider
+authentication state, and user-selected mount, mirror, cache, and recovery
+directories. These requirements are incompatible with a sandbox-only storage
+manager.
+
+**Selected Flatpak execution model:** July 8, 2026. The approved direction is
+to add a Flatpak runtime mode behind the existing typed command-runner boundary.
+Native installations continue to execute fixed approved commands directly. The
+Flatpak mode shall route approved host commands through
+`flatpak-spawn --host`, preserving separate validated arguments, no shell
+concatenation, bounded output, timeouts, cancellation behavior, and redaction.
+
+**Configuration ownership decision:** July 8, 2026. General applet settings
+remain applet configuration, but provider-owned state remains host-owned:
+existing rclone remotes and credentials, `jstaf/onedriver` state,
+`abraunegg/onedrive` state, generated user systemd units/timers, and selected
+storage paths must not be silently copied into a second Flatpak-private
+credential store.
+
+**Publication rejection rule:** July 8, 2026. Flatpak publication shall be
+rejected or postponed if prototype testing shows that the package cannot expose
+mounts to ordinary host applications, cannot manage the intended host user
+services, silently uses different rclone or OneDrive credentials than the
+native applet, or requires unjustified unrestricted host access.
+
+**Requirements update:** July 8, 2026. `Requirements and Specifications.md`
+now includes the selected Flatpak execution architecture and security tradeoffs
+in section 9.4. Implementation of the Flatpak command runner and live
+`flatpak-spawn --host` verification remain open tasks.
