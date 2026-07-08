@@ -1107,7 +1107,7 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   - [x] Live-verify `rclone version`, `nmcli general status`,
     `systemctl --user --version`, and `fusermount3 --version` through
     `flatpak-spawn --host`.
-  - [ ] Live-verify nonzero exit status, stderr capture, timeout, and
+  - [x] Live-verify nonzero exit status, stderr capture, timeout, and
     cancellation behavior through `flatpak-spawn --host`.
 - [x] Determine which configuration belongs inside the Flatpak and which must
   remain on the host. Existing rclone and OneDrive credentials must not be

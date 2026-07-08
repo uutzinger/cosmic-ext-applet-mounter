@@ -1522,3 +1522,13 @@ Running native `nmcli` inside the Codex command sandbox failed with
 normal user session rather than the restricted Codex sandbox. Remaining live
 host-spawn checks: nonzero exit status, stderr capture, timeout behavior, and
 cancellation behavior.
+
+**Stage 1 host-runner behavior verification:** July 8, 2026. Extended the
+Flatpak host-runner probe with expected-error cases and reran it inside the
+installed probe Flatpak. `flatpak-spawn --host` correctly propagated nonzero
+exit status using `false`, stderr capture using `cat` on a nonexistent path,
+timeout behavior using `sleep 5` with a short timeout, and cancellation
+behavior using `sleep 5` with a cancellation token. Native probe mode passed
+the same behavior checks outside the Codex sandbox. This completes the command
+behavior portion of the Flatpak host-runner verification; FUSE visibility and
+host user-systemd service behavior remain open.
