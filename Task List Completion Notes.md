@@ -1490,3 +1490,35 @@ Verification passed with `cargo fmt --all -- --check`,
 `flatpak-host-runner` branch. `flatpak-spawn` is not present on the current host
 PATH outside a Flatpak sandbox, so live `flatpak-spawn --host` execution remains
 open until a local Flatpak manifest/build exists.
+
+**Probe-only Flatpak manifest:** July 8, 2026. Added
+`packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.HostRunnerProbe.json`
+and `packaging/flatpak/README.md`. This is a prototype manifest only; it copies
+the locally built `flatpak_host_runner_probe` example into a minimal Flatpak and
+is not the final COSMIC repository submission. The probe app ID is
+`io.github.uutzinger.cosmic-ext-applet-mounter-probe`; the first attempted ID
+with an extra segment after `cosmic-ext-applet-mounter` was rejected by
+Flatpak's app ID rules. The final applet ID
+`io.github.uutzinger.cosmic-ext-applet-mounter` remains structurally valid
+because its hyphens are in the final segment.
+
+**Live Flatpak host-spawn verification:** July 8, 2026. Built and installed the
+probe with `flatpak-builder --force-clean --user --install
+target/flatpak-host-runner-probe
+packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.HostRunnerProbe.json`.
+The manifest grants only `--talk-name=org.freedesktop.Flatpak`. Running
+`flatpak run io.github.uutzinger.cosmic-ext-applet-mounter-probe` passed. The
+probe verified that `DependencyInventory` can detect host rclone 1.74.3,
+onedriver 0.15.0, onedrive 2.5.10, FUSE 3.14.0, NetworkManager 1.46.0, Cisco
+Secure Client components, user systemd, and fuser through
+`flatpak-spawn --host`.
+
+**Core host command verification:** July 8, 2026. The same Flatpak probe
+successfully ran `rclone version`, `nmcli general status`,
+`systemctl --user --version`, and `fusermount3 --version` through
+`flatpak-spawn --host`. Native probe mode also passed outside the Codex sandbox.
+Running native `nmcli` inside the Codex command sandbox failed with
+`Operation not permitted`, confirming that NetworkManager checks require the
+normal user session rather than the restricted Codex sandbox. Remaining live
+host-spawn checks: nonzero exit status, stderr capture, timeout behavior, and
+cancellation behavior.

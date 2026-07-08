@@ -1095,12 +1095,20 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
     `flatpak-spawn --host` modes without wiring it into the installed applet.
   - [ ] Wire the applet to select the Flatpak runtime runner when executing
     inside an installed Flatpak.
-- [ ] Start from the accepted COSMIC drives-applet precedent of
+- [x] Start from the accepted COSMIC drives-applet precedent of
   `--talk-name=org.freedesktop.Flatpak` and narrowly justify any additional
   permissions this applet requires.
 - [ ] Verify host command argument passing, exit status, standard output,
   standard error, cancellation, timeouts, and secret redaction through
   `flatpak-spawn --host`.
+  - [x] Add a probe-only Flatpak manifest that grants only
+    `--talk-name=org.freedesktop.Flatpak`.
+  - [x] Live-verify applet dependency detection through `flatpak-spawn --host`.
+  - [x] Live-verify `rclone version`, `nmcli general status`,
+    `systemctl --user --version`, and `fusermount3 --version` through
+    `flatpak-spawn --host`.
+  - [ ] Live-verify nonzero exit status, stderr capture, timeout, and
+    cancellation behavior through `flatpak-spawn --host`.
 - [x] Determine which configuration belongs inside the Flatpak and which must
   remain on the host. Existing rclone and OneDrive credentials must not be
   silently copied into a second credential store.

@@ -1,4 +1,5 @@
 /target/
+/.flatpak-builder/
 /archive/
 /debian/.debhelper/
 /debian/cosmic-ext-applet-mounter.substvars

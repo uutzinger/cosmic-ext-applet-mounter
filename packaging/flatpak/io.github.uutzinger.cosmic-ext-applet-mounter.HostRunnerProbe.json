@@ -1,0 +1,25 @@
+{
+  "app-id": "io.github.uutzinger.cosmic-ext-applet-mounter-probe",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "flatpak_host_runner_probe",
+  "finish-args": [
+    "--talk-name=org.freedesktop.Flatpak"
+  ],
+  "modules": [
+    {
+      "name": "flatpak-host-runner-probe",
+      "buildsystem": "simple",
+      "build-commands": [
+        "install -Dm0755 flatpak_host_runner_probe /app/bin/flatpak_host_runner_probe"
+      ],
+      "sources": [
+        {
+          "type": "file",
+          "path": "../../target/release/examples/flatpak_host_runner_probe"
+        }
+      ]
+    }
+  ]
+}
