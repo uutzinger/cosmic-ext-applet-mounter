@@ -1532,3 +1532,17 @@ behavior using `sleep 5` with a cancellation token. Native probe mode passed
 the same behavior checks outside the Codex sandbox. This completes the command
 behavior portion of the Flatpak host-runner verification; FUSE visibility and
 host user-systemd service behavior remain open.
+
+**FUSE and user-systemd host-visibility verification:** July 8, 2026. Extended
+the probe with opt-in `--fuse` mode. The probe creates disposable host paths
+under `/tmp`, starts a transient user systemd unit named
+`cosmic-mounter-flatpak-probe.service`, runs host `rclone mount` against a
+local source directory, verifies the mount with host `mountpoint` and `findmnt`,
+lists a probe file through the mounted FUSE filesystem, then stops the unit and
+removes the disposable paths. Native mode passed first. The installed Flatpak
+probe then passed the same test through `flatpak-spawn --host` using only
+`--talk-name=org.freedesktop.Flatpak`. The resulting mount was reported as
+`fuse.rclone` by host `findmnt`, demonstrating that the mount is created in the
+host namespace rather than trapped in the Flatpak sandbox. Post-run cleanup
+verification confirmed `mountpoint` returned inactive, the transient unit was
+inactive, and the disposable source/mount paths no longer existed.

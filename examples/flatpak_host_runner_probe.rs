@@ -9,6 +9,12 @@ use cosmic_ext_applet_mounter::process::{
 };
 use tokio_util::sync::CancellationToken;
 
+const FUSE_UNIT: &str = "cosmic-mounter-flatpak-probe.service";
+const FUSE_SOURCE: &str = "/tmp/cosmic-mounter-flatpak-fuse-source";
+const FUSE_MOUNT: &str = "/tmp/cosmic-mounter-flatpak-fuse-mount";
+const FUSE_FILE: &str = "/tmp/cosmic-mounter-flatpak-fuse-source/probe-file";
+const FUSE_MOUNTED_FILE: &str = "/tmp/cosmic-mounter-flatpak-fuse-mount/probe-file";
+
 struct Probe {
     label: &'static str,
     request: CommandRequest,
@@ -29,30 +35,59 @@ enum ExpectedError {
 
 #[tokio::main]
 async fn main() {
-    let mode = match std::env::args().nth(1).as_deref() {
-        None | Some("--flatpak-host") => ProbeMode::FlatpakHost,
-        Some("--native") => ProbeMode::Native,
-        Some("--help") | Some("-h") => {
-            print_help();
-            return;
-        }
-        Some(other) => {
-            eprintln!("unknown argument `{other}`");
+    let command = match parse_args() {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("{error}");
             print_help();
             std::process::exit(2);
         }
     };
 
-    let failed = run(mode).await;
+    let failed = match command {
+        ProbeCommand::Basic(mode) => run(mode).await,
+        ProbeCommand::Fuse(mode) => run_fuse_probe_for_mode(mode).await,
+        ProbeCommand::Help => {
+            print_help();
+            false
+        }
+    };
     if failed {
         std::process::exit(1);
     }
+}
+
+enum ProbeCommand {
+    Basic(ProbeMode),
+    Fuse(ProbeMode),
+    Help,
 }
 
 #[derive(Clone, Copy)]
 enum ProbeMode {
     Native,
     FlatpakHost,
+}
+
+fn parse_args() -> Result<ProbeCommand, String> {
+    let mut mode = ProbeMode::FlatpakHost;
+    let mut fuse = false;
+
+    for argument in std::env::args().skip(1) {
+        match argument.as_str() {
+            "--flatpak-host" => mode = ProbeMode::FlatpakHost,
+            "--native" => mode = ProbeMode::Native,
+            "--fuse" => fuse = true,
+            "--help" | "-h" => return Ok(ProbeCommand::Help),
+            other => return Err(format!("unknown argument `{other}`")),
+        }
+    }
+
+    if fuse {
+        Ok(ProbeCommand::Fuse(mode))
+    } else {
+        Ok(ProbeCommand::Basic(mode))
+    }
 }
 
 async fn run(mode: ProbeMode) -> bool {
@@ -117,6 +152,203 @@ async fn run(mode: ProbeMode) -> bool {
         println!("result: passed");
     }
     failed
+}
+
+async fn run_fuse_probe_for_mode(mode: ProbeMode) -> bool {
+    let cancellation = CancellationToken::new();
+    println!("COSMIC Mounter FUSE host-visibility probe");
+    println!(
+        "mode: {}",
+        match mode {
+            ProbeMode::Native => "native",
+            ProbeMode::FlatpakHost => "flatpak-spawn --host",
+        }
+    );
+
+    let result = match mode {
+        ProbeMode::Native => run_fuse_probe(&SystemCommandRunner, &cancellation).await,
+        ProbeMode::FlatpakHost => run_fuse_probe(&FlatpakHostCommandRunner, &cancellation).await,
+    };
+
+    match result {
+        Ok(()) => {
+            println!("result: passed");
+            false
+        }
+        Err(error) => {
+            println!("result: failed");
+            println!("FAIL FUSE probe: {error}");
+            true
+        }
+    }
+}
+
+async fn run_fuse_probe(
+    runner: &dyn CommandRunner,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
+    cleanup_fuse_probe(runner, cancellation).await;
+    run_required(
+        runner,
+        "create source directory",
+        CommandRequest::new(Executable::Mkdir)
+            .arg("-p")
+            .map_err(command_build_error)?
+            .arg(FUSE_SOURCE)
+            .map_err(command_build_error)?,
+        cancellation,
+    )
+    .await?;
+    run_required(
+        runner,
+        "create mount directory",
+        CommandRequest::new(Executable::Mkdir)
+            .arg("-p")
+            .map_err(command_build_error)?
+            .arg(FUSE_MOUNT)
+            .map_err(command_build_error)?,
+        cancellation,
+    )
+    .await?;
+    run_required(
+        runner,
+        "create source probe file",
+        CommandRequest::new(Executable::Touch)
+            .arg(FUSE_FILE)
+            .map_err(command_build_error)?,
+        cancellation,
+    )
+    .await?;
+
+    run_required(
+        runner,
+        "start transient rclone mount unit",
+        CommandRequest::new(Executable::SystemdRun)
+            .arg("--user")
+            .map_err(command_build_error)?
+            .arg(format!("--unit={FUSE_UNIT}"))
+            .map_err(command_build_error)?
+            .arg("--collect")
+            .map_err(command_build_error)?
+            .arg("--property=Restart=no")
+            .map_err(command_build_error)?
+            .arg("rclone")
+            .map_err(command_build_error)?
+            .arg("mount")
+            .map_err(command_build_error)?
+            .arg(FUSE_SOURCE)
+            .map_err(command_build_error)?
+            .arg(FUSE_MOUNT)
+            .map_err(command_build_error)?
+            .arg("--vfs-cache-mode")
+            .map_err(command_build_error)?
+            .arg("writes")
+            .map_err(command_build_error)?
+            .arg("--dir-cache-time")
+            .map_err(command_build_error)?
+            .arg("5s")
+            .map_err(command_build_error)?
+            .arg("--log-level")
+            .map_err(command_build_error)?
+            .arg("INFO")
+            .map_err(command_build_error)?
+            .with_timeout(Duration::from_secs(10)),
+        cancellation,
+    )
+    .await?;
+
+    wait_for_mount(runner, cancellation).await?;
+    run_required(
+        runner,
+        "find host-visible mount",
+        CommandRequest::new(Executable::Findmnt)
+            .arg("-rn")
+            .map_err(command_build_error)?
+            .arg("--target")
+            .map_err(command_build_error)?
+            .arg(FUSE_MOUNT)
+            .map_err(command_build_error)?,
+        cancellation,
+    )
+    .await?;
+    run_required(
+        runner,
+        "list file through mounted FUSE filesystem",
+        CommandRequest::new(Executable::Ls)
+            .arg(FUSE_MOUNTED_FILE)
+            .map_err(command_build_error)?,
+        cancellation,
+    )
+    .await?;
+
+    cleanup_fuse_probe(runner, cancellation).await;
+    Ok(())
+}
+
+async fn wait_for_mount(
+    runner: &dyn CommandRunner,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
+    for _ in 0..50 {
+        let request = CommandRequest::new(Executable::Mountpoint)
+            .arg("-q")
+            .map_err(command_build_error)?
+            .arg(FUSE_MOUNT)
+            .map_err(command_build_error)?
+            .with_timeout(Duration::from_secs(2));
+        if runner
+            .run(request, cancellation.child_token())
+            .await
+            .is_ok()
+        {
+            println!("OK mountpoint became active: {FUSE_MOUNT}");
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
+    Err(format!("mountpoint did not become active: {FUSE_MOUNT}"))
+}
+
+async fn cleanup_fuse_probe(runner: &dyn CommandRunner, cancellation: &CancellationToken) {
+    let cleanup_requests = [
+        CommandRequest::new(Executable::Systemctl)
+            .arg("--user")
+            .and_then(|request| request.arg("stop"))
+            .and_then(|request| request.arg(FUSE_UNIT))
+            .map(|request| request.with_timeout(Duration::from_secs(10))),
+        CommandRequest::new(Executable::Fusermount3)
+            .arg("-u")
+            .and_then(|request| request.arg(FUSE_MOUNT))
+            .map(|request| request.with_timeout(Duration::from_secs(10))),
+        CommandRequest::new(Executable::Rm)
+            .arg("-rf")
+            .and_then(|request| request.arg(FUSE_SOURCE))
+            .and_then(|request| request.arg(FUSE_MOUNT))
+            .map(|request| request.with_timeout(Duration::from_secs(10))),
+    ];
+
+    for request in cleanup_requests.into_iter().flatten() {
+        let _ = runner.run(request, cancellation.child_token()).await;
+    }
+}
+
+async fn run_required(
+    runner: &dyn CommandRunner,
+    label: &str,
+    request: CommandRequest,
+    cancellation: &CancellationToken,
+) -> Result<CommandOutput, String> {
+    let output = runner
+        .run(request, cancellation.child_token())
+        .await
+        .map_err(|error| format!("{label}: {error}"))?;
+    print_output(label, &output);
+    Ok(output)
+}
+
+fn command_build_error(error: CommandError) -> String {
+    format!("failed to build command: {error}")
 }
 
 async fn run_inventory(runner: &dyn CommandRunner, cancellation: &CancellationToken) {
@@ -304,10 +536,13 @@ fn first_line(value: &str) -> String {
 }
 
 fn print_help() {
-    println!("Usage: cargo run --example flatpak_host_runner_probe -- [--flatpak-host|--native]");
+    println!(
+        "Usage: cargo run --example flatpak_host_runner_probe -- [--flatpak-host|--native] [--fuse]"
+    );
     println!();
     println!("  --flatpak-host  Run commands through flatpak-spawn --host. Default.");
     println!("  --native        Run commands directly for a host sanity check.");
+    println!("  --fuse          Run disposable rclone FUSE host-visibility probe.");
     let auto = RuntimeCommandRunner::detect_current();
     println!("  detected runtime runner: {auto:?}");
 }
