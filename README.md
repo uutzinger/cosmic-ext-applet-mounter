@@ -41,11 +41,11 @@ Example screen shots of the applet:
 
 Until installation through COSMIC Store is available, install the Debian
 package from the [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest).
-Version 0.4.0 currently provides an `amd64` package:
+Version 0.4.1 currently provides an `amd64` package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.0/cosmic-ext-applet-mounter_0.4.0_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.0_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.1/cosmic-ext-applet-mounter_0.4.1_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.1_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop

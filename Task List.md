@@ -1421,7 +1421,7 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   migrated to the Flatpak installation.
 - [x] Add a Flatpak-specific warning if the package cannot safely coexist with
   the native `.deb` or source installation.
-- [ ] Prepare a tagged release whose version matches Cargo, AppStream, the
+- [x] Prepare a tagged release whose version matches Cargo, AppStream, the
   Flatpak manifest source, and GitHub release artifacts.
 - [x] Add the completed build and verification evidence to
   `Task List Completion Notes.md`.

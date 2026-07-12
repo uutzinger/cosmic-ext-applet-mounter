@@ -48,7 +48,7 @@
         {
           "type": "git",
           "url": "https://github.com/uutzinger/cosmic-ext-applet-mounter.git",
-          "commit": "REPLACE_WITH_FLATPAK_READY_COMMIT"
+          "tag": "v0.4.1"
         },
         "cargo-sources.json"
       ]

@@ -1,3 +1,12 @@
+cosmic-ext-applet-mounter (0.4.1) unstable; urgency=medium
+
+  * Align release metadata after the 0.4.0 merge.
+  * Point the project Flatpak manifest scaffold at the tagged source release.
+  * Update AppStream screenshot URLs and release notes for stable tag-based
+    references.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Sun, 12 Jul 2026 10:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.0) unstable; urgency=medium
 
   * Add Flatpak host-runner packaging prototype and final manifest scaffold.
