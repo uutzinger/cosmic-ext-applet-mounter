@@ -559,6 +559,9 @@ description is `Applet Description.md`.
   Enable/Disable action controls the same `enabled` field.
 - [x] Keep Remove as a Modify-window action with two-step confirmation; do not
   expose Remove on the main popup.
+- [x] Make destructive connection removal state visible in Modify mode:
+  `Remove` changes to `Confirm Remove`, then to a disabled/shaded
+  `Removing...` state while generated-unit cleanup runs.
 - [x] Move Import into the Add-mode action row only. Import shall scan legacy
   services, map a selected preview into the same Add/Modify fields, and require
   Save Connection before creating the applet-managed connection.
@@ -967,6 +970,9 @@ auditable.
   connection.
 - [x] Require explicit confirmation before deleting an rclone remote, and state
   that this affects rclone configuration rather than only applet configuration.
+- [x] Make rclone remote removal state visible: `Remove remote` changes to
+  `Confirm Remove`, then to a disabled/shaded `Removing...` state while rclone
+  configuration is updated.
 - [x] Decide whether rclone remote removal is hidden behind an advanced action
   such as Shift-click, a context action, or a dedicated advanced management
   surface.
@@ -998,6 +1004,8 @@ auditable.
   targets, nested paths, and shared account/remote acknowledgement.
 - [x] Verify rclone remote removal refuses in-use remotes and removes only the
   selected unused remote after confirmation.
+- [x] Verify connection and rclone remote removal succeed from the Add/Modify
+  window after the confirmation-state UI update.
 - [x] Verify detected rclone remotes wrap cleanly at the default settings window
   width.
 - [x] Complete user-guided visual review of the Version 0.2 Add/Modify and main
@@ -1016,7 +1024,7 @@ authentication behavior.
   Offline Mirror mode.
 - [x] Prefer a desktop-portal folder chooser when available so the applet uses
   the user session's native file/folder selection workflow.
-- [ ] Ensure the folder picker can create a new folder or offers a clear
+- [x] Ensure the folder picker can create a new folder or offers a clear
   create-folder path through the underlying chooser.
 - [x] Preserve plain text entry as an advanced/manual fallback.
 - [x] Validate picked folders with the existing duplicate-target, nested-path,
@@ -1049,7 +1057,7 @@ authentication behavior.
   fork.
 - [x] Open
   [cosmic-utils/cosmic-project-collection pull request 85](https://github.com/cosmic-utils/cosmic-project-collection/pull/85).
-- [ ] After the pull request is merged, verify the upstream workflow generates
+- [x] After the pull request is merged, verify the upstream workflow generates
   the README and website entries and that both display the project correctly.
 
 
@@ -1088,17 +1096,17 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   user systemd unit creation and control, FUSE mount visibility, host
   NetworkManager/Cisco status, existing rclone configuration, provider
   authentication, and access to user-selected mount/mirror directories.
-- [ ] Add a Flatpak runtime mode that routes approved host commands through
+- [x] Add a Flatpak runtime mode that routes approved host commands through
   `flatpak-spawn --host`; preserve the current direct command runner for native
   `.deb` and source installations.
   - [x] Prototype the runtime command-runner layer with native and
     `flatpak-spawn --host` modes without wiring it into the installed applet.
-  - [ ] Wire the applet to select the Flatpak runtime runner when executing
+  - [x] Wire the applet to select the Flatpak runtime runner when executing
     inside an installed Flatpak.
 - [x] Start from the accepted COSMIC drives-applet precedent of
   `--talk-name=org.freedesktop.Flatpak` and narrowly justify any additional
   permissions this applet requires.
-- [ ] Verify host command argument passing, exit status, standard output,
+- [x] Verify host command argument passing, exit status, standard output,
   standard error, cancellation, timeouts, and secret redaction through
   `flatpak-spawn --host`.
   - [x] Add a probe-only Flatpak manifest that grants only
@@ -1110,9 +1118,29 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   - [x] Live-verify nonzero exit status, stderr capture, timeout, and
     cancellation behavior through `flatpak-spawn --host`.
 - [x] Determine which configuration belongs inside the Flatpak and which must
-  remain on the host. Existing rclone and OneDrive credentials must not be
-  silently copied into a second credential store.
-- [ ] Determine whether `--filesystem=host` is actually required. Prefer the
+  remain on the host. Existing applet connections, rclone and OneDrive
+  credentials, generated user units, and app-owned engine metadata must not be
+  silently copied into a second sandbox-private store.
+- [x] Implement a Flatpak host-visible applet state bridge.
+  - [x] Reject sandbox-private applet connection configuration as the normal
+    Flatpak behavior because users switching from source or Debian installs
+    would otherwise have to recreate connections.
+  - [x] Define the host-visible applet state root for Flatpak mode, matching
+    the native COSMIC configuration namespace where possible.
+  - [x] Add a typed host-side helper or equivalent host-spawn operation for
+    reading the applet configuration document from the native-visible location.
+  - [x] Add a typed host-side helper or equivalent host-spawn operation for
+    validated atomic applet configuration writes.
+  - [x] Route generated user systemd unit/timer writes through the same
+    host-visible state path or host-side helper so systemd sees the files in
+    the normal user session.
+  - [x] Route app-owned onedriver config/cache paths and abraunegg/onedrive
+    config/sync/recovery paths through documented host-visible locations.
+  - [x] Keep provider-owned state host-owned: rclone config, onedriver auth,
+    onedrive refresh tokens, NetworkManager/Cisco profiles, and systemd state.
+  - [x] Verify native source and Debian installs continue using the existing
+    direct COSMIC configuration and unit-management code paths.
+- [x] Determine whether `--filesystem=host` is actually required. Prefer the
   narrowest filesystem permissions that still allow existing remote discovery,
   selected mount/mirror targets, recovery directories, and user-unit files.
 - [x] Verify that host-created FUSE mounts are visible to ordinary host file
@@ -1130,39 +1158,39 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 
 ### Flatpak Build Inputs
 
-- [ ] Add a project-owned Flatpak manifest named
+- [x] Add a project-owned Flatpak manifest named
   `io.github.uutzinger.cosmic-ext-applet-mounter.json` under a documented
   packaging directory; keep it structurally ready to copy into the COSMIC
   repository's matching `app/<application-id>/` directory.
-- [ ] Use the current accepted runtime stack:
+- [x] Use the current accepted runtime stack:
   `org.freedesktop.Platform//25.08`, `org.freedesktop.Sdk//25.08`,
   `org.freedesktop.Sdk.Extension.rust-stable`, and
   `com.system76.Cosmic.BaseApp//stable`. Recheck these versions immediately
   before submission because repository conventions can advance.
-- [ ] Set the manifest `command` to `cosmic-ext-applet-mounter`.
+- [x] Set the manifest `command` to `cosmic-ext-applet-mounter`.
 - [ ] Build the Rust binary from a tagged source archive or pinned commit rather
   than from an unpinned branch.
-- [ ] Generate `cargo-sources.json` for an offline, reproducible
+- [x] Generate `cargo-sources.json` for an offline, reproducible
   `flatpak-builder --sandbox` build, including the pinned libcosmic Git revision
   and its Git/submodule dependencies.
-- [ ] Add a repeatable project command or script that regenerates
+- [x] Add a repeatable project command or script that regenerates
   `cargo-sources.json` after dependency changes.
-- [ ] Install the applet binary to `/app/bin/cosmic-ext-applet-mounter` and the
+- [x] Install the applet binary to `/app/bin/cosmic-ext-applet-mounter` and the
   OneDrive authentication helper only if the approved architecture still uses
   it.
-- [ ] Install the desktop file as
+- [x] Install the desktop file as
   `/app/share/applications/io.github.uutzinger.cosmic-ext-applet-mounter.desktop`.
-- [ ] Install AppStream metadata as
+- [x] Install AppStream metadata as
   `/app/share/metainfo/io.github.uutzinger.cosmic-ext-applet-mounter.metainfo.xml`.
-- [ ] Install the scalable icon as
+- [x] Install the scalable icon as
   `/app/share/icons/hicolor/scalable/apps/io.github.uutzinger.cosmic-ext-applet-mounter.svg`.
-- [ ] Define the minimum required `finish-args`; justify each filesystem,
+- [x] Define the minimum required `finish-args`; justify each filesystem,
   socket, device, D-Bus, and host-command permission in manifest comments or
   packaging documentation.
-- [ ] Include Wayland and required COSMIC settings-daemon access following
+- [x] Include Wayland and required COSMIC settings-daemon access following
   accepted applet manifests; add fallback X11, IPC, network, session bus, host
   filesystem, or device access only when a tested feature requires it.
-- [ ] Continue using the desktop portal for user-selected folders where
+- [x] Continue using the desktop portal for user-selected folders where
   possible, even if broader filesystem permissions are ultimately required for
   mount and mirror operation.
 
@@ -1173,11 +1201,11 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   file, AppStream metadata, icon name, and application code.
 - [x] Include `<id>com.system76.CosmicApplet</id>` in the AppStream
   `<provides>` section so COSMIC can classify the package as an applet.
-- [ ] Change the AppStream binary declaration to the official template form:
+- [x] Change the AppStream binary declaration to the official template form:
   `<binaries><binary>cosmic-ext-applet-mounter</binary></binaries>`.
-- [ ] Add the AppStream `COSMIC` category and `COSMIC` keyword while retaining
+- [x] Add the AppStream `COSMIC` category and `COSMIC` keyword while retaining
   useful storage-related keywords.
-- [ ] Change the desktop entry to include `Categories=COSMIC;Utility;` and keep
+- [x] Change the desktop entry to include `Categories=COSMIC;Utility;` and keep
   `Keywords=COSMIC;cloud;mount;mirror;storage;`.
 - [x] Include `NoDisplay=true`, `X-CosmicApplet=true`, and
   `X-CosmicHoverPopup=Auto` in the desktop entry.
@@ -1193,10 +1221,10 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 
 ### Local Build and Installation
 
-- [ ] Install the local prerequisites: `flatpak`, `flatpak-builder`, and `just`.
-- [ ] Add the Flathub remote required by repository builds and runtime/SDK
+- [x] Install the local prerequisites: `flatpak`, `flatpak-builder`, and `just`.
+- [x] Add the Flathub remote required by repository builds and runtime/SDK
   dependency installation.
-- [ ] Add the COSMIC repository for local testing:
+- [x] Add the COSMIC repository for local testing:
   `flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo`.
 - [ ] Build through the current `pop-os/cosmic-flatpak` workflow using
   `just build io.github.uutzinger.cosmic-ext-applet-mounter` in a local clone of
@@ -1219,43 +1247,179 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 
 ### Flatpak Functional Verification
 
-- [ ] Verify the popup opens promptly and Add/Modify windows have the correct
+- [x] Verify the popup opens promptly and Add/Modify windows have the correct
   title, icon, tooltips, folder chooser, and keyboard navigation.
-- [ ] Verify dependency detection reports host dependency state accurately from
+- [x] Decide and implement the Flatpak configuration/state model.
+  - [x] Decide that the Flatpak applet shall share or migrate the native-visible
+    COSMIC applet configuration rather than using sandbox-private connection
+    configuration for normal operation.
+  - [x] Implement host-visible applet configuration read access for Flatpak
+    mode.
+  - [x] Implement host-visible applet configuration write access for Flatpak
+    mode.
+  - [x] Verify Modify Connection opens native saved connections from the
+    Flatpak runtime through the host-visible configuration bridge.
+  - [x] Ensure generated user systemd unit files and app-owned durable
+    config/cache/state paths are routed to locations where host services can
+    actually use them.
+  - [x] Live-verify app-owned onedriver and abraunegg/onedrive metadata paths
+    from the Flatpak prototype before marking OneDrive Save/setup flows
+    complete.
+- [x] Verify the GUI settings window opens from the prototype Flatpak.
+- [x] Resolve GUI prototype theme mismatch so the Flatpak settings window uses
+  the host COSMIC light/dark mode and full theme configuration at startup.
+- [x] Verify dependency detection reports host dependency state accurately from
   inside the packaged applet.
-- [ ] Verify an existing rclone remote can be detected without copying or
+  - [x] Verify host dependency inventory through the packaged Flatpak host
+    runner probe.
+  - [x] Verify the real GUI reports dependency and safety state correctly from
+    inside the prototype Flatpak.
+- [x] Verify an existing rclone remote can be detected without copying or
   exposing credentials to applet configuration.
-- [ ] Verify Box and Google Drive OAuth setup, SMB remote setup, and unused
+- [x] Verify Box and Google Drive OAuth setup, SMB remote setup, and unused
   rclone remote removal under the approved sandbox architecture.
-- [ ] Verify OneDrive Online Mount setup, mount, status refresh, clean unmount,
+  - [x] Live-verify applet-created Box OAuth remote setup from the Flatpak
+    prototype using a disposable/non-critical connection.
+  - [x] Live-verify applet-created Google Drive OAuth remote setup from the
+    Flatpak prototype using a disposable/non-critical connection.
+  - [x] Live-verify applet-created SMB remote setup from the Flatpak prototype
+    after adding applet-managed password entry/update.
+  - [x] Implement SMB password entry/update inside the applet using a transient
+    masked password field and `rclone config password`, without saving SMB
+    passwords in applet configuration.
+  - [x] Live-verify unused rclone remote removal succeeds after the
+    confirmation-state UI update.
+- [x] Verify OneDrive Online Mount setup, mount, status refresh, clean unmount,
   and confirmed lazy-unmount recovery.
-- [ ] Verify OneDrive Offline Mirror authentication, preview, initial sync,
+  - [x] Live-verify OneDrive Online Mount authentication/setup from the Flatpak
+    prototype with the user's corporate OneDrive account.
+  - [x] Live-recheck OneDrive Online Mount popup toggle, status refresh, and
+    file access from the Flatpak prototype.
+  - [x] Confirm failed onedriver clean unmount can leave a stale
+    `fuse.onedriver` endpoint that requires lazy-unmount recovery.
+  - [x] Live-recheck applet Repair confirmation flow for OneDrive Online Mount
+    lazy-unmount recovery from the Flatpak prototype.
+- [x] Verify OneDrive Offline Mirror authentication, preview, initial sync,
   start/stop, Sync Now, conflict preservation, and recovery retention.
-- [ ] Verify rclone Online Mount and Offline Mirror workflows for Box, Google
+  - [x] Increase bounded OneDrive post-auth dry-run validation timeout and make
+    setup notices explain that authorization can be followed by several minutes
+    of validation.
+  - [x] Cache successful OneDrive setup/Test Connection validation in the open
+    editor so Save Connection does not repeat the same dry-run when the form is
+    unchanged.
+  - [x] Use OneDrive-specific command error wording for OneDrive preview/sync
+    operations instead of rclone wording.
+  - [x] Run initial OneDrive Offline Mirror Sync Now with `--resync` after a
+    successful Preview, then record initial sync completion so later Sync Now
+    runs use normal `onedrive --sync`.
+  - [x] Add `--resync-auth` to initial OneDrive Offline Mirror Sync Now so
+    abraunegg/onedrive can run non-interactively after the applet-required
+    Preview plus explicit Sync Now confirmation.
+  - [x] Live-recheck OneDrive Offline Mirror authentication/setup and confirm
+    the applet explains the long post-auth validation wait.
+  - [x] Live-recheck OneDrive Offline Mirror Save after setup validation and
+    confirm it skips duplicate validation when the draft is unchanged.
+  - [x] Live-recheck initial OneDrive Offline Mirror Sync Now starts after the
+    `--resync-auth` correction.
+  - [x] Live-recheck OneDrive Offline Mirror initial Sync Now completion and
+    confirm downloaded local mirror content plus `initial-sync-complete` state.
+  - [x] Live-recheck OneDrive Offline Mirror later normal Sync Now after
+    `initial-sync-complete`.
+  - [x] Live-recheck OneDrive Offline Mirror start/stop monitoring through the
+    Flatpak popup toggle.
+  - [x] Live-recheck OneDrive Offline Mirror local-to-cloud Sync Now with a
+    disposable test file in the personal OneDrive mirror.
+  - [x] Live-recheck OneDrive Offline Mirror conflict preservation with a
+    disposable same-file local/remote edit.
+  - [x] Live-recheck OneDrive Offline Mirror recovery retention using provider
+    recycle-bin recovery for a disposable deleted file.
+- [x] Verify rclone Online Mount and Offline Mirror workflows for Box, Google
   Drive, and SMB using disposable/non-critical data.
-- [ ] Verify user systemd services and timers are created, controlled, and
+  - [x] Verify the Flatpak-generated Box Online Mount host user unit can be
+    started and stopped cleanly for the saved `UA Box` connection.
+  - [x] Verify the Box Online Mount appears as a host-visible `fuse.rclone`
+    mount and can be read by ordinary host processes.
+  - [x] Verify the Flatpak-generated personal Google Drive Online Mount host
+    user unit can be started/stopped cleanly and appears as host-visible
+    `fuse.rclone`.
+  - [x] Verify the same Box Online Mount start/stop path through the applet
+    popup toggle rather than direct host `systemctl --user` control.
+  - [x] Verify the personal Google Drive Online Mount start/stop path through
+    the applet popup toggle.
+  - [x] Verify the SMB Online Mount popup toggle with Cisco VPN connected,
+    confirm expected mounted content, then disconnect VPN and unmount cleanly.
+  - [x] Use longer bounded rclone mount timeouts for SMB Online Mounts than for
+    Google Drive and Box, because slow corporate SMB directory listings can
+    exceed the cloud-mount timeout and surface as file-manager I/O errors.
+  - [x] Add a disposable Box Offline Mirror connection for Flatpak preview and
+    sync verification.
+  - [x] Resolve initial rclone bisync preview failure caused by the
+    `--check-access`/`RCLONE_TEST` sentinel requirement on empty first-time
+    local mirrors.
+  - [x] Re-run Box Offline Mirror Preview from the Flatpak popup and confirm it
+    produces a dry-run summary without requiring a preexisting local sentinel
+    file.
+  - [x] Run Box Offline Mirror initial Sync Now from the Flatpak popup, confirm
+    the disposable remote files appear in the local mirror, and confirm future
+    syncs use normal bisync behavior.
+  - [x] Add a disposable Google Drive Offline Mirror connection for Flatpak
+    preview and sync verification.
+  - [x] Re-run Google Drive Offline Mirror Preview from the Flatpak popup and
+    confirm it produces a dry-run summary without requiring a preexisting local
+    sentinel file.
+  - [x] Run Google Drive Offline Mirror initial Sync Now from the Flatpak popup,
+    confirm the disposable remote files appear in the local mirror, and confirm
+    future syncs use normal bisync behavior.
+  - [x] Add a disposable SMB Offline Mirror connection for Flatpak preview and
+    sync verification.
+  - [x] Run SMB Offline Mirror Preview from the Flatpak popup and confirm it
+    produces a dry-run summary with Cisco VPN connected.
+  - [x] Run SMB Offline Mirror initial Sync Now from the Flatpak popup, confirm
+    the disposable remote files appear in the local mirror, and confirm future
+    syncs use normal bisync behavior.
+- [x] Verify user systemd services and timers are created, controlled, and
   observed in the intended host user session.
-- [ ] Verify FUSE mounts created by the applet are visible to ordinary host file
+  - [x] Verify the Flatpak-generated `UA Box` mount unit is loaded in the host
+    user systemd manager and remains disabled after manual start/stop testing.
+  - [x] Verify tested Box, Google Drive, and SMB online mount services plus
+    disposable offline mirror services/timers are loaded from host
+    `~/.config/systemd/user`, disabled, and inactive after verification.
+- [x] Verify FUSE mounts created by the applet are visible to ordinary host file
   managers and applications and do not remain trapped in the Flatpak namespace.
-- [ ] Verify NetworkManager and Cisco VPN detection, asynchronous popup status,
+  - [x] Verify `UA Box` mounted from the Flatpak-generated unit is visible at
+    `/home/uutzinger/Cloud/UA_Box` as `fuse.rclone`.
+  - [x] Verify personal Google Drive mounted from the Flatpak-generated unit is
+    visible at `/home/uutzinger/Cloud/uutzinger_GoogleDrive` as `fuse.rclone`.
+  - [x] Verify SMB Online Mount content was visible through the host file
+    manager/process view with Cisco VPN connected.
+- [x] Verify NetworkManager and Cisco VPN detection, asynchronous popup status,
   activation readiness, and disconnect-only-if-activated behavior.
-- [ ] Verify metered-network pause behavior and network-loss recovery.
-- [ ] Repeat the data-integrity safety tests that prevent overlapping Online
+  - [x] Verify GUI Detect VPNs imports/detects existing VPN choices from the
+    prototype Flatpak.
+  - [x] Re-run automated NetworkManager/Cisco VPN parser, readiness, and
+    disconnect-ownership tests after Flatpak host-runner changes.
+  - [x] Verify popup asynchronous VPN status from the prototype Flatpak.
+  - [x] Verify popup VPN activation readiness and disconnect-only-if-activated
+    behavior from the prototype Flatpak.
+- [x] Verify metered-network pause behavior and network-loss recovery policy
+  with automated tests; live network disruption was not performed during this
+  Flatpak pass.
+- [x] Repeat the data-integrity safety tests that prevent overlapping Online
   Mount and Offline Mirror targets or engines.
-- [ ] Capture known sandbox limitations and any behavior that differs from the
+- [x] Capture known sandbox limitations and any behavior that differs from the
   Debian/native installation.
 
 ### User Documentation and Release Preparation
 
-- [ ] Add Flatpak build, local install, update, run, troubleshooting, and
+- [x] Add Flatpak build, local install, update, run, troubleshooting, and
   uninstall instructions to `README.md` without displacing native Debian/source
   installation instructions.
-- [ ] State clearly whether host dependencies must be installed separately and
+- [x] State clearly whether host dependencies must be installed separately and
   how the Flatpak discovers and invokes them.
-- [ ] Document every non-default Flatpak permission and why the applet needs it.
-- [ ] Document whether existing native applet configuration is shared with or
+- [x] Document every non-default Flatpak permission and why the applet needs it.
+- [x] Document whether existing native applet configuration is shared with or
   migrated to the Flatpak installation.
-- [ ] Add a Flatpak-specific warning if the package cannot safely coexist with
+- [x] Add a Flatpak-specific warning if the package cannot safely coexist with
   the native `.deb` or source installation.
 - [ ] Prepare a tagged release whose version matches Cargo, AppStream, the
   Flatpak manifest source, and GitHub release artifacts.

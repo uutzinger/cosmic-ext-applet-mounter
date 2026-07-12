@@ -114,7 +114,9 @@ class AuthWindow:
         )
         dialog.format_secondary_text(
             "The response URL was written to onedrive's transient handoff file. "
-            "You can close this window and return to COSMIC Cloud Mounter."
+            "Cloud Mounter will continue with post-auth validation, which can "
+            "take several minutes on the first dry-run preview. You can close "
+            "this window and return to COSMIC Cloud Mounter."
         )
         dialog.connect("response", lambda *_args: Gtk.main_quit())
         dialog.show_all()

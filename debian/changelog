@@ -1,3 +1,14 @@
+cosmic-ext-applet-mounter (0.4.0) unstable; urgency=medium
+
+  * Add Flatpak host-runner packaging prototype and final manifest scaffold.
+  * Share native-visible applet configuration with Flatpak installations.
+  * Improve VPN status, Cisco activation, OneDrive mirror setup, SMB remote
+    authentication, popup layout, settings UI, and removal confirmation flows.
+  * Keep COSMIC applet metadata validation visible but non-fatal where current
+    freedesktop validators do not recognize official COSMIC template fields.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Sat, 11 Jul 2026 17:30:00 -0700
+
 cosmic-ext-applet-mounter (0.3.0) unstable; urgency=medium
 
   * Version 0.3 release candidate.

@@ -41,11 +41,11 @@ Example screen shots of the applet:
 
 Until installation through COSMIC Store is available, install the Debian
 package from the [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest).
-Version 0.3.0 currently provides an `amd64` package:
+Version 0.4.0 currently provides an `amd64` package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.3.0/cosmic-ext-applet-mounter_0.3.0_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.3.0_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.0/cosmic-ext-applet-mounter_0.4.0_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.0_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -228,9 +228,71 @@ system. `just install-user` installs the development build under `~/.local` and
 updates desktop metadata and icons for the current user.
 
 `just metadata-check` validates the desktop entry and AppStream metadata without
-network access. `just metadata-check-net` additionally verifies published URLs
-and screenshots. `just deb` builds a local unsigned Debian binary package in the
-parent directory.
+network access. Because the official COSMIC applet template currently uses
+COSMIC-specific metadata fields that strict freedesktop validators report as
+invalid or unknown, `just metadata-check` is non-fatal; use
+`just metadata-check-strict` to see the raw validator result. `just
+metadata-check-net` additionally checks published URLs and screenshots. `just
+deb` builds a local unsigned Debian binary package in the parent directory.
+
+## Flatpak Packaging Status
+
+Flatpak packaging is in prototype/submission preparation. The applet has been
+live-tested from a local Flatpak prototype, but it is not yet published through
+COSMIC Store.
+
+The project-owned final manifest scaffold is:
+
+```text
+packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json
+```
+
+Prototype build:
+
+```sh
+cargo build --release
+flatpak-builder --force-clean --user --install \
+  target/flatpak-gui-prototype \
+  packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json
+flatpak run io.github.uutzinger.cosmic-ext-applet-mounter
+```
+
+The final manifest uses `flatpak-spawn --host` for approved host commands, so
+host dependencies still must be installed separately: `rclone`, `onedriver`,
+`onedrive`, `fusermount3`, `nmcli`, and any VPN clients used by configured
+connections.
+
+The tested Flatpak design does **not** require `--filesystem=host`. It uses
+narrow app-specific grants for:
+
+- native-visible COSMIC applet configuration;
+- app-owned engine configuration/cache/state;
+- generated user systemd units;
+- host COSMIC theme files for standalone settings windows.
+
+Existing native/source/Debian applet configuration is shared with the Flatpak
+prototype through:
+
+```text
+~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document
+```
+
+Do not run native and Flatpak instances at the same time. Both can see the same
+connection configuration and manage the same generated user services, so
+concurrent instances can race on mount, sync, and service state. Switching
+package formats should be done by stopping the running applet first, then
+starting the other package format.
+
+To prepare the reproducible Flatpak source list after dependency changes:
+
+```sh
+just flatpak-cargo-sources
+```
+
+This requires `flatpak-cargo-generator` or the equivalent COSMIC helper script
+and writes `packaging/flatpak/cargo-sources.json`. The final COSMIC repository
+submission must replace the manifest's placeholder source commit with the
+tagged release commit and build through the `pop-os/cosmic-flatpak` workflow.
 
 ## Project Development
 
@@ -252,7 +314,7 @@ You can implement additional features to this project using agentic programming;
 - Have your AI agent update the Requirements and Specifications based on the Applet Description.
 - Verify the modifications to the Requirements and Specifications.
 - Ask your AI agent to update the Functional Requirements based on your reviewed Requirements and Specifications.
-- Have your AI agent add Tasks to the Task list based on the Specifications.
+- Have your AI agent add Tasks to the Task list based on the updated Specifications.
 - Have your AI agent execute the additions to the Task list.
 - Complete the verifications and test your implementation.
 - Submit pull request.

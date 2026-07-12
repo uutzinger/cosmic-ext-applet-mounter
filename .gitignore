@@ -8,3 +8,4 @@
 /debian/files
 __pycache__/
 *.pyc
+.venv-flatpak-generator/

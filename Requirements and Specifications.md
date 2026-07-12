@@ -637,12 +637,29 @@ The Flatpak command-runner mode shall preserve the current safety model:
 The following resources are host resources and shall not be silently copied into
 a Flatpak-private credential or configuration store:
 
+- the applet's own saved connection list and VPN profile references;
 - existing rclone remotes and credentials;
 - `jstaf/onedriver` and `abraunegg/onedrive` authentication state;
 - generated user systemd services and timers under the host user session;
 - user-selected mountpoints, mirror directories, cache directories, and
   recovery directories;
 - NetworkManager and Cisco VPN state.
+
+Flatpak installations shall use the same user-visible applet configuration as
+native source and Debian installations, or shall migrate to that configuration
+with explicit user-visible behavior. A user who switches between native and
+Flatpak packaging shall not be forced to recreate saved connections solely
+because Flatpak changed `XDG_CONFIG_HOME`. The implementation may accomplish
+this with a narrow host-side helper/bridge for configuration and unit writes,
+or with a documented host-visible configuration path, but it shall not silently
+use an isolated sandbox configuration for normal operation.
+
+Any host-side helper or bridge shall keep the same safety constraints as the
+native code path: fixed operations, validated connection IDs and paths, applet
+ownership markers for unit changes, atomic writes, no secret disclosure, and no
+general-purpose shell execution. The helper shall also make it clear which
+state is applet-owned and which state remains provider-owned by rclone,
+onedriver, onedrive, NetworkManager, Cisco Secure Client, or systemd.
 
 Flatpak permissions shall start from the accepted COSMIC applet pattern with
 Wayland/session access and `--talk-name=org.freedesktop.Flatpak` for
@@ -655,8 +672,8 @@ in the Flatpak manifest notes, README, and submission pull request.
 Flatpak publication shall be rejected or postponed if testing shows that the
 package cannot expose mounts to ordinary host applications, cannot manage the
 intended host user services, silently uses different rclone or OneDrive
-credentials than the native applet, or requires unjustified unrestricted host
-access.
+credentials or applet connection configuration than the native applet, or
+requires unjustified unrestricted host access.
 
 ## 10. Configuration Model
 
@@ -752,7 +769,8 @@ behavior.
 The generated service and timer shall:
 
 - use one dedicated bisync work directory per connection;
-- use access checks and supported resilient/recovery features;
+- use read-only setup access validation plus supported resilient/recovery
+  features;
 - prevent concurrent runs;
 - preserve conflict losers rather than deleting them;
 - use recovery directories for deleted or overwritten files;
