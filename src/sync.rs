@@ -16,6 +16,7 @@ use crate::services::{ServiceSpec, TimerSpec};
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
 const DEFAULT_ONEDRIVE: &str = "/usr/bin/onedrive";
 const RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+const ONEDRIVE_PREVIEW_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncError {
@@ -232,7 +233,6 @@ pub fn rclone_bisync_plan(
         remote_recovery_path.clone(),
         "--backup-dir2".to_owned(),
         options.recovery_directory.display().to_string(),
-        "--check-access".to_owned(),
         "--resilient".to_owned(),
         "--recover".to_owned(),
         "--conflict-resolve".to_owned(),
@@ -422,7 +422,7 @@ pub fn one_drive_preview_request(
     if let Some(single_directory) = &plan.single_directory {
         request = request.arg("--single-directory")?.arg(single_directory)?;
     }
-    Ok(request.with_timeout(Duration::from_secs(120)))
+    Ok(request.with_timeout(ONEDRIVE_PREVIEW_TIMEOUT))
 }
 
 pub fn one_drive_auth_request(plan: &OneDriveMirrorPlan) -> Result<CommandRequest, CommandError> {
@@ -454,12 +454,28 @@ pub fn one_drive_auth_files_request(
 }
 
 pub fn one_drive_sync_request(plan: &OneDriveMirrorPlan) -> Result<CommandRequest, CommandError> {
+    one_drive_sync_request_with_resync(plan, false)
+}
+
+pub fn one_drive_initial_sync_request(
+    plan: &OneDriveMirrorPlan,
+) -> Result<CommandRequest, CommandError> {
+    one_drive_sync_request_with_resync(plan, true)
+}
+
+fn one_drive_sync_request_with_resync(
+    plan: &OneDriveMirrorPlan,
+    resync: bool,
+) -> Result<CommandRequest, CommandError> {
     let mut request = CommandRequest::new(Executable::OneDrive)
         .arg("--confdir")?
         .arg(plan.config_directory.as_os_str())?
         .arg("--syncdir")?
         .arg(plan.sync_directory.as_os_str())?
         .arg("--sync")?;
+    if resync {
+        request = request.arg("--resync")?.arg("--resync-auth")?;
+    }
     if let Some(single_directory) = &plan.single_directory {
         request = request.arg("--single-directory")?.arg(single_directory)?;
     }
@@ -828,7 +844,8 @@ mod tests {
         assert_eq!(plan.path1_remote, "ua_gdrive:Projects");
         assert_eq!(plan.timer.interval, Duration::from_secs(900));
         assert!(
-            plan.service
+            !plan
+                .service
                 .arguments
                 .contains(&"--check-access".to_owned())
         );
@@ -1007,17 +1024,32 @@ mod tests {
             .sanitized_command(),
             "onedrive --confdir /home/example/.config/cosmic-mounter/onedrive-sync/2a3f5d45-e867-47e7-943f-66cf60e777ad --reauth --auth-files /tmp/cosmic-onedrive-auth-url:/tmp/cosmic-onedrive-response-url"
         );
-        assert!(
-            one_drive_preview_request(&plan)
-                .expect("preview")
-                .sanitized_command()
-                .contains(" --dry-run")
-        );
+        let preview = one_drive_preview_request(&plan).expect("preview");
+        assert!(preview.sanitized_command().contains(" --dry-run"));
+        assert_eq!(preview.timeout, Duration::from_secs(10 * 60));
         assert!(
             one_drive_sync_request(&plan)
                 .expect("sync")
                 .sanitized_command()
                 .contains(" --sync")
+        );
+        assert!(
+            !one_drive_sync_request(&plan)
+                .expect("sync")
+                .sanitized_command()
+                .contains(" --resync")
+        );
+        assert!(
+            one_drive_initial_sync_request(&plan)
+                .expect("initial sync")
+                .sanitized_command()
+                .contains(" --resync")
+        );
+        assert!(
+            one_drive_initial_sync_request(&plan)
+                .expect("initial sync")
+                .sanitized_command()
+                .contains(" --resync-auth")
         );
     }
 

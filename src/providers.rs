@@ -327,6 +327,7 @@ pub fn rclone_mount_plan(
     });
     let rc_socket = runtime_directory.join(format!("rclone-{}.sock", connection.id));
     let cache_limit = format_cache_limit(options.cache_limit_bytes);
+    let (timeout, contimeout) = rclone_mount_timeouts(connection.provider);
     let mut arguments = vec![
         "mount".to_owned(),
         remote.clone(),
@@ -342,9 +343,9 @@ pub fn rclone_mount_plan(
         "--dir-cache-time".to_owned(),
         "5m".to_owned(),
         "--timeout".to_owned(),
-        "10s".to_owned(),
+        timeout.to_owned(),
         "--contimeout".to_owned(),
-        "5s".to_owned(),
+        contimeout.to_owned(),
         "--low-level-retries".to_owned(),
         "1".to_owned(),
         "--retries".to_owned(),
@@ -377,6 +378,13 @@ pub fn rclone_mount_plan(
             restart_on_failure: true,
         },
     })
+}
+
+fn rclone_mount_timeouts(provider: Provider) -> (&'static str, &'static str) {
+    match provider {
+        Provider::Smb => ("90s", "15s"),
+        Provider::GoogleDrive | Provider::Box | Provider::OneDrive => ("10s", "5s"),
+    }
 }
 
 pub fn onedriver_mount_plan(
@@ -837,6 +845,28 @@ mod tests {
                 .any(|pair| pair == ["--retries", "1"])
         );
         assert!(plan.service.arguments.contains(&"--rc".to_owned()));
+    }
+
+    #[test]
+    fn rclone_mount_plan_uses_longer_smb_timeouts() {
+        let plan = rclone_mount_plan(
+            &connection(Provider::Smb),
+            Path::new("/run/user/1000/cosmic-mounter"),
+            Path::new("/home/example/.cache/cosmic-mounter"),
+        )
+        .expect("plan");
+        assert!(
+            plan.service
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["--timeout", "90s"])
+        );
+        assert!(
+            plan.service
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["--contimeout", "15s"])
+        );
     }
 
     #[test]

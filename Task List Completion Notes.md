@@ -1455,11 +1455,15 @@ Flatpak mode shall route approved host commands through
 concatenation, bounded output, timeouts, cancellation behavior, and redaction.
 
 **Configuration ownership decision:** July 8, 2026. General applet settings
-remain applet configuration, but provider-owned state remains host-owned:
-existing rclone remotes and credentials, `jstaf/onedriver` state,
-`abraunegg/onedrive` state, generated user systemd units/timers, and selected
-storage paths must not be silently copied into a second Flatpak-private
-credential store.
+remain applet configuration, but Flatpak must not make that configuration
+sandbox-private for normal operation. Users switching from source or Debian
+installs to Flatpak should see the same saved connections instead of recreating
+them. Provider-owned state also remains host-owned: existing rclone remotes and
+credentials, `jstaf/onedriver` state, `abraunegg/onedrive` state, generated
+user systemd units/timers, and selected storage paths must not be silently
+copied into a second Flatpak-private credential or connection store. The likely
+implementation is a narrow host-side helper/bridge for applet configuration and
+unit writes, preserving the existing typed-operation safety model.
 
 **Publication rejection rule:** July 8, 2026. Flatpak publication shall be
 rejected or postponed if prototype testing shows that the package cannot expose
@@ -1471,3 +1475,549 @@ native applet, or requires unjustified unrestricted host access.
 now includes the selected Flatpak execution architecture and security tradeoffs
 in section 9.4. Implementation of the Flatpak command runner and live
 `flatpak-spawn --host` verification remain open tasks.
+
+**Flatpak host-runner prototype:** July 8, 2026. Branch
+`flatpak-host-runner` adds the initial command-runner support for Flatpak host
+execution. `src/process.rs` now has `FlatpakHostCommandRunner`, which transforms
+typed requests such as `rclone version` into
+`flatpak-spawn --host rclone version` while preserving separate validated
+arguments, retry policy, timeout, output limit, cancellation, and redaction.
+`RuntimeCommandRunner` can select either the unchanged native
+`SystemCommandRunner` path or the Flatpak host-spawn path. The applet is not
+yet wired to use this runtime selector, so native `just install-user` and
+`just deb` behavior remains unchanged.
+
+**Prototype verification:** July 8, 2026. Added unit tests for Flatpak command
+wrapping, sensitive argument redaction, and native command shape preservation.
+Verification passed with `cargo fmt --all -- --check`,
+`cargo check --all-targets`, and `cargo test --all-targets` on the
+`flatpak-host-runner` branch. `flatpak-spawn` is not present on the current host
+PATH outside a Flatpak sandbox, so live `flatpak-spawn --host` execution remains
+open until a local Flatpak manifest/build exists.
+
+**Probe-only Flatpak manifest:** July 8, 2026. Added
+`packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.HostRunnerProbe.json`
+and `packaging/flatpak/README.md`. This is a prototype manifest only; it copies
+the locally built `flatpak_host_runner_probe` example into a minimal Flatpak and
+is not the final COSMIC repository submission. The probe app ID is
+`io.github.uutzinger.cosmic-ext-applet-mounter-probe`; the first attempted ID
+with an extra segment after `cosmic-ext-applet-mounter` was rejected by
+Flatpak's app ID rules. The final applet ID
+`io.github.uutzinger.cosmic-ext-applet-mounter` remains structurally valid
+because its hyphens are in the final segment.
+
+**Live Flatpak host-spawn verification:** July 8, 2026. Built and installed the
+probe with `flatpak-builder --force-clean --user --install
+target/flatpak-host-runner-probe
+packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.HostRunnerProbe.json`.
+The manifest grants only `--talk-name=org.freedesktop.Flatpak`. Running
+`flatpak run io.github.uutzinger.cosmic-ext-applet-mounter-probe` passed. The
+probe verified that `DependencyInventory` can detect host rclone 1.74.3,
+onedriver 0.15.0, onedrive 2.5.10, FUSE 3.14.0, NetworkManager 1.46.0, Cisco
+Secure Client components, user systemd, and fuser through
+`flatpak-spawn --host`.
+
+**Core host command verification:** July 8, 2026. The same Flatpak probe
+successfully ran `rclone version`, `nmcli general status`,
+`systemctl --user --version`, and `fusermount3 --version` through
+`flatpak-spawn --host`. Native probe mode also passed outside the Codex sandbox.
+Running native `nmcli` inside the Codex command sandbox failed with
+`Operation not permitted`, confirming that NetworkManager checks require the
+normal user session rather than the restricted Codex sandbox. Remaining live
+host-spawn checks: nonzero exit status, stderr capture, timeout behavior, and
+cancellation behavior.
+
+**Stage 1 host-runner behavior verification:** July 8, 2026. Extended the
+Flatpak host-runner probe with expected-error cases and reran it inside the
+installed probe Flatpak. `flatpak-spawn --host` correctly propagated nonzero
+exit status using `false`, stderr capture using `cat` on a nonexistent path,
+timeout behavior using `sleep 5` with a short timeout, and cancellation
+behavior using `sleep 5` with a cancellation token. Native probe mode passed
+the same behavior checks outside the Codex sandbox. This completes the command
+behavior portion of the Flatpak host-runner verification; FUSE visibility and
+host user-systemd service behavior remain open.
+
+**FUSE and user-systemd host-visibility verification:** July 8, 2026. Extended
+the probe with opt-in `--fuse` mode. The probe creates disposable host paths
+under `/tmp`, starts a transient user systemd unit named
+`cosmic-mounter-flatpak-probe.service`, runs host `rclone mount` against a
+local source directory, verifies the mount with host `mountpoint` and `findmnt`,
+lists a probe file through the mounted FUSE filesystem, then stops the unit and
+removes the disposable paths. Native mode passed first. The installed Flatpak
+probe then passed the same test through `flatpak-spawn --host` using only
+`--talk-name=org.freedesktop.Flatpak`. The resulting mount was reported as
+`fuse.rclone` by host `findmnt`, demonstrating that the mount is created in the
+host namespace rather than trapped in the Flatpak sandbox. Post-run cleanup
+verification confirmed `mountpoint` returned inactive, the transient unit was
+inactive, and the disposable source/mount paths no longer existed.
+
+**GUI prototype Flatpak smoke test:** July 8, 2026. Added
+`packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json`
+as a copy-based GUI prototype manifest for the real applet binary. This is not
+the final reproducible COSMIC submission manifest. The applet runtime command
+paths now use `RuntimeCommandRunner::detect_current()` so direct host commands
+are routed through `flatpak-spawn --host` when the applet runs inside Flatpak,
+while native source and Debian installs keep direct execution.
+
+**GUI prototype permissions:** July 8, 2026. The prototype was built and
+installed with `flatpak-builder --force-clean --user --install
+target/flatpak-gui-prototype
+packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json`.
+The installed prototype exposes Wayland, fallback X11, IPC, DRI, and
+`org.freedesktop.Flatpak` session-bus access. Flatpak also added read-only
+theme/config access for GTK/KDE color settings. The settings window launched
+with `flatpak run io.github.uutzinger.cosmic-ext-applet-mounter --settings`
+without immediate error and exited cleanly.
+
+**User GUI verification:** July 8, 2026. User confirmed the Flatpak settings
+window behaved normally. Detect rclone remotes showed existing rclone
+configuration, and Detect VPNs found the existing VPN choices. User observed
+that the prototype used a dark theme instead of the system-default light theme;
+theme matching remains an open Flatpak polish/minimum-permissions item. User
+did not create or save a new connection during this smoke test.
+
+**Flatpak configuration visibility finding:** July 8, 2026. Launching the
+prototype with `--modify-connection 260b9a2f-3409-48e6-8120-308b43b9fa04`
+opened the Modify workflow, but the app reported "Connection is no longer
+available." The native connection exists in
+`~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document`,
+while the Flatpak runtime currently uses sandboxed app configuration under
+`~/.var/app/io.github.uutzinger.cosmic-ext-applet-mounter`. This means host
+command execution through `flatpak-spawn --host` is working, but configuration,
+generated unit files, and app-owned engine metadata need a separate Flatpak
+state/access decision before Modify/Save flows can be considered verified.
+The local `../kdeconnect` reference confirms the same class of issue: code that
+uses `dirs::config_dir()` or `cosmic_config` inside Flatpak sees sandbox paths
+unless it explicitly reads host-visible `~/.config/cosmic` state via `HOME` or a
+bridge.
+
+**Host-visible applet state bridge prototype:** July 8, 2026. Added
+`AppConfigStorage` and `HostVisibleConfigStorage`. Native/source/Debian mode
+continues using `cosmic_config::Config`; Flatpak mode detects `/.flatpak-info`
+and reads/writes the native-visible applet document at
+`~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document`.
+The GUI prototype manifest now grants only that applet-specific COSMIC config
+path with `--filesystem=xdg-config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter:create`.
+Automated tests cover host-visible document loading and atomic writeback. After
+rebuilding and reinstalling the GUI prototype, launching
+`flatpak run io.github.uutzinger.cosmic-ext-applet-mounter --modify-connection
+260b9a2f-3409-48e6-8120-308b43b9fa04` opened the native saved `UA Box`
+connection. User ran Test Connection successfully: the app reported that the
+managed online mount unit validates structurally, rclone remote `ua_box` exists,
+backend `box` matches Box, and `ua_box:` is accessible with one visible item at
+depth 1. The theme mismatch remains open; the prototype still appears dark when
+the system default is light.
+
+**Flatpak Save-path and host user-unit verification:** July 8, 2026. Extended
+Flatpak mode so durable app-owned roots use host-visible paths:
+`~/.config/cosmic-ext-applet-mounter`, `~/.cache/cosmic-ext-applet-mounter`,
+and `~/.local/state/cosmic-ext-applet-mounter`. The GUI prototype manifest now
+also grants narrow access to those app-specific paths plus
+`~/.config/systemd/user`. User opened the Flatpak Modify window for native
+saved `UA Box` and clicked Save Connection. The app reported: "UA Box saved and
+managed mount unit installed. Start at login is disabled; the unit was not
+started." Shell verification showed the host unit file
+`~/.config/systemd/user/cosmic-mounter-260b9a2f-3409-48e6-8120-308b43b9fa04.service`
+was updated, loaded by the host user systemd manager, disabled, and inactive.
+The generated unit contains applet ownership markers, host `/usr/bin/rclone`,
+host mountpoint `/home/uutzinger/Cloud/UA_Box`, and host cache directory
+`/home/uutzinger/.cache/cosmic-ext-applet-mounter/rclone/260b9a2f-3409-48e6-8120-308b43b9fa04`.
+This verifies the Flatpak Save path for a non-destructive rclone Online Mount.
+
+**Flatpak host COSMIC theme verification:** July 8, 2026. The prototype
+settings window initially used a dark theme because the sandboxed runtime did
+not inherit the host COSMIC theme correctly. Diagnostic runs confirmed the
+Flatpak could read the host files under `~/.config/cosmic`, but constructing a
+theme from the built-in light palette plus accent did not match the native
+surface colors. The loader now reads the full host COSMIC theme through
+`cosmic_config::Config::with_custom_path` using the host-visible
+`~/.config/cosmic/com.system76.CosmicTheme.{Light,Dark}/v1` directories, with a
+built-in light/dark plus accent fallback. User confirmed the new Flatpak
+settings window uses light mode and is much closer to the native applet theme.
+Theme changes are applied when the settings window starts; live theme-change
+watching remains a possible later polish item if needed.
+
+**Flatpak rclone Box host-unit and FUSE verification:** July 8, 2026. Verified
+the saved `UA Box` connection generated by the Flatpak prototype through the
+host-visible configuration bridge. Before the test,
+`cosmic-mounter-260b9a2f-3409-48e6-8120-308b43b9fa04.service` was loaded by the
+host user systemd manager, disabled, inactive, and the local path
+`/home/uutzinger/Cloud/UA_Box` was not a mountpoint. Starting the unit with
+host `systemctl --user start` succeeded. Follow-up checks showed
+`ActiveState=active`, `SubState=running`, a nonzero `MainPID`, and
+`mountpoint -q /home/uutzinger/Cloud/UA_Box` returned success. `findmnt`
+reported `/home/uutzinger/Cloud/UA_Box` as source `ua_box:` with filesystem
+type `fuse.rclone`, and a normal host `ls` could list the mounted Box content.
+Stopping the unit with host `systemctl --user stop` succeeded; the unit returned
+to `ActiveState=inactive`, `SubState=dead`, `MainPID=0`, and the path was no
+longer a mountpoint. This verifies the Flatpak-generated host user unit and
+host-visible FUSE behavior for a Box Online Mount. The applet-popup toggle path
+for the same operation remains open for separate UI-driven verification.
+
+**Flatpak rclone Google Drive host-unit and FUSE verification:** July 8, 2026.
+Verified the saved `uutzinger Google Drive` connection
+`88abbf95-0372-44ab-b2a5-e90847060b2c` through the Flatpak-generated host unit.
+Before the test, the unit was loaded, disabled, inactive, and
+`/home/uutzinger/Cloud/uutzinger_GoogleDrive` was not a mountpoint. Starting
+`cosmic-mounter-88abbf95-0372-44ab-b2a5-e90847060b2c.service` with host
+`systemctl --user start` succeeded. The unit entered `ActiveState=active`,
+`SubState=running`, and `findmnt` reported
+`/home/uutzinger/Cloud/uutzinger_GoogleDrive` as source `uutzinger_gdrive:`
+with filesystem type `fuse.rclone`. A normal host `ls` could list the mounted
+Google Drive content. Stopping the unit succeeded, returning the service to
+`ActiveState=inactive`, `SubState=dead`, `MainPID=0`; the path was no longer a
+mountpoint. This verifies host-visible FUSE behavior and clean start/stop for a
+Google Drive Online Mount generated from the Flatpak-visible configuration.
+
+**Flatpak popup-toggle Box Online Mount verification:** July 8, 2026. With the
+Flatpak applet runtime running, user toggled `UA Box` on from the popup. Host
+verification showed
+`cosmic-mounter-260b9a2f-3409-48e6-8120-308b43b9fa04.service` entered
+`ActiveState=active`, `SubState=running`, `MainPID` was nonzero, and
+`/home/uutzinger/Cloud/UA_Box` became a mountpoint. `findmnt` reported the
+mount as source `ua_box:` with filesystem type `fuse.rclone`, proving the popup
+operation used the host-visible FUSE path. User then toggled `UA Box` off from
+the popup. Host verification showed the unit returned to
+`ActiveState=inactive`, `SubState=dead`, `MainPID=0`, and the path was no
+longer a mountpoint. This completes popup-driven mount/unmount verification for
+the Box Online Mount path under the Flatpak prototype.
+
+**Flatpak popup-toggle Google Drive Online Mount verification:** July 8, 2026.
+With the Flatpak applet runtime running, user toggled `uutzinger Google Drive`
+on from the popup. Host verification showed
+`cosmic-mounter-88abbf95-0372-44ab-b2a5-e90847060b2c.service` entered
+`ActiveState=active`, `SubState=running`, `MainPID` was nonzero, and
+`/home/uutzinger/Cloud/uutzinger_GoogleDrive` became a mountpoint. `findmnt`
+reported the mount as source `uutzinger_gdrive:` with filesystem type
+`fuse.rclone`. User toggled the connection off from the popup. Host
+verification showed the unit returned to `ActiveState=inactive`,
+`SubState=dead`, `MainPID=0`, and the path was no longer a mountpoint. This
+completes popup-driven mount/unmount verification for the personal Google Drive
+Online Mount path under the Flatpak prototype.
+
+**Flatpak popup-toggle SMB Online Mount with Cisco VPN verification:** July 8,
+2026. User started Cisco VPN, toggled `UA Engineering Research storage` from
+the Flatpak applet popup, checked the mounted content, and confirmed the
+expected files were visible. User then closed/disconnected the VPN and
+unmounted the drive from the applet. Follow-up host verification showed
+`cosmic-mounter-740cb417-10a1-4afd-a46a-8569c4e0d3e1.service` was
+`ActiveState=inactive`, `SubState=dead`, `MainPID=0`, and
+`/home/uutzinger/Cloud/UA_ENGR` was no longer a mountpoint. This verifies the
+VPN-gated SMB Online Mount popup path at the user-observed content level and
+confirms clean post-test detachment.
+OneDrive-specific metadata paths still need separate live verification.
+
+**Flatpak Box Offline Mirror initial preview correction:** July 8, 2026. Added
+a disposable Box Offline Mirror test connection for the Flatpak prototype. The
+first selected remote subtree, `ua_box:Utzinger/cosmic-mounter-ui-test`, failed
+because the path was ambiguous/not found. The test connection was updated to
+the verified disposable subtree
+`ua_box:cosmic-mounter-live-verify/offline-mirror-20260619-codex`. Preview then
+failed because rclone bisync `--check-access` requires an `RCLONE_TEST`
+sentinel file on both Path1 and Path2, which is incompatible with ordinary
+first-time empty local mirrors unless the applet creates sentinel files in the
+user's cloud storage. A manual bounded dry-run using `--resync --dry-run`
+without `--check-access` succeeded and reported five remote files that would be
+copied to the local mirror. The applet now relies on its existing read-only
+provider setup/access validation and no longer adds rclone bisync
+`--check-access` to generated mirror commands. Focused tests
+`rclone_bisync_plan_preserves_conflicts_recovery_and_schedule` and
+`rclone_preview_request_is_dry_run_and_bounded` passed. The native user install
+and local Flatpak GUI prototype were rebuilt so the next UI Preview test uses
+the corrected command. User then re-ran Preview from the Flatpak Modify
+Connection window. Preview completed successfully for `Disposable Box Offline
+Mirror Test` with uploads 0, downloads 1, deletes 0, conflicts 0, skipped 1,
+and transfer estimate 208 bytes. This confirms the initial preview path works
+for an empty local mirror without requiring a preexisting local sentinel file.
+User then clicked Sync Now for the same disposable mirror. The app reported
+uploads 0, downloads 1, deletes 0, conflicts 0, skipped 0, and recorded initial
+synchronization as complete so future Sync Now runs use normal bisync. Host
+verification showed `/tmp/cosmic-mounter-box-mirror` contains the expected
+files `RCLONE_TEST`, `local-followup.txt`, `local-seed.txt`,
+`remote-followup.txt`, and `remote-seed.txt`. The work directory contains
+`initial-sync-complete`, and the host user systemd service
+`cosmic-mounter-bb69e234-cf3e-4e63-8592-2601a93d604b.service` is loaded,
+disabled, and inactive after the manual sync.
+
+**Flatpak Google Drive Offline Mirror preview verification:** July 8, 2026.
+Created disposable Google Drive subtree
+`uutzinger_gdrive:cosmic-mounter-ui-test` with `RCLONE_TEST` and
+`remote-seed.txt`, then added the `Disposable Google Drive Offline Mirror Test`
+connection through the controlled setup helper. The generated service is
+`cosmic-mounter-4e30dc23-c887-4704-bb98-41c5dfaf6467.service`, the timer is
+`cosmic-mounter-4e30dc23-c887-4704-bb98-41c5dfaf6467.timer`, the local mirror is
+`/tmp/cosmic-mounter-gdrive-mirror`, and the work directory is
+`/home/uutzinger/.local/state/cosmic-ext-applet-mounter/rclone-bisync/4e30dc23-c887-4704-bb98-41c5dfaf6467`.
+User ran Preview from the Flatpak Modify Connection window. Preview completed
+successfully with uploads 0, downloads 1, deletes 0, conflicts 0, skipped 1,
+and transfer estimate 92 bytes. This confirms the Google Drive initial preview
+path works for an empty local mirror without requiring a preexisting local
+sentinel file.
+User then clicked Sync Now for the same disposable mirror. The app reported
+uploads 0, downloads 1, deletes 0, conflicts 0, skipped 0, and recorded initial
+synchronization as complete so future Sync Now runs use normal bisync. Host
+verification showed `/tmp/cosmic-mounter-gdrive-mirror` contains the expected
+files `RCLONE_TEST` and `remote-seed.txt`. The work directory contains
+`initial-sync-complete`, and the host user systemd service
+`cosmic-mounter-4e30dc23-c887-4704-bb98-41c5dfaf6467.service` is loaded,
+disabled, and inactive after the manual sync.
+
+**Flatpak SMB Offline Mirror preview and initial sync verification:** July 8,
+2026. With Cisco VPN connected, verified the disposable SMB subtree
+`ua_engr:Research/Utzinger/cosmic-mounter-ui-test` was reachable and contained
+`RCLONE_TEST`. Added the `Disposable SMB Offline Mirror Test` connection
+through the controlled setup helper. The generated service is
+`cosmic-mounter-9e6d9640-9c99-48ef-86c1-b3e91d8dc146.service`, the timer is
+`cosmic-mounter-9e6d9640-9c99-48ef-86c1-b3e91d8dc146.timer`, the local mirror is
+`/tmp/cosmic-mounter-smb-mirror`, and the work directory is
+`/home/uutzinger/.local/state/cosmic-ext-applet-mounter/rclone-bisync/9e6d9640-9c99-48ef-86c1-b3e91d8dc146`.
+User ran the Flatpak UI preview/sync path and reported Sync Now completed with
+uploads 0, downloads 1, deletes 0, conflicts 0, skipped 0, and initial
+synchronization recorded as complete. Host verification showed
+`/tmp/cosmic-mounter-smb-mirror` contains `RCLONE_TEST`, the work directory
+contains `initial-sync-complete`, and the host user systemd service is loaded,
+disabled, and inactive after the manual sync.
+
+**Flatpak host user systemd visibility rollup:** July 8, 2026. Verified the
+tested Flatpak-generated units are visible to the host user systemd manager and
+loaded from host `~/.config/systemd/user`: `UA Box`,
+`uutzinger Google Drive`, `UA Engineering Research storage`, and disposable
+Box, Google Drive, and SMB Offline Mirror services. The three disposable
+offline mirror timers are also loaded from the host user systemd directory. All
+checked services and timers were disabled and inactive after verification,
+which matches the manual-start/manual-sync test state.
+
+**Flatpak FUSE visibility rollup:** July 8, 2026. Box and personal Google
+Drive Online Mounts created from Flatpak-generated host user units were visible
+to ordinary host processes at `/home/uutzinger/Cloud/UA_Box` and
+`/home/uutzinger/Cloud/uutzinger_GoogleDrive` as `fuse.rclone` mounts. User
+also verified the Cisco-VPN-gated SMB Online Mount displayed the expected
+content from the host-visible mount location before unmounting. This completes
+the current FUSE namespace check for the tested rclone online mount providers:
+mounts are created in the host user session and are not trapped inside the
+Flatpak sandbox.
+
+**Flatpak provider-owned state check:** July 8, 2026. Inspected
+`~/.var/app/io.github.uutzinger.cosmic-ext-applet-mounter` after Flatpak
+prototype testing. The sandbox-private area contained runtime/font/theme/cache
+artifacts such as `fontconfig` caches and `kdeglobals`, but no rclone config,
+onedriver authentication state, abraunegg/onedrive refresh tokens,
+NetworkManager/Cisco profiles, or generated user systemd units. App-owned
+durable roots are present in host-visible locations under
+`~/.config/cosmic-ext-applet-mounter`, `~/.cache/cosmic-ext-applet-mounter`,
+and `~/.local/state/cosmic-ext-applet-mounter`, matching the selected
+host-visible state model.
+
+**Native/direct code path preservation:** July 8, 2026. Focused tests confirmed
+the Flatpak host-runner and host-visible configuration paths are opt-in runtime
+modes rather than replacing native behavior. Passing tests included
+`runtime_runner_can_be_selected_without_changing_native_default`,
+`flatpak_host_runner_wraps_fixed_executable_and_arguments`,
+`flatpak_host_runner_preserves_sensitive_redaction`,
+`host_visible_storage_loads_native_cosmic_document`,
+`host_visible_storage_writes_validated_document_atomically`, and
+`flatpak_durable_roots_use_host_visible_home_paths`. This preserves the direct
+command/config path expected by source and Debian installs while allowing the
+Flatpak runtime to select host-spawn and host-visible state paths.
+
+**Flatpak data-integrity safety recheck:** July 8, 2026. Re-ran focused
+automated safety tests for overlapping mount/mirror targets, unsafe local
+targets, cache/recovery overlap, unsafe rclone remote values, active onedriver
+overlap with OneDrive Offline Mirror, and Add/Modify UI validation. Passing
+tests included `duplicate_and_nested_targets_are_rejected_across_modes`,
+`unsafe_relative_and_system_targets_are_rejected`,
+`cache_and_recovery_directories_cannot_overlap_visible_tree`,
+`rclone_plan_rejects_overlap_and_unsafe_remote_values`,
+`onedrive_plan_blocks_active_onedriver_overlap`,
+`add_validation_rejects_duplicate_name_and_local_overlap`,
+`modify_validation_rejects_duplicate_name_and_local_overlap`, and
+`onedrive_offline_validation_reports_onedriver_overlap`.
+
+**Flatpak VPN parser/readiness automated recheck:** July 8, 2026. Re-ran
+focused VPN tests after Flatpak host-runner changes. Passing tests included
+`runtime_cisco_tunnel_state_reads_exact_connection_state`,
+`runtime_systemd_status_parser_recognizes_active_disabled_units`,
+`vpn_import_dedupes_by_backend_reference`,
+`app_nmcli_parser_recovers_flattened_applet_output`,
+`network_manager_list_profiles_falls_back_to_name_uuid_type_output`,
+`parsers_handle_nmcli_escaping_cisco_connected_and_access_modes`, and
+`activation_and_shutdown_decisions_respect_readiness_and_ownership`. Live
+Flatpak popup observation of asynchronous VPN status and activation/ownership
+behavior remains open.
+
+**Flatpak popup VPN status live check:** July 8, 2026. Host checks showed
+NetworkManager had `cscotun0:tun:activated` and Cisco Secure Client reported
+`Connected to Engineering SSL VPN`. User opened/refreshed the Flatpak applet
+popup and confirmed it displayed the expected active Cisco VPN status. Live
+activation-readiness and disconnect-only-if-activated behavior remains open.
+
+**Flatpak OneDrive app-owned metadata path verification:** July 8, 2026.
+Verified that OneDrive app-owned metadata is stored in host-visible applet roots
+rather than Flatpak sandbox-private state. Existing `jstaf/onedriver` metadata
+appears under `~/.config/cosmic-ext-applet-mounter/onedriver` and
+`~/.cache/cosmic-ext-applet-mounter/onedriver`; existing
+`abraunegg/onedrive` metadata appears under
+`~/.config/cosmic-ext-applet-mounter/onedrive-sync` and recovery state under
+`~/.local/state/cosmic-ext-applet-mounter/onedrive-recovery`. A scan of
+`~/.var/app/io.github.uutzinger.cosmic-ext-applet-mounter` found no copied
+onedriver, onedrive, or rclone credential/config stores. Focused tests also
+passed for isolated onedriver config/cache planning, auth-only request
+construction, authenticated onedriver metadata validation, OneDrive mirror
+interactive setup validation, OneDrive manual auth-files setup validation, and
+transient auth handoff file behavior. Full live OneDrive Flatpak setup/mount
+and mirror authentication flows remain separate open verification items.
+
+**Flatpak metered/network readiness policy recheck:** July 8, 2026. Re-ran
+focused automated tests for offline mirror preview confirmation, metered
+network pause/override behavior, VPN/network readiness blocking, restored
+offline sync and metered states, rclone status composition across readiness,
+service, mount, and pending-write states, and common offline status mappings.
+Passing tests included `sync_decision_requires_preview_confirmation_and_metered_override`,
+`vpn_and_network_readiness_block_operations`,
+`restores_offline_sync_and_metered_states`,
+`rclone_status_combines_readiness_service_mount_and_writes`, and
+`offline_status_maps_common_states`. Live network-loss disruption was not
+performed in this pass to avoid interrupting the user's active network/VPN
+session.
+
+**Flatpak sandbox limitations and behavior differences captured:** July 8,
+2026. Current GUI prototype permissions include Wayland/X11 fallback, IPC, DRI,
+`org.freedesktop.Flatpak` session-bus talk access for `flatpak-spawn --host`,
+narrow host-visible applet config/cache/state grants, `~/.config/systemd/user`
+for generated user units, and read-only host theme/config grants for COSMIC,
+GTK, KDE, and color-scheme data. This differs from native/source/Debian
+execution in three important ways: host commands are mediated through
+`flatpak-spawn --host`; applet-owned state must be explicitly mapped to
+host-visible locations to avoid duplicate sandbox-private configuration; and
+standalone settings windows need explicit COSMIC theme loading to match host
+light/dark mode. Verified behavior so far shows rclone remotes, generated user
+systemd units, app-owned metadata, and FUSE mounts stay host-visible. Remaining
+known open live checks are OneDrive Flatpak setup/mount/mirror flows and popup
+VPN async activation/readiness behavior.
+
+**Flatpak VPN activation live failure and fix:** July 9, 2026. User verified
+that VPN disconnect status is reported correctly, but a Cisco-dependent storage
+connection only reported that Cisco VPN was not running and did not open Cisco
+Secure Client when toggled on. The applet also did not run disconnect ownership
+handling after unmount. Code inspection confirmed that the controller disabled
+Mount while an online mount was in `WaitingForVpn`, and the managed mount
+operation only started/stopped the systemd unit without invoking VPN
+activation or shutdown policy. The controller now allows Mount from
+`WaitingForVpn`, and managed online mount operations call VPN readiness
+activation before starting the mount unit. NetworkManager profiles are
+activated with `nmcli connection up uuid`; Cisco profiles attempt to start the
+agent if needed, open Cisco Secure Client, and poll readiness until the profile
+timeout. Runtime applet-activated VPN IDs are stored under app-owned state so
+unmount can disconnect only a VPN the applet activated and only after no other
+active connection still needs it. Focused checks passed:
+`vpn_and_network_readiness_block_operations`,
+`activation_and_shutdown_decisions_respect_readiness_and_ownership`, and
+`cargo check --all-targets`. Native and Flatpak GUI prototype builds were
+reinstalled for retesting.
+
+**Flatpak VPN activation live verification:** July 9, 2026. User toggled a
+Cisco-VPN-dependent SMB Online Mount from the prototype Flatpak popup while
+Cisco was disconnected. The applet opened/started Cisco Secure Client, allowed
+the user to connect interactively, then completed the SMB mount. Toggling the
+connection off unmounted the SMB share and stopped the VPN connection. This
+verifies the prototype Flatpak popup path for Cisco activation readiness and
+disconnect-only-if-applet-activated behavior.
+
+**Flatpak Add/Modify window tooltip smoke recheck:** July 9, 2026. User found
+overlapping tooltips in the Flatpak settings window: Browse showed both the
+Browse tooltip and mountpoint safety tooltip, and Modify Connection showed both
+the general provider/access-mode tooltip and the locked-control tooltip. The UI
+was changed so Modify Connection uses only locked-control tooltips for provider
+and access-mode buttons, Add Connection retains the general provider/mode
+guidance, and the mountpoint safety warning is attached only to the path text
+input while Browse has its own bottom-positioned tooltip. After reinstalling the
+native build and prototype Flatpak, the user confirmed the tooltip behavior now
+looks correct.
+
+**SMB password handling implementation:** July 11, 2026. Replaced the
+shell-copy/paste SMB password workaround with an applet-managed password update
+path. Add/Modify Connection now shows SMB host, user, domain, and a masked
+transient password field for SMB connections. The password field is intentionally
+blank when modifying an existing connection; leaving it blank preserves the
+current rclone password, while entering a value runs
+`rclone config password <remote> pass <secret>` through the command runner with
+the secret marked sensitive and redacted from recorded command strings. On
+success, the password is cleared from the draft and is not saved in applet
+configuration. Focused tests passed for SMB redacted request construction and
+SMB create/update command sequencing.
+
+**SMB Modify hydration fix:** July 11, 2026. User found that reopening an SMB
+connection showed stale/default SMB metadata such as blank host, local username,
+and WORKGROUP even after the rclone remote had been updated. Modify Connection
+now loads SMB host, username, and domain from the selected rclone remote via
+`rclone config dump`; the password field remains blank and is never hydrated
+from rclone. If the remote cannot be read, Modify mode leaves the SMB fields
+blank rather than showing fabricated defaults. Added a parser test for SMB
+remote detail hydration that ignores secret fields.
+
+**VPN shutdown state recheck:** July 11, 2026. User reported that toggling an
+SMB storage connection off did not disconnect Cisco VPN even though the user
+believed the applet initiated it. Inspection showed the primary SMB connection
+has `disconnect_vpn_when_unused: true`, while the disposable SMB test connection
+has it disabled. The applet activation marker still contained the Cisco VPN id
+even though Cisco was currently disconnected, so popup/global VPN status refresh
+now clears stale applet-activated markers whenever the referenced VPN is not
+ready. This prevents a stale marker from being carried across manual disconnects
+or later tests. Native and Flatpak prototype builds were reinstalled.
+
+**OneDrive Offline Mirror auth/preview timeout finding:** July 11, 2026. User
+reported that OneDrive Online Mount authentication worked, but OneDrive Offline
+Mirror setup gave no clear feedback after browser/WebKit authorization and then
+timed out during dry-run preview. Inspection showed two new app-owned
+`abraunegg/onedrive` `refresh_token` files were created, so authentication was
+likely completing and the failure point was the post-auth
+`onedrive --sync --dry-run --verbose` validation. The WebKitGTK helper remains
+present and installed; it is used by the Manual Auth Handoff path, while the
+primary Start OneDrive Mirror Setup path still uses `onedrive --reauth`
+directly. The OneDrive dry-run preview timeout was increased from 120 seconds
+to 10 minutes, setup failures now explicitly distinguish completed
+authorization from post-auth validation failure, and the helper success dialog
+now states that Cloud Mounter will continue with a potentially long dry-run
+validation.
+
+**OneDrive Offline Mirror setup/save/sync UX correction:** July 11, 2026. User reported that OneDrive browser authorization completed but the applet gave no intermediate indication that post-auth validation had started, Save Connection repeated the same long dry-run validation, and Sync Now failed with misleading rclone wording plus an abraunegg/onedrive resync-required message. The editor now explains that post-auth validation can take several minutes, recommends Manual Auth Handoff only after setup failure, caches successful setup/Test Connection validation for the unchanged draft so Save can install the unit without repeating the dry-run, and labels OneDrive preview/sync failures as onedrive failures. Initial OneDrive Offline Mirror Sync Now now runs onedrive with --resync after a successful Preview, records initial sync completion, and leaves later Sync Now runs on normal onedrive --sync. Verification passed with cargo fmt --all -- --check after formatting, cargo test onedrive, cargo test onedrive_plan_uses_isolated_config_and_monitor_mode, cargo check --all-targets, and just install-user. Live Flatpak recheck remains open.
+
+**OneDrive initial resync noninteractive confirmation fix:** July 11, 2026. Live OneDrive Offline Mirror initial Sync Now reached abraunegg/onedrive --resync but failed because onedrive prompts for confirmation unless --resync-auth is supplied. Since the applet already requires Preview plus explicit Sync Now before initial sync, the initial OneDrive sync command now includes both --resync and --resync-auth. Added a command-construction assertion for --resync-auth.
+
+**SMB Online Mount timeout correction:** July 11, 2026. User reported that the same corporate SMB path worked through GVFS but applet/rclone mount returned I/O errors when opening the writable folder. Read-only rclone checks against ua_engr showed ua_engr:Research/Utzinger is accessible, but listing it took about 46 seconds. The applet-generated rclone online mount used --timeout 10s and --contimeout 5s for all providers, which is too aggressive for this SMB share. SMB rclone online mounts now use --timeout 90s and --contimeout 15s, while Google Drive and Box keep the shorter cloud-mount defaults. Focused tests rclone_mount_plan_uses_provider_remote_and_bounded_defaults and rclone_mount_plan_uses_longer_smb_timeouts passed, along with cargo fmt --all -- --check and cargo check --all-targets. Native and Flatpak prototype builds were reinstalled; existing SMB unit files need Save Connection or regeneration before they receive the longer timeout.
+
+**Connection and rclone remote removal confirmation UI:** July 11, 2026. User confirmed that rclone remote removal and whole-connection removal completed successfully, but requested clearer parity between the two workflows. Modify Connection removal now changes from Remove to Confirm Remove after the first click and then to a disabled/shaded Removing... state while generated-unit cleanup runs. Rclone remote management now similarly changes from Remove remote to Confirm Remove and then to disabled Removing... while rclone configuration is updated. Verification passed with cargo fmt --all -- --check and cargo check --all-targets; native and Flatpak prototype builds were reinstalled.
+
+**OneDrive initial Sync Now retest status:** July 11, 2026. After adding --resync-auth and reinstalling the native and Flatpak prototype builds, user confirmed that OneDrive Offline Mirror Sync Now now starts instead of failing at the abraunegg/onedrive resync confirmation prompt. Full live recheck remains open until setup/save/preview/initial sync/later normal sync behavior is completed end-to-end.
+
+**Flatpak task-list stale-item audit:** July 11, 2026. Reviewed unchecked Flatpak/publication tasks after the host-runner, state-bridge, rclone remote management, SMB password, VPN activation, theme, and OneDrive sync UX work. Marked the Flatpak runtime command-runner task complete because the applet now detects Flatpak mode and selects the `flatpak-spawn --host` runner. Marked host command verification complete because dependency detection, `rclone version`, `nmcli`, `systemctl --user`, `fusermount3`, nonzero status, stderr capture, timeout, cancellation, and redaction were live/probe tested. Marked the host-visible configuration/state bridge and Flatpak configuration/state model complete because native-visible applet config, generated user units, app-owned engine metadata, and provider-owned host state are routed through host-visible locations. Marked Box/Google/SMB rclone remote setup and unused remote removal complete based on live Flatpak prototype testing. Split OneDrive Online Mount and OneDrive Offline Mirror verification into completed setup/auth pieces and remaining end-to-end live rechecks.
+
+**Flatpak local toolchain prerequisite check:** July 11, 2026. Verified `flatpak` 1.16.6, `flatpak-builder` 1.4.2, and `just` 1.42.4 are installed. Verified the user Flatpak remotes include `flathub` and `cosmic`, plus local prototype remotes. Marked the local Flatpak prerequisite, Flathub remote, and COSMIC remote tasks complete.
+
+**Flatpak OneDrive Online Mount partial live recheck:** July 11, 2026. User mounted `UA OneDrive` from the Flatpak applet popup, confirmed files were visible, then unmounted and confirmed access was removed. Host verification showed the onedriver service had exited with status 128 after `fusermount3 -u` failed with "Device or resource busy"; `findmnt` still reported `fuse.onedriver`, while the mountpoint returned "Transport endpoint is not connected." Manual lazy unmount with `fusermount3 -uz /home/uutzinger/Cloud/UA_OneDrive` detached the stale mount and `systemctl --user reset-failed` restored the service to inactive/success. Marked popup toggle/status/file-access and stale-endpoint finding complete, but left the applet Repair confirmation flow open until it is exercised from the popup.
+
+**Flatpak OneDrive Offline Mirror initial sync live recheck:** July 11, 2026. User created a new OneDrive Offline Mirror for the personal Microsoft account named `uutzinger OneDrive mirror`, completed setup, and completed Sync Now from the applet. The saved connection id is `671e12ea-54a8-4077-971a-f115dc77e82b`, remote reference `onedrive-mirror`, local mirror `/home/uutzinger/Cloud/uutzinger_OneDrive_mirror`, and recovery directory `/home/uutzinger/Cloud/.cosmic-mounter-recovery/uutzinger_OneDrive_mirror-671e12ea-54a8-4077-971a-f115dc77e82b`. Host verification showed the generated monitor service exists and is disabled, its ExecStart uses host `/usr/bin/onedrive` with the app-owned confdir and syncdir, the OneDrive confdir contains `refresh_token`, `config`, `.config.hash`, `.config.backup`, `items.sqlite3`, and `initial-sync-complete`, and the local mirror contains downloaded OneDrive directories/files. Marked initial Sync Now completion verified; later normal Sync Now plus start/stop monitoring remain open.
+
+**Flatpak OneDrive Offline Mirror later normal Sync Now live recheck:** July 11, 2026. User ran Sync Now again for `uutzinger OneDrive mirror` after the `initial-sync-complete` marker existed. The app reported completion. Host verification showed the generated service was inactive/dead with `Result=success` and `ExecMainStatus=0` afterward, the `initial-sync-complete` marker remained present, and `items.sqlite3` had a newer modification time than the initial marker. Marked later normal Sync Now verified.
+
+**Flatpak OneDrive Offline Mirror monitor toggle live recheck:** July 11, 2026. User toggled `uutzinger OneDrive mirror` on from the Flatpak popup. Host verification showed `cosmic-mounter-671e12ea-54a8-4077-971a-f115dc77e82b.service` active/running with `MainPID=1393908`, executing `/usr/bin/onedrive --confdir ... --syncdir ... --monitor --monitor-interval 300 --disable-notifications`; logs showed a completed sync followed by continued monitor operation. User then toggled the mirror off. Host verification showed `ActiveState=inactive`, `SubState=dead`, `MainPID=0`, `Result=success`, `ExecMainStatus=0`; logs showed onedrive received the termination signal, performed database vacuum, and stopped cleanly. Marked OneDrive Offline Mirror start/stop monitoring verified.
+
+**Flatpak OneDrive Offline Mirror local-to-cloud Sync Now live recheck:** July 11, 2026. Created disposable local file `/home/uutzinger/Cloud/uutzinger_OneDrive_mirror/cosmic-mounter-test/local-seed.txt`. User ran Sync Now from the Flatpak popup and confirmed `local-seed.txt` exists in OneDrive. Host verification showed the generated service was inactive/dead with `Result=success` and `ExecMainStatus=0`, and the OneDrive `items.sqlite3` database timestamp updated after the local file was created. Marked local-to-cloud Sync Now verified for the OneDrive mirror.
+
+**Flatpak OneDrive Offline Mirror conflict preservation live recheck:** July 11, 2026. Created disposable `conflict-test.txt`, synced it to OneDrive, user edited the remote copy in OneDrive web, then the local copy was edited differently before Sync Now. The sync completed without applet error and the user confirmed the OneDrive web copy retained the remote edit. Local verification showed `/home/uutzinger/Cloud/uutzinger_OneDrive_mirror/cosmic-mounter-test/conflict-test.txt` contains the remote edit, while `/home/uutzinger/Cloud/uutzinger_OneDrive_mirror/cosmic-mounter-test/conflict-test-urslabtop-safeBackup-0001.txt` preserves the local edit. Marked conflict preservation verified for the OneDrive mirror.
+
+**Flatpak OneDrive Offline Mirror deletion/recovery retention live recheck:** July 11, 2026. Created disposable `delete-retention-test.txt`, user ran Sync Now and confirmed it appeared in OneDrive web, then the local file was deleted and user ran Sync Now again. User confirmed the file was removed from the active OneDrive folder and appeared in the OneDrive web Recycle Bin. Local verification showed the active local file was absent, the generated service was inactive/dead with `Result=success` and `ExecMainStatus=0`, and `items.sqlite3` updated after the deletion sync. For abraunegg/onedrive, this verifies provider recycle-bin recovery for deletion retention rather than applet-local recovery-directory retention.
+
+**Flatpak OneDrive Online Mount lazy repair live recheck:** July 11, 2026. Starting from a clean inactive `UA OneDrive` onedriver mount, user reproduced the stale/busy unmount condition using file-manager access and then the applet reported that lazy repair finished. Host verification showed `/home/uutzinger/Cloud/UA_OneDrive` was no longer present in `findmnt`, `mountpoint` reported it is not a mountpoint, the directory was normally accessible again, and `cosmic-mounter-990cc48f-4e4e-4ed7-a07b-c545ad3d3f9d.service` was `ActiveState=inactive`, `SubState=dead`, `MainPID=0`, `Result=success`, and `ExecMainStatus=0`. Marked OneDrive Online Mount lazy-unmount Repair flow verified from the Flatpak prototype.
+
+**Flatpak packaging scaffold and metadata cleanup:** July 11, 2026. Added clear create-folder guidance to the Browse tooltip: users can create a folder in the portal chooser when supported, or type the desired path manually and let the applet validate it before saving. Added `packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json` as the project-owned final-manifest scaffold using the accepted COSMIC runtime stack (`org.freedesktop.Platform//25.08`, `org.freedesktop.Sdk//25.08`, `org.freedesktop.Sdk.Extension.rust-stable`, and `com.system76.Cosmic.BaseApp//stable`), command `cosmic-ext-applet-mounter`, tested host-runner/state finish-args, and final install paths under `/app/bin`, `/app/share/applications`, `/app/share/metainfo`, and `/app/share/icons/hicolor/scalable/apps`. Updated desktop/AppStream metadata to include COSMIC category/keywords and the official template `<binaries>` wrapper. Local strict validators currently reject the official COSMIC category and report the AppStream `<binaries>` wrapper as an unknown provides item, matching the archived COSMIC applet template behavior; therefore the final metadata-validation task remains open until the target `pop-os/cosmic-flatpak` workflow/template is checked at submission time.
+
+**Flatpak minimum-permission decision:** July 11, 2026. Documented the final-manifest permission rationale in `packaging/flatpak/README.md`. Based on prototype live testing, `--filesystem=host` is not required: provider discovery and control happen through `flatpak-spawn --host`, generated user systemd units run host tools in the host session, and the Flatpak only needs app-specific host-visible configuration/cache/state grants plus host COSMIC theme read access. The final scaffold retains Wayland, fallback X11, IPC, DRI, `org.freedesktop.Flatpak`, app-specific COSMIC config, app-owned engine config/cache/state, and user systemd unit-file permissions. The folder portal remains the user-facing folder selection path.
+
+**Flatpak cargo-sources generation command:** July 11, 2026. Added `just flatpak-cargo-sources`, which uses `flatpak-cargo-generator` if installed or the local sibling COSMIC helper script when available, and writes `packaging/flatpak/cargo-sources.json`. Running the recipe initially failed in the sandbox because `just` could not write its runtime directory, then failed outside the sandbox because the sibling helper requires Python `aiohttp`, which was not installed in the current environment. Created a temporary local generator virtual environment, installed the helper dependencies, generated `packaging/flatpak/cargo-sources.json`, and verified it parses as JSON. Updated the recipe to reuse `.venv-flatpak-generator/bin/python` when present, reran `just flatpak-cargo-sources` successfully, and added `.venv-flatpak-generator/` to `.gitignore` so the local helper environment is not tracked.
+
+**Flatpak README documentation update:** July 11, 2026. Added a Flatpak Packaging Status section to `README.md` covering the local GUI prototype build/run commands, the final manifest scaffold path, host dependency expectations, `flatpak-spawn --host` host-command architecture, non-default permission categories, native-visible configuration sharing, source/Debian/Flatpak coexistence warning, and `just flatpak-cargo-sources` usage. Also clarified that `just metadata-check` is non-fatal because strict freedesktop validators currently reject official COSMIC applet template metadata fields; `just metadata-check-strict` shows the raw validator result.
+
+**Native source and Debian compatibility recheck after Flatpak host-runner work:** July 11, 2026. Verified the Flatpak host-runner branch still supports non-Flatpak installs. `just verify` passed: formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests passed. `just install-user` rebuilt and installed the applet binary, OneDrive auth helper, desktop file, AppStream metadata, and icon under the user-local paths. Initial `just deb` failed only because Debian packaging still treated strict freedesktop validation of official COSMIC applet metadata as fatal (`Categories=COSMIC` and AppStream provides/binaries). Updated `debian/rules` to keep those metadata checks visible but non-fatal, matching `just verify`; reran `just deb` successfully and produced `../cosmic-ext-applet-mounter_0.3.0_amd64.deb`. After deciding this work should become the next release, version metadata was bumped to 0.4.0 in Cargo, Debian changelog, AppStream, and README release-package examples; 0.4.0 build verification is the next required step before tagging.
+
+**Version 0.4.0 pre-merge verification:** July 11, 2026. After the version bump, `just verify` passed for `cosmic-ext-applet-mounter v0.4.0`, including formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests. `just install-user` rebuilt and installed the 0.4.0 user-local applet binary, OneDrive auth helper, desktop file, AppStream metadata, and icon. `just deb` completed successfully and produced `../cosmic-ext-applet-mounter_0.4.0_amd64.deb`; strict freedesktop metadata warnings for official COSMIC template fields remained visible but non-fatal.

@@ -22,11 +22,13 @@ pub type CommandFuture<'a> =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Executable {
+    FlatpakSpawn,
     Rclone,
     Onedriver,
     OneDrive,
     Fusermount3,
     Mountpoint,
+    Findmnt,
     Nmcli,
     Ip,
     Getent,
@@ -35,6 +37,15 @@ pub enum Executable {
     SystemdAnalyze,
     Journalctl,
     Fuser,
+    Cat,
+    False,
+    Ls,
+    Mkdir,
+    Printf,
+    Rm,
+    Sleep,
+    SystemdRun,
+    Touch,
     CiscoVpn,
     CiscoVpnUi,
     CiscoAgent,
@@ -46,11 +57,13 @@ impl Executable {
     #[must_use]
     pub const fn display_name(self) -> &'static str {
         match self {
+            Self::FlatpakSpawn => "flatpak-spawn",
             Self::Rclone => "rclone",
             Self::Onedriver => "onedriver",
             Self::OneDrive => "onedrive",
             Self::Fusermount3 => "fusermount3",
             Self::Mountpoint => "mountpoint",
+            Self::Findmnt => "findmnt",
             Self::Nmcli => "nmcli",
             Self::Ip => "ip",
             Self::Getent => "getent",
@@ -59,6 +72,15 @@ impl Executable {
             Self::SystemdAnalyze => "systemd-analyze",
             Self::Journalctl => "journalctl",
             Self::Fuser => "fuser",
+            Self::Cat => "cat",
+            Self::False => "false",
+            Self::Ls => "ls",
+            Self::Mkdir => "mkdir",
+            Self::Printf => "printf",
+            Self::Rm => "rm",
+            Self::Sleep => "sleep",
+            Self::SystemdRun => "systemd-run",
+            Self::Touch => "touch",
             Self::CiscoVpn => "Cisco Secure Client VPN CLI",
             Self::CiscoVpnUi => "Cisco Secure Client VPN UI",
             Self::CiscoAgent => "Cisco Secure Client agent",
@@ -69,11 +91,13 @@ impl Executable {
 
     fn path_candidates(self) -> Vec<&'static str> {
         match self {
+            Self::FlatpakSpawn => vec!["flatpak-spawn"],
             Self::Rclone => vec!["rclone"],
             Self::Onedriver => vec!["onedriver"],
             Self::OneDrive => vec!["onedrive"],
             Self::Fusermount3 => vec!["fusermount3"],
             Self::Mountpoint => vec!["mountpoint"],
+            Self::Findmnt => vec!["findmnt", "/usr/bin/findmnt"],
             Self::Nmcli => vec!["nmcli", "/usr/bin/nmcli", "/bin/nmcli"],
             Self::Ip => vec!["ip"],
             Self::Getent => vec!["getent"],
@@ -82,6 +106,15 @@ impl Executable {
             Self::SystemdAnalyze => vec!["systemd-analyze"],
             Self::Journalctl => vec!["journalctl"],
             Self::Fuser => vec!["fuser"],
+            Self::Cat => vec!["cat", "/usr/bin/cat"],
+            Self::False => vec!["false", "/usr/bin/false"],
+            Self::Ls => vec!["ls", "/usr/bin/ls"],
+            Self::Mkdir => vec!["mkdir", "/usr/bin/mkdir"],
+            Self::Printf => vec!["printf", "/usr/bin/printf"],
+            Self::Rm => vec!["rm", "/usr/bin/rm"],
+            Self::Sleep => vec!["sleep", "/usr/bin/sleep"],
+            Self::SystemdRun => vec!["systemd-run", "/usr/bin/systemd-run"],
+            Self::Touch => vec!["touch", "/usr/bin/touch"],
             Self::CiscoVpn => vec![
                 "/opt/cisco/secureclient/bin/vpn",
                 "/opt/cisco/anyconnect/bin/vpn",
@@ -303,6 +336,114 @@ impl CommandRunner for SystemCommandRunner {
                 .ok_or(CommandError::MissingExecutable(request.executable))?;
             run_with_retries(path, request, cancellation).await
         })
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FlatpakHostCommandRunner;
+
+impl FlatpakHostCommandRunner {
+    fn host_executable_arg(executable: Executable) -> Result<&'static str, CommandError> {
+        executable
+            .path_candidates()
+            .first()
+            .copied()
+            .ok_or(CommandError::MissingExecutable(executable))
+    }
+
+    fn host_request(request: CommandRequest) -> Result<CommandRequest, CommandError> {
+        let host_executable = Self::host_executable_arg(request.executable)?;
+        let mut host_request = CommandRequest::new(Executable::FlatpakSpawn)
+            .arg("--host")?
+            .arg(host_executable)?
+            .with_timeout(request.timeout)
+            .with_output_limit(request.output_limit)
+            .with_retry(request.retry);
+        host_request.args.extend(request.args);
+        Ok(host_request)
+    }
+}
+
+impl CommandRunner for FlatpakHostCommandRunner {
+    fn resolve(&self, executable: Executable) -> Option<PathBuf> {
+        SystemCommandRunner.resolve(Executable::FlatpakSpawn)?;
+        Self::host_executable_arg(executable)
+            .ok()
+            .map(|candidate| PathBuf::from(format!("host:{candidate}")))
+    }
+
+    fn run<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> CommandFuture<'a> {
+        Box::pin(async move {
+            let path = SystemCommandRunner
+                .resolve(Executable::FlatpakSpawn)
+                .ok_or(CommandError::MissingExecutable(Executable::FlatpakSpawn))?;
+            let request = Self::host_request(request)?;
+            run_with_retries(path, request, cancellation).await
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandExecutionMode {
+    Native,
+    FlatpakSpawnHost,
+}
+
+impl CommandExecutionMode {
+    #[must_use]
+    pub fn detect_current() -> Self {
+        if Path::new("/.flatpak-info").is_file() {
+            Self::FlatpakSpawnHost
+        } else {
+            Self::Native
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RuntimeCommandRunner {
+    Native(SystemCommandRunner),
+    FlatpakSpawnHost(FlatpakHostCommandRunner),
+}
+
+impl RuntimeCommandRunner {
+    #[must_use]
+    pub fn for_mode(mode: CommandExecutionMode) -> Self {
+        match mode {
+            CommandExecutionMode::Native => Self::Native(SystemCommandRunner),
+            CommandExecutionMode::FlatpakSpawnHost => {
+                Self::FlatpakSpawnHost(FlatpakHostCommandRunner)
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn detect_current() -> Self {
+        Self::for_mode(CommandExecutionMode::detect_current())
+    }
+}
+
+impl CommandRunner for RuntimeCommandRunner {
+    fn resolve(&self, executable: Executable) -> Option<PathBuf> {
+        match self {
+            Self::Native(runner) => runner.resolve(executable),
+            Self::FlatpakSpawnHost(runner) => runner.resolve(executable),
+        }
+    }
+
+    fn run<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> CommandFuture<'a> {
+        match self {
+            Self::Native(runner) => runner.run(request, cancellation),
+            Self::FlatpakSpawnHost(runner) => runner.run(request, cancellation),
+        }
     }
 }
 
@@ -586,6 +727,73 @@ mod tests {
         let candidates = Executable::Nmcli.path_candidates();
         assert!(candidates.contains(&"nmcli"));
         assert!(candidates.contains(&"/usr/bin/nmcli"));
+    }
+
+    #[test]
+    fn flatpak_host_runner_wraps_fixed_executable_and_arguments() {
+        let request = CommandRequest::new(Executable::Rclone)
+            .arg("version")
+            .expect("safe argument")
+            .with_timeout(Duration::from_secs(22))
+            .with_output_limit(256)
+            .with_retry(RetryPolicy {
+                max_attempts: 2,
+                delay: Duration::from_millis(5),
+                retry_nonzero: true,
+            });
+        let wrapped = FlatpakHostCommandRunner::host_request(request).expect("host request");
+
+        assert_eq!(
+            wrapped.sanitized_command(),
+            "flatpak-spawn --host rclone version"
+        );
+        assert_eq!(wrapped.timeout, Duration::from_secs(22));
+        assert_eq!(wrapped.output_limit, 256);
+        assert_eq!(wrapped.retry.max_attempts, 2);
+        assert_eq!(wrapped.retry.delay, Duration::from_millis(5));
+        assert!(wrapped.retry.retry_nonzero);
+    }
+
+    #[test]
+    fn flatpak_host_runner_preserves_sensitive_redaction() {
+        let request = CommandRequest::new(Executable::Rclone)
+            .arg("config")
+            .expect("safe argument")
+            .arg("password")
+            .expect("safe argument")
+            .arg("remote")
+            .expect("safe argument")
+            .arg("pass")
+            .expect("safe argument")
+            .sensitive_arg("top-secret")
+            .expect("safe sensitive argument");
+        let wrapped = FlatpakHostCommandRunner::host_request(request).expect("host request");
+
+        assert_eq!(
+            wrapped.sanitized_command(),
+            "flatpak-spawn --host rclone config password remote pass [REDACTED]"
+        );
+    }
+
+    #[test]
+    fn system_runner_keeps_native_command_shape() {
+        let request = CommandRequest::new(Executable::Rclone)
+            .arg("version")
+            .expect("safe argument");
+
+        assert_eq!(request.sanitized_command(), "rclone version");
+    }
+
+    #[test]
+    fn runtime_runner_can_be_selected_without_changing_native_default() {
+        assert!(matches!(
+            RuntimeCommandRunner::for_mode(CommandExecutionMode::Native),
+            RuntimeCommandRunner::Native(_)
+        ));
+        assert!(matches!(
+            RuntimeCommandRunner::for_mode(CommandExecutionMode::FlatpakSpawnHost),
+            RuntimeCommandRunner::FlatpakSpawnHost(_)
+        ));
     }
 
     #[tokio::test]

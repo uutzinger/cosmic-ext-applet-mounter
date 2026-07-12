@@ -14,14 +14,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::fl;
-use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::dialog::file_chooser;
 use cosmic::iced::Background;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::{Alignment, Color, Length, Limits, Subscription, window::Id};
 use cosmic::prelude::*;
 use cosmic::widget;
-use cosmic_ext_applet_mounter::config::{APP_ID, Config, ConfigDocument};
+use cosmic_ext_applet_mounter::config::{APP_ID, AppConfigStorage, Config, ConfigDocument};
 use cosmic_ext_applet_mounter::controller::{
     ConnectionRowState, ControllerSnapshot, aggregate_label, decide_operation, operation_label,
     provider_label, restore, status_label,
@@ -37,8 +36,8 @@ use cosmic_ext_applet_mounter::model::{
 };
 use cosmic_ext_applet_mounter::mounts::{MountEntry, MountTable, ProcMountTable, SyncRuntimeState};
 use cosmic_ext_applet_mounter::process::{
-    CommandError, CommandOutput, CommandRequest, CommandRunner, Executable, SystemCommandRunner,
-    redact_text,
+    CommandError, CommandExecutionMode, CommandOutput, CommandRequest, CommandRunner, Executable,
+    RuntimeCommandRunner, redact_text,
 };
 use cosmic_ext_applet_mounter::providers::{
     CommandRcloneProvider, OnedriverAuthState, ProviderError, lazy_unmount_request,
@@ -51,13 +50,14 @@ use cosmic_ext_applet_mounter::services::{
 use cosmic_ext_applet_mounter::sync::{
     OneDriveIsolationReport, SyncDecision, SyncDecisionRejection, SyncReadiness, SyncRequest,
     SyncTrigger, google_native_filter_file, one_drive_auth_files_request, one_drive_auth_request,
-    one_drive_mirror_plan, one_drive_preview_request, one_drive_sync_request, parse_preview,
-    rclone_bisync_initial_preview_request, rclone_bisync_initial_sync_request, rclone_bisync_plan,
-    rclone_bisync_preview_request, rclone_bisync_sync_request, sync_now_request,
+    one_drive_initial_sync_request, one_drive_mirror_plan, one_drive_preview_request,
+    one_drive_sync_request, parse_preview, rclone_bisync_initial_preview_request,
+    rclone_bisync_initial_sync_request, rclone_bisync_plan, rclone_bisync_preview_request,
+    rclone_bisync_sync_request, sync_now_request,
 };
 use cosmic_ext_applet_mounter::vpn::{
     CiscoTunnelState, CiscoVpn, CommandCiscoVpn, CommandNetworkManagerVpn, CommandReadinessProbe,
-    NetworkManagerVpn, readiness_report,
+    NetworkManagerVpn, VpnShutdownDecision, readiness_report, shutdown_decision,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -107,6 +107,7 @@ struct ConnectionDraft {
     smb_host: String,
     smb_user: String,
     smb_domain: String,
+    smb_password: String,
     local_path: String,
     enabled: bool,
     start_at_login: bool,
@@ -124,6 +125,19 @@ struct RcloneDraftRemote {
     backend: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedDraft {
+    connection: Connection,
+    summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SmbRemoteDetails {
+    host: String,
+    user: String,
+    domain: String,
+}
+
 impl Default for ConnectionDraft {
     fn default() -> Self {
         Self {
@@ -136,6 +150,7 @@ impl Default for ConnectionDraft {
             smb_host: String::new(),
             smb_user: std::env::var("USER").unwrap_or_default(),
             smb_domain: "WORKGROUP".into(),
+            smb_password: String::new(),
             local_path: String::new(),
             enabled: true,
             start_at_login: false,
@@ -163,8 +178,11 @@ pub struct AppModel {
     pending_repair: Option<ConnectionId>,
     pending_shared_remote_ack: Option<ConnectionId>,
     pending_rclone_remote_remove: Option<String>,
+    removing_connection: Option<ConnectionId>,
+    removing_rclone_remote: Option<String>,
     onedrive_auth_open_command: String,
     onedrive_auth_response_url: String,
+    validated_draft: Option<ValidatedDraft>,
     last_notice: Option<String>,
     last_notice_at: Option<Instant>,
     vpn_ready: BTreeMap<VpnProfileId, bool>,
@@ -187,6 +205,7 @@ pub enum Message {
     DraftSmbHost(String),
     DraftSmbUser(String),
     DraftSmbDomain(String),
+    DraftSmbPassword(String),
     DraftLocalPath(String),
     OpenLocalFolderPicker,
     LocalFolderPicked(Result<Option<String>, String>),
@@ -206,7 +225,7 @@ pub enum Message {
     CreateBoxRcloneRemote,
     BoxRcloneRemoteCreated(Result<String, String>),
     CreateSmbRcloneRemote,
-    SmbRcloneRemoteCreated(Result<String, String>),
+    SmbRcloneRemoteCreated(Result<SmbRemoteApplyResult, String>),
     RequestRemoveRcloneRemote(String),
     RcloneRemoteRemoved(Result<String, String>),
     StartOnedriverSetup,
@@ -217,7 +236,7 @@ pub enum Message {
     OpenOneDriveMirrorAuthUrl,
     SubmitOneDriveMirrorAuthResponse,
     TestDraft,
-    DraftTested(String),
+    DraftTested(Connection, Result<String, String>),
     SaveDraft,
     SaveDraftValidated(Connection, Result<String, String>),
     DraftSaved(String),
@@ -245,7 +264,7 @@ impl cosmic::Application for AppModel {
     }
 
     fn init(core: cosmic::Core, flags: Self::Flags) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        let config = Config::load().config;
+        let config = Config::load_runtime().config;
         let main_window_id = core.main_window_id();
         let standalone = flags != AppLaunchMode::Applet;
         let window_mode = match flags {
@@ -267,8 +286,11 @@ impl cosmic::Application for AppModel {
             pending_repair: None,
             pending_shared_remote_ack: None,
             pending_rclone_remote_remove: None,
+            removing_connection: None,
+            removing_rclone_remote: None,
             onedrive_auth_open_command: String::new(),
             onedrive_auth_response_url: String::new(),
+            validated_draft: None,
             last_notice: None,
             last_notice_at: None,
             vpn_ready: BTreeMap::new(),
@@ -333,7 +355,7 @@ impl cosmic::Application for AppModel {
                 return if let Some(id) = self.popup.take() {
                     destroy_popup(id)
                 } else {
-                    self.config = Config::load().config;
+                    self.config = Config::load_runtime().config;
                     self.pending_remove = None;
                     self.pending_repair = None;
                     self.pending_shared_remote_ack = None;
@@ -372,6 +394,8 @@ impl cosmic::Application for AppModel {
                 self.pending_repair = None;
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.removing_connection = None;
+                self.removing_rclone_remote = None;
                 self.launch_settings_process(AppLaunchMode::AddConnection);
             }
             Message::OpenModifyConnection(connection_id) => {
@@ -379,6 +403,8 @@ impl cosmic::Application for AppModel {
                 self.pending_repair = None;
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.removing_connection = None;
+                self.removing_rclone_remote = None;
                 self.launch_settings_process(AppLaunchMode::ModifyConnection(connection_id));
             }
             Message::PopupClosed(id) if self.popup == Some(id) => {
@@ -389,7 +415,7 @@ impl cosmic::Application for AppModel {
                 return self.record_operation_request(connection_id, operation);
             }
             Message::OperationCompleted(notice) => {
-                self.config = Config::load().config;
+                self.config = Config::load_runtime().config;
                 self.pending_repair = None;
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
@@ -406,7 +432,11 @@ impl cosmic::Application for AppModel {
                 }
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.validated_draft = None;
                 self.draft.provider = provider;
+                if provider != Provider::Smb {
+                    self.draft.smb_password.clear();
+                }
                 if provider == Provider::OneDrive {
                     self.draft.remote_reference = "onedrive".into();
                 }
@@ -419,34 +449,46 @@ impl cosmic::Application for AppModel {
                     );
                     return Task::none();
                 }
+                self.validated_draft = None;
                 self.draft.access_mode = mode;
             }
             Message::DraftName(value) => {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.validated_draft = None;
                 self.draft.name = value;
             }
             Message::DraftRemote(value) => {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.validated_draft = None;
                 self.draft.remote_reference = value;
             }
             Message::DraftSubpath(value) => {
                 self.pending_shared_remote_ack = None;
+                self.validated_draft = None;
                 self.draft.remote_subpath = value;
             }
             Message::DraftSmbHost(value) => {
+                self.validated_draft = None;
                 self.draft.smb_host = value;
             }
             Message::DraftSmbUser(value) => {
+                self.validated_draft = None;
                 self.draft.smb_user = value;
             }
             Message::DraftSmbDomain(value) => {
+                self.validated_draft = None;
                 self.draft.smb_domain = value;
+            }
+            Message::DraftSmbPassword(value) => {
+                self.validated_draft = None;
+                self.draft.smb_password = value;
             }
             Message::DraftLocalPath(value) => {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
+                self.validated_draft = None;
                 self.draft.local_path = value;
             }
             Message::OpenLocalFolderPicker => {
@@ -456,6 +498,7 @@ impl cosmic::Application for AppModel {
                 Ok(Some(path)) => {
                     self.pending_shared_remote_ack = None;
                     self.pending_rclone_remote_remove = None;
+                    self.validated_draft = None;
                     self.draft.local_path = path.clone();
                     self.last_notice = Some(format!(
                         "{} selected: {path}",
@@ -470,27 +513,35 @@ impl cosmic::Application for AppModel {
                 }
             },
             Message::DraftRecoveryDirectory(value) => {
+                self.validated_draft = None;
                 self.draft.recovery_directory = value;
             }
             Message::DraftCacheLimit(value) => {
+                self.validated_draft = None;
                 self.draft.cache_limit_gib = value;
             }
             Message::DraftSyncInterval(value) => {
+                self.validated_draft = None;
                 self.draft.sync_interval_minutes = value;
             }
             Message::DraftEnabled(value) => {
+                self.validated_draft = None;
                 self.draft.enabled = value;
             }
             Message::DraftStartAtLogin(value) => {
+                self.validated_draft = None;
                 self.draft.start_at_login = value;
             }
             Message::DraftSyncOnMetered(value) => {
+                self.validated_draft = None;
                 self.draft.sync_on_metered = value;
             }
             Message::DraftVpn(id) => {
+                self.validated_draft = None;
                 self.draft.vpn_profile_id = id;
             }
             Message::DraftDisconnectVpn(value) => {
+                self.validated_draft = None;
                 self.draft.disconnect_vpn_when_unused = value;
             }
             Message::DraftOneDriveAuthResponse(value) => {
@@ -507,6 +558,7 @@ impl cosmic::Application for AppModel {
             }
             Message::GoogleDriveRcloneRemoteCreated(result) => match result {
                 Ok(remote_name) => {
+                    self.validated_draft = None;
                     self.draft.remote_reference = remote_name.clone();
                     self.detect_rclone_remotes();
                     self.last_notice = Some(format!(
@@ -524,6 +576,7 @@ impl cosmic::Application for AppModel {
             }
             Message::BoxRcloneRemoteCreated(result) => match result {
                 Ok(remote_name) => {
+                    self.validated_draft = None;
                     self.draft.remote_reference = remote_name.clone();
                     self.detect_rclone_remotes();
                     self.last_notice = Some(format!(
@@ -538,11 +591,19 @@ impl cosmic::Application for AppModel {
                 return self.create_smb_rclone_remote();
             }
             Message::SmbRcloneRemoteCreated(result) => match result {
-                Ok(remote_name) => {
-                    self.draft.remote_reference = remote_name.clone();
+                Ok(result) => {
+                    self.validated_draft = None;
+                    self.draft.remote_reference = result.remote_name.clone();
+                    self.draft.smb_password.clear();
                     self.detect_rclone_remotes();
+                    let password_status = if result.password_updated {
+                        "The SMB password was updated in rclone and cleared from the applet form."
+                    } else {
+                        "No password was entered; the existing rclone password was left unchanged."
+                    };
                     self.last_notice = Some(format!(
-                        "Created SMB rclone remote `{remote_name}`. It is selected; run Test Connection to verify access."
+                        "Created or updated SMB rclone remote `{}` with host/user/domain metadata. {password_status} Run Test Connection to verify access.",
+                        result.remote_name
                     ));
                 }
                 Err(error) => {
@@ -555,6 +616,8 @@ impl cosmic::Application for AppModel {
             Message::RcloneRemoteRemoved(result) => match result {
                 Ok(remote_name) => {
                     self.pending_rclone_remote_remove = None;
+                    self.removing_rclone_remote = None;
+                    self.validated_draft = None;
                     if self.draft.remote_reference == remote_name {
                         self.draft.remote_reference.clear();
                     }
@@ -565,6 +628,7 @@ impl cosmic::Application for AppModel {
                 }
                 Err(error) => {
                     self.pending_rclone_remote_remove = None;
+                    self.removing_rclone_remote = None;
                     self.last_notice = Some(format!("Could not remove rclone remote: {error}"));
                 }
             },
@@ -593,13 +657,19 @@ impl cosmic::Application for AppModel {
                 Ok(summary) => {
                     self.onedrive_auth_open_command.clear();
                     self.onedrive_auth_response_url.clear();
+                    if let Ok(connection) = connection_from_draft(&self.draft) {
+                        self.validated_draft = Some(ValidatedDraft {
+                            connection,
+                            summary: summary.clone(),
+                        });
+                    }
                     self.last_notice = Some(format!(
-                        "OneDrive Offline Mirror setup completed. {summary} Run Test Connection, preview the initial synchronization, then Save Connection."
+                        "OneDrive Offline Mirror authorization and validation completed. {summary} Save Connection can reuse this validation. After saving, run Preview, then Sync Now to start the initial mirror."
                     ));
                 }
                 Err(error) => {
                     self.last_notice = Some(format!(
-                        "Could not complete OneDrive Offline Mirror setup: {error}"
+                        "Could not complete OneDrive Offline Mirror setup: {error}. If browser redirect capture failed or authentication timed out, use Manual Auth Handoff."
                     ));
                 }
             },
@@ -612,9 +682,25 @@ impl cosmic::Application for AppModel {
             Message::TestDraft => {
                 return self.test_draft_plan();
             }
-            Message::DraftTested(notice) => {
-                self.last_notice = Some(notice);
-            }
+            Message::DraftTested(connection, result) => match result {
+                Ok(summary) => {
+                    self.validated_draft = Some(ValidatedDraft {
+                        connection: connection.clone(),
+                        summary: summary.clone(),
+                    });
+                    self.last_notice = Some(format!(
+                        "Draft test passed for {}. {summary}",
+                        connection.name
+                    ));
+                }
+                Err(error) => {
+                    self.validated_draft = None;
+                    self.last_notice = Some(format!(
+                        "Draft test failed for {}: {error}",
+                        connection.name
+                    ));
+                }
+            },
             Message::SaveDraft => {
                 return self.save_draft();
             }
@@ -639,11 +725,15 @@ impl cosmic::Application for AppModel {
                 return self.remove_connection_with_confirmation(connection_id);
             }
             Message::RemoveCompleted(notice) => {
+                self.pending_remove = None;
+                self.removing_connection = None;
                 self.last_notice = Some(notice);
             }
             Message::Refresh => {
-                self.config = Config::load().config;
+                self.config = Config::load_runtime().config;
                 self.pending_remove = None;
+                self.removing_connection = None;
+                self.removing_rclone_remote = None;
                 self.last_notice = Some("Configuration reloaded.".into());
                 self.last_notice_at = Some(Instant::now());
                 self.vpn_ready = BTreeMap::new();
@@ -674,7 +764,11 @@ impl cosmic::Application for AppModel {
     }
 
     fn style(&self) -> Option<cosmic::iced::theme::Style> {
-        Some(cosmic::applet::style())
+        if self.standalone {
+            None
+        } else {
+            Some(cosmic::applet::style())
+        }
     }
 }
 
@@ -863,35 +957,56 @@ impl AppModel {
         mut content: widget::ListColumn<'a, Message>,
     ) -> widget::ListColumn<'a, Message> {
         let modify_locked = matches!(self.window_mode, WindowMode::ModifyConnection(_));
+        let provider_choices = choice_row(vec![
+            provider_choice(
+                "OneDrive",
+                Provider::OneDrive,
+                self.draft.provider,
+                modify_locked,
+            ),
+            provider_choice(
+                "Google Drive",
+                Provider::GoogleDrive,
+                self.draft.provider,
+                modify_locked,
+            ),
+            provider_choice("Box", Provider::Box, self.draft.provider, modify_locked),
+            provider_choice("SMB", Provider::Smb, self.draft.provider, modify_locked),
+        ]);
+        let mode_choices = choice_row(vec![
+            mode_choice(
+                "Online mount",
+                AccessMode::OnlineMount,
+                self.draft.access_mode,
+                modify_locked,
+            ),
+            mode_choice(
+                "Offline mirror",
+                AccessMode::OfflineMirror,
+                self.draft.access_mode,
+                modify_locked,
+            ),
+        ]);
+
         content = content
-            .add(section_row_with_help(
-                "Provider",
-                "Choose the storage provider. OneDrive uses OneDrive-specific engines; Google Drive, Box, and SMB use rclone.",
-                choice_row(vec![
-                    provider_choice("OneDrive", Provider::OneDrive, self.draft.provider, modify_locked),
-                    provider_choice("Google Drive", Provider::GoogleDrive, self.draft.provider, modify_locked),
-                    provider_choice("Box", Provider::Box, self.draft.provider, modify_locked),
-                    provider_choice("SMB", Provider::Smb, self.draft.provider, modify_locked),
-                ]),
-            ))
-            .add(section_row_with_help(
-                "Access mode",
-                "Online mount gives on-demand network-backed access. Offline mirror keeps a local copy and synchronizes later.",
-                choice_row(vec![
-                    mode_choice(
-                        "Online mount",
-                        AccessMode::OnlineMount,
-                        self.draft.access_mode,
-                        modify_locked,
-                    ),
-                    mode_choice(
-                        "Offline mirror",
-                        AccessMode::OfflineMirror,
-                        self.draft.access_mode,
-                        modify_locked,
-                    ),
-                ]),
-            ))
+            .add(if modify_locked {
+                section_row("Provider", provider_choices)
+            } else {
+                section_row_with_help(
+                    "Provider",
+                    "Choose the storage provider. OneDrive uses OneDrive-specific engines; Google Drive, Box, and SMB use rclone.",
+                    provider_choices,
+                )
+            })
+            .add(if modify_locked {
+                section_row("Access mode", mode_choices)
+            } else {
+                section_row_with_help(
+                    "Access mode",
+                    "Online mount gives on-demand network-backed access. Offline mirror keeps a local copy and synchronizes later.",
+                    mode_choices,
+                )
+            })
             .add(section_row(
                 "Connection",
                 widget::Column::new()
@@ -906,10 +1021,8 @@ impl AppModel {
                     ))
                     .push(self.view_remote_account_fields()),
             ))
-            .add(section_row_with_safety_help(
+            .add(section_row(
                 local_target_label(self.draft.access_mode),
-                "Do not reuse mountpoints and mirror directories.",
-                "Online mounts use a mountpoint. Offline mirrors use an ordinary local directory.",
                 self.view_local_target_picker(),
             ));
 
@@ -1040,6 +1153,13 @@ impl AppModel {
                         .into()
                 };
                 let mut modify_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
+                if self.draft.provider == Provider::Smb {
+                    modify_row = modify_row.push(field_with_help(
+                        widget::button::standard("Update SMB Remote")
+                            .on_press(Message::CreateSmbRcloneRemote),
+                        "Update the selected rclone SMB remote. Enter a password to rotate it without saving the password in applet configuration; host, username, and domain are optional for existing remotes.",
+                    ));
+                }
                 if self.saved_connection_is_offline_mirror(connection_id) {
                     modify_row = modify_row
                         .push(field_with_help(
@@ -1066,8 +1186,7 @@ impl AppModel {
                         "Disable prevents automatic use without deleting credentials, data, cache, recovery, or imported originals.",
                     ))
                     .push(field_with_help(
-                        widget::button::destructive("Remove")
-                            .on_press(Message::RemoveConnection(connection_id)),
+                        self.view_remove_connection_button(connection_id),
                         "Remove this applet-managed connection after confirmation. User data and external credentials are preserved.",
                     ));
 
@@ -1087,6 +1206,25 @@ impl AppModel {
         }
 
         primary_row.into()
+    }
+
+    fn view_remove_connection_button(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Element<'static, Message> {
+        if self.removing_connection == Some(connection_id) {
+            widget::button::standard("Removing...")
+                .on_press_maybe(None)
+                .into()
+        } else if self.pending_remove == Some(connection_id) {
+            widget::button::destructive("Confirm Remove")
+                .on_press(Message::RemoveConnection(connection_id))
+                .into()
+        } else {
+            widget::button::destructive("Remove")
+                .on_press(Message::RemoveConnection(connection_id))
+                .into()
+        }
     }
 
     fn view_onedrive_setup_actions(&self) -> Option<Element<'static, Message>> {
@@ -1119,13 +1257,18 @@ impl AppModel {
         widget::Row::new()
             .spacing(8)
             .align_y(Alignment::Center)
-            .push(
+            .push(field_with_safety_help(
                 widget::text_input::text_input("/home/user/Cloud/Example", &self.draft.local_path)
                     .on_input(Message::DraftLocalPath),
-            )
-            .push(field_with_help(
+                "Do not reuse mountpoints and mirror directories.",
+                "Online mounts use a mountpoint. Offline mirrors use an ordinary local directory.",
+            ))
+            .push(field_with_help_at(
                 widget::button::standard("Browse").on_press(Message::OpenLocalFolderPicker),
-                "Choose the local mountpoint or mirror directory with the desktop folder picker. Keep using the text field for advanced/manual path entry.",
+                TooltipHelp::Plain(Cow::Borrowed(
+                "Choose an existing local mountpoint or mirror directory with the desktop folder picker. To use a new folder, create it in the chooser if your portal supports that, or type the desired path in the text field and let the applet validate it before saving.",
+                )),
+                widget::tooltip::Position::Bottom,
             ))
             .into()
     }
@@ -1143,9 +1286,9 @@ impl AppModel {
                 "Create the rclone Box remote with local browser OAuth. Complete the browser authorization window that rclone opens, then run Test Connection. Credentials and refresh tokens stay in rclone config, not applet configuration.",
             ),
             Provider::Smb => field_with_help(
-                widget::button::suggested("Create SMB Remote")
+                widget::button::suggested("Create/Update SMB Remote")
                     .on_press(Message::CreateSmbRcloneRemote),
-                "Create the rclone SMB remote with host/user/domain only, then detect and select it. Passwords stay in rclone, not applet config.",
+                "Create or update the rclone SMB remote with host/user/domain metadata. If the SMB password field is filled, the applet updates the rclone password and then clears the field. Passwords stay in rclone, not applet configuration.",
             ),
             Provider::OneDrive => widget::Space::new().width(Length::Shrink).into(),
         }
@@ -1328,7 +1471,7 @@ impl AppModel {
             }
         }
 
-        if provider == Provider::Smb && self.window_mode == WindowMode::AddConnection {
+        if provider == Provider::Smb {
             column = column.push(self.view_smb_remote_setup_fields());
         }
 
@@ -1350,7 +1493,7 @@ impl AppModel {
             .push(field_with_help(
                 widget::text_input::text_input("SMB server host", &self.draft.smb_host)
                     .on_input(Message::DraftSmbHost),
-                "Server DNS name or IP address used for rclone's SMB `host` option. Create SMB Remote uses these fields and leaves passwords in rclone, not applet configuration.",
+                "Server DNS name or IP address used for rclone's SMB `host` option. Create/Update SMB Remote uses these fields and leaves passwords in rclone, not applet configuration.",
             ))
             .push(field_with_help(
                 widget::text_input::text_input("SMB username", &self.draft.smb_user)
@@ -1361,6 +1504,16 @@ impl AppModel {
                 widget::text_input::text_input("SMB domain or WORKGROUP", &self.draft.smb_domain)
                     .on_input(Message::DraftSmbDomain),
                 "Optional NTLM domain. WORKGROUP is rclone's default.",
+            ))
+            .push(field_with_safety_help(
+                widget::text_input::text_input(
+                    "SMB password (leave blank to keep existing)",
+                    &self.draft.smb_password,
+                )
+                .password()
+                .on_input(Message::DraftSmbPassword),
+                "The applet does not save this password.",
+                "Enter a password only when creating a new SMB remote or changing an expired/incorrect SMB password. On success it is stored in rclone's config and cleared from this form.",
             ))
             .into()
     }
@@ -1411,12 +1564,17 @@ impl AppModel {
             let in_use = self.rclone_remote_is_referenced(&remote.name);
             let confirm =
                 self.pending_rclone_remote_remove.as_deref() == Some(remote.name.as_str());
+            let removing = self.removing_rclone_remote.as_deref() == Some(remote.name.as_str());
             let button: Element<'_, Message> = if in_use {
                 widget::button::standard("In use")
                     .on_press_maybe(None)
                     .into()
+            } else if removing {
+                widget::button::standard("Removing...")
+                    .on_press_maybe(None)
+                    .into()
             } else if confirm {
-                widget::button::destructive("Confirm remove")
+                widget::button::destructive("Confirm Remove")
                     .on_press(Message::RequestRemoveRcloneRemote(remote.name.clone()))
                     .into()
             } else {
@@ -1610,6 +1768,34 @@ impl AppModel {
         };
         self.pending_shared_remote_ack = None;
         self.draft = draft_from_connection(connection);
+        if connection.provider == Provider::Smb {
+            match load_smb_remote_details(&connection.remote_reference) {
+                Ok(Some(details)) => {
+                    self.draft.smb_host = details.host;
+                    self.draft.smb_user = details.user;
+                    self.draft.smb_domain = details.domain;
+                    self.last_notice = Some(format!(
+                        "Modify {}. SMB host/user/domain were loaded from rclone; password remains blank.",
+                        connection.name
+                    ));
+                    return;
+                }
+                Ok(None) => {
+                    self.last_notice = Some(format!(
+                        "Modify {}. The rclone SMB remote `{}` was not found; host/user/domain are blank.",
+                        connection.name, connection.remote_reference
+                    ));
+                    return;
+                }
+                Err(error) => {
+                    self.last_notice = Some(format!(
+                        "Modify {}. Could not load SMB details from rclone: {error}",
+                        connection.name
+                    ));
+                    return;
+                }
+            }
+        }
         self.last_notice = Some(format!("Modify {}.", connection.name));
     }
 
@@ -1629,17 +1815,29 @@ impl AppModel {
             self.last_notice = Some(error);
             return Task::none();
         }
-        if let Some(warning) = self.shared_remote_warning(&connection) {
-            if self.pending_shared_remote_ack != Some(connection.id) {
-                self.pending_shared_remote_ack = Some(connection.id);
-                self.last_notice = Some(format!(
-                    "{warning} Press Save Connection again to confirm this shared account/remote choice."
-                ));
-                return Task::none();
-            }
+        if let Some(warning) = self.shared_remote_warning(&connection)
+            && self.pending_shared_remote_ack != Some(connection.id)
+        {
+            self.pending_shared_remote_ack = Some(connection.id);
+            self.last_notice = Some(format!(
+                "{warning} Press Save Connection again to confirm this shared account/remote choice."
+            ));
+            return Task::none();
         }
         if connection.provider == Provider::OneDrive {
-            self.last_notice = Some(format!("Validating {} before saving...", connection.name));
+            if let Some(validated) = &self.validated_draft
+                && validated.connection == connection
+            {
+                self.last_notice = Some(format!(
+                    "{} already passed validation in this window; saving without repeating the dry-run.",
+                    connection.name
+                ));
+                return self.save_validated_draft(connection, Some(validated.summary.clone()));
+            }
+            self.last_notice = Some(format!(
+                "Validating {} before saving. OneDrive Offline Mirror validation runs a bounded dry-run preview and can take several minutes; keep this window open until the message changes...",
+                connection.name
+            ));
             return Task::perform(
                 async move {
                     let validation = validate_onedrive_connection_for_save(&connection).await;
@@ -1658,7 +1856,7 @@ impl AppModel {
         connection: Connection,
         validation_summary: Option<String>,
     ) -> Task<cosmic::Action<Message>> {
-        let storage = match config_storage() {
+        let storage = match AppConfigStorage::runtime() {
             Ok(storage) => storage,
             Err(error) => {
                 self.last_notice = Some(error);
@@ -1672,7 +1870,7 @@ impl AppModel {
         let should_install_onedriver_online_mount = is_onedriver_online_mount(&connection);
         let should_install_onedrive_offline_mirror = is_onedrive_offline_mirror(&connection);
         let saved_connection = connection.clone();
-        let result = self.config.update_validated(&storage, |document| {
+        let result = self.config.update_validated_with(&storage, |document| {
             if let Some(existing) = document
                 .connections
                 .iter_mut()
@@ -1814,7 +2012,7 @@ impl AppModel {
 
     fn detect_and_import_vpns(&mut self) {
         let detection = detect_vpn_profiles();
-        let storage = match config_storage() {
+        let storage = match AppConfigStorage::runtime() {
             Ok(storage) => storage,
             Err(error) => {
                 self.last_notice = Some(error);
@@ -1825,7 +2023,7 @@ impl AppModel {
         let mut imported = 0usize;
         let mut updated = 0usize;
         let mut selected = None;
-        let result = self.config.update_validated(&storage, |document| {
+        let result = self.config.update_validated_with(&storage, |document| {
             for detected in &detection.profiles {
                 if let Some(existing) = document
                     .vpn_profiles
@@ -1869,7 +2067,7 @@ impl AppModel {
     }
 
     fn detect_rclone_remotes(&mut self) {
-        match Command::new("rclone").args(["config", "dump"]).output() {
+        match run_sync_host_command("rclone", &["config", "dump"]) {
             Ok(output) if output.status.success() => {
                 match parse_rclone_remotes_for_app(&String::from_utf8_lossy(&output.stdout)) {
                     Ok(remotes) => {
@@ -1935,6 +2133,7 @@ impl AppModel {
         }
 
         self.last_notice = Some(format!("Removing rclone remote `{remote_name}`..."));
+        self.removing_rclone_remote = Some(remote_name.clone());
         Task::perform(
             async move { remove_rclone_remote_result(remote_name).await },
             |result| cosmic::Action::App(Message::RcloneRemoteRemoved(result)),
@@ -2082,7 +2281,7 @@ impl AppModel {
                 self.onedrive_auth_open_command.clear();
                 self.onedrive_auth_response_url.clear();
                 self.last_notice = Some(format!(
-                    "Starting OneDrive mirror setup for `{}`. Complete the browser authorization window; onedrive should capture the local redirect automatically. If it fails or times out, use Manual Auth Handoff.",
+                    "Starting OneDrive mirror setup for `{}`. Complete browser authorization and keep this window open. After the browser step, onedrive may take several minutes to finish and Cloud Mounter will run a dry-run validation before reporting completion.",
                     connection.name
                 ));
                 Task::perform(
@@ -2095,7 +2294,7 @@ impl AppModel {
                 self.onedrive_auth_open_command = onedrive_auth_open_command(&auth_files);
                 self.onedrive_auth_response_url.clear();
                 self.last_notice = Some(format!(
-                    "Starting manual OneDrive mirror auth handoff for `{}`. When the auth URL is ready, press Open OneDrive Auth Helper. If automatic capture fails, paste the final Microsoft redirect URL into the response field.",
+                    "Starting manual OneDrive mirror auth handoff for `{}`. When the auth URL is ready, press Open OneDrive Auth Helper. After authorization, Cloud Mounter waits for onedrive and then runs dry-run validation; this can take several minutes.",
                     connection.name
                 ));
                 Task::perform(
@@ -2196,14 +2395,14 @@ impl AppModel {
             }
         };
         let connection = plan.preview.connection.clone();
-        let storage = match config_storage() {
+        let storage = match AppConfigStorage::runtime() {
             Ok(storage) => storage,
             Err(error) => {
                 self.last_notice = Some(error);
                 return Task::none();
             }
         };
-        let result = self.config.update_validated(&storage, |document| {
+        let result = self.config.update_validated_with(&storage, |document| {
             if !document
                 .connections
                 .iter()
@@ -2237,10 +2436,16 @@ impl AppModel {
                 return Task::none();
             }
         };
-        self.last_notice = Some(format!("Testing {}...", connection.name));
+        self.last_notice = Some(format!(
+            "Testing {}. OneDrive mirror validation runs a dry-run preview and can take several minutes for a large drive or slow Microsoft response...",
+            connection.name
+        ));
         Task::perform(
-            async move { test_connection_plan_and_access(connection).await },
-            |notice| cosmic::Action::App(Message::DraftTested(notice)),
+            async move {
+                let result = test_connection_plan_and_access(&connection).await;
+                (connection, result)
+            },
+            |(connection, result)| cosmic::Action::App(Message::DraftTested(connection, result)),
         )
     }
 
@@ -2268,14 +2473,14 @@ impl AppModel {
             ));
             return Task::none();
         }
-        let storage = match config_storage() {
+        let storage = match AppConfigStorage::runtime() {
             Ok(storage) => storage,
             Err(error) => {
                 self.last_notice = Some(error);
                 return Task::none();
             }
         };
-        let result = self.config.update_validated(&storage, |document| {
+        let result = self.config.update_validated_with(&storage, |document| {
             document
                 .connections
                 .retain(|connection| connection.id != connection_id);
@@ -2283,6 +2488,7 @@ impl AppModel {
         self.pending_remove = None;
         match result {
             Ok(true) => {
+                self.removing_connection = Some(connection_id);
                 self.last_notice = Some(format!(
                     "{name} was removed from applet configuration. Removing applet-owned generated units..."
                 ));
@@ -2292,10 +2498,12 @@ impl AppModel {
                 )
             }
             Ok(false) => {
+                self.removing_connection = None;
                 self.last_notice = Some(format!("{name} was already absent."));
                 Task::none()
             }
             Err(error) => {
+                self.removing_connection = None;
                 self.last_notice = Some(format!("Failed to remove {name}: {error}"));
                 Task::none()
             }
@@ -2464,7 +2672,7 @@ async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfile
         .cloned()
         .collect::<Vec<_>>();
     let mut ready = BTreeMap::new();
-    let runner = SystemCommandRunner;
+    let runner = app_command_runner();
     for profile in profiles {
         let is_ready = match profile.kind {
             VpnKind::NetworkManager => CommandNetworkManagerVpn::new(runner)
@@ -2476,6 +2684,9 @@ async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfile
                 .await
                 .is_ok_and(|components| components.tunnel == CiscoTunnelState::Connected),
         };
+        if !is_ready {
+            unmark_vpn_applet_activated(profile.id);
+        }
         ready.insert(profile.id, is_ready);
     }
     ready
@@ -2553,15 +2764,18 @@ fn runtime_service_status(connection_id: ConnectionId) -> Option<UnitStatus> {
 
 fn runtime_unit_status(connection_id: ConnectionId, unit_kind: UnitKind) -> Option<UnitStatus> {
     let unit = UnitName::new(connection_id, unit_kind);
-    let output = Command::new("systemctl")
-        .arg("--user")
-        .arg("show")
-        .arg("--property=ActiveState")
-        .arg("--property=UnitFileState")
-        .arg("--property=SubState")
-        .arg(unit.file_name())
-        .output()
-        .ok()?;
+    let output = run_sync_host_command(
+        "systemctl",
+        &[
+            "--user",
+            "show",
+            "--property=ActiveState",
+            "--property=UnitFileState",
+            "--property=SubState",
+            unit.file_name().as_str(),
+        ],
+    )
+    .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -2724,6 +2938,21 @@ fn settings_executable_path() -> Option<PathBuf> {
     Some(PathBuf::from("cosmic-ext-applet-mounter"))
 }
 
+fn app_command_runner() -> RuntimeCommandRunner {
+    RuntimeCommandRunner::detect_current()
+}
+
+fn run_sync_host_command(executable: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    match CommandExecutionMode::detect_current() {
+        CommandExecutionMode::Native => Command::new(executable).args(args).output(),
+        CommandExecutionMode::FlatpakSpawnHost => Command::new("flatpak-spawn")
+            .arg("--host")
+            .arg(executable)
+            .args(args)
+            .output(),
+    }
+}
+
 fn row_operation_label(status: &ConnectionStatus, operation: Operation) -> &'static str {
     match (status, operation) {
         (ConnectionStatus::OfflineMirror(_), Operation::PauseSync) => "Stop",
@@ -2781,6 +3010,14 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
             options.recovery_directory.display().to_string(),
         ),
     };
+    let (smb_user, smb_domain) = if connection.provider == Provider::Smb {
+        (String::new(), String::new())
+    } else {
+        (
+            std::env::var("USER").unwrap_or_default(),
+            "WORKGROUP".into(),
+        )
+    };
     ConnectionDraft {
         id: Some(connection.id),
         name: connection.name.clone(),
@@ -2789,8 +3026,9 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         remote_reference: connection.remote_reference.clone(),
         remote_subpath: connection.remote_subpath.clone().unwrap_or_default(),
         smb_host: String::new(),
-        smb_user: std::env::var("USER").unwrap_or_default(),
-        smb_domain: "WORKGROUP".into(),
+        smb_user,
+        smb_domain,
+        smb_password: String::new(),
         local_path: connection.local_path.display().to_string(),
         enabled: connection.enabled,
         start_at_login,
@@ -2987,7 +3225,7 @@ fn detect_vpn_profiles() -> VpnDetection {
 
     runtime.block_on(async {
         let cancellation = CancellationToken::new();
-        let runner = SystemCommandRunner;
+        let runner = app_command_runner();
         detect_network_manager_vpns_with_debug(&runner, &mut detection, cancellation.clone()).await;
 
         let network_manager = CommandNetworkManagerVpn::new(runner);
@@ -3050,7 +3288,7 @@ fn detect_vpn_profiles() -> VpnDetection {
 }
 
 async fn detect_network_manager_vpns_with_debug(
-    runner: &SystemCommandRunner,
+    runner: &dyn CommandRunner,
     detection: &mut VpnDetection,
     cancellation: CancellationToken,
 ) {
@@ -3406,15 +3644,6 @@ fn section_row_with_help<'a>(
     section_row(title, field_with_help(body, help))
 }
 
-fn section_row_with_safety_help<'a>(
-    title: &'static str,
-    warning: &'static str,
-    help: &'static str,
-    body: impl Into<Element<'a, Message>> + 'a,
-) -> Element<'a, Message> {
-    section_row(title, field_with_safety_help(body, warning, help))
-}
-
 fn field_with_help<'a, H>(
     body: impl Into<Element<'a, Message>> + 'a,
     help: H,
@@ -3659,8 +3888,8 @@ async fn pick_local_folder(mode: AccessMode) -> Result<Option<String>, String> {
         Ok(response) => response
             .url()
             .to_file_path()
-            .map(|path| Some(selected_folder_path(&path)))
-            .map_err(|()| "selected folder is not a local filesystem path".to_string()),
+            .map_err(|()| "selected folder is not a local filesystem path".to_string())
+            .and_then(|path| host_visible_selected_folder_path(&path).map(Some)),
         Err(file_chooser::Error::Cancelled) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
@@ -3668,6 +3897,59 @@ async fn pick_local_folder(mode: AccessMode) -> Result<Option<String>, String> {
 
 fn selected_folder_path(path: &Path) -> String {
     path.display().to_string()
+}
+
+fn host_visible_selected_folder_path(path: &Path) -> Result<String, String> {
+    document_portal_origin_path(path).map(|origin| {
+        origin
+            .as_deref()
+            .map(selected_folder_path)
+            .unwrap_or_else(|| selected_folder_path(path))
+    })
+}
+
+fn document_portal_origin_path(path: &Path) -> Result<Option<PathBuf>, String> {
+    if !is_document_portal_path(path) {
+        return Ok(None);
+    }
+    let path_text = path.display().to_string();
+    let output = run_sync_host_command("flatpak", &["document-info", &path_text]).map_err(
+        |error| {
+            format!(
+                "selected folder is a document-portal path and could not be resolved to its original host path: {error}"
+            )
+        },
+    )?;
+    if !output.status.success() {
+        return Err(format!(
+            "selected folder is a document-portal path and `flatpak document-info` failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    parse_document_portal_origin(&String::from_utf8_lossy(&output.stdout))
+        .map(Some)
+        .ok_or_else(|| {
+            "selected folder is a document-portal path but its original host path was not reported"
+                .into()
+        })
+}
+
+fn is_document_portal_path(path: &Path) -> bool {
+    let parts = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    matches!(parts.as_slice(), ["/", "run", "user", _, "doc", ..])
+}
+
+fn parse_document_portal_origin(output: &str) -> Option<PathBuf> {
+    output.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("origin:")
+            .map(str::trim)
+            .filter(|origin| !origin.is_empty())
+            .map(PathBuf::from)
+    })
 }
 
 fn rclone_backend_name(provider: Provider) -> Option<&'static str> {
@@ -3736,7 +4018,7 @@ fn onedrive_setup_guidance(mode: AccessMode) -> &'static str {
             "Complete all required fields before setup, then finish onedriver authorization in the browser. After authorization, run Test Connection and Save Connection."
         }
         AccessMode::OfflineMirror => {
-            "Complete all required fields before setup, then finish OneDrive authorization in the browser. After authorization, run Test Connection and Save Connection."
+            "Complete all required fields before setup, then finish OneDrive authorization in the browser. After browser authorization, Cloud Mounter waits for onedrive and runs dry-run validation; this can take several minutes. Save reuses that validation if the form is unchanged."
         }
     }
 }
@@ -3770,12 +4052,75 @@ fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, 
     Ok(remotes)
 }
 
+fn load_smb_remote_details(remote_name: &str) -> Result<Option<SmbRemoteDetails>, String> {
+    match run_sync_host_command("rclone", &["config", "dump"]) {
+        Ok(output) if output.status.success() => {
+            parse_smb_remote_details(&String::from_utf8_lossy(&output.stdout), remote_name)
+        }
+        Ok(output) => Err(format!(
+            "rclone config dump failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Err(format!("could not run rclone config dump: {error}")),
+    }
+}
+
+fn parse_smb_remote_details(
+    output: &str,
+    remote_name: &str,
+) -> Result<Option<SmbRemoteDetails>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+    let Some(remote_config) = object.get(remote_name).and_then(|value| value.as_object()) else {
+        return Ok(None);
+    };
+    let Some("smb") = remote_config.get("type").and_then(|value| value.as_str()) else {
+        return Ok(None);
+    };
+    Ok(Some(SmbRemoteDetails {
+        host: remote_config
+            .get("host")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+        user: remote_config
+            .get("user")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+        domain: remote_config
+            .get("domain")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+    }))
+}
+
+fn rclone_config_has_section(output: &str, remote_name: &str) -> Result<bool, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+    Ok(object.contains_key(remote_name))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SmbRemoteSetup {
     name: String,
-    host: String,
+    host: Option<String>,
     user: Option<String>,
     domain: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmbRemoteApplyResult {
+    remote_name: String,
+    password_updated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3833,15 +4178,16 @@ impl SmbRemoteSetup {
         }
         let name = draft.remote_reference.trim();
         validate_rclone_remote_create_name(name)?;
-        let host = draft.smb_host.trim();
-        validate_setup_value("SMB host", host, true)?;
+        let host = optional_setup_value("SMB host", &draft.smb_host)?;
         let user = optional_setup_value("SMB username", &draft.smb_user)?;
         let domain = optional_setup_value("SMB domain", &draft.smb_domain)?;
+        let password = optional_secret_value("SMB password", &draft.smb_password)?;
         Ok(Self {
             name: name.to_owned(),
-            host: host.to_owned(),
+            host,
             user,
             domain,
+            password,
         })
     }
 }
@@ -3849,7 +4195,7 @@ impl SmbRemoteSetup {
 async fn create_google_drive_rclone_remote_result(
     setup: GoogleDriveRemoteSetup,
 ) -> Result<String, String> {
-    create_google_drive_rclone_remote_with(&SystemCommandRunner, setup).await
+    create_google_drive_rclone_remote_with(&app_command_runner(), setup).await
 }
 
 async fn create_google_drive_rclone_remote_with(
@@ -3857,18 +4203,24 @@ async fn create_google_drive_rclone_remote_with(
     setup: GoogleDriveRemoteSetup,
 ) -> Result<String, String> {
     ensure_rclone_remote_name_available(runner, &setup.name).await?;
-    runner
+    let create_result = runner
         .run(
             google_drive_rclone_config_create_request(&setup)?,
             CancellationToken::new(),
         )
-        .await
-        .map_err(|error| rclone_setup_command_error("Google Drive OAuth setup", error))?;
+        .await;
+    if let Err(error) = create_result {
+        cleanup_failed_rclone_remote_create(runner, &setup.name).await;
+        return Err(rclone_setup_command_error(
+            "Google Drive OAuth setup",
+            error,
+        ));
+    }
     Ok(setup.name)
 }
 
 async fn create_box_rclone_remote_result(setup: BoxRemoteSetup) -> Result<String, String> {
-    create_box_rclone_remote_with(&SystemCommandRunner, setup).await
+    create_box_rclone_remote_with(&app_command_runner(), setup).await
 }
 
 async fn create_box_rclone_remote_with(
@@ -3876,37 +4228,91 @@ async fn create_box_rclone_remote_with(
     setup: BoxRemoteSetup,
 ) -> Result<String, String> {
     ensure_rclone_remote_name_available(runner, &setup.name).await?;
-    runner
+    let create_result = runner
         .run(
             box_rclone_config_create_request(&setup)?,
             CancellationToken::new(),
         )
-        .await
-        .map_err(|error| rclone_setup_command_error("Box OAuth setup", error))?;
+        .await;
+    if let Err(error) = create_result {
+        cleanup_failed_rclone_remote_create(runner, &setup.name).await;
+        return Err(rclone_setup_command_error("Box OAuth setup", error));
+    }
     Ok(setup.name)
 }
 
-async fn create_smb_rclone_remote_result(setup: SmbRemoteSetup) -> Result<String, String> {
-    create_smb_rclone_remote_with(&SystemCommandRunner, setup).await
+async fn create_smb_rclone_remote_result(
+    setup: SmbRemoteSetup,
+) -> Result<SmbRemoteApplyResult, String> {
+    create_smb_rclone_remote_with(&app_command_runner(), setup).await
 }
 
 async fn create_smb_rclone_remote_with(
     runner: &dyn CommandRunner,
     setup: SmbRemoteSetup,
-) -> Result<String, String> {
-    ensure_rclone_remote_name_available(runner, &setup.name).await?;
-    runner
-        .run(
-            smb_rclone_config_create_request(&setup)?,
-            CancellationToken::new(),
-        )
-        .await
-        .map_err(|error| rclone_setup_command_error("config create", error))?;
-    Ok(setup.name)
+) -> Result<SmbRemoteApplyResult, String> {
+    let metadata_updated = setup.has_metadata();
+    match rclone_remote_backend(runner, &setup.name).await? {
+        None => {
+            let create_result = runner
+                .run(
+                    smb_rclone_config_create_request(&setup)?,
+                    CancellationToken::new(),
+                )
+                .await;
+            if let Err(error) = create_result {
+                cleanup_failed_rclone_remote_create(runner, &setup.name).await;
+                return Err(rclone_setup_command_error("config create", error));
+            }
+        }
+        Some(backend) if backend == "smb" => {
+            if !metadata_updated && setup.password.is_none() {
+                return Err(
+                    "Enter SMB host, username, domain, or password before updating this remote."
+                        .into(),
+                );
+            }
+            if metadata_updated {
+                runner
+                    .run(
+                        smb_rclone_config_update_request(&setup)?,
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .map_err(|error| rclone_setup_command_error("config update", error))?;
+            }
+        }
+        Some(backend) => {
+            return Err(format!(
+                "rclone remote `{}` already exists with backend `{backend}`. Choose a different SMB remote name.",
+                setup.name
+            ));
+        }
+    }
+    let password_updated = setup.password.is_some();
+    if password_updated {
+        runner
+            .run(
+                smb_rclone_config_password_request(&setup)?,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|error| rclone_setup_command_error("config password", error))?;
+    }
+    Ok(SmbRemoteApplyResult {
+        remote_name: setup.name,
+        password_updated,
+    })
+}
+
+impl SmbRemoteSetup {
+    fn has_metadata(&self) -> bool {
+        self.host.is_some() || self.user.is_some() || self.domain.is_some()
+    }
 }
 
 async fn remove_rclone_remote_result(remote_name: String) -> Result<String, String> {
-    remove_rclone_remote_with(&SystemCommandRunner, remote_name).await
+    remove_rclone_remote_with(&app_command_runner(), remote_name).await
 }
 
 async fn remove_rclone_remote_with(
@@ -3931,7 +4337,7 @@ async fn remove_rclone_remote_with(
 
 async fn run_onedriver_online_setup_result(connection: Connection) -> Result<String, String> {
     run_onedriver_online_setup_with(
-        &SystemCommandRunner,
+        &app_command_runner(),
         &ProcMountTable::default(),
         &connection,
         &default_cache_root(),
@@ -3986,7 +4392,7 @@ async fn run_onedrive_mirror_interactive_setup_result(
     connection: Connection,
 ) -> Result<String, String> {
     run_onedrive_mirror_interactive_setup_with(
-        &SystemCommandRunner,
+        &app_command_runner(),
         &ProcMountTable::default(),
         &connection,
         &default_config_root(),
@@ -3999,7 +4405,7 @@ async fn run_onedrive_mirror_manual_setup_result(
     auth_files: OneDriveMirrorAuthFiles,
 ) -> Result<String, String> {
     run_onedrive_mirror_manual_setup_with(
-        &SystemCommandRunner,
+        &app_command_runner(),
         &ProcMountTable::default(),
         &connection,
         &default_config_root(),
@@ -4049,7 +4455,13 @@ async fn run_onedrive_mirror_interactive_setup_with(
             token_file.display()
         ));
     }
-    verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root).await
+    verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root)
+        .await
+        .map_err(|error| {
+            format!(
+                "OneDrive interactive authorization completed, but post-auth validation failed: {error}"
+            )
+        })
 }
 
 async fn run_onedrive_mirror_manual_setup_with(
@@ -4088,7 +4500,13 @@ async fn run_onedrive_mirror_manual_setup_with(
     if let Err(Some(error)) = auth_result {
         return Err(error);
     }
-    verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root).await
+    verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root)
+        .await
+        .map_err(|error| {
+            format!(
+                "OneDrive manual/WebKit authorization completed, but post-auth validation failed: {error}"
+            )
+        })
 }
 
 fn prepare_onedrive_mirror_setup_plan(
@@ -4147,13 +4565,73 @@ async fn ensure_rclone_remote_name_available(
         )
         .await
         .map_err(|error| rclone_setup_command_error("config dump", error))?;
-    let remotes = parse_rclone_remotes_for_app(&dump.stdout.text)?;
-    if remotes.iter().any(|remote| remote.name == remote_name) {
+    if rclone_config_has_section(&dump.stdout.text, remote_name)? {
         return Err(format!(
             "rclone remote `{remote_name}` already exists. Choose a different remote name or select the existing remote."
         ));
     }
     Ok(())
+}
+
+async fn rclone_remote_backend(
+    runner: &dyn CommandRunner,
+    remote_name: &str,
+) -> Result<Option<String>, String> {
+    if runner.resolve(Executable::Rclone).is_none() {
+        return Err(
+            "rclone is missing. Install rclone 1.74.3 or newer before creating remotes.".into(),
+        );
+    }
+    let dump = runner
+        .run(
+            CommandRequest::new(Executable::Rclone)
+                .arg("config")
+                .map_err(|error| error.to_string())?
+                .arg("dump")
+                .map_err(|error| error.to_string())?
+                .with_timeout(Duration::from_secs(5)),
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|error| rclone_setup_command_error("config dump", error))?;
+    rclone_config_section_backend(&dump.stdout.text, remote_name)
+}
+
+fn rclone_config_section_backend(
+    output: &str,
+    remote_name: &str,
+) -> Result<Option<String>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+    let Some(config) = object.get(remote_name) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        config
+            .as_object()
+            .and_then(|remote_config| remote_config.get("type"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("<missing>")
+            .to_owned(),
+    ))
+}
+
+async fn cleanup_failed_rclone_remote_create(runner: &dyn CommandRunner, remote_name: &str) {
+    if validate_rclone_remote_create_name(remote_name).is_err() {
+        return;
+    }
+    let Ok(request) = rclone_config_delete_request(remote_name) else {
+        return;
+    };
+    let _ = runner
+        .run(
+            request.with_timeout(Duration::from_secs(10)),
+            CancellationToken::new(),
+        )
+        .await;
 }
 
 fn google_drive_rclone_config_create_request(
@@ -4201,6 +4679,10 @@ fn box_rclone_config_create_request(setup: &BoxRemoteSetup) -> Result<CommandReq
 }
 
 fn smb_rclone_config_create_request(setup: &SmbRemoteSetup) -> Result<CommandRequest, String> {
+    let host = setup
+        .host
+        .as_ref()
+        .ok_or_else(|| "SMB host is required to create a new SMB rclone remote.".to_owned())?;
     let mut request = CommandRequest::new(Executable::Rclone)
         .arg("config")
         .map_err(|error| error.to_string())?
@@ -4212,7 +4694,7 @@ fn smb_rclone_config_create_request(setup: &SmbRemoteSetup) -> Result<CommandReq
         .map_err(|error| error.to_string())?
         .arg("host")
         .map_err(|error| error.to_string())?
-        .sensitive_arg(&setup.host)
+        .sensitive_arg(host)
         .map_err(|error| error.to_string())?;
     if let Some(user) = &setup.user {
         request = request
@@ -4230,6 +4712,60 @@ fn smb_rclone_config_create_request(setup: &SmbRemoteSetup) -> Result<CommandReq
     }
     request
         .arg("--non-interactive")
+        .map_err(|error| error.to_string())
+        .map(|request| request.with_timeout(Duration::from_secs(30)))
+}
+
+fn smb_rclone_config_update_request(setup: &SmbRemoteSetup) -> Result<CommandRequest, String> {
+    let mut request = CommandRequest::new(Executable::Rclone)
+        .arg("config")
+        .map_err(|error| error.to_string())?
+        .arg("update")
+        .map_err(|error| error.to_string())?
+        .arg(&setup.name)
+        .map_err(|error| error.to_string())?;
+    if let Some(host) = &setup.host {
+        request = request
+            .arg("host")
+            .map_err(|error| error.to_string())?
+            .sensitive_arg(host)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(user) = &setup.user {
+        request = request
+            .arg("user")
+            .map_err(|error| error.to_string())?
+            .sensitive_arg(user)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(domain) = &setup.domain {
+        request = request
+            .arg("domain")
+            .map_err(|error| error.to_string())?
+            .sensitive_arg(domain)
+            .map_err(|error| error.to_string())?;
+    }
+    request
+        .arg("--non-interactive")
+        .map_err(|error| error.to_string())
+        .map(|request| request.with_timeout(Duration::from_secs(30)))
+}
+
+fn smb_rclone_config_password_request(setup: &SmbRemoteSetup) -> Result<CommandRequest, String> {
+    let password = setup
+        .password
+        .as_ref()
+        .ok_or_else(|| "SMB password is not set.".to_owned())?;
+    CommandRequest::new(Executable::Rclone)
+        .arg("config")
+        .map_err(|error| error.to_string())?
+        .arg("password")
+        .map_err(|error| error.to_string())?
+        .arg(&setup.name)
+        .map_err(|error| error.to_string())?
+        .arg("pass")
+        .map_err(|error| error.to_string())?
+        .sensitive_arg(password)
         .map_err(|error| error.to_string())
         .map(|request| request.with_timeout(Duration::from_secs(30)))
 }
@@ -4283,6 +4819,15 @@ fn optional_setup_value(label: &str, value: &str) -> Result<Option<String>, Stri
     } else {
         validate_setup_value(label, trimmed, false)?;
         Ok(Some(trimmed.to_owned()))
+    }
+}
+
+fn optional_secret_value(label: &str, value: &str) -> Result<Option<String>, String> {
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        validate_setup_value(label, value, false)?;
+        Ok(Some(value.to_owned()))
     }
 }
 
@@ -4372,11 +4917,6 @@ fn toggle_button(
         .push(widget::text::body(label))
         .push(widget::toggler(current).on_toggle(message))
         .into()
-}
-
-fn config_storage() -> Result<cosmic_config::Config, String> {
-    cosmic_config::Config::new(APP_ID, Config::VERSION)
-        .map_err(|error| format!("Failed to open applet configuration storage: {error}"))
 }
 
 fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
@@ -4501,7 +5041,7 @@ async fn install_rclone_online_mount_unit_result(connection: &Connection) -> Res
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -4513,7 +5053,7 @@ async fn install_rclone_online_mount_unit_result(connection: &Connection) -> Res
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -4548,7 +5088,7 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -4562,7 +5102,7 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
         return Err(error.to_string());
     }
 
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     manager
         .action(
             SystemdAction::Disable,
@@ -4607,7 +5147,7 @@ async fn install_onedriver_online_mount_unit_result(
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -4619,7 +5159,7 @@ async fn install_onedriver_online_mount_unit_result(
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -4656,14 +5196,14 @@ async fn install_onedrive_offline_mirror_unit_result(
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
         .install(&document, cancellation.child_token())
         .await
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     manager
         .action(SystemdAction::Disable, Some(&document.name), cancellation)
         .await
@@ -4705,7 +5245,7 @@ async fn install_import_replacement_unit_result(
     }
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -4717,7 +5257,7 @@ async fn install_import_replacement_unit_result(
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -4757,15 +5297,15 @@ async fn remove_generated_units_for_connection_result(
 ) -> Result<usize, String> {
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let controller = UnitController::new(store, CommandSystemdManager::new(SystemCommandRunner));
+    let controller = UnitController::new(store, CommandSystemdManager::new(app_command_runner()));
     let cancellation = CancellationToken::new();
     let mut removed = 0usize;
     for unit in managed_unit_names_for_connection(connection) {
-        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let manager = CommandSystemdManager::new(app_command_runner());
         let _ = manager
             .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
             .await;
-        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let manager = CommandSystemdManager::new(app_command_runner());
         let _ = manager
             .action(
                 SystemdAction::Disable,
@@ -4822,7 +5362,10 @@ async fn run_managed_online_mount_operation_result(
     };
     let unit = UnitName::new(connection.id, UnitKind::Service);
     prepare_online_mount_runtime(connection)?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    if action == SystemdAction::Start {
+        ensure_vpn_ready_for_connection(connection).await?;
+    }
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
         manager
@@ -4845,6 +5388,9 @@ async fn run_managed_online_mount_operation_result(
         .action(action, Some(&unit), cancellation)
         .await
         .map_err(|error| error.to_string())?;
+    if action == SystemdAction::Stop {
+        maybe_shutdown_vpn_after_unmount(connection).await?;
+    }
     Ok(())
 }
 
@@ -4875,7 +5421,10 @@ async fn run_managed_onedriver_online_mount_operation_result(
     };
     let unit = UnitName::new(connection.id, UnitKind::Service);
     prepare_onedriver_online_mount_runtime(connection)?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    if action == SystemdAction::Start {
+        ensure_vpn_ready_for_connection(connection).await?;
+    }
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
         manager
@@ -4898,6 +5447,9 @@ async fn run_managed_onedriver_online_mount_operation_result(
         .action(action, Some(&unit), cancellation)
         .await
         .map_err(|error| error.to_string())?;
+    if action == SystemdAction::Stop {
+        maybe_shutdown_vpn_after_unmount(connection).await?;
+    }
     Ok(())
 }
 
@@ -4917,14 +5469,14 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
     }
 
     let unit = UnitName::new(connection.id, UnitKind::Service);
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
 
     let _ = manager
         .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
         .await;
 
-    SystemCommandRunner
+    app_command_runner()
         .run(
             lazy_unmount_request(&connection.local_path).map_err(|error| error.to_string())?,
             cancellation.child_token(),
@@ -5012,7 +5564,7 @@ async fn start_rclone_offline_mirror_background(
     }
     ensure_background_sync_may_start(connection).await?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     manager
         .action(
@@ -5042,7 +5594,7 @@ async fn stop_rclone_offline_mirror_background(
 ) -> Result<String, String> {
     let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     let _ = manager
         .action(
@@ -5077,7 +5629,7 @@ async fn start_onedrive_offline_mirror_background(
     }
     ensure_background_sync_may_start(connection).await?;
     let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     manager
         .action(
@@ -5141,7 +5693,7 @@ async fn current_network_ready() -> bool {
         Ok(request) => request.with_timeout(Duration::from_secs(5)),
         Err(_) => return true,
     };
-    match SystemCommandRunner
+    match app_command_runner()
         .run(request, CancellationToken::new())
         .await
     {
@@ -5164,7 +5716,7 @@ async fn current_metered_network() -> bool {
         Ok(request) => request.with_timeout(Duration::from_secs(5)),
         Err(_) => return false,
     };
-    match SystemCommandRunner
+    match app_command_runner()
         .run(request, CancellationToken::new())
         .await
     {
@@ -5185,7 +5737,7 @@ async fn current_vpn_ready(connection: &Connection) -> Result<bool, String> {
     let Some(profile_id) = connection.vpn_profile_id else {
         return Ok(true);
     };
-    let config = Config::load().config;
+    let config = Config::load_runtime().config;
     let Some(profile) = config
         .document
         .vpn_profiles
@@ -5197,18 +5749,237 @@ async fn current_vpn_ready(connection: &Connection) -> Result<bool, String> {
     if profile.readiness_checks.is_empty() {
         return Ok(true);
     }
-    let probe = CommandReadinessProbe::new(SystemCommandRunner);
-    readiness_report(&probe, &profile.readiness_checks, CancellationToken::new())
+    let probe = CommandReadinessProbe::new(app_command_runner());
+    let ready = readiness_report(&probe, &profile.readiness_checks, CancellationToken::new())
         .await
         .map(|report| report.ready)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if !ready {
+        unmark_vpn_applet_activated(profile.id);
+    }
+    Ok(ready)
+}
+
+async fn ensure_vpn_ready_for_connection(connection: &Connection) -> Result<(), String> {
+    let Some(profile_id) = connection.vpn_profile_id else {
+        return Ok(());
+    };
+    let Some(profile) = Config::load_runtime()
+        .config
+        .document
+        .vpn_profiles
+        .into_iter()
+        .find(|profile| profile.id == profile_id)
+    else {
+        return Err("configured VPN profile is no longer available".into());
+    };
+    if vpn_profile_ready(&profile).await? {
+        return Ok(());
+    }
+
+    match profile.kind {
+        VpnKind::NetworkManager => {
+            CommandNetworkManagerVpn::new(app_command_runner())
+                .activate(&profile, CancellationToken::new())
+                .await
+                .map_err(|error| format!("could not activate NetworkManager VPN: {error}"))?;
+        }
+        VpnKind::Cisco => {
+            let cisco = CommandCiscoVpn::new(app_command_runner());
+            let components = cisco
+                .components(CancellationToken::new())
+                .await
+                .map_err(|error| format!("could not inspect Cisco Secure Client: {error}"))?;
+            if matches!(components.tunnel, CiscoTunnelState::NotInstalled) {
+                return Err("Cisco Secure Client is not installed".into());
+            }
+            if matches!(components.tunnel, CiscoTunnelState::ServiceUnavailable)
+                && let Ok(request) = cisco.start_agent_request()
+            {
+                let _ = app_command_runner()
+                    .run(request, CancellationToken::new())
+                    .await;
+            }
+            if let Ok(request) = cisco.open_gui_request() {
+                let _ = app_command_runner()
+                    .run(request, CancellationToken::new())
+                    .await;
+            }
+        }
+    }
+
+    let ready = wait_for_vpn_ready(&profile).await?;
+    if ready {
+        mark_vpn_applet_activated(profile.id);
+        Ok(())
+    } else {
+        Err(format!(
+            "{} did not become ready within {} seconds",
+            profile.name, profile.timeout_seconds
+        ))
+    }
+}
+
+async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
+    match profile.kind {
+        VpnKind::NetworkManager => CommandNetworkManagerVpn::new(app_command_runner())
+            .state(profile, CancellationToken::new())
+            .await
+            .map(|state| state.ready())
+            .map_err(|error| error.to_string()),
+        VpnKind::Cisco => CommandCiscoVpn::new(app_command_runner())
+            .components(CancellationToken::new())
+            .await
+            .map(|components| components.tunnel == CiscoTunnelState::Connected)
+            .map_err(|error| error.to_string()),
+    }
+}
+
+async fn wait_for_vpn_ready(profile: &VpnProfile) -> Result<bool, String> {
+    let deadline = Instant::now() + Duration::from_secs(u64::from(profile.timeout_seconds));
+    loop {
+        if vpn_profile_ready(profile).await? {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+async fn maybe_shutdown_vpn_after_unmount(connection: &Connection) -> Result<(), String> {
+    let Some(profile_id) = connection.vpn_profile_id else {
+        return Ok(());
+    };
+    if !connection.disconnect_vpn_when_unused {
+        return Ok(());
+    }
+    let activated = applet_activated_vpns();
+    let snapshot = cosmic_ext_applet_mounter::vpn::VpnUsageSnapshot {
+        profile_id,
+        applet_activated: activated.contains(&profile_id),
+        active_connection_ids: active_connections_using_vpn(profile_id, Some(connection.id)),
+    };
+    match shutdown_decision(&snapshot) {
+        VpnShutdownDecision::Disconnect => {
+            disconnect_vpn_profile(profile_id).await?;
+            unmark_vpn_applet_activated(profile_id);
+        }
+        VpnShutdownDecision::NoAction
+        | VpnShutdownDecision::KeepAliveShared
+        | VpnShutdownDecision::KeepAlivePreExisting => {}
+    }
+    Ok(())
+}
+
+async fn disconnect_vpn_profile(profile_id: VpnProfileId) -> Result<(), String> {
+    let Some(profile) = Config::load_runtime()
+        .config
+        .document
+        .vpn_profiles
+        .into_iter()
+        .find(|profile| profile.id == profile_id)
+    else {
+        return Ok(());
+    };
+    match profile.kind {
+        VpnKind::NetworkManager => CommandNetworkManagerVpn::new(app_command_runner())
+            .deactivate(&profile, CancellationToken::new())
+            .await
+            .map_err(|error| format!("could not disconnect NetworkManager VPN: {error}")),
+        VpnKind::Cisco => {
+            let request = CommandRequest::new(Executable::CiscoVpn)
+                .arg("disconnect")
+                .map_err(|error| error.to_string())?
+                .with_timeout(Duration::from_secs(20));
+            app_command_runner()
+                .run(request, CancellationToken::new())
+                .await
+                .map(|_| ())
+                .map_err(|error| format!("could not disconnect Cisco Secure Client: {error}"))
+        }
+    }
+}
+
+fn active_connections_using_vpn(
+    profile_id: VpnProfileId,
+    exclude_connection: Option<ConnectionId>,
+) -> BTreeSet<ConnectionId> {
+    let config = Config::load_runtime().config.document;
+    let mount_entries = ProcMountTable::default().entries().unwrap_or_default();
+    config
+        .connections
+        .iter()
+        .filter(|connection| connection.enabled)
+        .filter(|connection| connection.vpn_profile_id == Some(profile_id))
+        .filter(|connection| Some(connection.id) != exclude_connection)
+        .filter(|connection| connection_appears_active(connection, &mount_entries))
+        .map(|connection| connection.id)
+        .collect()
+}
+
+fn connection_appears_active(connection: &Connection, mount_entries: &[MountEntry]) -> bool {
+    match connection.mode {
+        ConnectionMode::OnlineMount(_) => {
+            mount_entries
+                .iter()
+                .any(|entry| entry.target == connection.local_path)
+                || runtime_service_status(connection.id).is_some_and(|status| {
+                    matches!(status.active, ActiveState::Active | ActiveState::Activating)
+                })
+        }
+        ConnectionMode::OfflineMirror(_) => {
+            runtime_service_status(connection.id).is_some_and(|status| {
+                matches!(status.active, ActiveState::Active | ActiveState::Activating)
+            }) || runtime_unit_status(connection.id, UnitKind::Timer).is_some_and(|status| {
+                matches!(status.active, ActiveState::Active | ActiveState::Activating)
+            })
+        }
+    }
+}
+
+fn applet_activated_vpns_path() -> PathBuf {
+    default_work_root().join("vpn-applet-activated.ron")
+}
+
+fn applet_activated_vpns() -> BTreeSet<VpnProfileId> {
+    let path = applet_activated_vpns_path();
+    let Ok(contents) = fs::read_to_string(path) else {
+        return BTreeSet::new();
+    };
+    ron::from_str(&contents).unwrap_or_default()
+}
+
+fn write_applet_activated_vpns(profiles: &BTreeSet<VpnProfileId>) {
+    let path = applet_activated_vpns_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if profiles.is_empty() {
+        let _ = fs::remove_file(path);
+    } else if let Ok(contents) = ron::to_string(profiles) {
+        let _ = fs::write(path, contents);
+    }
+}
+
+fn mark_vpn_applet_activated(profile_id: VpnProfileId) {
+    let mut profiles = applet_activated_vpns();
+    profiles.insert(profile_id);
+    write_applet_activated_vpns(&profiles);
+}
+
+fn unmark_vpn_applet_activated(profile_id: VpnProfileId) {
+    let mut profiles = applet_activated_vpns();
+    profiles.remove(&profile_id);
+    write_applet_activated_vpns(&profiles);
 }
 
 async fn stop_onedrive_offline_mirror_background(
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
 ) -> Result<String, String> {
     let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     let _ = manager
         .action(
@@ -5233,7 +6004,7 @@ async fn preview_rclone_offline_mirror(
     } else {
         rclone_bisync_initial_preview_request(plan).map_err(|error| error.to_string())?
     };
-    let output = SystemCommandRunner
+    let output = app_command_runner()
         .run(request, CancellationToken::new())
         .await
         .map_err(|error| offline_mirror_command_error("preview", error))?;
@@ -5251,13 +6022,13 @@ async fn preview_rclone_offline_mirror(
 async fn preview_onedrive_offline_mirror(
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
 ) -> Result<String, String> {
-    let output = SystemCommandRunner
+    let output = app_command_runner()
         .run(
             one_drive_preview_request(plan).map_err(|error| error.to_string())?,
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| offline_mirror_command_error("OneDrive preview", error))?;
+        .map_err(|error| onedrive_runtime_command_error("preview", error))?;
     let summary = onedrive_output_summary("Preview", &output);
     if !onedrive_initial_sync_marker(plan).exists() {
         write_onedrive_initial_preview_marker(plan, &summary)?;
@@ -5313,7 +6084,7 @@ async fn sync_rclone_offline_mirror(
     } else {
         rclone_bisync_initial_sync_request(plan).map_err(|error| error.to_string())?
     };
-    let output = SystemCommandRunner
+    let output = app_command_runner()
         .run(request, CancellationToken::new())
         .await
         .map_err(|error| offline_mirror_command_error("sync", error))?;
@@ -5368,13 +6139,15 @@ async fn sync_onedrive_offline_mirror(
         SyncDecision::Reject(rejection) => return Err(sync_rejection_message(rejection).into()),
     }
 
-    let output = SystemCommandRunner
-        .run(
-            one_drive_sync_request(plan).map_err(|error| error.to_string())?,
-            CancellationToken::new(),
-        )
+    let request = if initialized {
+        one_drive_sync_request(plan).map_err(|error| error.to_string())?
+    } else {
+        one_drive_initial_sync_request(plan).map_err(|error| error.to_string())?
+    };
+    let output = app_command_runner()
+        .run(request, CancellationToken::new())
         .await
-        .map_err(|error| offline_mirror_command_error("OneDrive sync", error))?;
+        .map_err(|error| onedrive_runtime_command_error("sync", error))?;
     if initialized {
         Ok(onedrive_output_summary("Sync", &output))
     } else {
@@ -5873,51 +6646,36 @@ fn offline_mirror_command_error(stage: &str, error: CommandError) -> String {
     }
 }
 
-async fn test_connection_plan_and_access(connection: Connection) -> String {
-    let plan_summary = match managed_plan_summary(&connection) {
+fn onedrive_runtime_command_error(stage: &str, error: CommandError) -> String {
+    onedrive_validation_command_error(stage, error)
+}
+
+async fn test_connection_plan_and_access(connection: &Connection) -> Result<String, String> {
+    let plan_summary = match managed_plan_summary(connection) {
         Ok(summary) => summary,
-        Err(error) => return format!("Draft test failed for {}: {error}", connection.name),
+        Err(error) => return Err(error),
     };
+
+    ensure_vpn_ready_for_connection(connection).await?;
 
     match connection.provider {
         Provider::GoogleDrive | Provider::Box | Provider::Smb => {
-            match verify_rclone_access(&connection).await {
-                Ok(access_summary) => {
-                    format!(
-                        "Draft test passed for {}. {plan_summary} {access_summary}",
-                        connection.name
-                    )
-                }
-                Err(error) => {
-                    format!("Draft test failed for {}: {error}", connection.name)
-                }
+            match verify_rclone_access(connection).await {
+                Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
+                Err(error) => Err(error),
             }
         }
         Provider::OneDrive => match connection.mode {
             ConnectionMode::OnlineMount(_) => {
-                match verify_onedriver_online_mount_setup(&connection) {
-                    Ok(access_summary) => {
-                        format!(
-                            "Draft test passed for {}. {plan_summary} {access_summary}",
-                            connection.name
-                        )
-                    }
-                    Err(error) => {
-                        format!("Draft test failed for {}: {error}", connection.name)
-                    }
+                match verify_onedriver_online_mount_setup(connection) {
+                    Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
+                    Err(error) => Err(error),
                 }
             }
             ConnectionMode::OfflineMirror(_) => {
-                match verify_onedrive_offline_mirror_setup(&connection).await {
-                    Ok(access_summary) => {
-                        format!(
-                            "Draft test passed for {}. {plan_summary} {access_summary}",
-                            connection.name
-                        )
-                    }
-                    Err(error) => {
-                        format!("Draft test failed for {}: {error}", connection.name)
-                    }
+                match verify_onedrive_offline_mirror_setup(connection).await {
+                    Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
+                    Err(error) => Err(error),
                 }
             }
         },
@@ -5941,7 +6699,7 @@ fn save_notice_name(name: &str, validation_summary: Option<&str>) -> String {
 fn verify_onedriver_online_mount_setup(connection: &Connection) -> Result<String, String> {
     verify_onedriver_online_mount_setup_with(
         connection,
-        &SystemCommandRunner,
+        &app_command_runner(),
         &ProcMountTable::default(),
         &default_cache_root(),
         &default_config_root(),
@@ -6043,7 +6801,7 @@ fn paths_overlap(left: &std::path::Path, right: &std::path::Path) -> bool {
 async fn verify_onedrive_offline_mirror_setup(connection: &Connection) -> Result<String, String> {
     verify_onedrive_offline_mirror_setup_with(
         connection,
-        &SystemCommandRunner,
+        &app_command_runner(),
         &ProcMountTable::default(),
         &default_config_root(),
     )
@@ -6166,7 +6924,7 @@ fn onedrive_validation_command_error(stage: &str, error: CommandError) -> String
             "onedrive command argument contains unsupported characters".into()
         }
         CommandError::Timeout { timeout, .. } => format!(
-            "onedrive {stage} timed out after {} seconds. Check network/VPN readiness and Microsoft OneDrive responsiveness.",
+            "onedrive {stage} timed out after {} seconds. Authentication may still be valid, but the initial dry-run can take several minutes for a whole drive. Check network/VPN readiness, Microsoft OneDrive responsiveness, and consider selecting a smaller remote subtree for first validation.",
             timeout.as_secs()
         ),
         CommandError::Cancelled { .. } => format!("onedrive {stage} was cancelled"),
@@ -6251,14 +7009,14 @@ fn onedrive_auth_files_completion_error(error: &CommandError) -> bool {
 async fn verify_rclone_access(connection: &Connection) -> Result<String, String> {
     let expected_backend = rclone_backend_name(connection.provider)
         .ok_or_else(|| "selected provider does not use rclone".to_owned())?;
-    let provider = CommandRcloneProvider::new(SystemCommandRunner);
+    let provider = CommandRcloneProvider::new(app_command_runner());
     provider
         .validate_remote(connection, CancellationToken::new())
         .await
         .map_err(|error| rclone_remote_validation_error(connection, error))?;
 
     let target = rclone_access_target(connection);
-    let output = SystemCommandRunner
+    let output = app_command_runner()
         .run(
             CommandRequest::new(Executable::Rclone)
                 .arg("lsf")
@@ -6395,7 +7153,25 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+fn running_in_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
+}
+
+fn host_visible_home_dir() -> Option<PathBuf> {
+    home_dir()
+}
+
 fn default_cache_root() -> PathBuf {
+    default_cache_root_for(running_in_flatpak(), host_visible_home_dir())
+}
+
+fn default_cache_root_for(flatpak: bool, host_home: Option<PathBuf>) -> PathBuf {
+    if flatpak {
+        return host_home
+            .map(|home| home.join(".cache"))
+            .unwrap_or_else(std::env::temp_dir)
+            .join("cosmic-ext-applet-mounter");
+    }
     std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".cache")))
@@ -6404,6 +7180,16 @@ fn default_cache_root() -> PathBuf {
 }
 
 fn default_config_root() -> PathBuf {
+    default_config_root_for(running_in_flatpak(), host_visible_home_dir())
+}
+
+fn default_config_root_for(flatpak: bool, host_home: Option<PathBuf>) -> PathBuf {
+    if flatpak {
+        return host_home
+            .map(|home| home.join(".config"))
+            .unwrap_or_else(std::env::temp_dir)
+            .join("cosmic-ext-applet-mounter");
+    }
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".config")))
@@ -6412,6 +7198,16 @@ fn default_config_root() -> PathBuf {
 }
 
 fn default_work_root() -> PathBuf {
+    default_work_root_for(running_in_flatpak(), host_visible_home_dir())
+}
+
+fn default_work_root_for(flatpak: bool, host_home: Option<PathBuf>) -> PathBuf {
+    if flatpak {
+        return host_home
+            .map(|home| home.join(".local/state"))
+            .unwrap_or_else(std::env::temp_dir)
+            .join("cosmic-ext-applet-mounter");
+    }
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".local/state")))
@@ -6440,6 +7236,24 @@ fn provider_engine_summary(provider: Provider, mode: AccessMode) -> &'static str
 mod tests {
     use super::*;
     use cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile;
+
+    #[test]
+    fn flatpak_durable_roots_use_host_visible_home_paths() {
+        let home = PathBuf::from("/home/example");
+
+        assert_eq!(
+            default_config_root_for(true, Some(home.clone())),
+            PathBuf::from("/home/example/.config/cosmic-ext-applet-mounter")
+        );
+        assert_eq!(
+            default_cache_root_for(true, Some(home.clone())),
+            PathBuf::from("/home/example/.cache/cosmic-ext-applet-mounter")
+        );
+        assert_eq!(
+            default_work_root_for(true, Some(home)),
+            PathBuf::from("/home/example/.local/state/cosmic-ext-applet-mounter")
+        );
+    }
 
     #[test]
     fn popup_scroll_height_depends_on_connection_count_not_notice_text() {
@@ -6648,6 +7462,39 @@ mod tests {
     }
 
     #[test]
+    fn smb_remote_details_parser_loads_non_secret_fields_only() {
+        let details = parse_smb_remote_details(
+            r#"{
+                "ua_engr": {
+                    "type": "smb",
+                    "host": "engr-drive.bluecat.arizona.edu",
+                    "user": "uutzinger",
+                    "domain": "BLUECAT",
+                    "pass": "*** ENCRYPTED ***"
+                },
+                "ua_box": {"type": "box"}
+            }"#,
+            "ua_engr",
+        )
+        .expect("valid rclone dump")
+        .expect("SMB remote details");
+
+        assert_eq!(details.host, "engr-drive.bluecat.arizona.edu");
+        assert_eq!(details.user, "uutzinger");
+        assert_eq!(details.domain, "BLUECAT");
+        assert_eq!(
+            parse_smb_remote_details(r#"{"ua_box": {"type": "box"}}"#, "ua_box")
+                .expect("valid rclone dump"),
+            None
+        );
+        assert_eq!(
+            parse_smb_remote_details(r#"{"ua_engr": {"type": "smb"}}"#, "missing")
+                .expect("valid rclone dump"),
+            None
+        );
+    }
+
+    #[test]
     fn rclone_remote_matching_is_provider_specific() {
         let app = AppModel {
             rclone_remotes: vec![
@@ -6692,6 +7539,7 @@ mod tests {
             smb_host: "files.example.edu".into(),
             smb_user: "uutzinger".into(),
             smb_domain: "UA".into(),
+            smb_password: "secret passphrase".into(),
             ..ConnectionDraft::default()
         };
 
@@ -6706,12 +7554,26 @@ mod tests {
         assert!(!command.contains("files.example.edu"));
         assert!(!command.contains("uutzinger"));
         assert!(!command.contains("UA"));
+        assert_eq!(setup.password.as_deref(), Some("secret passphrase"));
+        let password_request =
+            smb_rclone_config_password_request(&setup).expect("password request");
+        assert_eq!(
+            password_request.sanitized_command(),
+            "rclone config password test_smb pass [REDACTED]"
+        );
+        assert!(
+            !password_request
+                .sanitized_command()
+                .contains("secret passphrase")
+        );
 
         draft.smb_user.clear();
         draft.smb_domain.clear();
+        draft.smb_password.clear();
         let setup = SmbRemoteSetup::from_draft(&draft).expect("optional user/domain");
         assert_eq!(setup.user, None);
         assert_eq!(setup.domain, None);
+        assert_eq!(setup.password, None);
     }
 
     #[test]
@@ -6723,7 +7585,8 @@ mod tests {
             ..ConnectionDraft::default()
         };
 
-        let error = SmbRemoteSetup::from_draft(&draft).expect_err("missing host must fail");
+        let setup = SmbRemoteSetup::from_draft(&draft).expect("missing host is allowed for update");
+        let error = smb_rclone_config_create_request(&setup).expect_err("create needs host");
         assert!(error.contains("SMB host is required"));
 
         draft.smb_host = "files.example.edu".into();
@@ -6814,6 +7677,21 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].sanitized_command(), "rclone config dump");
 
+        let malformed_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+            .with_resolved([Executable::Rclone]);
+        malformed_runner.push(Ok(command_output(r#"{"broken": {}}"#)));
+        let malformed = BoxRemoteSetup {
+            name: "broken".into(),
+        };
+
+        let error = create_box_rclone_remote_with(&malformed_runner, malformed)
+            .await
+            .expect_err("malformed existing section must block create");
+        assert!(error.contains("already exists"));
+        let requests = malformed_runner.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].sanitized_command(), "rclone config dump");
+
         let runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
             .with_resolved([Executable::Rclone]);
         runner.push(Ok(command_output("{}")));
@@ -6832,6 +7710,31 @@ mod tests {
         assert_eq!(
             requests[1].sanitized_command(),
             "rclone config create new_box box config_is_local true --non-interactive"
+        );
+
+        let cleanup_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+            .with_resolved([Executable::Rclone]);
+        cleanup_runner.push(Ok(command_output("{}")));
+        cleanup_runner.push(Err(nonzero_command_error("failed to start auth webserver")));
+        cleanup_runner.push(Ok(command_output("")));
+        let setup = BoxRemoteSetup {
+            name: "failed_box".into(),
+        };
+
+        let error = create_box_rclone_remote_with(&cleanup_runner, setup)
+            .await
+            .expect_err("failed create must be reported");
+        assert!(error.contains("failed to start auth webserver"));
+        let requests = cleanup_runner.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0].sanitized_command(), "rclone config dump");
+        assert_eq!(
+            requests[1].sanitized_command(),
+            "rclone config create failed_box box config_is_local true --non-interactive"
+        );
+        assert_eq!(
+            requests[2].sanitized_command(),
+            "rclone config delete failed_box"
         );
     }
 
@@ -6877,12 +7780,13 @@ mod tests {
     async fn create_smb_remote_blocks_duplicates_and_uses_fixed_commands() {
         let duplicate_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
             .with_resolved([Executable::Rclone]);
-        duplicate_runner.push(Ok(command_output(r#"{"existing": {"type": "smb"}}"#)));
+        duplicate_runner.push(Ok(command_output(r#"{"existing": {"type": "box"}}"#)));
         let duplicate = SmbRemoteSetup {
             name: "existing".into(),
-            host: "files.example.edu".into(),
+            host: Some("files.example.edu".into()),
             user: Some("uutzinger".into()),
             domain: Some("UA".into()),
+            password: None,
         };
 
         let error = create_smb_rclone_remote_with(&duplicate_runner, duplicate)
@@ -6893,23 +7797,80 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].sanitized_command(), "rclone config dump");
 
+        let update_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+            .with_resolved([Executable::Rclone]);
+        update_runner.push(Ok(command_output(r#"{"existing_smb": {"type": "smb"}}"#)));
+        update_runner.push(Ok(command_output("")));
+        let update = SmbRemoteSetup {
+            name: "existing_smb".into(),
+            host: Some("files.example.edu".into()),
+            user: Some("uutzinger".into()),
+            domain: Some("BLUECAT".into()),
+            password: None,
+        };
+
+        let updated = create_smb_rclone_remote_with(&update_runner, update)
+            .await
+            .expect("existing SMB remote should update metadata");
+        assert_eq!(updated.remote_name, "existing_smb");
+        assert!(!updated.password_updated);
+        let requests = update_runner.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].sanitized_command(), "rclone config dump");
+        let command = requests[1].sanitized_command();
+        assert!(command.contains("rclone config update existing_smb"));
+        assert!(command.contains(" --non-interactive"));
+        assert!(!command.contains("files.example.edu"));
+        assert!(!command.contains("uutzinger"));
+        assert!(!command.contains("BLUECAT"));
+
+        let password_update_runner =
+            cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+                .with_resolved([Executable::Rclone]);
+        password_update_runner.push(Ok(command_output(r#"{"existing_smb": {"type": "smb"}}"#)));
+        password_update_runner.push(Ok(command_output("")));
+        let password_update = SmbRemoteSetup {
+            name: "existing_smb".into(),
+            host: None,
+            user: None,
+            domain: None,
+            password: Some("rotated secret".into()),
+        };
+
+        let updated = create_smb_rclone_remote_with(&password_update_runner, password_update)
+            .await
+            .expect("existing SMB remote should allow password-only update");
+        assert_eq!(updated.remote_name, "existing_smb");
+        assert!(updated.password_updated);
+        let requests = password_update_runner.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].sanitized_command(), "rclone config dump");
+        assert_eq!(
+            requests[1].sanitized_command(),
+            "rclone config password existing_smb pass [REDACTED]"
+        );
+        assert!(!requests[1].sanitized_command().contains("rotated"));
+
         let runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
             .with_resolved([Executable::Rclone]);
         runner.push(Ok(command_output("{}")));
         runner.push(Ok(command_output("")));
+        runner.push(Ok(command_output("")));
         let setup = SmbRemoteSetup {
             name: "new_smb".into(),
-            host: "files.example.edu".into(),
+            host: Some("files.example.edu".into()),
             user: Some("uutzinger".into()),
             domain: Some("UA".into()),
+            password: Some("secret passphrase".into()),
         };
 
         let created = create_smb_rclone_remote_with(&runner, setup)
             .await
             .expect("new remote should be created");
-        assert_eq!(created, "new_smb");
+        assert_eq!(created.remote_name, "new_smb");
+        assert!(created.password_updated);
         let requests = runner.requests();
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert_eq!(requests[0].sanitized_command(), "rclone config dump");
 
         let command = requests[1].sanitized_command();
@@ -6918,6 +7879,11 @@ mod tests {
         assert!(!command.contains("files.example.edu"));
         assert!(!command.contains("uutzinger"));
         assert!(!command.contains("UA"));
+        assert_eq!(
+            requests[2].sanitized_command(),
+            "rclone config password new_smb pass [REDACTED]"
+        );
+        assert!(!requests[2].sanitized_command().contains("secret"));
     }
 
     #[tokio::test]
@@ -7729,6 +8695,22 @@ mod tests {
             .validate_connection_edit(&connection)
             .expect_err("selected nested folder must fail existing validation");
         assert!(error.contains("overlaps"));
+    }
+
+    #[test]
+    fn document_portal_folder_paths_parse_to_original_host_paths() {
+        assert!(is_document_portal_path(Path::new(
+            "/run/user/1000/doc/edc79c37/box_test"
+        )));
+        assert!(!is_document_portal_path(Path::new(
+            "/home/example/Cloud/box_test"
+        )));
+        assert_eq!(
+            parse_document_portal_origin(
+                "id: edc79c37\npath: /run/user/1000/doc/edc79c37/box_test\norigin: /home/example/Cloud/box_test\n"
+            ),
+            Some(PathBuf::from("/home/example/Cloud/box_test"))
+        );
     }
 
     #[test]

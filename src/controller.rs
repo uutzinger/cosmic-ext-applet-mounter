@@ -448,10 +448,16 @@ fn actions(status: &ConnectionStatus) -> Vec<OperationAction> {
         ConnectionStatus::OnlineMount(Online::PendingWrites | Online::Detaching) => {
             vec![action(Operation::Repair, false)]
         }
-        ConnectionStatus::OnlineMount(_) => vec![
-            action(Operation::Mount, false),
+        ConnectionStatus::OnlineMount(Online::WaitingForVpn) => vec![
+            action(Operation::Mount, true),
             action(Operation::Repair, true),
         ],
+        ConnectionStatus::OnlineMount(_) => {
+            vec![
+                action(Operation::Mount, false),
+                action(Operation::Repair, true),
+            ]
+        }
         ConnectionStatus::OfflineMirror(
             Offline::Idle | Offline::Offline | Offline::MeteredPaused,
         ) => {
@@ -850,10 +856,9 @@ mod tests {
             state.rows[0].status,
             ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn)
         );
-        assert_eq!(
-            decide_operation(&state.rows[0], Operation::Mount).reason,
-            Some("waiting for VPN readiness".into())
-        );
+        let decision = decide_operation(&state.rows[0], Operation::Mount);
+        assert!(decision.allowed);
+        assert_eq!(decision.reason, None);
     }
 
     #[test]

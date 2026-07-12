@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use cosmic::cosmic_config::{
@@ -16,6 +17,7 @@ use crate::model::{
 
 pub const APP_ID: &str = "io.github.uutzinger.cosmic-ext-applet-mounter";
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+const DOCUMENT_KEY: &str = "document";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigDocument {
@@ -114,6 +116,8 @@ impl std::error::Error for ValidationError {}
 pub enum SaveError {
     Validation(Vec<ValidationError>),
     Storage(cosmic_config::Error),
+    Io(String),
+    Serialize(String),
 }
 
 impl fmt::Display for SaveError {
@@ -121,11 +125,166 @@ impl fmt::Display for SaveError {
         match self {
             Self::Validation(errors) => write!(formatter, "configuration is invalid: {errors:?}"),
             Self::Storage(error) => error.fmt(formatter),
+            Self::Io(error) | Self::Serialize(error) => error.fmt(formatter),
         }
     }
 }
 
 impl std::error::Error for SaveError {}
+
+#[derive(Debug, Clone)]
+pub struct HostVisibleConfigStorage {
+    document_path: PathBuf,
+}
+
+#[derive(Debug)]
+pub enum AppConfigStorage {
+    Cosmic(cosmic_config::Config),
+    HostVisible(HostVisibleConfigStorage),
+}
+
+impl HostVisibleConfigStorage {
+    #[must_use]
+    pub fn new(document_path: PathBuf) -> Self {
+        Self { document_path }
+    }
+
+    #[must_use]
+    pub fn document_path(&self) -> &Path {
+        &self.document_path
+    }
+
+    fn load(&self) -> LoadReport {
+        match fs::read_to_string(&self.document_path) {
+            Ok(contents) => match ron::from_str::<ConfigDocument>(&contents) {
+                Ok(document) => {
+                    let config = Config { document };
+                    match config.validate() {
+                        Ok(()) => LoadReport {
+                            config,
+                            source: LoadSource::Current,
+                            warnings: Vec::new(),
+                        },
+                        Err(errors) => LoadReport {
+                            config: Config::default(),
+                            source: LoadSource::RecoveredDefaults,
+                            warnings: errors.into_iter().map(|error| error.to_string()).collect(),
+                        },
+                    }
+                }
+                Err(error) => LoadReport {
+                    config: Config::default(),
+                    source: LoadSource::RecoveredDefaults,
+                    warnings: vec![format!(
+                        "failed to parse host-visible applet configuration `{}`: {error}",
+                        self.document_path.display()
+                    )],
+                },
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => LoadReport {
+                config: Config::default(),
+                source: LoadSource::Fresh,
+                warnings: Vec::new(),
+            },
+            Err(error) => LoadReport {
+                config: Config::default(),
+                source: LoadSource::RecoveredDefaults,
+                warnings: vec![format!(
+                    "failed to read host-visible applet configuration `{}`: {error}",
+                    self.document_path.display()
+                )],
+            },
+        }
+    }
+
+    fn write(&self, document: &ConfigDocument) -> Result<(), SaveError> {
+        let parent = self.document_path.parent().ok_or_else(|| {
+            SaveError::Io(format!(
+                "configuration path `{}` has no parent directory",
+                self.document_path.display()
+            ))
+        })?;
+        fs::create_dir_all(parent).map_err(|error| {
+            SaveError::Io(format!(
+                "failed to create configuration directory `{}`: {error}",
+                parent.display()
+            ))
+        })?;
+        let content = ron::ser::to_string_pretty(document, ron::ser::PrettyConfig::new())
+            .map_err(|error| SaveError::Serialize(error.to_string()))?;
+        let tmp_path = self.document_path.with_extension("tmp");
+        fs::write(&tmp_path, content).map_err(|error| {
+            SaveError::Io(format!(
+                "failed to write temporary configuration `{}`: {error}",
+                tmp_path.display()
+            ))
+        })?;
+        fs::rename(&tmp_path, &self.document_path).map_err(|error| {
+            let _ = fs::remove_file(&tmp_path);
+            SaveError::Io(format!(
+                "failed to install configuration `{}`: {error}",
+                self.document_path.display()
+            ))
+        })
+    }
+}
+
+impl AppConfigStorage {
+    pub fn runtime() -> Result<Self, String> {
+        if running_in_flatpak() {
+            Ok(Self::HostVisible(HostVisibleConfigStorage::new(
+                host_visible_document_path()?,
+            )))
+        } else {
+            cosmic_config::Config::new(APP_ID, Config::VERSION)
+                .map(Self::Cosmic)
+                .map_err(|error| format!("Failed to open applet configuration storage: {error}"))
+        }
+    }
+
+    fn load(&self) -> LoadReport {
+        match self {
+            Self::Cosmic(current) => {
+                let legacy = cosmic_config::Config::new(APP_ID, LegacyConfigV1::VERSION);
+                match legacy {
+                    Ok(legacy) => Config::load_from(current, &legacy),
+                    Err(error) => LoadReport {
+                        config: Config::default(),
+                        source: LoadSource::RecoveredDefaults,
+                        warnings: vec![error.to_string()],
+                    },
+                }
+            }
+            Self::HostVisible(storage) => storage.load(),
+        }
+    }
+
+    fn write(&self, config: &Config) -> Result<(), SaveError> {
+        match self {
+            Self::Cosmic(storage) => config.write_validated(storage),
+            Self::HostVisible(storage) => {
+                config.validate().map_err(SaveError::Validation)?;
+                storage.write(&config.document)
+            }
+        }
+    }
+}
+
+fn running_in_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
+}
+
+fn host_visible_document_path() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+        "HOME is not set; cannot locate host-visible applet configuration".to_owned()
+    })?;
+    Ok(home
+        .join(".config")
+        .join("cosmic")
+        .join(APP_ID)
+        .join(format!("v{}", Config::VERSION))
+        .join(DOCUMENT_KEY))
+}
 
 impl Config {
     #[must_use]
@@ -152,6 +311,17 @@ impl Config {
                     warnings,
                 }
             }
+        }
+    }
+
+    pub fn load_runtime() -> LoadReport {
+        match AppConfigStorage::runtime() {
+            Ok(storage) => storage.load(),
+            Err(error) => LoadReport {
+                config: Self::default(),
+                source: LoadSource::RecoveredDefaults,
+                warnings: vec![error],
+            },
         }
     }
 
@@ -234,6 +404,34 @@ impl Config {
             return Ok(false);
         }
         if let Err(error) = self.write_validated(storage) {
+            *self = previous;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    pub fn update_validated_runtime<F>(&mut self, update: F) -> Result<bool, SaveError>
+    where
+        F: FnOnce(&mut ConfigDocument),
+    {
+        let storage = AppConfigStorage::runtime().map_err(SaveError::Io)?;
+        self.update_validated_with(&storage, update)
+    }
+
+    pub fn update_validated_with<F>(
+        &mut self,
+        storage: &AppConfigStorage,
+        update: F,
+    ) -> Result<bool, SaveError>
+    where
+        F: FnOnce(&mut ConfigDocument),
+    {
+        let previous = self.clone();
+        update(&mut self.document);
+        if *self == previous {
+            return Ok(false);
+        }
+        if let Err(error) = storage.write(self) {
             *self = previous;
             return Err(error);
         }
@@ -597,6 +795,64 @@ mod tests {
             Config::get_entry(&storage).expect("read stored defaults"),
             Config::default()
         );
+    }
+
+    #[test]
+    fn host_visible_storage_loads_native_cosmic_document() {
+        let temp = TempDir::new().expect("temporary directory");
+        let document_path = temp
+            .path()
+            .join(".config")
+            .join("cosmic")
+            .join(APP_ID)
+            .join(format!("v{}", Config::VERSION))
+            .join("document");
+        fs::create_dir_all(document_path.parent().expect("parent")).expect("create parent");
+        let expected = ConfigDocument {
+            notifications_enabled: false,
+            ..ConfigDocument::default()
+        };
+        fs::write(
+            &document_path,
+            ron::ser::to_string_pretty(&expected, ron::ser::PrettyConfig::new())
+                .expect("serialize"),
+        )
+        .expect("write document");
+
+        let storage = HostVisibleConfigStorage::new(document_path);
+        let report = storage.load();
+
+        assert_eq!(report.source, LoadSource::Current);
+        assert_eq!(report.config.document, expected);
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn host_visible_storage_writes_validated_document_atomically() {
+        let temp = TempDir::new().expect("temporary directory");
+        let document_path = temp
+            .path()
+            .join(".config")
+            .join("cosmic")
+            .join(APP_ID)
+            .join(format!("v{}", Config::VERSION))
+            .join("document");
+        let storage =
+            AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(document_path.clone()));
+        let mut config = Config::default();
+
+        let changed = config
+            .update_validated_with(&storage, |document| {
+                document.notifications_enabled = false;
+            })
+            .expect("write host-visible config");
+
+        assert!(changed);
+        assert!(!document_path.with_extension("tmp").exists());
+        let persisted: ConfigDocument =
+            ron::from_str(&fs::read_to_string(document_path).expect("read document"))
+                .expect("parse document");
+        assert!(!persisted.notifications_enabled);
     }
 
     #[test]

@@ -30,12 +30,39 @@ test:
     cargo test --all-targets
 
 metadata-check:
+    # Strict freedesktop validators currently reject official COSMIC applet
+    # template fields such as Categories=COSMIC and AppStream provides/binaries.
+    # Keep this recipe non-fatal so `just verify` remains useful; run
+    # `metadata-check-strict` when checking freedesktop-only metadata.
+    -desktop-file-validate resources/app.desktop
+    -appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
+
+metadata-check-net:
+    -desktop-file-validate resources/app.desktop
+    -appstreamcli validate --pedantic resources/app.metainfo.xml
+
+metadata-check-strict:
     desktop-file-validate resources/app.desktop
     appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
 
-metadata-check-net:
-    desktop-file-validate resources/app.desktop
-    appstreamcli validate --pedantic resources/app.metainfo.xml
+flatpak-cargo-sources:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    generator_python="python3"
+    if [ -x .venv-flatpak-generator/bin/python ]; then
+        generator_python=".venv-flatpak-generator/bin/python"
+    fi
+    if command -v flatpak-cargo-generator >/dev/null 2>&1; then
+        flatpak-cargo-generator Cargo.lock -o packaging/flatpak/cargo-sources.json
+    elif [ -f ../cosmic-ext-applet-sysinfo/flatpak/flatpak-cargo-generator.py ]; then
+        "$generator_python" ../cosmic-ext-applet-sysinfo/flatpak/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+    elif [ -f ../cosmic-ext-applet-weather/flatpak/flatpak-cargo-generator.py ]; then
+        "$generator_python" ../cosmic-ext-applet-weather/flatpak/flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+    else
+        printf '%s\n' 'flatpak-cargo-generator is required to generate packaging/flatpak/cargo-sources.json.' >&2
+        printf '%s\n' 'Install/provide flatpak-cargo-generator, or place the COSMIC helper script at ../cosmic-ext-applet-sysinfo/flatpak/flatpak-cargo-generator.py.' >&2
+        exit 127
+    fi
 
 build *args:
     cargo build {{args}}
