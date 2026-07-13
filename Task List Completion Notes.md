@@ -2113,3 +2113,39 @@ COSMIC Flatpak fork branch `add-cosmic-cloud-mounter` to
 `github.com:uutzinger/cosmic-flatpak.git`; GitHub reported the PR creation URL
 `https://github.com/uutzinger/cosmic-flatpak/pull/new/add-cosmic-cloud-mounter`.
 The upstream PR has not been opened yet and remains pending explicit approval.
+
+**COSMIC Flatpak panel persistence verification:** July 13, 2026. User removed
+the Flatpak-installed COSMIC Cloud Mounter applet from the COSMIC panel and
+added it back successfully. After logout and login, the applet remained present
+and preserved the existing saved connection settings. Marked panel add/remove
+and session persistence verified for the local Flatpak installation.
+
+**COSMIC Flatpak local Store/AppStream visibility:** July 13, 2026. The initial
+local OSTree repository was installable but not searchable because it lacked
+`appstream` refs. Ran
+`flatpak build-update-repo --generate-static-deltas --prune repo` in the local
+`/home/uutzinger/Build/cosmic-flatpak` checkout, which updated `appstream` and
+`appstream2` refs, generated static deltas, and updated the repository summary.
+After refreshing the user AppStream cache with
+`flatpak update --user --appstream cosmic-flatpak-local`, both
+`flatpak remote-ls --user --app --columns=application,name,description,version cosmic-flatpak-local`
+and `flatpak search --user 'COSMIC Cloud Mounter'` exposed
+`io.github.uutzinger.cosmic-ext-applet-mounter` as `COSMIC Cloud Mounter`, with
+summary `Manage online storage mounts and offline storage mirrors`, version
+`0.4.1`, branch `master`, and origin `cosmic-flatpak-local`. This verifies the
+metadata needed for Store-style discovery from the local/test remote.
+
+**COSMIC Flatpak uninstall preservation behavior:** July 13, 2026. Before
+uninstall, the applet configuration document hash was
+`e598014021bc376464bfd1a0efb80270ca892293080201611cccce03c75d004f` and the
+document contained 7 provider entries. Uninstalled the user Flatpak package with
+`flatpak uninstall --user -y io.github.uutzinger.cosmic-ext-applet-mounter`.
+The package was removed and the exported desktop/icon files disappeared, while
+the COSMIC configuration document, app-owned configuration directory, app-owned
+state directory, and 7 managed user service files remained present. Reinstalled
+from `cosmic-flatpak-local`; `flatpak info --user` again reported version
+`0.4.1` and the same deployment commit
+`6ec814f93a6774b4c99c90aaca171aa4c1d5ef3efe24bfd44c5c1642481f9e66`. The
+configuration document hash and provider count remained unchanged after
+reinstall, verifying that Flatpak uninstall removes packaged files without
+deleting user-created connection configuration, credentials, services, or state.

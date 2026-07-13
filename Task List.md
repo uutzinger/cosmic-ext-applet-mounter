@@ -1236,12 +1236,12 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 - [x] Install the locally built Flatpak from the generated local OSTree
   repository for the current user and confirm the
   exported desktop entry, icon, AppStream record, and applet classification.
-- [ ] Confirm the applet can be added to and removed from the COSMIC panel, and
+- [x] Confirm the applet can be added to and removed from the COSMIC panel, and
   that logout/login preserves the configured panel entry.
-- [ ] Confirm COSMIC Store displays the applet from a configured test/local
+- [x] Confirm COSMIC Store displays the applet from a configured test/local
   Flatpak remote using its AppStream name, summary, icon, screenshots, and
   applet classification.
-- [ ] Confirm uninstall removes packaged files without deleting user-created
+- [x] Confirm uninstall removes packaged files without deleting user-created
   connection configuration, mirrors, mountpoints, credentials, or recovery
   data.
 
