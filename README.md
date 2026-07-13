@@ -3,21 +3,21 @@
 <img src="./resources/icon.svg" alt="COSMIC Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
 COSMIC Cloud Mounter is a COSMIC desktop applet for managing storage
-connections to *OneDrive, Google Drive, Box,* and *SMB*. It supports direct <u>Online
-mount</u> and <u>Offline mirror</u> with background synchronization.
+connections to **OneDrive**, **Google Drive**, **Box**, and **SMB**. It supports
+direct **Online mount** and **Offline mirror** modes with background
+synchronization.
 
-The applet was developed to simplify mounting cloud storage. Users can easily
-turn storage connections on and off to reduce file manager stalls when the
-network is slow or unavailable.
+The applet simplifies mounting cloud storage. Users can turn storage
+connections on or off to reduce file manager stalls when the network is slow or
+unavailable.
 
 ## Modes and Providers
 
 **Online mount** uses a network-backed FUSE filesystem. It is useful for browsing
 large remote trees without keeping a full local copy.
 
-**Offline mirror** uses an ordinary local directory plus bidirectional sync. Initial
-sync requires a dry Preview and confirmed Sync Now. Automatic background sync
-pauses on metered networks by default.
+**Offline mirror** uses an ordinary local directory plus bidirectional sync.
+Automatic background sync pauses on metered networks by default.
 
 The following connection engines are used to connect to the providers:
 
@@ -28,7 +28,7 @@ The following connection engines are used to connect to the providers:
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
-Example screen shots of the applet:
+Example screenshots of the applet:
 <table>
   <tr>
     <td valign="top"><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="200"></td>
@@ -39,22 +39,39 @@ Example screen shots of the applet:
 
 ## Installation and Removal
 
-Until installation through COSMIC Store is available, install the Debian
-package from the [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest).
-Version 0.4.1 currently provides an `amd64` package:
+Before installing, verify [Dependencies](#dependencies) and use
+[Dependency Installation.md](Dependency%20Installation.md) to install the
+external storage engines you plan to use.
+
+### Installation from Source
+
+See [Build from Source](#build-from-source).
+
+### Installation from Debian Package
+
+The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest)
+provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.1/cosmic-ext-applet-mounter_0.4.1_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.1_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.2/cosmic-ext-applet-mounter_0.4.2_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.2_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
 entry, AppStream metadata, and icon.
 
+### Installation from Flatpak
+
+Flatpak packaging is being prepared for COSMIC repository submission. Until it
+is published through a public Flatpak remote, use the Debian package or build
+from source unless you are testing the Flatpak manifest locally.
+
+### Post Installation
+
 After installation, open **COSMIC Settings > Desktop > Panel > Applets** and add
-**COSMIC Cloud Mounter** to the desired panel or dock. Install the external
-storage engines needed for your providers as described under
-[Dependencies](#dependencies).
+**COSMIC Cloud Mounter** to the desired panel or dock.
+
+### Uninstallation
 
 Before uninstalling, use the applet to stop active mounts and mirrors. If you
 also want to remove its generated user services and timers, remove each
@@ -63,8 +80,29 @@ data, local mirror data, provider credentials, caches, or recovery directories.
 
 Remove COSMIC Cloud Mounter from the panel, then uninstall the package:
 
+When installed from Debian package:
+
 ```sh
 sudo apt remove cosmic-ext-applet-mounter
+```
+
+When installed from Flatpak:
+
+```sh
+flatpak uninstall io.github.uutzinger.cosmic-ext-applet-mounter
+```
+
+When installed from source with `just install-user`, remove the installed user
+files:
+
+```sh
+rm -f ~/.local/bin/cosmic-ext-applet-mounter
+rm -f ~/.local/bin/cosmic-ext-applet-mounter-onedrive-auth-helper
+rm -f ~/.local/share/applications/io.github.uutzinger.cosmic-ext-applet-mounter.desktop
+rm -f ~/.local/share/metainfo/io.github.uutzinger.cosmic-ext-applet-mounter.metainfo.xml
+rm -f ~/.local/share/icons/hicolor/scalable/apps/io.github.uutzinger.cosmic-ext-applet-mounter.svg
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 ```
 
 Package removal does not delete configuration and data in the user's home
@@ -101,15 +139,14 @@ To reduce data integrity risks, **do not**:
   provider account and overlapping remote subtree;
 - use an Online mount point as an Offline mirror directory;
 - use an Offline mirror directory as an Online mount point;
-- run OneDrive Online mount and OneDrive Offline mirror concurrently against the same
-  OneDrive account or overlapping subtree unless the applet has explicitly
+- run OneDrive Online mount and OneDrive Offline mirror concurrently against the
+  same OneDrive account or overlapping subtree unless the applet has explicitly
   isolated that setup;
 - run `onedrive --resync` casually. State rebuilds require preview and
   confirmation when managed by the applet.
 
-Offline **mirror** mode is the reliable option for uninterrupted local file access.
-
-Online mounts can block or fail when the provider, VPN, FUSE layer, or
+Offline **mirror** mode is the reliable option for uninterrupted local file
+access. Online mounts can block or fail when the provider, VPN, FUSE layer, or
 network stalls.
 
 ## Applet Workflow
@@ -125,9 +162,11 @@ Each connection row has the connection name and one primary state control:
 
 Clicking the connection name opens `Modify`.
 
-`Add` and `Modify` share the same editor. Modify mode exposes `Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline mirrors, `Disable` or `Enable`, and
-`Remove`. The Information section summarizes the selected engine, generated unit
-validation, and confirmation policy.
+`Add` and `Modify` share the same editor. Modify mode exposes
+`Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline
+mirrors, `Disable` or `Enable`, and `Remove`. The Information section
+summarizes the selected engine, generated unit validation, and confirmation
+policy.
 
 ## Authentication
 
@@ -142,7 +181,7 @@ For OneDrive Online mount, the applet uses `jstaf/onedriver` with applet-owned
 configuration and cache paths. For OneDrive Offline mirror, it uses
 `abraunegg/onedrive` with applet-owned configuration, sync, and recovery paths.
 
-## Recovery and Limitations
+## Conflict Recovery and Limitations
 
 Offline mirrors preserve both versions of same-file conflicts. Deletions
 propagate bidirectionally after preview and confirmation policy has been
@@ -156,9 +195,12 @@ are excluded from rclone Offline mirrors and remain browser-accessible.
 
 Known limitations:
 
-- `abraunegg/onedrive` requires a GTK webview because it does not yet provide a
-  method that hands the authorization redirect to this applet.
-- Google Drive Online mount testing can hit Google Drive API quota/rate limiting.
+- OneDrive Offline mirror setup uses `abraunegg/onedrive` authentication. The
+  applet provides a helper flow for the Microsoft redirect and retains a manual
+  handoff fallback because redirect handling can vary by browser and account
+  type.
+- Google Drive Online mount testing can hit Google Drive API quota/rate
+  limiting.
 - NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
   integration remains future work.
 
@@ -174,8 +216,8 @@ active connection still requires it.
 
 ## Connection Removal
 
-Press **Remove** once to request confirmation, then press **Remove** again to
-remove the connection.
+Press **Remove** once to request confirmation, then press **Confirm Remove**
+again to remove the connection.
 
 Removal deletes the applet-managed connection record and any matching
 applet-owned systemd user units. Units that do not carry this applet's ownership
@@ -235,26 +277,29 @@ invalid or unknown, `just metadata-check` is non-fatal; use
 metadata-check-net` additionally checks published URLs and screenshots. `just
 deb` builds a local unsigned Debian binary package in the parent directory.
 
-## Flatpak Packaging Status
+## Flatpak Packaging and Publication
 
-Flatpak packaging is in prototype/submission preparation. The applet has been
-live-tested from a local Flatpak prototype, but it is not yet published through
-COSMIC Store.
+Flatpak packaging is intended for the COSMIC Flatpak repository because this is
+a COSMIC panel applet, not a general desktop application. The local Flatpak has
+been built, installed, tested from a local repository, and verified for
+AppStream discovery and uninstall behavior. It is not yet published through a
+public COSMIC remote.
 
-The project-owned final manifest scaffold is:
+The project-owned manifest is:
 
 ```text
 packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json
 ```
 
-Prototype build:
+The manifest builds from the tagged source release and generated Cargo source
+list. The COSMIC repository submission uses the `pop-os/cosmic-flatpak`
+workflow:
 
 ```sh
-cargo build --release
-flatpak-builder --force-clean --user --install \
-  target/flatpak-gui-prototype \
-  packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json
-flatpak run io.github.uutzinger.cosmic-ext-applet-mounter
+cd ../cosmic-flatpak
+just build io.github.uutzinger.cosmic-ext-applet-mounter
+just build-changed
+flatpak build-update-repo --generate-static-deltas --prune repo
 ```
 
 The final manifest uses `flatpak-spawn --host` for approved host commands, so
@@ -283,45 +328,52 @@ concurrent instances can race on mount, sync, and service state. Switching
 package formats should be done by stopping the running applet first, then
 starting the other package format.
 
-To prepare the reproducible Flatpak source list after dependency changes:
+To regenerate the reproducible Flatpak source list after dependency changes:
 
 ```sh
 just flatpak-cargo-sources
 ```
 
 This requires `flatpak-cargo-generator` or the equivalent COSMIC helper script
-and writes `packaging/flatpak/cargo-sources.json`. The final COSMIC repository
-submission must replace the manifest's placeholder source commit with the
-tagged release commit and build through the `pop-os/cosmic-flatpak` workflow.
+and writes `packaging/flatpak/cargo-sources.json`. For public release, submit a
+focused pull request to `pop-os/cosmic-flatpak` containing the manifest and
+generated source list. The repository builds binaries from source; maintainers
+do not need prebuilt `amd64` binaries from this project.
 
 ## Project Development
 
 This applet was developed with agent-assisted programming. The project starts
 from [Applet Description.md](Applet%20Description.md), which is translated into
-[Requirements and Specifications.md](Requirements%20and%20Specifications.md) including the Functional Requirements. They are reviewed by the author.
-The requirements drive [Task List.md](Task%20List.md), and its execution history is
-documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author supervises each task and its verification.
+[Requirements and Specifications.md](Requirements%20and%20Specifications.md),
+including the Functional Requirements. The author reviews these documents before
+implementation. The requirements drive [Task List.md](Task%20List.md), and its
+execution history is documented in
+[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author
+supervises and approves each task and its verification.
 
 ## Contributing & Feature Requests
 
 ### Feature Requests
 
-You can implement additional features to this project using agentic programming;
+You can implement additional features using agent-assisted programming:
 
-- Download the github repository.
-- Update the Applet Description to include your request or create a document describing your reuqest and ask you AI agent to include it in the Applet Description.
+- Clone the GitHub repository.
+- Update the Applet Description to include your request, or create a document
+  describing your request and ask your AI agent to include it in the Applet
+  Description.
 - Have your AI agent check and update the Applet Description.
 - Have your AI agent update the Requirements and Specifications based on the Applet Description.
 - Verify the modifications to the Requirements and Specifications.
 - Ask your AI agent to update the Functional Requirements based on your reviewed Requirements and Specifications.
 - Have your AI agent add Tasks to the Task list based on the updated Specifications.
 - Have your AI agent execute the additions to the Task list.
-- Complete the verifications and test your implementation.
-- Submit pull request.
+- Make sure your AI agent updates Task List Completion Notes.
+- Complete the verifications and test for your implementation as instructed by your AI agent.
+- Submit a pull request.
 
 ### Bug Reports
 
-- Submit report on Github,
+- Submit a report on GitHub.
 
 ## License
 

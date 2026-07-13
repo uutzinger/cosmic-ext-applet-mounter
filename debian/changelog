@@ -1,3 +1,11 @@
+cosmic-ext-applet-mounter (0.4.2) unstable; urgency=medium
+
+  * Refresh README installation, removal, and Flatpak publication guidance.
+  * Update screenshots for publication.
+  * Record local Flatpak Store visibility and uninstall behavior validation.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 13 Jul 2026 08:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.1) unstable; urgency=medium
 
   * Align release metadata after the 0.4.0 merge.

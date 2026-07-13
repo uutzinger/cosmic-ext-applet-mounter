@@ -61,19 +61,29 @@
   </branding>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.1/resources/Popup.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.2/resources/Popup.png</image>
       <caption>Manage storage connections from the COSMIC panel popup.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.1/resources/Add_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.2/resources/Add_Connection.png</image>
       <caption>Add a storage connection with provider, mode, remote, local target, and VPN options.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.1/resources/Change_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.2/resources/Change_Connection.png</image>
       <caption>Modify, test, disable, remove, preview, or synchronize an existing connection.</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.2" date="2026-07-13">
+      <description>
+        <p>Version 0.4.2.</p>
+        <ul>
+          <li>Refined README installation, removal, and Flatpak publication guidance.</li>
+          <li>Updated screenshots for public repository review.</li>
+          <li>Recorded local Flatpak AppStream visibility and uninstall behavior validation.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-07-12">
       <description>
         <p>Version 0.4.1.</p>
