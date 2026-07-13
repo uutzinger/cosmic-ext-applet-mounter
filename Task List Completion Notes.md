@@ -2104,3 +2104,12 @@ URLs and now reports only the known COSMIC-template issues: unknown
 `<binaries>` provides wrapper and invalid `COSMIC` category. The strict
 validation task therefore remains open until maintainers confirm whether to keep
 the official COSMIC template fields or adjust them for this submission.
+
+**COSMIC Flatpak branch push:** July 12, 2026. Committed the finalized project
+Flatpak manifest, generated cargo sources, and task-record updates to the app
+repository as `22e8d3b Finalize COSMIC Flatpak submission metadata` and pushed
+`master` to `github.com:uutzinger/cosmic-ext-applet-mounter.git`. Pushed the
+COSMIC Flatpak fork branch `add-cosmic-cloud-mounter` to
+`github.com:uutzinger/cosmic-flatpak.git`; GitHub reported the PR creation URL
+`https://github.com/uutzinger/cosmic-flatpak/pull/new/add-cosmic-cloud-mounter`.
+The upstream PR has not been opened yet and remains pending explicit approval.
