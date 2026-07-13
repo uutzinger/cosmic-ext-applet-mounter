@@ -2024,4 +2024,83 @@ validation.
 
 **Version 0.4.0 merge and release-tag evidence:** July 11, 2026. Merged `flatpak-host-runner` into `master` with merge commit `fb7fceb`, reran `just verify` and `just deb` successfully on merged `master`, pushed `master`, and created/pushed annotated tag `v0.4.0` on the merge commit. Local Debian artifact `../cosmic-ext-applet-mounter_0.4.0_amd64.deb` was produced. The official Flatpak publication tasks remain open because the final Flatpak manifest still uses the placeholder `REPLACE_WITH_FLATPAK_READY_COMMIT`, AppStream screenshot URLs still point at an older raw GitHub commit, and no GitHub release artifact or `pop-os/cosmic-flatpak` submission has been completed yet.
 
-**Version 0.4.1 release metadata and package evidence:** July 12, 2026. Because `master` gained task-list/completion-note bookkeeping after the pushed `v0.4.0` tag, the release was advanced to `0.4.1` rather than rewriting the existing tag. Updated Cargo, Cargo.lock, Debian changelog, AppStream release entries, README package URLs, stable tag-based AppStream screenshot URLs, and the project Flatpak manifest source reference to `v0.4.1`. `just verify` passed for `cosmic-ext-applet-mounter v0.4.1`, including formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests. `just deb` passed and produced `../cosmic-ext-applet-mounter_0.4.1_amd64.deb`; the known strict-validator warnings for official COSMIC applet metadata remained visible but non-fatal.
+**Version 0.4.1 release metadata and package evidence:** July 12, 2026. Because `master` gained task-list/completion-note bookkeeping after the pushed `v0.4.0` tag, the release was advanced to `0.4.1` rather than rewriting the existing tag. Updated Cargo, Cargo.lock, Debian changelog, AppStream release entries, README package URLs, stable tag-based AppStream screenshot URLs, and the project Flatpak manifest source reference to `v0.4.1`. `just verify` passed for `cosmic-ext-applet-mounter v0.4.1`, including formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests. `just deb` passed and produced `../cosmic-ext-applet-mounter_0.4.1_amd64.deb`; the known strict-validator warnings for official COSMIC applet metadata remained visible but non-fatal. Commit `ce3e8bd` was pushed to `master`, annotated tag `v0.4.1` was pushed, and the GitHub release `COSMIC Cloud Mounter v0.4.1` was published at `https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.4.1` with uploaded asset `cosmic-ext-applet-mounter_0.4.1_amd64.deb` (`application/x-debian-package`, 7,023,570 bytes).
+
+**COSMIC Flatpak repository local build:** July 12, 2026. Forked and cloned
+`pop-os/cosmic-flatpak` to `/home/uutzinger/Build/cosmic-flatpak`, created
+branch `add-cosmic-cloud-mounter`, and added only
+`app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
+plus `cargo-sources.json`. The initial repository build failed during
+`cargo --offline fetch` because the generated Cargo source replacement covered
+only one `libcosmic` source identity. `Cargo.lock` contains both
+`https://github.com/pop-os/libcosmic.git?rev=a991d7bb433f67016c1473e8e4a03691ededd75a`
+and plain `https://github.com/pop-os/libcosmic` through
+`cosmic-panel-config`. Updated the generated `cargo-sources.json` Cargo config
+to keep the plain `libcosmic` replacement broad, matching accepted COSMIC
+applet patterns, and added a second replacement stanza for the direct
+`.git?rev=...` identity. Re-running
+`just build io.github.uutzinger.cosmic-ext-applet-mounter` in the COSMIC
+Flatpak repository succeeded: `cargo --offline fetch` passed, the applet built
+in release mode, AppStream compose reported `Success!`, and Flatpak exported
+app commit `6ec814f93a6774b4c99c90aaca171aa4c1d5ef3efe24bfd44c5c1642481f9e66`
+plus debuginfo commit
+`7e9648422337d0b13050e1d1a2cb37ee506b8af4e7c43c216f5d0afe6e60dfda`.
+The known desktop validator warning for `Categories=COSMIC;Utility;` remained
+visible during export but did not fail the repository build.
+
+**COSMIC Flatpak changed-app workflow:** July 12, 2026. The first
+`just build-changed` run exited successfully but did not build the app because
+the submission files were still untracked. Created local submission commit
+`3c2ddc0` in `/home/uutzinger/Build/cosmic-flatpak` with only the app manifest
+and generated `cargo-sources.json`, then reran `just build-changed`. The target
+fetched `origin/master`, detected the committed
+`io.github.uutzinger.cosmic-ext-applet-mounter` app directory, invoked the same
+`flatpak-builder` path, and completed successfully using the already validated
+cache for build, cleanup, and finish stages.
+
+**COSMIC Flatpak local repository install:** July 12, 2026. Installed the
+locally built app from the generated `/home/uutzinger/Build/cosmic-flatpak/repo`
+OSTree repository by reinstalling
+`io.github.uutzinger.cosmic-ext-applet-mounter` from the user remote
+`cosmic-flatpak-local`. `flatpak info --user` reports version `0.4.1`, origin
+`cosmic-flatpak-local`, runtime `org.freedesktop.Platform/x86_64/25.08`, and
+app commit `6ec814f93a6774b4c99c90aaca171aa4c1d5ef3efe24bfd44c5c1642481f9e66`.
+The exported desktop entry advertises `Name=COSMIC Cloud Mounter`,
+`Exec=/usr/bin/flatpak run --branch=master --arch=x86_64 --command=cosmic-ext-applet-mounter io.github.uutzinger.cosmic-ext-applet-mounter`,
+`Icon=io.github.uutzinger.cosmic-ext-applet-mounter`,
+`Categories=COSMIC;Utility;`, and COSMIC/cloud/storage keywords. The installed
+AppStream file exists under the Flatpak deployment and includes the app ID,
+MIT license, app name, summary, desktop launchable, `com.system76.CosmicApplet`
+provides entry, and `cosmic-ext-applet-mounter` binary declaration. The local
+install reported the expected `com.system76.CosmicSettingsDaemon` D-Bus
+permission added for COSMIC theme/status integration.
+
+**COSMIC Flatpak submission diff review:** July 12, 2026. Reviewed local
+submission commit `3c2ddc0` in `/home/uutzinger/Build/cosmic-flatpak`. The
+commit adds only
+`app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
+and `app/io.github.uutzinger.cosmic-ext-applet-mounter/cargo-sources.json`.
+The manifest points to the public tagged source `v0.4.1`, uses the approved
+finish-args, installs only app binaries/desktop/AppStream/icon files, and does
+not include local mount paths, test accounts, credentials, refresh tokens,
+passwords, SMB details, or machine-specific cloud configuration. The generated
+cargo source file contains vendored dependency metadata only; broad secret/path
+searches found no submission-blocking private data.
+
+**COSMIC Flatpak template comparison and strict metadata validation:** July 12,
+2026. Compared the final manifest against accepted applet manifests in the local
+`pop-os/cosmic-flatpak` clone, including `io.github.hepp3n.kdeconnect`,
+`dev.cappsy.CosmicExtAppletDrives`, and
+`io.github.cosmic_utils.weather-applet`. The mounter manifest follows the
+current repository pattern: `id`, Freedesktop 25.08 runtime/SDK, Rust stable SDK
+extension, COSMIC BaseApp, app command, offline cargo build, and app-owned
+desktop/AppStream/icon install paths. Its permissions are narrower than the
+Drives applet because the mounter avoids `--filesystem=host` and routes host
+operations through the approved `flatpak-spawn --host` boundary. Direct
+`desktop-file-validate` still exits nonzero because the official COSMIC applet
+category `COSMIC` is not registered in freedesktop validators. Network-enabled
+`appstreamcli validate --pedantic resources/app.metainfo.xml` reaches the remote
+URLs and now reports only the known COSMIC-template issues: unknown
+`<binaries>` provides wrapper and invalid `COSMIC` category. The strict
+validation task therefore remains open until maintainers confirm whether to keep
+the official COSMIC template fields or adjust them for this submission.

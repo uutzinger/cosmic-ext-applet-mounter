@@ -1168,7 +1168,7 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   `com.system76.Cosmic.BaseApp//stable`. Recheck these versions immediately
   before submission because repository conventions can advance.
 - [x] Set the manifest `command` to `cosmic-ext-applet-mounter`.
-- [ ] Build the Rust binary from a tagged source archive or pinned commit rather
+- [x] Build the Rust binary from a tagged source archive or pinned commit rather
   than from an unpinned branch.
 - [x] Generate `cargo-sources.json` for an offline, reproducible
   `flatpak-builder --sandbox` build, including the pinned libcosmic Git revision
@@ -1209,11 +1209,11 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   `Keywords=COSMIC;cloud;mount;mirror;storage;`.
 - [x] Include `NoDisplay=true`, `X-CosmicApplet=true`, and
   `X-CosmicHoverPopup=Auto` in the desktop entry.
-- [ ] Compare the final desktop and AppStream files with the current official
+- [x] Compare the final desktop and AppStream files with the current official
   applet template again immediately before submission.
-- [ ] Update AppStream release entries to match the source tag submitted to the
+- [x] Update AppStream release entries to match the source tag submitted to the
   repository; do not label a final publication as a release candidate.
-- [ ] Ensure AppStream includes stable remote icon and screenshot URLs that are
+- [x] Ensure AppStream includes stable remote icon and screenshot URLs that are
   reachable without authentication and will remain valid for the submitted
   release.
 - [ ] Validate metadata with `desktop-file-validate` and
@@ -1226,14 +1226,14 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   dependency installation.
 - [x] Add the COSMIC repository for local testing:
   `flatpak remote-add --if-not-exists --user cosmic https://apt.pop-os.org/cosmic/cosmic.flatpakrepo`.
-- [ ] Build through the current `pop-os/cosmic-flatpak` workflow using
+- [x] Build through the current `pop-os/cosmic-flatpak` workflow using
   `just build io.github.uutzinger.cosmic-ext-applet-mounter` in a local clone of
   that repository; this runs `flatpak-builder` with `--sandbox`,
   `--force-clean`, `--install-deps-from=flathub`, and `--require-changes` and
   retains a log under `log/app/<application-id>/`.
-- [ ] Run `just build-changed` from a submission branch to reproduce repository
+- [x] Run `just build-changed` from a submission branch to reproduce repository
   CI behavior before opening the pull request.
-- [ ] Install the locally built Flatpak from the generated local OSTree
+- [x] Install the locally built Flatpak from the generated local OSTree
   repository for the current user and confirm the
   exported desktop entry, icon, AppStream record, and applet classification.
 - [ ] Confirm the applet can be added to and removed from the COSMIC panel, and
@@ -1428,14 +1428,14 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 
 ### COSMIC Repository Submission
 
-- [ ] Fork and clone `https://github.com/pop-os/cosmic-flatpak`.
-- [ ] Add only
+- [x] Fork and clone `https://github.com/pop-os/cosmic-flatpak`.
+- [x] Add only
   `app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
   and its required generated `cargo-sources.json` or equivalent source file to
   the repository submission unless maintainers request additional files.
-- [ ] Run the repository's complete local validation/build target and resolve
+- [x] Run the repository's complete local validation/build target and resolve
   all errors without weakening the approved permission model.
-- [ ] Review the submission diff for generated files, credentials, local paths,
+- [x] Review the submission diff for generated files, credentials, local paths,
   test accounts, and machine-specific configuration before committing.
 - [ ] Open a focused pull request containing the manifest and required
   packaging files, with links to the source repository, MIT license, tagged
