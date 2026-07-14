@@ -1,6 +1,6 @@
-# Dependency Installation
+# Dependencies
 
-This document covers installing and checking external dependencies.
+The applet detects dependencies and provides guidance, but does not install or upgrade them. You likely will need to update rclone. If you want to connect to OneDrive storage, you need to install onedriver and/or onedrive. All other components should be preinstalled by the operating system.
 
 ## Required Versions
 
@@ -20,7 +20,7 @@ If you build from source you can check dependencies with:
 cargo run --example dependency_inventory
 ```
 
-## rclone
+## rclone (Google Drive, Box, SMB)
 
 Check the installed version and configuration location:
 
@@ -70,7 +70,7 @@ References:
 - <https://rclone.org/commands/rclone_selfupdate/>
 - <https://rclone.org/downloads/>
 
-## jstaf/onedriver
+## jstaf/onedriver (OneDrive Online)
 
 Install `onedriver` from the
 [OpenSUSE Build Service](https://software.opensuse.org/download.html?project=home%3Ajstaf&package=onedriver)
@@ -89,7 +89,7 @@ Reference:
 
 - <https://github.com/jstaf/onedriver>
 
-## abraunegg/onedrive
+## abraunegg/onedrive (OneDrive Mirror)
 
 Ubuntu 24.04 repositories may provide an obsolete 2.4.x package. Use an
 upstream-supported package source that provides version 2.5.10 or newer.
@@ -113,6 +113,8 @@ sudo apt install --no-install-recommends --no-install-suggests onedrive
 onedrive --version
 ```
 
+For an operating system other than Ubuntu 24.04, check the onedrive installation instructions in the reference below.
+
 Before installing, confirm `apt-cache policy onedrive` selects the OBS package
 and version 2.5.10 or newer.
 
@@ -122,7 +124,7 @@ References:
 - <https://github.com/abraunegg/onedrive/blob/master/docs/usage.md>
 - <https://github.com/abraunegg/onedrive/blob/master/docs/advanced-usage.md>
 
-## Cisco Secure Client
+## Cisco Secure Client (VPN)
 
 Cisco Secure Client support requires the CLI/GUI binaries and the VPN agent
 service. On the tested machine the service was named `vpnagentd.service`.

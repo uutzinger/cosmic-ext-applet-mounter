@@ -39,8 +39,8 @@ Example screenshots of the applet:
 
 ## Installation and Removal
 
-Before installing, verify [Dependencies](#dependencies) and use
-[Dependency Installation.md](Dependency%20Installation.md) to install the
+Before installing, verify dependencies in
+[Dependency Installation.md](Dependency%20Installation.md). Follow instructions to install the
 external storage engines you plan to use.
 
 ### Installation from Source
@@ -108,24 +108,6 @@ gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 Package removal does not delete configuration and data in the user's home
 directory. Any connection records or generated user services not removed
 before uninstalling remain in place for a later reinstall or manual cleanup.
-
-## Dependencies
-
-The applet detects dependencies and provides guidance, but does not install or
-upgrade them.
-
-| Dependency | Purpose | Minimum for this project |
-|---|---|---|
-| `rclone` | Google Drive, Box, and SMB mounts and mirrors | 1.74.3 |
-| `onedriver` by jstaf | OneDrive Online mount | 0.15.0 |
-| `onedrive` by abraunegg | OneDrive Offline mirror | 2.5.10 |
-| FUSE 3 / `fusermount3` | Online mounts | Required |
-| NetworkManager / `nmcli` | Network and VPN readiness | Required |
-| Cisco Secure Client | Optional Cisco VPN support | 5.1.10 tested |
-| `fuser` from `psmisc` | Optional busy-mount diagnostics | Recommended |
-
-Install and upgrade guidance is provided here:
-[Dependency Installation.md](Dependency%20Installation.md).
 
 ## Data Integrity Warning
 
@@ -261,13 +243,13 @@ just deb
 
 Useful read-only examples:
 
-```sh
-cargo run --example dependency_inventory
-```
+`cargo run --example dependency_inventory` checks dependencies.
+
+`just install-user` installs the development build under `~/.local` and
+updates desktop metadata and icons for the current user.
 
 `just stage` installs into `target/stage/usr` and does not modify the host
-system. `just install-user` installs the development build under `~/.local` and
-updates desktop metadata and icons for the current user.
+system.
 
 `just metadata-check` validates the desktop entry and AppStream metadata without
 network access. Because the official COSMIC applet template currently uses
@@ -322,7 +304,7 @@ prototype through:
 ~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document
 ```
 
-Do not run native and Flatpak instances at the same time. Both can see the same
+**Do not** run native and Flatpak instances at the same time. Both can see the same
 connection configuration and manage the same generated user services, so
 concurrent instances can race on mount, sync, and service state. Switching
 package formats should be done by stopping the running applet first, then
@@ -355,7 +337,7 @@ supervises and approves each task and its verification.
 
 ### Feature Requests
 
-You can implement additional features using agent-assisted programming:
+You can implement additional features using agent-assisted programming. OpenAI Codex was used for the current version:
 
 - Clone the GitHub repository.
 - Update the Applet Description to include your request, or create a document
@@ -368,8 +350,8 @@ You can implement additional features using agent-assisted programming:
 - Have your AI agent add Tasks to the Task list based on the updated Specifications.
 - Have your AI agent execute the additions to the Task list.
 - Make sure your AI agent updates Task List Completion Notes.
-- Complete the verifications and test for your implementation as instructed by your AI agent.
-- Submit a pull request.
+- Complete the verifications and test for your implementation as instructed by your AI agent. Do not skip the testing.
+- Submit a pull request to this repo.
 
 ### Bug Reports
 
