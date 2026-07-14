@@ -1,9 +1,9 @@
-# COSMIC Cloud Mounter Applet
+# Cloud Mounter Applet for COSMIC™
 
 ## Purpose
 
-The COSMIC Cloud Mounter Applet manages cloud and network storage connections
-from the COSMIC desktop panel. It allows users to choose between direct online
+The Cloud Mounter Applet manages cloud and network storage connections from the
+COSMIC™ desktop panel. It allows users to choose between direct online
 access and a local offline copy that synchronizes with the remote service.
 
 The applet may also start a required VPN connection before accessing storage and

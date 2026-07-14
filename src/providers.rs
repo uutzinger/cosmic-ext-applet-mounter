@@ -372,7 +372,7 @@ pub fn rclone_mount_plan(
         rc_socket,
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("COSMIC Cloud Mounter: {}", connection.name),
+            description: format!("Cloud Mounter: {}", connection.name),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
             restart_on_failure: true,
@@ -419,7 +419,7 @@ pub fn onedriver_mount_plan(
         config_file,
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("COSMIC Cloud Mounter: {}", connection.name),
+            description: format!("Cloud Mounter: {}", connection.name),
             executable: PathBuf::from(DEFAULT_ONEDRIVER),
             arguments,
             restart_on_failure: true,

@@ -63,7 +63,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const CONNECTION_SETTINGS_TITLE: &str = "Cloud Mounter Connection Settings";
-const APP_DISPLAY_NAME: &str = "COSMIC Cloud Mounter";
+const APP_DISPLAY_NAME: &str = "Cloud Mounter";
 const POPUP_CONNECTION_LIST_MAX_HEIGHT: f32 = 640.0;
 const POPUP_CONNECTION_NAME_MAX_CHARS: usize = 36;
 const POPUP_CONNECTION_ROW_VERTICAL_PADDING: u16 = 0;
@@ -3200,7 +3200,7 @@ fn detect_vpn_profiles() -> VpnDetection {
     let mut detection = VpnDetection::default();
     writeln!(
         detection.debug,
-        "COSMIC Mounter VPN detection started at {:?}",
+        "Cloud Mounter VPN detection started at {:?}",
         std::time::SystemTime::now()
     )
     .ok();
@@ -6495,7 +6495,7 @@ fn write_initial_preview_marker(
 ) -> Result<(), String> {
     fs::write(
         initial_preview_marker(plan),
-        format!("COSMIC Cloud Mounter initial preview completed.\n{summary}\n"),
+        format!("Cloud Mounter initial preview completed.\n{summary}\n"),
     )
     .map_err(|error| format!("failed to record initial preview completion: {error}"))
 }
@@ -6505,7 +6505,7 @@ fn write_initial_sync_marker(
 ) -> Result<(), String> {
     fs::write(
         initial_sync_marker(plan),
-        "COSMIC Cloud Mounter initial sync completed.\n",
+        "Cloud Mounter initial sync completed.\n",
     )
     .map_err(|error| format!("failed to record initial sync completion: {error}"))
 }
@@ -6516,7 +6516,7 @@ fn write_onedrive_initial_preview_marker(
 ) -> Result<(), String> {
     fs::write(
         onedrive_initial_preview_marker(plan),
-        format!("COSMIC Cloud Mounter OneDrive initial preview completed.\n{summary}\n"),
+        format!("Cloud Mounter OneDrive initial preview completed.\n{summary}\n"),
     )
     .map_err(|error| format!("failed to record OneDrive initial preview completion: {error}"))
 }
@@ -6526,7 +6526,7 @@ fn write_onedrive_initial_sync_marker(
 ) -> Result<(), String> {
     fs::write(
         onedrive_initial_sync_marker(plan),
-        "COSMIC Cloud Mounter OneDrive initial sync completed.\n",
+        "Cloud Mounter OneDrive initial sync completed.\n",
     )
     .map_err(|error| format!("failed to record OneDrive initial sync completion: {error}"))
 }

@@ -1,4 +1,4 @@
-app-title = COSMIC Cloud Mounter
+app-title = Cloud Mounter
 no-connections = No storage connections configured
 open-settings = Open Settings
 settings-title = Mounter Settings

@@ -1,3 +1,12 @@
+cosmic-ext-applet-mounter (0.4.3) unstable; urgency=medium
+
+  * Rename the public-facing app name to Cloud Mounter for COSMIC trademark
+    policy alignment.
+  * Keep technical package, binary, and app ID names in the encouraged
+    cosmic-ext namespace.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Tue, 14 Jul 2026 09:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.2) unstable; urgency=medium
 
   * Refresh README installation, removal, and Flatpak publication guidance.

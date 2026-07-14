@@ -1,4 +1,4 @@
-# COSMIC Cloud Mounter Applet Task List Completion Notes
+# Cloud Mounter Applet Task List Completion Notes
 
 This document preserves execution history, completion evidence, manual-test
 notes, command summaries, superseded gate approvals, and implementation
@@ -2024,7 +2024,7 @@ validation.
 
 **Version 0.4.0 merge and release-tag evidence:** July 11, 2026. Merged `flatpak-host-runner` into `master` with merge commit `fb7fceb`, reran `just verify` and `just deb` successfully on merged `master`, pushed `master`, and created/pushed annotated tag `v0.4.0` on the merge commit. Local Debian artifact `../cosmic-ext-applet-mounter_0.4.0_amd64.deb` was produced. The official Flatpak publication tasks remain open because the final Flatpak manifest still uses the placeholder `REPLACE_WITH_FLATPAK_READY_COMMIT`, AppStream screenshot URLs still point at an older raw GitHub commit, and no GitHub release artifact or `pop-os/cosmic-flatpak` submission has been completed yet.
 
-**Version 0.4.1 release metadata and package evidence:** July 12, 2026. Because `master` gained task-list/completion-note bookkeeping after the pushed `v0.4.0` tag, the release was advanced to `0.4.1` rather than rewriting the existing tag. Updated Cargo, Cargo.lock, Debian changelog, AppStream release entries, README package URLs, stable tag-based AppStream screenshot URLs, and the project Flatpak manifest source reference to `v0.4.1`. `just verify` passed for `cosmic-ext-applet-mounter v0.4.1`, including formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests. `just deb` passed and produced `../cosmic-ext-applet-mounter_0.4.1_amd64.deb`; the known strict-validator warnings for official COSMIC applet metadata remained visible but non-fatal. Commit `ce3e8bd` was pushed to `master`, annotated tag `v0.4.1` was pushed, and the GitHub release `COSMIC Cloud Mounter v0.4.1` was published at `https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.4.1` with uploaded asset `cosmic-ext-applet-mounter_0.4.1_amd64.deb` (`application/x-debian-package`, 7,023,570 bytes).
+**Version 0.4.1 release metadata and package evidence:** July 12, 2026. Because `master` gained task-list/completion-note bookkeeping after the pushed `v0.4.0` tag, the release was advanced to `0.4.1` rather than rewriting the existing tag. Updated Cargo, Cargo.lock, Debian changelog, AppStream release entries, README package URLs, stable tag-based AppStream screenshot URLs, and the project Flatpak manifest source reference to `v0.4.1`. `just verify` passed for `cosmic-ext-applet-mounter v0.4.1`, including formatting, `cargo check --all-targets`, `cargo clippy --all-targets --all-features -- -D warnings`, and all Rust tests. `just deb` passed and produced `../cosmic-ext-applet-mounter_0.4.1_amd64.deb`; the known strict-validator warnings for official COSMIC applet metadata remained visible but non-fatal. Commit `ce3e8bd` was pushed to `master`, annotated tag `v0.4.1` was pushed, and the GitHub release `Cloud Mounter v0.4.1` was published at `https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.4.1` with uploaded asset `cosmic-ext-applet-mounter_0.4.1_amd64.deb` (`application/x-debian-package`, 7,023,570 bytes).
 
 **COSMIC Flatpak repository local build:** July 12, 2026. Forked and cloned
 `pop-os/cosmic-flatpak` to `/home/uutzinger/Build/cosmic-flatpak`, created
@@ -2065,7 +2065,7 @@ OSTree repository by reinstalling
 `cosmic-flatpak-local`. `flatpak info --user` reports version `0.4.1`, origin
 `cosmic-flatpak-local`, runtime `org.freedesktop.Platform/x86_64/25.08`, and
 app commit `6ec814f93a6774b4c99c90aaca171aa4c1d5ef3efe24bfd44c5c1642481f9e66`.
-The exported desktop entry advertises `Name=COSMIC Cloud Mounter`,
+The exported desktop entry advertises `Name=Cloud Mounter`,
 `Exec=/usr/bin/flatpak run --branch=master --arch=x86_64 --command=cosmic-ext-applet-mounter io.github.uutzinger.cosmic-ext-applet-mounter`,
 `Icon=io.github.uutzinger.cosmic-ext-applet-mounter`,
 `Categories=COSMIC;Utility;`, and COSMIC/cloud/storage keywords. The installed
@@ -2115,7 +2115,7 @@ COSMIC Flatpak fork branch `add-cosmic-cloud-mounter` to
 The upstream PR has not been opened yet and remains pending explicit approval.
 
 **COSMIC Flatpak panel persistence verification:** July 13, 2026. User removed
-the Flatpak-installed COSMIC Cloud Mounter applet from the COSMIC panel and
+the Flatpak-installed Cloud Mounter applet from the COSMIC panel and
 added it back successfully. After logout and login, the applet remained present
 and preserved the existing saved connection settings. Marked panel add/remove
 and session persistence verified for the local Flatpak installation.
@@ -2129,8 +2129,8 @@ local OSTree repository was installable but not searchable because it lacked
 After refreshing the user AppStream cache with
 `flatpak update --user --appstream cosmic-flatpak-local`, both
 `flatpak remote-ls --user --app --columns=application,name,description,version cosmic-flatpak-local`
-and `flatpak search --user 'COSMIC Cloud Mounter'` exposed
-`io.github.uutzinger.cosmic-ext-applet-mounter` as `COSMIC Cloud Mounter`, with
+and `flatpak search --user 'Cloud Mounter'` exposed
+`io.github.uutzinger.cosmic-ext-applet-mounter` as `Cloud Mounter`, with
 summary `Manage online storage mounts and offline storage mirrors`, version
 `0.4.1`, branch `master`, and origin `cosmic-flatpak-local`. This verifies the
 metadata needed for Store-style discovery from the local/test remote.

@@ -261,14 +261,14 @@ pub fn rclone_bisync_plan(
         filters_file,
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("COSMIC Cloud Mounter sync: {}", connection.name),
+            description: format!("Cloud Mounter sync: {}", connection.name),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
             restart_on_failure: false,
         },
         timer: TimerSpec {
             connection_id: connection.id,
-            description: format!("COSMIC Cloud Mounter sync schedule: {}", connection.name),
+            description: format!("Cloud Mounter sync schedule: {}", connection.name),
             interval: Duration::from_secs(u64::from(options.sync_interval_minutes) * 60),
             persistent: true,
         },
@@ -400,7 +400,7 @@ pub fn one_drive_mirror_plan(
         single_directory: connection.remote_subpath.clone(),
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("COSMIC Cloud Mounter OneDrive mirror: {}", connection.name),
+            description: format!("Cloud Mounter OneDrive mirror: {}", connection.name),
             executable: PathBuf::from(DEFAULT_ONEDRIVE),
             arguments,
             restart_on_failure: true,
@@ -586,7 +586,7 @@ pub fn expired_recovery_records(
 #[must_use]
 pub fn google_native_filter_file() -> String {
     [
-        "# COSMIC Cloud Mounter: Google cloud-native documents stay browser-accessible.",
+        "# Cloud Mounter: Google cloud-native documents stay browser-accessible.",
         "- **.gdoc",
         "- **.gsheet",
         "- **.gslides",

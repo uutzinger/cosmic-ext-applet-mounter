@@ -1,4 +1,4 @@
-# COSMIC Cloud Mounter Applet
+# Cloud Mounter Applet for COSMIC™
 
 ## Requirements and Specifications
 
@@ -10,8 +10,8 @@ testable product requirements and a proposed technical design.
 
 ## 1. Purpose
 
-The COSMIC Cloud Mounter Applet manages cloud and network storage connections
-from the COSMIC desktop panel. Each connection uses one of two mutually exclusive
+The Cloud Mounter Applet manages cloud and network storage connections from the
+COSMIC™ desktop panel. Each connection uses one of two mutually exclusive
 access modes:
 
 - **Online mount:** A network-backed filesystem that provides on-demand access.

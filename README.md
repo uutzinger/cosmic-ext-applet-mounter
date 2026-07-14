@@ -1,8 +1,8 @@
-# COSMIC Cloud Mounter
+# Cloud Mounter for COSMIC™
 
-<img src="./resources/icon.svg" alt="COSMIC Mounter" style="float: left; margin-right: 15px; width: 100px;">
+<img src="./resources/icon.svg" alt="Cloud Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
-COSMIC Cloud Mounter is a COSMIC desktop applet for managing storage
+Cloud Mounter is an applet for the COSMIC™ desktop for managing storage
 connections to **OneDrive**, **Google Drive**, **Box**, and **SMB**. It supports
 direct **Online mount** and **Offline mirror** modes with background
 synchronization.
@@ -31,7 +31,7 @@ The following connection engines are used to connect to the providers:
 Example screenshots of the applet:
 <table>
   <tr>
-    <td valign="top"><img src="./resources/Popup.png" alt="COSMIC Cloud Mounter popup" width="200"></td>
+    <td valign="top"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="200"></td>
     <td valign="top"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></td>
     <td valign="top"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
   </tr>
@@ -53,8 +53,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.2/cosmic-ext-applet-mounter_0.4.2_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.2_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.3/cosmic-ext-applet-mounter_0.4.3_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.3_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -69,7 +69,7 @@ from source unless you are testing the Flatpak manifest locally.
 ### Post Installation
 
 After installation, open **COSMIC Settings > Desktop > Panel > Applets** and add
-**COSMIC Cloud Mounter** to the desired panel or dock.
+**Cloud Mounter** to the desired panel or dock.
 
 ### Uninstallation
 
@@ -78,7 +78,7 @@ also want to remove its generated user services and timers, remove each
 connection from the applet first. Removing a connection does not delete cloud
 data, local mirror data, provider credentials, caches, or recovery directories.
 
-Remove COSMIC Cloud Mounter from the panel, then uninstall the package:
+Remove Cloud Mounter from the panel, then uninstall the package:
 
 When installed from Debian package:
 

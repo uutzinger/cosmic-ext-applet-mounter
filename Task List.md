@@ -1,4 +1,4 @@
-# COSMIC Cloud Mounter Applet Task List
+# Cloud Mounter Applet Task List
 
 This document tracks the complete work-item checklist, including historical,
 superseded, completed, and current tasks. Detailed execution evidence, manual
@@ -1051,7 +1051,7 @@ authentication behavior.
 
 - [x] Fork and clone the
   [COSMIC project collection](https://github.com/cosmic-utils/cosmic-project-collection).
-- [x] Add and validate the COSMIC Cloud Mounter entry in `applets.ron`,
+- [x] Add and validate the Cloud Mounter entry in `applets.ron`,
   including its public screenshot URL.
 - [x] Commit and push the entry to the `uutzinger/cosmic-project-collection`
   fork.

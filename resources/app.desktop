@@ -1,6 +1,6 @@
 [Desktop Entry]
-Name=COSMIC Cloud Mounter
-Comment=Manage online storage mounts and offline storage mirrors
+Name=Cloud Mounter
+Comment=Manage online storage mounts and offline storage mirrors for the COSMIC desktop
 Type=Application
 Icon=io.github.uutzinger.cosmic-ext-applet-mounter
 Exec=cosmic-ext-applet-mounter

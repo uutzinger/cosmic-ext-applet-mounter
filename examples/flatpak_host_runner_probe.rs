@@ -101,7 +101,7 @@ async fn run(mode: ProbeMode) -> bool {
     let cancellation = CancellationToken::new();
     let mut failed = false;
 
-    println!("COSMIC Mounter host-runner probe");
+    println!("Cloud Mounter host-runner probe");
     println!(
         "mode: {}",
         match mode {
@@ -156,7 +156,7 @@ async fn run(mode: ProbeMode) -> bool {
 
 async fn run_fuse_probe_for_mode(mode: ProbeMode) -> bool {
     let cancellation = CancellationToken::new();
-    println!("COSMIC Mounter FUSE host-visibility probe");
+    println!("Cloud Mounter FUSE host-visibility probe");
     println!(
         "mode: {}",
         match mode {

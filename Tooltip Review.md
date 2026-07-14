@@ -1,4 +1,4 @@
-# COSMIC Cloud Mounter Tooltip Review
+# Cloud Mounter Tooltip Review
 
 Use this file to review tooltip wording without editing Rust code.
 

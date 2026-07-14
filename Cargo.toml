@@ -1,11 +1,11 @@
 [package]
 name = "cosmic-ext-applet-mounter"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Urs Utzinger", "OpenAI Codex"]
 license = "MIT"
-description = "A COSMIC applet for online mounts and offline storage mirrors"
+description = "An applet for COSMIC to manage online mounts and offline storage mirrors"
 repository = "https://github.com/uutzinger/cosmic-ext-applet-mounter"
 
 [dependencies]
