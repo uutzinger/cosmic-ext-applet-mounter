@@ -219,7 +219,7 @@ configuration, not only applet configuration.
 
 Requirements:
 
-- Linux with the COSMIC desktop
+- Linux with the COSMIC™ desktop
 - Rust 1.95.0 or later through rustup
 - `just`
 - native development packages required by libcosmic
@@ -262,10 +262,10 @@ deb` builds a local unsigned Debian binary package in the parent directory.
 ## Flatpak Packaging and Publication
 
 Flatpak packaging is intended for the COSMIC Flatpak repository because this is
-a COSMIC panel applet, not a general desktop application. The local Flatpak has
-been built, installed, tested from a local repository, and verified for
-AppStream discovery and uninstall behavior. It is not yet published through a
-public COSMIC remote.
+an applet for the COSMIC™ desktop, not a general desktop application. The local
+Flatpak has been built, installed, tested from a local repository, and verified
+for AppStream discovery and uninstall behavior. It is not yet published through
+a public Flatpak remote.
 
 The project-owned manifest is:
 
@@ -292,10 +292,10 @@ connections.
 The tested Flatpak design does **not** require `--filesystem=host`. It uses
 narrow app-specific grants for:
 
-- native-visible COSMIC applet configuration;
+- native-visible applet configuration for the COSMIC™ desktop;
 - app-owned engine configuration/cache/state;
 - generated user systemd units;
-- host COSMIC theme files for standalone settings windows.
+- host COSMIC™ theme files for standalone settings windows.
 
 Existing native/source/Debian applet configuration is shared with the Flatpak
 prototype through:
