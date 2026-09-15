@@ -328,7 +328,7 @@ impl<R: CommandRunner> CiscoVpn for CommandCiscoVpn<R> {
     }
 
     fn open_gui_request(&self) -> Result<CommandRequest, VpnError> {
-        Ok(CommandRequest::new(Executable::CiscoVpnUi).with_timeout(Duration::from_secs(5)))
+        Ok(CommandRequest::new(Executable::CiscoVpnUi).launch_only())
     }
 
     fn start_agent_request(&self) -> Result<CommandRequest, VpnError> {
@@ -1111,5 +1111,64 @@ mod tests {
             AccessMode::OfflineMirror,
             ConnectionMode::OfflineMirror(OfflineMirrorConfig::default()).kind()
         );
+    }
+}
+
+/// Poll transient readiness failures within one overall authentication deadline.
+/// The check itself is bounded by that deadline, not only the delay between checks.
+pub async fn poll_readiness_until<F, Fut>(
+    deadline: tokio::time::Instant,
+    interval: Duration,
+    mut check: F,
+) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        if tokio::time::timeout_at(deadline, check())
+            .await
+            .is_ok_and(|result| result.unwrap_or(false))
+        {
+            return true;
+        }
+        tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
+    }
+}
+
+#[cfg(test)]
+mod readiness_wait_tests {
+    use super::*;
+    #[tokio::test]
+    async fn transient_failure_then_readiness_succeeds() {
+        let mut attempts = 0;
+        let ready = poll_readiness_until(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_millis(1),
+            || {
+                attempts += 1;
+                std::future::ready(match attempts {
+                    1 => Err("temporary probe failure".into()),
+                    2 => Ok(false),
+                    _ => Ok(true),
+                })
+            },
+        )
+        .await;
+        assert!(ready);
+        assert_eq!(attempts, 3);
+    }
+    #[tokio::test]
+    async fn deadline_bounds_a_hung_probe_and_never_permits_storage() {
+        let ready = poll_readiness_until(
+            tokio::time::Instant::now() + Duration::from_millis(10),
+            Duration::from_millis(1),
+            std::future::pending::<Result<bool, String>>,
+        )
+        .await;
+        assert!(!ready);
     }
 }

@@ -16,6 +16,8 @@
     "--device=dri",
     "--talk-name=com.system76.CosmicSettingsDaemon",
     "--talk-name=org.freedesktop.Flatpak",
+    "--system-talk-name=org.freedesktop.login1",
+    "--filesystem=xdg-run/systemd/user:create",
     "--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Mode:ro",
     "--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Light:ro",
     "--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Dark:ro",
@@ -49,7 +51,7 @@
         {
           "type": "git",
           "url": "https://github.com/uutzinger/cosmic-ext-applet-mounter.git",
-          "tag": "v0.4.3"
+          "tag": "v0.4.4"
         },
         "./cargo-sources.json"
       ]

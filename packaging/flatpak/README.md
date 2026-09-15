@@ -135,6 +135,13 @@ Current final-manifest `finish-args`:
   acceleration match the tested settings-window behavior.
 - `--talk-name=org.freedesktop.Flatpak`: required for
   `flatpak-spawn --host`.
+- `--system-talk-name=org.freedesktop.login1`: subscribe to sleep preparation
+  and retain the delay-inhibitor descriptor while opt-in Online cleanup runs.
+- `--filesystem=xdg-run/systemd/user:create`: create only app-owned Online-unit
+  runtime drop-ins for normal, nonforcing sleep cleanup. These safeguards
+  persist for the user runtime session. Offline mirror units are not changed.
+  Both new sleep permissions require verification in a rebuilt Flatpak; older
+  installed packages will not acquire them from source changes alone.
 - `--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Mode:ro`: read the
   host COSMIC light/dark preference for standalone settings windows.
 - `--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Light:ro`: read the

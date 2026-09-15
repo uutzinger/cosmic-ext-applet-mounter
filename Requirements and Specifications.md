@@ -471,10 +471,27 @@ Mounter Connection Settings`.
   authentication material.
 - **FR-085:** Each dependency shall support readiness checks using one or more of
   NetworkManager state, interface, route, DNS, or endpoint reachability.
-- **FR-086:** Mounting or synchronization shall not start until readiness passes
-  or a bounded timeout expires.
+- **FR-086:** Mounting or synchronization shall start only after the tunnel is
+  connected and all configured readiness checks pass. Timeout shall fail the
+  attempt without starting storage.
 - **FR-087:** The UI shall report when interactive Cisco authentication is
   required.
+- **FR-086A (A):** Use one monotonic overall activation/readiness
+  deadline using the saved profile timeout (Cisco default 90 seconds,
+  NetworkManager default 30 seconds). Include interactive password/MFA time.
+  Launch the Cisco GUI with lifecycle handling suitable for an interactive
+  application; the short command-runner timeout shall not kill its window. Coordinate the
+  NetworkManager activation wait with this deadline so a shorter CLI timeout
+  does not end authentication early. Short probe timeouts shall remain separate.
+- **FR-086B (A):** Existing saved positive timeouts shall be preserved;
+  do not increase Cisco’s default to mask premature GUI termination. Detect VPNs shall
+  preserve user timeout and readiness settings when refreshing references.
+- **FR-087A (planned A):** Show waiting, connected/checking, timeout and failed
+  states, elapsed/remaining time, Cancel and Retry. Cancel shall prevent a late
+  activation result from starting storage. Transient probe failures shall retry
+  within the deadline; explicit authentication rejection shall be actionable.
+  Passwords and MFA remain in the external VPN client. Concurrent requests for
+  one profile shall share activation and avoid duplicate authentication prompts.
 - **FR-088:** The applet shall reference-count connections using the same VPN.
 - **FR-089:** No VPN still required by a mounting, mounted, previewing, or syncing
   connection shall be disconnected.
@@ -503,6 +520,56 @@ Mounter Connection Settings`.
   polling.
 - **FR-096:** Conflict, pending-write, low-space, and recovery-required states
   shall produce persistent UI indicators until resolved.
+
+### 6.11 Sleep preparation and wake (B; live acceptance pending)
+
+- **FR-097:** Provide an app-wide “Unmount all Online connections before sleep”
+  setting below the connection list in the main popup, default false, persisted
+  across restarts. Keep this app-wide control outside Add/Modify connection
+  settings. “All” means applet-owned Online mounts, including disabled connections with a remaining live mount;
+  unrelated system/removable mounts are outside its scope.
+- **FR-098:** Subscribe to host logind `PrepareForSleep`. While enabled, acquire
+  a `sleep` inhibitor in `delay` mode before sleep is requested, and keep its
+  file descriptor open. Read `InhibitDelayMaxUSec`; signal handling alone is
+  insufficient. Use one cleanup deadline below that host limit, with a release
+  margin. Do not change host sleep policy or use an indefinite block inhibitor.
+- **FR-099:** On preparation, atomically suspend new mounts, automatic recovery,
+  Online-mount VPN activation, cancel queued Online-mount starts, and snapshot
+  active Online connections. Offline mirrors and their sync jobs are unaffected.
+  Coordinate in-flight operations so late completion cannot mount during
+  cleanup. Unmount managed Online mounts with bounded concurrency under the
+  shared deadline. Keep dependent VPN connectivity available during cleanup; retain the existing ownership and
+  shared-use rules for any subsequent VPN shutdown.
+- **FR-100:** Preserve pending-write caches and mirror data. Do not force/lazily
+  detach automatically or claim data is flushed without provider evidence.
+  Verify service state and mount-table disappearance without traversing a
+  potentially hung mount. Record busy mounts, unknown flush state and failures;
+  release the delay inhibitor on completion or deadline even if cleanup fails.
+  Bound the actual service stop jobs as well as command waits: timing out a
+  `systemctl` client does not cancel its already queued systemd job.
+- **FR-101:** On wake or canceled sleep, reconcile mount/service state, report
+  incomplete cleanup once, and reacquire the delay inhibitor. A separate
+  “Restore previously active Online connections after wake” setting defaults false.
+  Keep cleaned-up connections suspended until manual restart unless restoration
+  is enabled; do not alter their saved login policy. Restoration shall use the
+  pre-sleep snapshot of successfully cleaned connections, respect later user
+  disables/removals, and wait for network and the full VPN readiness gate. Repeated sleep signals shall be idempotent.
+- **FR-102:** Implement the listener in the applet runtime for native and Flatpak
+  installs. Grant Flatpak access only to the logind system-bus name for this
+  feature; retain the inhibitor descriptor in the applet throughout cleanup.
+  Continue storage commands through the existing host-runner boundary. Use
+  app-owned Online-service drop-ins under the host user runtime systemd
+  directory, with narrowly scoped Flatpak filesystem access. Verify effective
+  normal-stop settings before enqueueing a stop; refuse overridden unsafe
+  settings. Runtime stop protection remains for the user runtime session.
+  Avoid a root sleep hook controlling user services. Surface
+  unavailable logind, denied inhibitor access, listener failure, or an insufficient
+  cleanup window as degraded protection, and verify listener lifecycle when the
+  applet exits or the setting changes.
+
+Implementation reference: systemd's [inhibitor lock documentation](https://github.com/systemd/systemd/blob/main/docs/INHIBITOR_LOCKS.md).
+The host's delay is finite; this is best-effort cleanup, not a guarantee that
+OneDrive caused the reported suspend hang or that every busy mount will detach.
 
 ## 7. Non-functional Requirements
 
@@ -685,6 +752,8 @@ configuration namespace.
 AppConfig
   version
   notifications_enabled
+  unmount_before_sleep: bool = false  # planned B
+  restore_after_wake: bool = false    # planned B
   connections[]
   vpn_profiles[]
 
@@ -957,6 +1026,11 @@ Details shall show:
 ## 14. Testing Requirements
 
 ### 14.1 Automated tests
+
+Planned A/B acceptance coverage is tracked in `Task List.md`, section “VPN
+Authentication Wait and Sleep Cleanup”: fake-clock VPN deadlines/cancellation,
+sleep lifecycle and service-stop races, plus native/Flatpak live acceptance.
+
 
 - Configuration serialization, migration, and invalid-data recovery.
 - Mode/path overlap and recursive-sync validation.

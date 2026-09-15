@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-ext-applet-mounter"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "i18n-embed",
  "i18n-embed-fl",
@@ -948,6 +948,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "zbus",
 ]
 
 [[package]]

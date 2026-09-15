@@ -192,6 +192,8 @@ pub struct CommandRequest {
     pub timeout: Duration,
     pub output_limit: usize,
     pub retry: RetryPolicy,
+    /// Return once spawned; the interactive application owns its lifetime.
+    pub launch_only: bool,
 }
 
 impl CommandRequest {
@@ -203,7 +205,14 @@ impl CommandRequest {
             timeout: Duration::from_secs(10),
             output_limit: 64 * 1024,
             retry: RetryPolicy::default(),
+            launch_only: false,
         }
+    }
+
+    #[must_use]
+    pub fn launch_only(mut self) -> Self {
+        self.launch_only = true;
+        self
     }
 
     pub fn arg(mut self, value: impl Into<OsString>) -> Result<Self, CommandError> {
@@ -359,6 +368,7 @@ impl FlatpakHostCommandRunner {
             .with_timeout(request.timeout)
             .with_output_limit(request.output_limit)
             .with_retry(request.retry);
+        host_request.launch_only = request.launch_only;
         host_request.args.extend(request.args);
         Ok(host_request)
     }
@@ -454,6 +464,34 @@ async fn run_with_retries(
 ) -> Result<CommandOutput, CommandError> {
     let started = Instant::now();
     let command = request.sanitized_command();
+    if request.launch_only {
+        if cancellation.is_cancelled() {
+            return Err(CommandError::Cancelled { command });
+        }
+        let mut child = Command::new(path)
+            .args(request.args.iter().map(|argument| &argument.value))
+            .kill_on_drop(false)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| CommandError::Spawn {
+                command: command.clone(),
+                message: redact_text(&error.to_string()),
+            })?;
+        // Reap on exit without imposing the command timeout on authentication.
+        // A successful spawn is not evidence that the VPN is connected.
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
+        return Ok(CommandOutput {
+            command,
+            stdout: empty_output(),
+            stderr: empty_output(),
+            attempts: 1,
+            duration: started.elapsed(),
+        });
+    }
     let max_attempts = request.retry.max_attempts.max(1);
 
     for attempt in 1..=max_attempts {
@@ -817,6 +855,45 @@ mod tests {
             .await
             .expect_err("false must fail after retries");
         assert!(matches!(error, CommandError::NonZero { attempts: 3, .. }));
+    }
+
+    #[tokio::test]
+    async fn interactive_launch_outlives_command_timeout() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let marker = temp.path().join("finished");
+        // A disposable child writes a marker only after the short request
+        // timeout. Normal bounded execution would kill it before that point.
+        let request = request("/bin/sh")
+            .arg("-c")
+            .unwrap()
+            .arg("sleep 0.1; printf done > \"$1\"")
+            .unwrap()
+            .arg("test-child")
+            .unwrap()
+            .arg(marker.as_os_str())
+            .unwrap()
+            .with_timeout(Duration::from_millis(5))
+            .launch_only();
+        SystemCommandRunner
+            .run(request, CancellationToken::new())
+            .await
+            .expect("launch");
+        let deadline = time::Instant::now() + Duration::from_secs(3);
+        while !marker.exists() && time::Instant::now() < deadline {
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "done");
+    }
+
+    #[test]
+    fn host_interactive_launch_preserves_lifecycle() {
+        let request = CommandRequest::new(Executable::CiscoVpnUi).launch_only();
+        let host = FlatpakHostCommandRunner::host_request(request).unwrap();
+        assert!(host.launch_only);
+        assert!(
+            host.sanitized_command()
+                .starts_with("flatpak-spawn --host ")
+        );
     }
 
     #[tokio::test]

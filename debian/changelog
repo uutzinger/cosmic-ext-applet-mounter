@@ -1,3 +1,14 @@
+cosmic-ext-applet-mounter (0.4.4) unstable; urgency=medium
+
+  * Keep the Cisco authentication window alive while waiting for VPN readiness.
+  * Preserve VPN settings and bound activation/readiness by one deadline.
+  * Add optional Online-only unmount before sleep and restoration after wake.
+  * Add logind integration and nonforcing runtime stop policies; leave Offline
+    mirrors and their synchronization jobs untouched.
+  * Update project requirements, implementation notes, and Flatpak permissions.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 14 Sep 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.3) unstable; urgency=medium
 
   * Rename the public-facing app name to Cloud Mounter for COSMIC trademark

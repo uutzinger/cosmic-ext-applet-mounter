@@ -123,6 +123,41 @@ for the configured readiness checks while the user completes authentication.
 The applet disconnects a VPN only when it activated that VPN and no other active
 storage connection still requires it.
 
+### Interactive VPN connection wait (A)
+
+Cisco Secure Client is launched as an interactive application; the applet does
+not kill its window after a short command timeout. The saved Cisco timeout
+remains 90 seconds. Activation and readiness share one deadline, transient
+readiness failures are retried, and a mount starts only after the tunnel is
+connected and every configured readiness check passes. Timeout fails the mount
+attempt and the user can retry with the existing mount control. VPN detection
+preserves customized timeouts and readiness checks. Dedicated progress and
+Cancel/Retry controls remain a planned UI improvement.
+
+## Unmount Before Sleep (B)
+
+An app-wide **Unmount all Online connections before sleep** toggle appears
+below the connection list in the main popup and defaults to off. When enabled,
+the applet listens for system sleep preparation even while the popup is closed,
+cancels pending Online mount operations, and attempts clean unmount of its
+Online connections, including OneDrive and SMB. Offline mirrors and their
+running synchronization jobs are unaffected. Sleep cleanup does not disconnect
+shared VPNs.
+
+The applet holds a bounded sleep-delay handle and releases it on completion or
+deadline. Busy mounts or pending uploads can prevent cleanup. Caches are
+preserved, forced/lazy unmount is not automatic, and a persistent summary reports
+incomplete cleanup. This cannot guarantee that a stuck filesystem releases
+before sleep. App-owned runtime service drop-ins prevent forced killing during
+cleanup; these protections last for the user runtime session.
+
+A separate **Restore previously active Online connections after wake** toggle
+defaults to off. When enabled, connections successfully unmounted for sleep are
+restored only if still enabled, after network and VPN readiness checks pass.
+Saved login policies are preserved. Implementation is locally tested; live
+native/Flatpak acceptance remains tracked in `Task List.md` under “VPN
+Authentication Wait and Sleep Cleanup”.
+
 ## User Interface
 
 Selecting the panel icon opens a compact popup. The popup shows the app name,

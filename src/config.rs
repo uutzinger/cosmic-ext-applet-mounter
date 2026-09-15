@@ -23,6 +23,10 @@ const DOCUMENT_KEY: &str = "document";
 pub struct ConfigDocument {
     pub schema_version: u32,
     pub notifications_enabled: bool,
+    #[serde(default)]
+    pub unmount_before_sleep: bool,
+    #[serde(default)]
+    pub restore_after_wake: bool,
     pub connections: Vec<Connection>,
     pub vpn_profiles: Vec<VpnProfile>,
 }
@@ -32,6 +36,8 @@ impl Default for ConfigDocument {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             notifications_enabled: true,
+            unmount_before_sleep: false,
+            restore_after_wake: false,
             connections: Vec::new(),
             vpn_profiles: Vec::new(),
         }
@@ -703,6 +709,18 @@ mod tests {
     fn storage(temp: &TempDir, version: u64) -> cosmic_config::Config {
         cosmic_config::Config::with_custom_path(APP_ID, version, temp.path().to_path_buf())
             .expect("create isolated config")
+    }
+
+    #[test]
+    fn old_documents_default_sleep_settings_off_and_round_trip_new_settings() {
+        let old = "(schema_version:2,notifications_enabled:true,connections:[],vpn_profiles:[])";
+        let mut document: ConfigDocument = ron::from_str(old).expect("old document");
+        assert!(!document.unmount_before_sleep);
+        assert!(!document.restore_after_wake);
+        document.unmount_before_sleep = true;
+        document.restore_after_wake = true;
+        let loaded: ConfigDocument = ron::from_str(&ron::to_string(&document).unwrap()).unwrap();
+        assert_eq!(loaded, document);
     }
 
     #[test]

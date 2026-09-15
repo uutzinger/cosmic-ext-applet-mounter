@@ -9,5 +9,6 @@ pub mod mounts;
 pub mod process;
 pub mod providers;
 pub mod services;
+pub mod sleep;
 pub mod sync;
 pub mod vpn;

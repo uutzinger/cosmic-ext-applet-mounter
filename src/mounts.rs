@@ -70,7 +70,7 @@ impl MountTable for ProcMountTable {
     }
 }
 
-fn parse_mountinfo_line(line: &str) -> Result<MountEntry, MountTableError> {
+pub fn parse_mountinfo_line(line: &str) -> Result<MountEntry, MountTableError> {
     let (left, right) = line
         .split_once(" - ")
         .ok_or_else(|| MountTableError("mountinfo line lacks separator".into()))?;

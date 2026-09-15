@@ -15,6 +15,48 @@ release-candidate checks and user approval.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## VPN Authentication Wait and Sleep Cleanup
+
+**Requested September 14, 2026. Status: A/B runtime implemented locally;
+live acceptance and additional VPN UI work remain open.**
+Requirements: FR-086 through FR-087A (A), FR-097 through FR-102 (B).
+
+- [x] Update Applet Description, Requirements and Specifications, and Completion
+  Notes; constrain sleep cleanup to Online connections only.
+- [x] A: Fix the Cisco GUI lifecycle without increasing the 90-second default.
+  Preserve launch behavior through the Flatpak host runner; report spawn errors.
+- [x] A: Preserve customized VPN timeouts/readiness checks on detection.
+- [x] A: Bound activation and full readiness by one deadline, retry transient
+  probe failures, serialize shared-profile activation and cancel Online starts
+  for sleep. Recheck connection changes after authentication.
+- [x] A: Test interactive child survival past its command timeout, Flatpak launch
+  wrapping, transient readiness failure and hung-probe deadline handling.
+- [ ] A: Add dedicated waiting/progress, Cancel and Retry UI (existing mount
+  control remains the retry action). Add explicit authentication-rejection UI.
+- [ ] A: Live-check native and Flatpak NetworkManager/Cisco password/MFA followed
+  by SMB mount; verify concurrent requests and credentials rejected by client.
+- [x] B: Add persistent, default-off sleep cleanup toggle below the main popup
+  connection list and optional wake restoration beneath it.
+- [x] B: Implement logind listener/delay inhibitor independent of popup visibility,
+  finite cleanup budget, inhibitor reacquisition and visible degraded status.
+- [x] B: Select Online connections only, verify unit/filesystem ownership, cancel
+  Online operations and wait for them to leave before cleanup. Leave Offline
+  mirrors, sync jobs and shared VPNs untouched.
+- [x] B: Use nonforcing runtime service drop-ins, verify loaded stop policy, check
+  rclone upload queues, and verify host mount disappearance without traversal.
+- [x] B: Restore successfully cleaned connections only when explicitly enabled,
+  after network/VPN checks; preserve login policy and report incomplete cleanup.
+- [x] B: Test Online-only selection, mirror-only no-op, repeated sleep gate,
+  old-operation invalidation, deadlines, queue-state parsing, foreign mounts,
+  runtime drop-in ownership and effective stop-policy checks.
+- [ ] B: Exercise live logind signal/inhibitor lifecycle, busy mounts, failed
+  service stops, denied bus permissions, canceled sleep, connection edits during
+  wake and native/Flatpak lid/menu suspend over repeated sleep/wake cycles.
+- [ ] B: Capture sleep journal/service evidence to isolate the reported OneDrive
+  hang; source changes do not establish its live root cause.
+- [x] Final local formatting, all-target checks, warning-free Clippy, all 167
+  tests and debug build passed; results are recorded in Completion Notes.
+
 ## Codex Working Rules
 
 - [x] Work one phase at a time and keep this list current.

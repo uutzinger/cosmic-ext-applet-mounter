@@ -41,7 +41,7 @@ Example screenshots of the applet:
 
 Before installing, verify dependencies in
 [Dependency Installation.md](Dependency%20Installation.md). Follow instructions to install the
-external storage engines you plan to use.
+external storage engines you plan to use. The applet does not install them for you.
 
 ### Installation from Source
 
@@ -53,8 +53,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.3/cosmic-ext-applet-mounter_0.4.3_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.3_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.4/cosmic-ext-applet-mounter_0.4.4_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.4_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -316,12 +316,6 @@ To regenerate the reproducible Flatpak source list after dependency changes:
 just flatpak-cargo-sources
 ```
 
-This requires `flatpak-cargo-generator` or the equivalent COSMIC helper script
-and writes `packaging/flatpak/cargo-sources.json`. For public release, submit a
-focused pull request to `pop-os/cosmic-flatpak` containing the manifest and
-generated source list. The repository builds binaries from source; maintainers
-do not need prebuilt `amd64` binaries from this project.
-
 ## Project Development
 
 This applet was developed with agent-assisted programming. The project starts
@@ -350,7 +344,7 @@ You can implement additional features using agent-assisted programming. OpenAI C
 - Have your AI agent add Tasks to the Task list based on the updated Specifications.
 - Have your AI agent execute the additions to the Task list.
 - Make sure your AI agent updates Task List Completion Notes.
-- Complete the verifications and test for your implementation as instructed by your AI agent. Do not skip the testing.
+- Complete the verifications and test your implementation as instructed by your AI agent. Do not skip the testing.
 - Submit a pull request to this repo.
 
 ### Bug Reports

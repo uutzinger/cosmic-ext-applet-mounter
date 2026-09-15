@@ -187,11 +187,15 @@ pub struct AppModel {
     last_notice_at: Option<Instant>,
     vpn_ready: BTreeMap<VpnProfileId, bool>,
     vpn_status_pending: bool,
+    sleep_status: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     TogglePopup,
+    UnmountBeforeSleep(bool),
+    RestoreAfterWake(bool),
+    SleepEvent(cosmic_ext_applet_mounter::sleep::Event),
     OpenAddConnection,
     OpenModifyConnection(ConnectionId),
     PopupClosed(Id),
@@ -295,6 +299,7 @@ impl cosmic::Application for AppModel {
             last_notice_at: None,
             vpn_ready: BTreeMap::new(),
             vpn_status_pending: false,
+            sleep_status: None,
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
@@ -342,15 +347,75 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
+        let mut subscriptions = Vec::new();
         if !self.standalone && self.popup.is_some() && self.last_notice.is_some() {
-            cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick)
-        } else {
-            Subscription::none()
+            subscriptions
+                .push(cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick));
         }
+        if !self.standalone && self.config.document.unmount_before_sleep {
+            subscriptions
+                .push(cosmic_ext_applet_mounter::sleep::subscription().map(Message::SleepEvent));
+        }
+        Subscription::batch(subscriptions)
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
+            Message::UnmountBeforeSleep(value) => {
+                self.config = Config::load_runtime().config;
+                match self
+                    .config
+                    .update_validated_runtime(|doc| doc.unmount_before_sleep = value)
+                {
+                    Ok(_) => {
+                        self.sleep_status = if value {
+                            Some("Starting sleep listener…".into())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(error) => {
+                        self.last_notice = Some(format!("Could not save sleep setting: {error}"))
+                    }
+                }
+            }
+            Message::RestoreAfterWake(value) => {
+                self.config = Config::load_runtime().config;
+                if let Err(error) = self
+                    .config
+                    .update_validated_runtime(|doc| doc.restore_after_wake = value)
+                {
+                    self.last_notice = Some(format!("Could not save wake setting: {error}"));
+                }
+            }
+            Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status(status)) => {
+                self.sleep_status = Some(status);
+            }
+            Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Wake(ids)) => {
+                self.config = Config::load_runtime().config;
+                if self.config.document.unmount_before_sleep
+                    && self.config.document.restore_after_wake
+                {
+                    let connections = self
+                        .config
+                        .document
+                        .connections
+                        .iter()
+                        .filter(|connection| {
+                            ids.contains(&connection.id)
+                                && connection.enabled
+                                && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    return Task::batch(connections.into_iter().map(|connection| {
+                        Task::perform(
+                            async move { restore_online_after_wake(connection).await },
+                            |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                        )
+                    }));
+                }
+            }
             Message::TogglePopup => {
                 return if let Some(id) = self.popup.take() {
                     destroy_popup(id)
@@ -827,10 +892,43 @@ impl AppModel {
                 .width(Length::Fill),
         );
 
+        // Reserve space for the app-wide sleep controls and their bounded
+        // status area, keeping the toggle visible within the popup height.
+        let list_limit = if self.config.document.unmount_before_sleep {
+            220.0
+        } else {
+            300.0
+        } - if self.last_notice.is_some() {
+            60.0
+        } else {
+            0.0
+        };
         content = content.push(widget::scrollable(rows).height(Length::Fixed(
-            popup_connection_scroll_height(state.rows.len(), state.rows.is_empty()),
+            popup_connection_scroll_height(state.rows.len(), state.rows.is_empty()).min(list_limit),
         )));
 
+        let mut sleep_controls = widget::Column::new().spacing(8).push(field_with_help(
+            widget::toggler(self.config.document.unmount_before_sleep)
+                .label(String::from("Unmount all Online connections before sleep"))
+                .on_toggle(Message::UnmountBeforeSleep),
+            "Cleanly unmount applet-managed Online connections before system sleep. Offline mirrors and their synchronization remain untouched. Busy mounts may outlast the system’s sleep delay; caches are preserved.",
+        ));
+        if self.config.document.unmount_before_sleep {
+            sleep_controls = sleep_controls.push(field_with_help(
+                widget::toggler(self.config.document.restore_after_wake)
+                    .label(String::from("Restore previously active Online connections after wake"))
+                    .on_toggle(Message::RestoreAfterWake),
+                "Restore only previously active, still-enabled Online connections after network and VPN readiness checks pass.",
+            ));
+            if let Some(status) = &self.sleep_status {
+                sleep_controls = sleep_controls.push(
+                    widget::scrollable(widget::text::caption(status.clone()))
+                        .height(Length::Fixed(48.0)),
+                );
+            }
+        }
+        content = content
+            .push(widget::container(sleep_controls).padding([8, POPUP_ACTION_HORIZONTAL_PADDING]));
         self.core.applet.popup_container(content).into()
     }
 
@@ -2031,8 +2129,6 @@ impl AppModel {
                     .find(|profile| same_vpn_reference(profile, detected))
                 {
                     existing.name = detected.name.clone();
-                    existing.readiness_checks = detected.readiness_checks.clone();
-                    existing.timeout_seconds = detected.timeout_seconds;
                     selected.get_or_insert(existing.id);
                     updated += 1;
                 } else {
@@ -5335,6 +5431,49 @@ fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
     }
 }
 
+async fn restore_online_after_wake(connection: Connection) -> String {
+    let Ok(token) = cosmic_ext_applet_mounter::sleep::online_operation_token() else {
+        return format!("Wake restoration canceled for {}", connection.name);
+    };
+    let wait = async {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+        loop {
+            if current_network_ready().await {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return format!(
+                    "Wake restoration for {} is waiting for network; retry manually",
+                    connection.name
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        // Re-read after waiting: a removal or disable must override restoration.
+        let config = Config::load_runtime().config;
+        if !config.document.unmount_before_sleep || !config.document.restore_after_wake {
+            return format!("Wake restoration disabled for {}", connection.name);
+        }
+        let Some(current) = config.document.connections.into_iter().find(|item| {
+            item.id == connection.id
+                && item.enabled
+                && matches!(item.mode, ConnectionMode::OnlineMount(_))
+        }) else {
+            return format!("Wake restoration skipped for {}", connection.name);
+        };
+        if current.provider == Provider::OneDrive {
+            run_managed_onedriver_online_mount_operation(current, Operation::Mount).await
+        } else {
+            run_managed_online_mount_operation(current, Operation::Mount).await
+        }
+    };
+    tokio::select! {
+        biased;
+        () = token.cancelled() => format!("Wake restoration canceled for {}", connection.name),
+        result = wait => result,
+    }
+}
+
 async fn run_managed_online_mount_operation(
     connection: Connection,
     operation: Operation,
@@ -5347,6 +5486,18 @@ async fn run_managed_online_mount_operation(
 }
 
 async fn run_managed_online_mount_operation_result(
+    connection: &Connection,
+    operation: Operation,
+) -> Result<(), String> {
+    let token = cosmic_ext_applet_mounter::sleep::begin_online_operation()?;
+    tokio::select! {
+        biased;
+        () = token.cancelled() => Err("Online operation canceled for sleep; retry after wake".into()),
+        result = run_managed_online_mount_operation_result_inner(connection, operation) => result,
+    }
+}
+
+async fn run_managed_online_mount_operation_result_inner(
     connection: &Connection,
     operation: Operation,
 ) -> Result<(), String> {
@@ -5364,6 +5515,15 @@ async fn run_managed_online_mount_operation_result(
     prepare_online_mount_runtime(connection)?;
     if action == SystemdAction::Start {
         ensure_vpn_ready_for_connection(connection).await?;
+        let current = Config::load_runtime().config;
+        if !current
+            .document
+            .connections
+            .iter()
+            .any(|saved| saved == connection && saved.enabled)
+        {
+            return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
+        }
     }
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
@@ -5409,6 +5569,18 @@ async fn run_managed_onedriver_online_mount_operation_result(
     connection: &Connection,
     operation: Operation,
 ) -> Result<(), String> {
+    let token = cosmic_ext_applet_mounter::sleep::begin_online_operation()?;
+    tokio::select! {
+        biased;
+        () = token.cancelled() => Err("Online operation canceled for sleep; retry after wake".into()),
+        result = run_managed_onedriver_online_mount_operation_result_inner(connection, operation) => result,
+    }
+}
+
+async fn run_managed_onedriver_online_mount_operation_result_inner(
+    connection: &Connection,
+    operation: Operation,
+) -> Result<(), String> {
     let action = match operation {
         Operation::Mount => SystemdAction::Start,
         Operation::Unmount => SystemdAction::Stop,
@@ -5423,6 +5595,15 @@ async fn run_managed_onedriver_online_mount_operation_result(
     prepare_onedriver_online_mount_runtime(connection)?;
     if action == SystemdAction::Start {
         ensure_vpn_ready_for_connection(connection).await?;
+        let current = Config::load_runtime().config;
+        if !current
+            .document
+            .connections
+            .iter()
+            .any(|saved| saved == connection && saved.enabled)
+        {
+            return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
+        }
     }
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
@@ -5773,44 +5954,71 @@ async fn ensure_vpn_ready_for_connection(connection: &Connection) -> Result<(), 
     else {
         return Err("configured VPN profile is no longer available".into());
     };
-    if vpn_profile_ready(&profile).await? {
-        return Ok(());
-    }
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(u64::from(profile.timeout_seconds));
+    tokio::time::timeout_at(deadline, ensure_vpn_profile_ready(&profile, deadline))
+        .await.map_err(|_| format!("{} did not become ready within {} seconds; complete authentication and retry the mount", profile.name, profile.timeout_seconds))?
+}
 
-    match profile.kind {
-        VpnKind::NetworkManager => {
-            CommandNetworkManagerVpn::new(app_command_runner())
-                .activate(&profile, CancellationToken::new())
-                .await
-                .map_err(|error| format!("could not activate NetworkManager VPN: {error}"))?;
-        }
-        VpnKind::Cisco => {
-            let cisco = CommandCiscoVpn::new(app_command_runner());
-            let components = cisco
-                .components(CancellationToken::new())
-                .await
-                .map_err(|error| format!("could not inspect Cisco Secure Client: {error}"))?;
-            if matches!(components.tunnel, CiscoTunnelState::NotInstalled) {
-                return Err("Cisco Secure Client is not installed".into());
+async fn ensure_vpn_profile_ready(
+    profile: &VpnProfile,
+    deadline: tokio::time::Instant,
+) -> Result<(), String> {
+    // Serialize activation for each profile. Other waiting storage requests
+    // recheck the tunnel before considering opening another authentication UI.
+    static ACTIVATIONS: std::sync::LazyLock<
+        std::sync::Mutex<BTreeMap<VpnProfileId, Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
+    let lock = ACTIVATIONS
+        .lock()
+        .expect("VPN activation locks")
+        .entry(profile.id)
+        .or_default()
+        .clone();
+    let _guard = lock.lock().await;
+    let already_connected = vpn_tunnel_ready(profile).await.unwrap_or(false);
+
+    if !already_connected {
+        match profile.kind {
+            VpnKind::NetworkManager => {
+                CommandNetworkManagerVpn::new(app_command_runner())
+                    .activate(profile, CancellationToken::new())
+                    .await
+                    .map_err(|error| format!("could not activate NetworkManager VPN: {error}"))?;
             }
-            if matches!(components.tunnel, CiscoTunnelState::ServiceUnavailable)
-                && let Ok(request) = cisco.start_agent_request()
-            {
-                let _ = app_command_runner()
-                    .run(request, CancellationToken::new())
-                    .await;
-            }
-            if let Ok(request) = cisco.open_gui_request() {
-                let _ = app_command_runner()
-                    .run(request, CancellationToken::new())
-                    .await;
+            VpnKind::Cisco => {
+                let cisco = CommandCiscoVpn::new(app_command_runner());
+                let components = cisco
+                    .components(CancellationToken::new())
+                    .await
+                    .map_err(|error| format!("could not inspect Cisco Secure Client: {error}"))?;
+                if matches!(components.tunnel, CiscoTunnelState::NotInstalled) {
+                    return Err("Cisco Secure Client is not installed".into());
+                }
+                if matches!(components.tunnel, CiscoTunnelState::ServiceUnavailable)
+                    && let Ok(request) = cisco.start_agent_request()
+                {
+                    let _ = app_command_runner()
+                        .run(request, CancellationToken::new())
+                        .await;
+                }
+                app_command_runner()
+                    .run(
+                        cisco
+                            .open_gui_request()
+                            .map_err(|error| error.to_string())?,
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .map_err(|error| format!("could not open Cisco Secure Client: {error}"))?;
             }
         }
     }
-
-    let ready = wait_for_vpn_ready(&profile).await?;
+    let ready = wait_for_vpn_ready(profile, deadline).await?;
     if ready {
-        mark_vpn_applet_activated(profile.id);
+        if !already_connected {
+            mark_vpn_applet_activated(profile.id);
+        }
         Ok(())
     } else {
         Err(format!(
@@ -5820,7 +6028,7 @@ async fn ensure_vpn_ready_for_connection(connection: &Connection) -> Result<(), 
     }
 }
 
-async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
+async fn vpn_tunnel_ready(profile: &VpnProfile) -> Result<bool, String> {
     match profile.kind {
         VpnKind::NetworkManager => CommandNetworkManagerVpn::new(app_command_runner())
             .state(profile, CancellationToken::new())
@@ -5835,17 +6043,32 @@ async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
     }
 }
 
-async fn wait_for_vpn_ready(profile: &VpnProfile) -> Result<bool, String> {
-    let deadline = Instant::now() + Duration::from_secs(u64::from(profile.timeout_seconds));
-    loop {
-        if vpn_profile_ready(profile).await? {
-            return Ok(true);
-        }
-        if Instant::now() >= deadline {
-            return Ok(false);
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
+    let connected = vpn_tunnel_ready(profile).await?;
+
+    if !connected {
+        return Ok(false);
     }
+    readiness_report(
+        &CommandReadinessProbe::new(app_command_runner()),
+        &profile.readiness_checks,
+        CancellationToken::new(),
+    )
+    .await
+    .map(|report| report.ready)
+    .map_err(|error| error.to_string())
+}
+
+async fn wait_for_vpn_ready(
+    profile: &VpnProfile,
+    deadline: tokio::time::Instant,
+) -> Result<bool, String> {
+    Ok(cosmic_ext_applet_mounter::vpn::poll_readiness_until(
+        deadline,
+        Duration::from_secs(2),
+        || vpn_profile_ready(profile),
+    )
+    .await)
 }
 
 async fn maybe_shutdown_vpn_after_unmount(connection: &Connection) -> Result<(), String> {

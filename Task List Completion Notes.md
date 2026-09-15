@@ -31,6 +31,120 @@ Task List/Completion Notes separation.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## VPN Authentication Wait and Sleep Cleanup
+
+**September 14, 2026 — initial proposal and source findings (before implementation).**
+
+A: Source inspection found imported NetworkManager profiles default to 30
+seconds and Cisco profiles to 90 seconds (`src/app.rs`, profile constructors).
+`detect_and_import_vpns` overwrites existing timeouts/readiness settings.
+`ensure_vpn_ready_for_connection` activates the VPN then polls tunnel state
+through `wait_for_vpn_ready` every two seconds; this mount-start path does not
+apply the configured readiness probes. NetworkManager's activation command
+also uses the profile timeout (`src/vpn.rs`). These are source findings;
+a live trace has not established which stage ends the user's password attempt.
+The initial proposal suggested a 300-second default; the user clarified that
+90 seconds should suffice for Cisco. The revised proposal retains 90 seconds
+and prioritizes correcting premature GUI termination, alongside full readiness
+gating and cancel/retry behavior (FR-086 through FR-087A).
+
+Follow-up source finding: `CommandCiscoVpn::open_gui_request` sets a five-second
+timeout (`src/vpn.rs`). The process runner kills its child on timeout
+(`src/process.rs`), and `ensure_vpn_ready_for_connection` ignores the GUI result
+before starting the separate readiness wait (`src/app.rs`). Treat this as a
+GUI lifecycle bug, not merely cleanup or evidence that 90 seconds is too short.
+Actual GUI survival/termination needs native and Flatpak reproduction because
+launcher/wrapper process behavior can differ. Proposed sleep control location:
+below the connection list in `AppModel::view_popup`, persisted app-wide in
+`ConfigDocument`; optional wake restoration appears beneath it.
+
+B: No logind sleep listener/inhibitor was found in the current source. Propose
+opt-in clean unmount of all applet-managed Online mounts only; offline
+mirror jobs remain untouched, using a pre-acquired logind delay inhibitor and the host's finite
+cleanup budget. Wake restoration is a separate opt-in setting. Pending caches
+must survive and failed cleanup must be reported; automatic forced/lazy
+unmount is excluded (FR-097 through FR-102). Native and Flatpak logind
+support, service-stop deadlines and suspend races require implementation/tests.
+The user's OneDrive suspend hang is reported, not independently reproduced or
+attributed to a specific provider/service failure.
+
+Documentation updated: `Applet Description.md` planned A/B sections;
+`Requirements and Specifications.md` sections 6.9, 6.11, 10 and 14.1;
+`Task List.md` matching A/B checklist. Verification for this change is document
+and source review plus `git diff --check`; no runtime changes, builds, live VPN
+activation, mount operations or sleep tests were performed.
+
+### September 14, 2026 — A/B implementation
+
+The user authorized implementation and clarified that sleep cleanup must affect
+only Online connections. Offline mirrors and their running jobs are unchanged.
+
+A: `CommandRequest::launch_only` launches the interactive Cisco client without
+applying a command-lifetime timeout, with detached standard streams and child
+reaping. Flatpak preserves this behavior when wrapping the host command. Spawn
+failures are reported. Cisco retains its 90-second saved default. Activation
+and tunnel/readiness probes use one overall deadline, transient probes retry,
+and per-profile locks serialize activation. Detection preserves customized
+settings. An Online operation canceled by sleep cannot start storage on a late
+VPN result; changed/disabled/removed connections are rechecked after waiting.
+Dedicated VPN progress/Cancel/Retry UI remains an unchecked follow-up.
+
+B: `src/sleep.rs` implements an always-subscribed logind listener while the new
+popup toggle is enabled, including inhibitor ownership, repeated-signal gating,
+cleanup deadlines and wake reacquisition. Old documents deserialize both new
+settings as false. Cleanup checks only configured Online connections, including
+saved-disabled connections with a remaining mount. It verifies app-owned unit
+markers and expected filesystem type, reads the host mount table through the
+existing runner, checks rclone's documented upload counters, and uses ordinary
+service stop/clean unmount. No mirror jobs or VPNs are stopped.
+
+Stop safeguards use app-owned runtime drop-ins in
+`$XDG_RUNTIME_DIR/systemd/user/<online-unit>.d/90-cosmic-mounter-sleep.conf`.
+They specify a two-second normal stop, SIGTERM and `SendSIGKILL=no`; effective
+settings are verified before a nonblocking stop is queued. Other edits to this
+file are preserved and reported. The runtime protections persist for the user
+runtime session, including after the checkbox is turned off; they cannot be
+removed immediately while a lingering stop might still need them. A host sleep
+budget too short for this policy is reported as incomplete cleanup.
+
+Implementation review checked systemd's
+[service property setter](https://github.com/systemd/systemd/blob/main/src/core/dbus-service.c)
+and [inhibitor protocol](https://github.com/systemd/systemd/blob/main/docs/INHIBITOR_LOCKS.md):
+ordinary services cannot use the transient-only stop property setters, so this
+implementation uses drop-ins/reload instead of `systemctl set-property`.
+Rclone upload counters follow its [VFS stats API](https://rclone.org/rc/#vfs-stats).
+
+Flatpak now declares `org.freedesktop.login1` system-bus access and access to
+`xdg-run/systemd/user` for runtime drop-ins. The applet itself retains the
+inhibitor descriptor; there is no host sleep helper or root sleep hook.
+Optional restoration targets only successfully unmounted Online connections
+and rechecks network, VPN, saved connection state and enabled restoration.
+
+Local verification passed: `cargo fmt --all -- --check`,
+`cargo check --all-targets --offline`,
+`cargo clippy --all-targets --all-features --offline -- -D warnings`,
+`cargo test --all-targets --offline` (111 library tests and 56 app tests),
+`cargo build --offline`, and `git diff --check`. The debug binary was built;
+no installation, commit, release or package publication was performed. Live Cisco,
+actual logind suspend/resume, OneDrive hang reproduction and updated Flatpak
+installation remain unverified. No live mounts, accounts, user services or
+sleep were operated during implementation.
+
+### September 14, 2026 — version 0.4.4 and local installation inventory
+
+Prepared 0.4.4 metadata in Cargo, Debian changelog, AppStream, README package
+examples and the Flatpak source tag. The installed binary resolves to
+`~/.local/bin/cosmic-ext-applet-mounter`; its user-local desktop entry launches
+`cosmic-ext-applet-mounter`. No matching Debian package or Flatpak app is
+installed. This matches the native source installation layout produced by
+`just install-user`. Updating that installation requires `just install-user`
+and restarting the panel applet afterward.
+
+The user requested a version bump and local Git commit. Existing unrelated
+README edits are preserved outside the commit. This step does not install the
+new version, create/push a release tag, publish packages or perform live VPN or
+sleep testing. The Flatpak source reference targets the future v0.4.4 tag.
+
 ## Gate 0: Review and Approval
 
 **Gate 0 completed:** June 15, 2026. This approval permits application

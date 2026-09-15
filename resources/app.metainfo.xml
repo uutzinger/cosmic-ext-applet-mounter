@@ -61,19 +61,29 @@
   </branding>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.3/resources/Popup.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.4/resources/Popup.png</image>
       <caption>Manage storage connections from the COSMIC panel popup.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.3/resources/Add_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.4/resources/Add_Connection.png</image>
       <caption>Add a storage connection with provider, mode, remote, local target, and VPN options.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.3/resources/Change_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.4/resources/Change_Connection.png</image>
       <caption>Modify, test, disable, remove, preview, or synchronize an existing connection.</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.4" date="2026-09-14">
+      <description>
+        <p>Version 0.4.4.</p>
+        <ul>
+          <li>Keep Cisco Secure Client open during authentication and wait for VPN readiness before mounting.</li>
+          <li>Add optional unmount of Online connections before sleep, with optional restoration after wake.</li>
+          <li>Leave Offline mirrors and their synchronization jobs unaffected by sleep cleanup.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.3" date="2026-07-14">
       <description>
         <p>Version 0.4.3.</p>
