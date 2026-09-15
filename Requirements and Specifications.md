@@ -121,14 +121,15 @@ An active Cisco agent does not prove that an authenticated tunnel exists. The
 applet may start the agent and open the Cisco UI, but storage operations shall
 wait for configured readiness checks.
 
-### 4.5 Connection settings windows
+### 4.5 Settings windows
 
-Add, Modify, and Import run in a standalone COSMIC application window launched
-from the panel applet. They shall not be implemented as embedded applet child
+General Settings, Add, Modify, and Import run in standalone COSMIC
+application windows launched from the panel applet. They shall not be implemented as embedded applet child
 windows, because embedded child windows may inherit toolkit window titles such
 as `Cosmic - Iced` and may not support reliable title updates in the active
-libcosmic revision. The standalone settings window title shall be `Cloud
-Mounter Connection Settings`.
+libcosmic revision. Add/Modify/Import shall retain the title `Cloud Mounter
+Connection Settings`; the new app-wide window shall use `Cloud Mounter
+Settings`. This revision does not reintroduce embedded applet child windows.
 
 ## 5. User Workflows
 
@@ -183,11 +184,22 @@ Mounter Connection Settings`.
 ### 6.1 Panel and status
 
 - **FR-001:** The applet shall provide a COSMIC panel icon and popup.
-- **FR-001A:** The popup shall provide Add Connection and Refresh controls.
-  These controls shall be visually grouped above the connection list and below
-  the aggregate status and current notice area.
-- **FR-001B:** The popup empty state shall provide one Add Connection control
-  that opens the Add Connection wizard.
+- **FR-001A (layout revision, September 15, 2026):** The popup shall place a
+  clickable Settings gear at the right edge of the title row, with Cloud
+  Mounter aligned to the left. Add Connection, Refresh and sleep options shall be in General
+  Settings, with no toolbar or sleep-settings footer in the popup.
+- **FR-001B:** The popup empty state shall explain that a connection can be
+  added through Settings; the title-row gear shall remain available.
+- **FR-001C:** The gear shall open/focus one standalone General Settings window
+  titled `Cloud Mounter Settings`. It shall support keyboard focus/activation,
+  an accessible Settings label, and a Settings tooltip; provide an icon fallback
+  when the theme lacks the gear. Opening it may close the transient popup but
+  shall not stop the applet or any runtime subscriptions.
+- **FR-001D:** Moving controls shall preserve the popup's shared operation/error
+  status area. Settings commands shall report in General Settings; mount/sync
+  feedback shall remain visible in the popup, and provider setup/validation
+  feedback in the connection editor. A Refresh success message shall not erase
+  an unresolved background error or sleep-cleanup warning.
 - **FR-002:** The popup shall show every configured connection.
 - **FR-003:** Each row shall be optimized for the fixed-width COSMIC applet
   popup. It shall prefer a single-line layout with the connection name as the
@@ -284,6 +296,11 @@ Mounter Connection Settings`.
   removal of remotes referenced by saved connections, require explicit
   confirmation before deletion, and state that deletion changes rclone
   configuration rather than only applet configuration.
+- **FR-011MA:** Google Drive, Box, and SMB remote-name help shall explain both
+  entering a new name before using the provider's Create Remote action and
+  selecting/entering an existing remote name from `rclone config`. SMB help
+  shall identify its Create/Update action and distinguish updating an existing
+  remote from creating a new one.
 - **FR-011N:** Import shall not be part of the default Add Connection action
   row. Legacy import shall remain a dedicated workflow or advanced entry point.
 - **FR-012:** Every connection shall have a stable generated UUID.
@@ -523,10 +540,13 @@ Mounter Connection Settings`.
 
 ### 6.11 Sleep preparation and wake (B; live acceptance pending)
 
-- **FR-097:** Provide an app-wide “Unmount all Online connections before sleep”
-  setting below the connection list in the main popup, default false, persisted
-  across restarts. Keep this app-wide control outside Add/Modify connection
-  settings. “All” means applet-owned Online mounts, including disabled connections with a remaining live mount;
+- **FR-097:** Provide an app-wide “Unmount when sleep” setting in General
+  Settings, default false and persisted across restarts. Its help shall state
+  that only Online connections are affected. The September 15 layout revision
+  supersedes placement below the popup connection list. Keep this control out
+  of both the main popup and Add/Modify connection settings. Scope includes
+  applet-owned Online mounts, including disabled connections with a remaining
+  live mount;
   unrelated system/removable mounts are outside its scope.
 - **FR-098:** Subscribe to host logind `PrepareForSleep`. While enabled, acquire
   a `sleep` inhibitor in `delay` mode before sleep is requested, and keep its
@@ -549,7 +569,9 @@ Mounter Connection Settings`.
   `systemctl` client does not cancel its already queued systemd job.
 - **FR-101:** On wake or canceled sleep, reconcile mount/service state, report
   incomplete cleanup once, and reacquire the delay inhibitor. A separate
-  “Restore previously active Online connections after wake” setting defaults false.
+  “Restore after wake up” setting in General Settings defaults false. Show it
+  disabled while Unmount when sleep is off, retain its saved value, and explain
+  that only successfully cleaned Online connections are restored.
   Keep cleaned-up connections suspended until manual restart unless restoration
   is enabled; do not alter their saved login policy. Restoration shall use the
   pre-sleep snapshot of successfully cleaned connections, respect later user
@@ -742,6 +764,41 @@ intended host user services, silently uses different rclone or OneDrive
 credentials or applet connection configuration than the native applet, or
 requires unjustified unrestricted host access.
 
+### 9.5 General Settings runtime coordination
+
+- Add a distinct General Settings launch mode and `--app-settings` argument.
+  Preserve existing `--settings`/`--add-connection` aliases for the connection
+  wizard, avoiding a silent change to scripts or existing launch paths.
+- Use one standalone General Settings process, with repeat gear activation
+  focusing that window. Reuse existing native/Flatpak executable resolution.
+- Add a session-bus runtime interface owned by the panel applet (bus name
+  `io.github.uutzinger.cosmic-ext-applet-mounter.Runtime`). It shall support
+  applying sleep preferences, Refresh, reading runtime/cleanup status, and
+  notification of saved connection changes. Use request/reply completion and
+  status updates so General Settings never reports success for a request that
+  did not reach the owner. Poll status every two seconds while Settings is open;
+  serialize its preference writes and acknowledge saved preferences separately
+  from the listener's readiness status. Reserve both Runtime and Settings bus
+  names without replacement to prevent duplicate owners/listeners. Check the corresponding Flatpak bus grants during
+  implementation; do not assume a separately launched process shares memory.
+- The runtime owner shall reload the latest document, validate and persist only
+  the requested settings, update its in-memory config and subscriptions, then
+  acknowledge the change. Preserve unrelated fields, defaults and current keys
+  `unmount_before_sleep` and `restore_after_wake`.
+- Refresh shall retain configuration reload and asynchronous VPN/status checks
+  in the running applet and return completion/failure to General Settings. It
+  shall not mount, unmount, sync, or replace an in-flight operation as a side
+  effect. Preserve unresolved errors separately from the Refresh result.
+- Add Connection shall reuse the existing wizard launch path. On a successful
+  save, notify the runtime owner to reload the connection list; retain popup
+  reopen/reload as a recovery path if the owner is temporarily unavailable.
+- General Settings shall not start another sleep listener or execute duplicate
+  mount operations. If the runtime owner is unavailable, show that explicitly
+  and do not silently claim that runtime settings/Refresh were applied.
+- Closing General Settings or the editor shall not exit the applet, cancel
+  unrelated work, or release the applet-owned inhibitor. Keep settings-action
+  notices distinct from popup runtime notices and editor-local notices.
+
 ## 10. Configuration Model
 
 Configuration shall use app ID
@@ -898,11 +955,16 @@ Remote deletion shall:
 
 ### 13.1 Panel popup
 
-- Header with title, active connection count, notification state, and VPN
-  summary.
+- Title row with Cloud Mounter aligned left and a clickable Settings gear
+  aligned to the right edge,
+  followed by active connection count, notification state and VPN summary.
 - A current notice/result area below the header when an operation has something
   useful to report.
-- Header controls for Add Connection and Refresh below the notice/result area.
+- No Add Connection/Refresh toolbar or sleep-settings footer. Put these in
+  General Settings and restore the connection list space they previously used.
+- Use a continuous themed background for header and connections. Separate
+  status/notices from the connection list with a thin horizontal line and no
+  empty background band.
 - Scrollable connection rows sized for the fixed-width COSMIC applet popup.
 - Each row is a compact card:
   - preferred layout: one line with the connection name on the left and a
@@ -920,9 +982,8 @@ Remote deletion shall:
   main popup and belong in the Add/Modify or diagnostics workflow.
 - Disabled or unavailable primary controls explain why the action cannot
   currently run.
-- Empty state provides one Add Connection control. The applet shall not show both
-  a global Settings control and an Add Connection control for the same
-  configuration entry point.
+- Empty state directs the user to Settings > Add Connection. The gear remains
+  visible without duplicating Add Connection in the popup.
 - Import previews shall not replace the connection list. Imported candidates
   remain previews until the user confirms creating applet-managed connections.
 - Popup actions dispatch typed operation requests and return immediately without
@@ -930,9 +991,38 @@ Remote deletion shall:
 - The popup shall grow to fit configured rows up to a bounded maximum height.
   Scrolling shall engage only when the configured rows exceed that bound.
 
+### 13.1A General Settings
+
+- Open/focus using the popup title-row gear. Use a standalone window with an
+  ordinary close control and title `Cloud Mounter Settings`.
+- Present both sleep toggles together under Sleep. Use short labels “Unmount
+  when sleep” and “Restore after wake up”; help shall explain Online-only scope
+  and restoration eligibility. The second toggle remains visible but disabled
+  while the first is off, so changing the first does not resize the window.
+- Place Add Connection and Refresh together in the top row of the window,
+  above the sleep settings and status/feedback areas.
+  Add Connection launches the existing editor rather than replacing General
+  Settings with connection-specific fields. Refresh updates the runtime owner.
+- Use the same COSMIC themed list surface as the popup and Add/Modify content,
+  including the area behind hover help; do not hardcode a background color.
+- Place Refresh results, Add Connection launch errors and connection-to-applet
+  notices directly below the top button row, before Sleep and wake.
+- End the sleep options with “Applies only to Online connections.” Display sleep
+  preference feedback and cleanup status as ordinary wrapping text immediately
+  below it, without a “Sleep cleanup status” heading or fixed-height status box.
+  Keep these messages separate from top-row action notices. Surface unresolved
+  sleep problems briefly in popup status even when Settings is closed.
+- Persist toggles immediately with validated writes acknowledged by the owner;
+  display save failures without presenting an unsaved setting as effective.
+- All controls shall remain reachable with keyboard navigation, long translated
+  labels, display scaling and small windows. Long status details shall wrap in
+  the window’s overall scrollable content; do not reserve a separate status box
+  or reduce the main popup list height for hidden settings.
+
 ### 13.2 Add, Modify, Import, and Field Help
 
-- Add Connection opens a wizard, not a generic settings page.
+- Add Connection, reached from General Settings, opens the existing connection
+  wizard. App-wide General Settings and the per-connection editor are distinct.
 - Modify opens the same wizard prefilled for an existing connection.
 - Add mode instruction text shall describe the required choices: provider, mode,
   remote/subtree, local target, VPN, and startup policy. The same notice area
@@ -988,7 +1078,10 @@ Remote deletion shall:
   choices, and a management area for removing unused remotes. Remote creation
   and removal controls shall not appear while modifying an existing connection.
   Detected remote choice buttons shall wrap into bounded rows at the default
-  settings-window width.
+  settings-window width. Remote-name help shall explain new-name entry before
+  Create and detected/exact existing-name selection (FR-011MA). SMB help shall
+  explain Create/Update. Since Modify hides creation actions, its help shall
+  describe existing-name use without directing users to a hidden Create button.
 - OneDrive setup controls shall use user-facing guidance: complete required
   fields, finish browser authentication, then run Test Connection and Save
   Connection. Implementation details about credential file locations belong in
@@ -1064,8 +1157,21 @@ or access real cloud data.
 
 ### 14.3 Manual acceptance tests
 
-- Open the Add Connection wizard from the popup Add Connection control.
-- Open the Add Connection wizard from the popup empty state.
+- Open/focus General Settings using the title-row gear, including an empty
+  popup, and open the existing Add Connection wizard from that window.
+- Verify that the popup contains only title/gear, status/notices and connections;
+  enabling sleep options does not add popup controls or shrink the list.
+- Verify Refresh from General Settings updates the actual applet, including
+  asynchronous VPN status, without clearing unrelated unresolved errors.
+- Change sleep settings with the popup closed and confirm one runtime listener
+  updates immediately; closing settings shall leave that listener active.
+- Verify gear focus, icon fallback, standalone title, duplicate-window handling,
+  runtime-owner unavailability, native/Flatpak IPC, and save/reload propagation.
+- Verify mount/unmount/repair failures remain visible in popup status, while
+  remote creation, authentication, detection and save feedback remain in the
+  connection editor. Check sleep warnings with General Settings closed.
+- Verify Google Drive, Box and SMB remote-name help covers creation and existing
+  remote selection in Add mode and avoids hidden-action instructions in Modify.
 - Verify each popup row shows a clickable connection name, one primary
   compact state control, and no separate static provider/local/VPN chips.
 - Verify popup primary operation controls dispatch Mount, Unmount, Start, or

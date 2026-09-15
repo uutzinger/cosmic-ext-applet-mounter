@@ -17,6 +17,51 @@ wording can be mapped back into `src/app.rs`.
 - Keep dynamic placeholders such as `{provider}`, `{connection}`, `{remote}`,
   `{backend}`, `{status}`, `{action}`, and `{reason}` intact when present.
 
+## General Settings Layout — September 15, 2026
+
+The popup keeps title/gear, status/notices and connections. Add Connection,
+Refresh occupy the top row of a standalone General Settings window, with
+sleep settings below.
+Existing `popup.add_connection` and `popup.refresh` IDs below remain stable for
+review history; their controls are now hosted in General Settings. Remote-name guidance from the preceding review stays
+in the connection editor, not General Settings. In Modify, where Create is
+hidden, the implemented help describes existing remotes without instructing users to press Create.
+
+### popup.settings
+
+Reviewed text:
+
+```text
+Open Settings to add connections, refresh the applet, and configure sleep behavior.
+```
+
+Accessible label: `Settings`. Align the clickable gear to the right edge of the title row; keep the title left-aligned.
+
+### settings.unmount_before_sleep
+
+Visible label: `Unmount when sleep`.
+
+Reviewed text:
+
+```text
+Cleanly unmount applet-managed Online connections before system sleep. Offline mirrors and synchronization remain untouched. Busy mounts may outlast the system’s sleep delay; caches are preserved.
+```
+
+### settings.restore_after_wake
+
+Visible label: `Restore after wake up`.
+
+Reviewed text:
+
+```text
+Restore only previously active, still-enabled Online connections after network and VPN readiness checks pass. Enable Unmount when sleep first; the saved restore preference is retained while disabled.
+```
+
+Keep this toggle visible but disabled when Unmount when sleep is off, retaining
+its saved preference. Show listener status and cleanup details as plain text
+below “Applies only to Online connections.”, without a separate heading;
+keep a concise unresolved-warning indication in popup status.
+
 ## Popup
 
 ### popup.add_connection
@@ -38,13 +83,13 @@ Open the Add Connection workflow to create a new storage connection.
 Current text:
 
 ```text
-Reload saved configuration and refresh the applet view.
+Reload saved connections and refresh VPN status in the running applet. Existing operations continue.
 ```
 
 Reviewed text:
 
 ```text
-Reload saved configuration and refresh the applet view.
+Reload saved connections and refresh VPN status in the running applet. Existing operations continue.
 ```
 
 ### popup.connection_name
@@ -334,10 +379,10 @@ Provider-specific variants mention Google Drive, Box, or SMB.
 Reviewed text:
 
 ```text
-Select a detected rclone remote, or enter the exact remote name from `rclone config`. Use a clear provider-specific name; the applet verifies the backend, authentication, and subtree access before saving. Passwords stay in rclone, not applet configuration.
+Enter a new rclone remote name, then click the provider-specific Create Remote button. To use an existing remote, select a detected remote or enter its exact name from `rclone config`. For SMB, fill in the SMB settings and use Create/Update SMB Remote, which can also update an existing remote.
 ```
 
-Resolution: added provider-specific naming examples and clarified that the user may select a detected remote or enter the exact rclone remote name.
+Resolution (September 15, 2026): corrected all three provider-specific tooltips to explain that a new name is entered before creation. Retained existing-remote selection, exact-name entry, naming examples and provider validation details; clarified SMB create/update behavior.
 
 ### rclone.remote_choice
 

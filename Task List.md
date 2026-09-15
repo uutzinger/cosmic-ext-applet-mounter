@@ -15,6 +15,64 @@ release-candidate checks and user approval.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## Release 0.4.5
+
+- [x] Align design documentation and README with the final Settings/popup layout.
+- [x] Bump Cargo, Debian, AppStream, README examples and Flatpak tag to 0.4.5.
+- [x] Pass release-build validation and all 174 tests; inspect the amd64 Debian
+  package and prepare its SHA256SUMS for publication.
+- User authorized commit, push and publication of tag/release `v0.4.5`.
+
+## Compact Popup and General Settings Window
+
+**September 15, 2026 — implemented and locally tested; desktop/Flatpak live checks pending.**
+This revision supersedes previous popup placement of Add Connection, Refresh
+and sleep toggles. Earlier completed layout tasks remain historical evidence.
+
+- [x] Inspect title/button APIs, icon availability, separate-window architecture,
+  shared notices, Refresh behavior and runtime ownership.
+- [x] Update Applet Description, requirements, Tooltip Review and Completion
+  Notes; incorporate the preceding rclone remote-name help correction.
+- [x] Add right-aligned Settings gear with keyboard/accessible label, tooltip and
+  bundled icon independent of the installed icon theme. Keep title/status/connections and meaningful runtime notices.
+- [x] Add/focus one standalone General Settings window with a distinct launch
+  mode/title; retain existing connection-editor launch arguments and behavior.
+- [x] Implement runtime-owner IPC for settings, Refresh, current sleep status
+  and saved connection changes; review native/Flatpak service-name permissions.
+- [x] Move sleep toggles into General Settings; keep Restore visible but disabled
+  when Unmount when sleep is off. Persist through the applet owner without
+  duplicating its listener or changing Online-only cleanup semantics.
+- [x] Move Add Connection and Refresh to the top of General Settings, above
+  the sleep options. Refresh must reach
+  the actual applet; successful editor saves must refresh its connection list.
+- [x] Separate settings-action notices from popup runtime notices. Preserve
+  mount/unmount/repair errors and sleep warnings when settings is closed, and
+  keep provider/authentication/test/save feedback in the connection editor.
+- [x] Remove toolbar/footer and their popup height reservation. Update empty
+  state to direct users to Settings > Add Connection.
+- [x] Make rclone help context-sensitive: new-name/Create guidance in Add;
+  existing-name guidance in Modify where creation buttons are hidden.
+- [x] Test routing, owner-unavailable errors, persistent setting acknowledgments,
+  refresh completion, notice preservation and one-listener lifecycle.
+- [x] Match General Settings to the themed list surface; put button notices
+  below the top actions and plain sleep feedback below the Online-only sentence.
+  Remove the extra Offline sentence and separate cleanup-status heading/box.
+- [x] Align the title left and Settings gear right; replace the status/list
+  background gap with a thin divider on a continuous themed surface.
+- [ ] Live-check native/Flatpak title/focus, keyboard access, scaling, empty/long
+  lists, editor-save propagation and closing either window during runtime work.
+
+## Rclone Remote Name Help Clarification
+
+**September 15, 2026 — source and documentation updated.**
+
+- [x] Explain entering a new remote name before creation in the Google Drive,
+  Box, and SMB field tooltips; retain detected/existing remote guidance.
+- [x] Identify provider-specific Create buttons and SMB Create/Update behavior.
+- [x] Update Applet Description, FR-011MA, Tooltip Review and Completion Notes.
+- [x] Review the three strings against creation code and run formatting/diff
+  checks. This text-only change does not alter provider behavior.
+
 ## VPN Authentication Wait and Sleep Cleanup
 
 **Requested September 14, 2026. Status: A/B runtime implemented locally;

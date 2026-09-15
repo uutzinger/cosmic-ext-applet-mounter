@@ -11,6 +11,18 @@ The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
 unavailable.
 
+## Applet and Settings
+
+The popup shows connection status and controls. Use the gear at the top right
+of **Cloud Mounter** to open **Settings**. **Add Connection** and **Refresh** are
+at the top; Refresh updates the running applet. Click a connection name in the
+popup to open its Modify window.
+
+Settings also offers **Unmount when sleep** and **Restore after wake up**.
+Both default to off and apply only to applet-managed Online connections.
+Restore becomes available when unmount-before-sleep is enabled. Offline mirrors
+and their synchronization jobs are unaffected.
+
 ## Modes and Providers
 
 **Online mount** uses a network-backed FUSE filesystem. It is useful for browsing
@@ -28,7 +40,8 @@ The following connection engines are used to connect to the providers:
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
-Example screenshots of the applet:
+Example screenshots from the earlier layout (version 0.4.5 moves app-wide
+actions into the separate Settings window):
 <table>
   <tr>
     <td valign="top"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="200"></td>
@@ -53,8 +66,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.4/cosmic-ext-applet-mounter_0.4.4_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.4_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.5/cosmic-ext-applet-mounter_0.4.5_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.5_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -62,9 +75,7 @@ entry, AppStream metadata, and icon.
 
 ### Installation from Flatpak
 
-Flatpak packaging is being prepared for COSMIC repository submission. Until it
-is published through a public Flatpak remote, use the Debian package or build
-from source unless you are testing the Flatpak manifest locally.
+Flatpak packaging is being prepared for COSMIC repository submission. Until it is published through a public Flatpak remote, use the Debian package or build from source unless you are testing the Flatpak manifest locally.
 
 ### Post Installation
 
@@ -246,7 +257,15 @@ Useful read-only examples:
 `cargo run --example dependency_inventory` checks dependencies.
 
 `just install-user` installs the development build under `~/.local` and
-updates desktop metadata and icons for the current user.
+updates desktop metadata and icons for the current user. After updating,
+close any Cloud Mounter settings/editor windows and restart the COSMIC panel
+without logging out:
+
+```sh
+killall cosmic-panel
+```
+
+The panel should automatically restart and load the updated applet.
 
 `just stage` installs into `target/stage/usr` and does not modify the host
 system.

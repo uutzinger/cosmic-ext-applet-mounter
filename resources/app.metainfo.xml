@@ -74,6 +74,19 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.5" date="2026-09-15">
+      <description>
+        <p>Version 0.4.5.</p>
+        <ul>
+          <li>Open a separate Settings window from the right-aligned popup gear.</li>
+          <li>Move Add Connection, Refresh and Online-only sleep preferences into Settings.</li>
+          <li>Apply settings and refresh requests to the running panel applet.</li>
+          <li>Unify themed backgrounds and place status messages beside their controls.</li>
+          <li>Separate popup status and connections with a thin divider.</li>
+          <li>Clarify new and existing rclone remote names in Add and Modify help.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.4" date="2026-09-14">
       <description>
         <p>Version 0.4.4.</p>

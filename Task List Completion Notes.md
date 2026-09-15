@@ -31,6 +31,197 @@ Task List/Completion Notes separation.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## Release 0.4.5 — September 15, 2026
+
+User authorized documentation alignment, version bump, commit, push and a
+GitHub release with an installation asset. This release includes the standalone
+Settings window and runtime-owner IPC, the final themed layout and right-aligned
+gear, compact status/list divider, and Add/Modify remote-name help corrections.
+README now explains Settings and the native update/restart workflow. Its prior
+formatting edit is preserved. Existing screenshot assets remain identified as
+an earlier layout; AppStream retains their original v0.4.4 image URLs.
+
+Aligned Cargo manifest/lockfile, Debian changelog, AppStream release metadata,
+README package examples and the Flatpak source tag to 0.4.5. Design/task documents
+reflect the final layout; removed the stale statement that sleep controls are
+still in the popup. Historical completion entries remain as execution history.
+
+Release validation: formatting/diff checks and all-target/all-feature Clippy
+with warnings denied passed. `just deb` completed its optimized build, all 174
+tests (111 library, 63 app/IPC), and package creation. Inspected package metadata
+and contents: version 0.4.5, amd64, applet binary, auth helper, desktop entry,
+AppStream metadata and icon. Existing nonfatal COSMIC category/AppStream findings
+and host libc diversion notices remain. Desktop and Flatpak acceptance items
+stay explicitly tracked; this build did not perform a live sleep cycle.
+
+Installation asset: `cosmic-ext-applet-mounter_0.4.5_amd64.deb`.
+SHA-256: `c4b091429a21314182323dac1499102ab50319ce52cc2aedbe45e03acf64ed9e`.
+Prepared the Debian package and `SHA256SUMS` for the `v0.4.5` GitHub release.
+Generated packaging files and binaries are excluded from the source commit.
+
+## Compact Popup and General Settings Window
+
+### Follow-up: popup title alignment and separator — September 15, 2026
+
+The popup title row now fills the available width: Cloud Mounter stays left,
+while the title container takes the remaining space and places the Settings
+gear at the right edge. Removed the 12-pixel inter-section spacing and added a
+standard COSMIC horizontal divider above the connection list. Header and rows
+use transparent list containers inside one themed List surface, preventing
+separate rounded cards from exposing a white band at their boundary. Runtime
+notices and sleep warnings remain between the header and divider when present.
+
+Updated Applet Description, Requirements §6.1/§13.1, Task List and Tooltip Review.
+Formatting, diff checks, all-target compilation and the native debug build
+passed. This is a layout-only change; no new tests were added. Desktop visual
+verification remains pending. No installation, commit or release was performed.
+
+### Follow-up: settings surface and message placement — September 15, 2026
+
+General Settings now uses `Container::List`, the same COSMIC themed surface
+used by the popup and Add/Modify list content. The earlier plain column had
+exposed the window's different `Background` surface. The replacement derives
+background and text colors from the theme; it does not hardcode grey or white.
+
+Moved Refresh feedback, Add Connection launch errors and applet connectivity
+messages directly below the top buttons. Sleep preference progress, save
+results/errors and cleanup status have their own message area below the exact
+sentence “Applies only to Online connections.” Removed the extra Offline
+sentence, “Sleep cleanup status” heading and fixed 100-pixel status scroller.
+Sleep messages now render as ordinary wrapping text; long content uses the
+window's main scrollbar. Hover help retains the Online-only safety explanation.
+
+Updated Applet Description, Requirements §13.1A, Task List and Tooltip Review.
+Expanded the existing message-routing regression to verify Refresh and sleep
+results do not overwrite each other's feedback. All 62 app tests passed;
+`cargo check --all-targets`, Clippy with all targets/features and warnings denied,
+format/diff checks, and the native debug build passed. IPC/sleep execution was
+unchanged; no desktop sleep cycle or visual theme check was performed. Reinstall
+and reopen Settings to inspect the theme and layout on the desktop. No install,
+version bump, commit or release was performed for this follow-up.
+
+### Implementation — September 15, 2026
+
+Implemented the approved layout with the user's final ordering: **Add Connection**
+and **Refresh** occupy the top row of General Settings; **Unmount when sleep**
+and **Restore after wake up** appear below. Both options stay visible; Restore
+is disabled when Unmount is off, retaining its saved value. Settings has its own
+640 × 480 standalone window and title, with scrollable content and bounded
+cleanup details. Existing Add/Modify editor launch arguments remain compatible.
+
+The main popup now has an adjacent, keyboard-focusable Settings gear with an
+accessible name and tooltip. Its embedded symbolic SVG uses the theme foreground
+and does not depend on an installed icon theme. Removed the toolbar, sleep footer
+and their fixed space reservation; empty-state guidance points to Settings.
+Shared operation notices remain intact. A compact sleep-warning link appears
+for unavailable or incomplete cleanup, including when Settings is closed.
+
+Added `src/runtime_ipc.rs`: a session-bus request/reply bridge to the panel owner,
+plus a separate Settings activation interface. The new `--app-settings` launch
+mode focuses an existing Settings instance. Both service names explicitly reject
+replacement: the private-bus regression test caught that zbus defaults otherwise
+allow replacing an existing owner. Only the registered panel owner may subscribe
+to sleep events. Closing either standalone window leaves runtime work in the
+panel process.
+
+Preference writes reload and validate the saved configuration, change only the
+requested field, and return acknowledgment/error to Settings. Listener readiness
+is reported separately. Settings polls current status every two seconds and
+keeps failed action feedback after successful status polls. Refresh reloads the
+panel and completes its asynchronous VPN status checks without clearing operation
+notices or pending actions. Saved/imported/removed connections notify the owner;
+popup reopen still reloads as a fallback. Editor configuration writers reload
+before updating to preserve preferences changed while the editor was open.
+
+Google Drive, Box and SMB remote help now distinguishes Add (new name followed
+by Create, or an existing remote) from Modify (existing remote guidance).
+Updated Applet Description, Requirements §§9.5/13.1A, Task List, Tooltip Review
+and the main Flatpak manifest's explicit Runtime/Settings session-bus grants.
+Existing unrelated README edits remain untouched.
+
+Validation: all 174 unit tests passed (111 library, 63 app/IPC), including private
+D-Bus routing, error replies, duplicate ownership, activation and window/runtime
+lifetime separation; preference persistence/rollback, action notice preservation,
+and Add/Modify remote help also pass. The private-bus test required execution
+outside the sandbox because local socket creation is blocked there. It uses its
+own temporary bus and does not contact desktop mounts or logind. Formatting,
+warning-denying Clippy (all targets/features) and the native debug build passed.
+Metadata validation retains the pre-existing COSMIC category and AppStream
+`binaries` findings; the changed Flatpak manifest parses as valid JSON.
+
+Pending: live COSMIC keyboard/focus/title, scaling and connection-list layout,
+editor-save propagation with a running panel, and Flatpak permission/visual
+acceptance. No installation, version bump, commit or publication in this change.
+The local debug executable is `target/debug/cosmic-ext-applet-mounter`; the
+currently installed applet continues to use its installed binary until updated.
+
+### Earlier feasibility review
+
+**September 15, 2026 — feasibility review and design revision only.**
+
+Source inspection confirms that `AppModel::view_popup` constructs the Add
+Connection/Refresh controls in their own `controls` row. The `last_notice`
+container above it is separate and shared: popup operations and launch errors
+use it in addition to Refresh. The connection editor separately renders its
+process-local `last_notice` for provider creation, authentication, detection,
+validation, save and removal feedback. The header's notification-enabled text
+is a preference summary, not the notice container. `sleep_status` is currently
+rendered in the sleep footer. Moving buttons is feasible; deleting the shared
+notice/status paths would lose feedback unrelated to those buttons.
+
+The pinned libcosmic source includes `widget::button::icon(...).on_press(...)`
+and Row composition. `preferences-system-symbolic.svg` exists in the installed
+COSMIC, Pop and Adwaita themes. A clickable gear immediately beside the title
+is source/API-feasible; final rendering, keyboard behavior and fallback still
+require implementation and live checks.
+
+`launch_settings_process`, `AppLaunchMode`, `WindowMode` and `src/main.rs`
+already support standalone editor processes. Although libcosmic also exposes
+`window::open` and `gain_focus`, requirement 4.5 and previous title investigations
+record problems with embedded applet child windows. The proposed General
+Settings window therefore follows the standalone process approach, with title
+`Cloud Mounter Settings` and a new `--app-settings` entry point. Existing
+`--settings` behavior for Add Connection remains compatible.
+
+A separate process does not share `AppModel`: its current Refresh handler would
+reload only its own config/status. Sleep subscriptions currently run only when
+`!standalone`, so merely moving the save handlers would not update the active
+listener until the applet next reloads. The design explicitly requires an
+applet-owned session-bus interface for settings/Refresh/status and saved-editor
+changes, plus one General Settings instance. Runtime mount/sleep work stays in
+the panel process. Flatpak IPC permissions and correct standalone focus/title
+remain acceptance work; API availability alone does not establish live support.
+
+The popup retains title/gear, status/relevant notices and connections. General
+Settings receives both sleep toggles, Add Connection, Refresh and cleanup
+details. Restore stays visible but disabled when sleep unmount is off. Offline
+mirrors remain unaffected. Shared runtime warnings must remain visible without
+opening Settings, and Refresh feedback must not replace an unresolved error.
+
+The previous remote-name help correction is retained in FR-011MA, the Applet
+Description and Tooltip Review, and is now explicit in UI section 13.2 and
+acceptance tests. Review also found that Modify hides Create actions, so a new
+pending task requires context-appropriate existing-remote help in Modify.
+
+Updated the four project design/task documents and Tooltip Review. Existing
+README edits and the preceding Rust tooltip changes were preserved. Verified
+cross-references and `git diff --check`; no runtime layout code, build, install,
+commit or release was performed for this documentation-only revision.
+
+## Rclone Remote Name Help Clarification
+
+**September 15, 2026.** Updated `rclone_remote_help` in `src/app.rs` for Google
+Drive, Box and SMB. Each tooltip now starts with entering a new remote name
+before clicking its Create action, then explains selecting a detected remote
+or entering an existing name from `rclone config`. SMB explicitly describes
+Create/Update behavior. Existing provider checks and credential guidance remain.
+
+Updated Applet Description, Requirements FR-011MA, Task List and Tooltip Review.
+Verified wording against the create/preflight paths and passed
+`cargo fmt --all -- --check` and `git diff --check`. No runtime behavior changed;
+no new tests, rebuild, installation, version bump or publication was needed for
+this source edit. Existing unrelated README changes were preserved.
+
 ## VPN Authentication Wait and Sleep Cleanup
 
 **September 14, 2026 — initial proposal and source findings (before implementation).**

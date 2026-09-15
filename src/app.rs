@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::fl;
+use crate::runtime_ipc::{self, Command as RuntimeCommand};
 use cosmic::dialog::file_chooser;
 use cosmic::iced::Background;
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
@@ -62,6 +63,7 @@ use cosmic_ext_applet_mounter::vpn::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+const GENERAL_SETTINGS_TITLE: &str = "Cloud Mounter Settings";
 const CONNECTION_SETTINGS_TITLE: &str = "Cloud Mounter Connection Settings";
 const APP_DISPLAY_NAME: &str = "Cloud Mounter";
 const POPUP_CONNECTION_LIST_MAX_HEIGHT: f32 = 640.0;
@@ -83,6 +85,7 @@ const SETTINGS_DISABLE_BUTTON_DISABLED_LIGHTENING: f32 = 0.15;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppLaunchMode {
     Applet,
+    GeneralSettings,
     AddConnection,
     ModifyConnection(ConnectionId),
     ImportLegacy,
@@ -90,6 +93,7 @@ pub enum AppLaunchMode {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum WindowMode {
+    GeneralSettings,
     #[default]
     AddConnection,
     ModifyConnection(ConnectionId),
@@ -188,11 +192,24 @@ pub struct AppModel {
     vpn_ready: BTreeMap<VpnProfileId, bool>,
     vpn_status_pending: bool,
     sleep_status: Option<String>,
+    sleep_notice: Option<String>,
+    sleep_settings_pending: bool,
+    runtime_owner: bool,
+    runtime_available: bool,
+    runtime_pending: bool,
+    runtime_poll_pending: bool,
+    runtime_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     TogglePopup,
+    OpenGeneralSettings,
+    RuntimeEvent(runtime_ipc::Event),
+    RuntimePoll,
+    RuntimeResult(RuntimeCommand, Result<runtime_ipc::Status, String>),
+    RuntimeRefreshCompleted(runtime_ipc::Reply, BTreeMap<VpnProfileId, bool>),
+    EditorNotified(Result<runtime_ipc::Status, String>),
     UnmountBeforeSleep(bool),
     RestoreAfterWake(bool),
     SleepEvent(cosmic_ext_applet_mounter::sleep::Event),
@@ -275,6 +292,7 @@ impl cosmic::Application for AppModel {
             AppLaunchMode::Applet | AppLaunchMode::AddConnection => WindowMode::AddConnection,
             AppLaunchMode::ModifyConnection(id) => WindowMode::ModifyConnection(id),
             AppLaunchMode::ImportLegacy => WindowMode::ImportLegacy,
+            AppLaunchMode::GeneralSettings => WindowMode::GeneralSettings,
         };
 
         let mut app = Self {
@@ -300,28 +318,45 @@ impl cosmic::Application for AppModel {
             vpn_ready: BTreeMap::new(),
             vpn_status_pending: false,
             sleep_status: None,
+            sleep_notice: None,
+            sleep_settings_pending: false,
+            runtime_owner: false,
+            runtime_available: false,
+            runtime_pending: false,
+            runtime_poll_pending: false,
+            runtime_error: None,
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
             AppLaunchMode::ImportLegacy => app.scan_imports(),
-            AppLaunchMode::Applet | AppLaunchMode::AddConnection => {}
+            AppLaunchMode::Applet
+            | AppLaunchMode::AddConnection
+            | AppLaunchMode::GeneralSettings => {}
         }
+        let window_title = if window_mode == WindowMode::GeneralSettings {
+            GENERAL_SETTINGS_TITLE
+        } else {
+            CONNECTION_SETTINGS_TITLE
+        };
         let title = if standalone {
-            app.set_header_title(CONNECTION_SETTINGS_TITLE.into());
+            app.set_header_title(window_title.into());
             if app.last_notice.is_none() {
                 app.last_notice = Some(window_mode_notice(window_mode));
             }
-            app.set_window_title(
-                CONNECTION_SETTINGS_TITLE.into(),
-                main_window_id.unwrap_or(Id::RESERVED),
-            )
+            app.set_window_title(window_title.into(), main_window_id.unwrap_or(Id::RESERVED))
         } else if let Some(id) = main_window_id {
             app.set_window_title(APP_DISPLAY_NAME.into(), id)
         } else {
             Task::none()
         };
 
-        (app, title)
+        let initial = if window_mode == WindowMode::GeneralSettings {
+            app.runtime_poll_pending = true;
+            runtime_request_task(RuntimeCommand::Status)
+        } else {
+            Task::none()
+        };
+        (app, Task::batch([title, initial]))
     }
 
     fn on_close_requested(&self, id: Id) -> Option<Message> {
@@ -333,6 +368,9 @@ impl cosmic::Application for AppModel {
 
     fn view(&self) -> Element<'_, Self::Message> {
         if self.standalone {
+            if self.window_mode == WindowMode::GeneralSettings {
+                return self.view_general_settings();
+            }
             return self.view_settings_window();
         }
         self.core
@@ -348,11 +386,19 @@ impl cosmic::Application for AppModel {
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let mut subscriptions = Vec::new();
+        if !self.standalone {
+            subscriptions.push(runtime_ipc::runtime_subscription().map(Message::RuntimeEvent));
+        } else if self.window_mode == WindowMode::GeneralSettings {
+            subscriptions.push(runtime_ipc::settings_subscription().map(Message::RuntimeEvent));
+            subscriptions.push(
+                cosmic::iced::time::every(Duration::from_secs(2)).map(|_| Message::RuntimePoll),
+            );
+        }
         if !self.standalone && self.popup.is_some() && self.last_notice.is_some() {
             subscriptions
                 .push(cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick));
         }
-        if !self.standalone && self.config.document.unmount_before_sleep {
+        if !self.standalone && self.runtime_owner && self.config.document.unmount_before_sleep {
             subscriptions
                 .push(cosmic_ext_applet_mounter::sleep::subscription().map(Message::SleepEvent));
         }
@@ -361,32 +407,127 @@ impl cosmic::Application for AppModel {
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
-            Message::UnmountBeforeSleep(value) => {
-                self.config = Config::load_runtime().config;
-                match self
-                    .config
-                    .update_validated_runtime(|doc| doc.unmount_before_sleep = value)
-                {
-                    Ok(_) => {
-                        self.sleep_status = if value {
-                            Some("Starting sleep listener…".into())
-                        } else {
-                            None
+            Message::OpenGeneralSettings => {
+                self.launch_settings_process(AppLaunchMode::GeneralSettings);
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::Ready) => {
+                self.runtime_owner = !self.standalone;
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::Activate) => {
+                if let Some(id) = self.core.main_window_id() {
+                    return cosmic::iced::window::gain_focus(id);
+                }
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::DuplicateWindow) => {
+                return cosmic::iced::exit();
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::Error(error)) => {
+                if self.standalone {
+                    self.last_notice = Some(error.clone());
+                }
+                self.runtime_error = Some(error);
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::Request(command, reply)) => {
+                if self.standalone {
+                    reply.complete(Err("This window is not the runtime owner".into()));
+                } else if matches!(
+                    command,
+                    RuntimeCommand::Refresh | RuntimeCommand::ConfigurationChanged
+                ) {
+                    match load_runtime_config() {
+                        Ok(config) => self.config = config,
+                        Err(error) => {
+                            reply.complete(Err(error));
+                            return Task::none();
+                        }
+                    }
+                    self.vpn_status_pending = true;
+                    let config = self.config.document.clone();
+                    return Task::perform(
+                        async move { current_vpn_ready_states(config).await },
+                        move |ready| {
+                            cosmic::Action::App(Message::RuntimeRefreshCompleted(
+                                reply.clone(),
+                                ready,
+                            ))
+                        },
+                    );
+                } else {
+                    let result = self.apply_runtime_command(command);
+                    reply.complete(result);
+                }
+            }
+            Message::RuntimeRefreshCompleted(reply, ready) => {
+                self.vpn_ready = ready;
+                self.vpn_status_pending = false;
+                reply.complete(Ok(self.runtime_status()));
+            }
+            Message::RuntimePoll => {
+                if !self.runtime_pending && !self.runtime_poll_pending {
+                    self.runtime_poll_pending = true;
+                    return runtime_request_task(RuntimeCommand::Status);
+                }
+            }
+            Message::RuntimeResult(command, result) => {
+                if command == RuntimeCommand::Status {
+                    self.runtime_poll_pending = false;
+                } else {
+                    self.runtime_pending = false;
+                    self.sleep_settings_pending = false;
+                }
+                match result {
+                    Ok(status) => {
+                        self.runtime_available = true;
+                        self.runtime_error = None;
+                        // Ignore a status poll that started before a setting write.
+                        if !self.runtime_pending {
+                            self.config.document.unmount_before_sleep = status.unmount_before_sleep;
+                            self.config.document.restore_after_wake = status.restore_after_wake;
+                            self.sleep_status = status.sleep_status;
+                        }
+                        match command {
+                            RuntimeCommand::SetUnmount(_) | RuntimeCommand::SetRestore(_) => {
+                                self.sleep_notice = Some("Setting saved.".into());
+                            }
+                            RuntimeCommand::Refresh => {
+                                self.last_notice =
+                                    Some("Applet configuration and VPN status refreshed.".into());
+                            }
+                            _ => {}
                         }
                     }
                     Err(error) => {
-                        self.last_notice = Some(format!("Could not save sleep setting: {error}"))
+                        self.runtime_available = false;
+                        match command {
+                            RuntimeCommand::SetUnmount(_) | RuntimeCommand::SetRestore(_) => {
+                                self.sleep_notice = Some(error);
+                            }
+                            RuntimeCommand::Status => self.runtime_error = Some(error),
+                            _ => self.last_notice = Some(error),
+                        }
                     }
                 }
             }
-            Message::RestoreAfterWake(value) => {
-                self.config = Config::load_runtime().config;
-                if let Err(error) = self
-                    .config
-                    .update_validated_runtime(|doc| doc.restore_after_wake = value)
-                {
-                    self.last_notice = Some(format!("Could not save wake setting: {error}"));
+            Message::EditorNotified(result) => {
+                if let Err(error) = result {
+                    let notice = self.last_notice.get_or_insert_with(String::new);
+                    let _ = write!(
+                        notice,
+                        " Applet refresh unavailable: {error}. Reopen the popup to reload."
+                    );
                 }
+            }
+            Message::UnmountBeforeSleep(value) => {
+                self.runtime_pending = true;
+                self.sleep_settings_pending = true;
+                self.sleep_notice = None;
+                return runtime_request_task(RuntimeCommand::SetUnmount(value));
+            }
+            Message::RestoreAfterWake(value) => {
+                self.runtime_pending = true;
+                self.sleep_settings_pending = true;
+                self.sleep_notice = None;
+                return runtime_request_task(RuntimeCommand::SetRestore(value));
             }
             Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status(status)) => {
                 self.sleep_status = Some(status);
@@ -782,6 +923,7 @@ impl cosmic::Application for AppModel {
             Message::DraftSaved(notice) => {
                 self.pending_shared_remote_ack = None;
                 self.last_notice = Some(notice);
+                return notify_runtime_task();
             }
             Message::ConfirmImport(index) => {
                 return self.confirm_import(index);
@@ -793,21 +935,11 @@ impl cosmic::Application for AppModel {
                 self.pending_remove = None;
                 self.removing_connection = None;
                 self.last_notice = Some(notice);
+                return notify_runtime_task();
             }
             Message::Refresh => {
-                self.config = Config::load_runtime().config;
-                self.pending_remove = None;
-                self.removing_connection = None;
-                self.removing_rclone_remote = None;
-                self.last_notice = Some("Configuration reloaded.".into());
-                self.last_notice_at = Some(Instant::now());
-                self.vpn_ready = BTreeMap::new();
-                self.vpn_status_pending = true;
-                let config = self.config.document.clone();
-                return Task::perform(
-                    async move { current_vpn_ready_states(config).await },
-                    |ready| cosmic::Action::App(Message::VpnStatusChecked(ready)),
-                );
+                self.runtime_pending = true;
+                return runtime_request_task(RuntimeCommand::Refresh);
             }
             Message::NoticeTick(now) => {
                 if let Some(started_at) = self.last_notice_at {
@@ -838,6 +970,93 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
+    fn runtime_status(&self) -> runtime_ipc::Status {
+        runtime_ipc::Status {
+            unmount_before_sleep: self.config.document.unmount_before_sleep,
+            restore_after_wake: self.config.document.restore_after_wake,
+            sleep_status: self.sleep_status.clone(),
+        }
+    }
+
+    fn apply_runtime_command(
+        &mut self,
+        command: RuntimeCommand,
+    ) -> Result<runtime_ipc::Status, String> {
+        if command == RuntimeCommand::Status {
+            return Ok(self.runtime_status());
+        }
+        self.config = load_runtime_config()?;
+        let storage = AppConfigStorage::runtime()?;
+        save_sleep_preference(&mut self.config, &storage, command)?;
+        if let RuntimeCommand::SetUnmount(value) = command {
+            self.sleep_status = value.then(|| "Starting sleep listener…".into());
+        }
+        Ok(self.runtime_status())
+    }
+
+    fn view_general_settings(&self) -> Element<'_, Message> {
+        let enabled = self.runtime_available && !self.runtime_pending && !self.runtime_poll_pending;
+        let actions = widget::Row::new().spacing(8)
+            .push(field_with_help(
+                widget::button::suggested(fl!("add-connection")).on_press(Message::OpenAddConnection),
+                "Open the Add Connection workflow to create a new storage connection.",
+            ))
+            .push(field_with_help(
+                widget::button::standard(fl!("refresh"))
+                    .on_press_maybe((!self.runtime_pending && !self.runtime_poll_pending).then_some(Message::Refresh)),
+                "Reload saved connections and refresh VPN status in the running applet. Existing operations continue.",
+            ));
+        let mut action_section = widget::Column::new().spacing(8).push(actions);
+        if self.runtime_pending && !self.sleep_settings_pending {
+            action_section =
+                action_section.push(widget::text::body("Waiting for the running applet…"));
+        }
+        if let Some(error) = &self.runtime_error {
+            action_section = action_section.push(widget::text::body(error.clone()));
+        } else if !self.runtime_available {
+            action_section =
+                action_section.push(widget::text::body("Connecting to the running applet…"));
+        }
+        if let Some(notice) = &self.last_notice {
+            action_section = action_section.push(widget::text::body(notice.clone()));
+        }
+        let mut sleep_section = widget::Column::new().spacing(8)
+            .push(widget::text::title4("Sleep and wake"))
+            .push(field_with_help(
+                widget::toggler(self.config.document.unmount_before_sleep)
+                    .label("Unmount when sleep".to_string())
+                    .on_toggle_maybe(enabled.then_some(Message::UnmountBeforeSleep)),
+                "Cleanly unmount applet-managed Online connections before system sleep. Offline mirrors and synchronization remain untouched. Busy mounts may outlast the system’s sleep delay; caches are preserved.",
+            ))
+            .push(field_with_help(
+                widget::toggler(self.config.document.restore_after_wake)
+                    .label("Restore after wake up".to_string())
+                    .on_toggle_maybe((enabled && self.config.document.unmount_before_sleep).then_some(Message::RestoreAfterWake)),
+                "Restore only previously active, still-enabled Online connections after network and VPN readiness checks pass. Enable Unmount when sleep first; the saved restore preference is retained while disabled.",
+            ))
+            .push(widget::text::body("Applies only to Online connections."));
+        if self.sleep_settings_pending {
+            sleep_section = sleep_section.push(widget::text::body("Saving sleep setting…"));
+        }
+        if let Some(notice) = &self.sleep_notice {
+            sleep_section = sleep_section.push(widget::text::body(notice.clone()));
+        }
+        if let Some(status) = &self.sleep_status {
+            sleep_section = sleep_section.push(widget::text::body(status.clone()));
+        }
+        let content = widget::Column::new()
+            .spacing(16)
+            .push(action_section)
+            .push(sleep_section);
+        // Match the themed surface used by the popup and Add/Modify list content.
+        widget::container(widget::scrollable(content))
+            .padding(24)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .class(cosmic::style::Container::List)
+            .into()
+    }
+
     fn view_popup(&self) -> Element<'_, Message> {
         let notification_status = if self.config.notifications_enabled() {
             fl!("notifications-enabled")
@@ -846,20 +1065,23 @@ impl AppModel {
         };
         let snapshot = self.controller_snapshot();
         let state = restore(&snapshot);
-        let controls = widget::Row::new()
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .push(field_with_help(
-                widget::button::suggested(fl!("add-connection"))
-                    .on_press(Message::OpenAddConnection),
-                "Open the Add Connection workflow to create a new storage connection.",
-            ))
-            .push(field_with_help(
-                widget::button::standard(fl!("refresh")).on_press(Message::Refresh),
-                "Reload saved configuration and refresh the applet view.",
-            ));
         let header = widget::list_column()
-            .add(widget::text::title4(fl!("app-title")))
+            .style(cosmic::style::Container::Transparent)
+            .add(
+                widget::Row::new()
+                    .width(Length::Fill)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(widget::container(widget::text::title4(fl!("app-title"))).width(Length::Fill))
+                    .push(
+                        widget::button::icon(widget::icon::from_svg_bytes(include_bytes!(
+                            "../resources/settings-symbolic.svg"
+                        )).symbolic(true))
+                        .name("Settings")
+                        .tooltip("Open Settings to add connections, refresh the applet, and configure sleep behavior.")
+                        .on_press(Message::OpenGeneralSettings),
+                    ),
+            )
             .add(widget::text::body(format!(
                 "{}\n{}\n{}",
                 aggregate_label(&state.aggregate),
@@ -867,16 +1089,18 @@ impl AppModel {
                 self.vpn_summary(&state.rows, &snapshot.vpn_ready, self.vpn_status_pending)
             )));
 
-        let mut rows = widget::list_column();
+        let mut rows = widget::list_column().style(cosmic::style::Container::Transparent);
         if state.rows.is_empty() {
-            rows = rows.add(widget::text::body(fl!("no-connections")));
+            rows = rows.add(widget::text::body(
+                "No connections. Open Settings > Add Connection to get started.",
+            ));
         }
 
         for row in &state.rows {
             rows = rows.add(self.view_connection_row(row));
         }
 
-        let mut content = widget::Column::new().spacing(12).push(header);
+        let mut content = widget::Column::new().spacing(0).push(header);
 
         if let Some(notice) = &self.last_notice {
             content = content.push(
@@ -886,50 +1110,43 @@ impl AppModel {
             );
         }
 
-        content = content.push(
-            widget::container(controls)
-                .padding([0, POPUP_ACTION_HORIZONTAL_PADDING])
-                .width(Length::Fill),
-        );
-
-        // Reserve space for the app-wide sleep controls and their bounded
-        // status area, keeping the toggle visible within the popup height.
-        let list_limit = if self.config.document.unmount_before_sleep {
-            220.0
-        } else {
-            300.0
-        } - if self.last_notice.is_some() {
-            60.0
-        } else {
-            0.0
-        };
+        if let Some(error) = &self.runtime_error {
+            content = content.push(field_with_help(
+                widget::text::caption("Settings communication unavailable"),
+                error.clone(),
+            ));
+        }
+        if sleep_needs_attention(self.sleep_status.as_deref()) {
+            content = content.push(field_with_help(
+                widget::button::text("Sleep cleanup needs attention — open Settings")
+                    .on_press(Message::OpenGeneralSettings),
+                self.sleep_status.clone().unwrap_or_default(),
+            ));
+        }
+        let list_limit = 360.0
+            - if self.last_notice.is_some() {
+                60.0
+            } else {
+                0.0
+            }
+            - if sleep_needs_attention(self.sleep_status.as_deref()) {
+                40.0
+            } else {
+                0.0
+            }
+            - if self.runtime_error.is_some() {
+                40.0
+            } else {
+                0.0
+            };
+        content = content.push(widget::divider::horizontal::default());
         content = content.push(widget::scrollable(rows).height(Length::Fixed(
             popup_connection_scroll_height(state.rows.len(), state.rows.is_empty()).min(list_limit),
         )));
-
-        let mut sleep_controls = widget::Column::new().spacing(8).push(field_with_help(
-            widget::toggler(self.config.document.unmount_before_sleep)
-                .label(String::from("Unmount all Online connections before sleep"))
-                .on_toggle(Message::UnmountBeforeSleep),
-            "Cleanly unmount applet-managed Online connections before system sleep. Offline mirrors and their synchronization remain untouched. Busy mounts may outlast the system’s sleep delay; caches are preserved.",
-        ));
-        if self.config.document.unmount_before_sleep {
-            sleep_controls = sleep_controls.push(field_with_help(
-                widget::toggler(self.config.document.restore_after_wake)
-                    .label(String::from("Restore previously active Online connections after wake"))
-                    .on_toggle(Message::RestoreAfterWake),
-                "Restore only previously active, still-enabled Online connections after network and VPN readiness checks pass.",
-            ));
-            if let Some(status) = &self.sleep_status {
-                sleep_controls = sleep_controls.push(
-                    widget::scrollable(widget::text::caption(status.clone()))
-                        .height(Length::Fixed(48.0)),
-                );
-            }
-        }
-        content = content
-            .push(widget::container(sleep_controls).padding([8, POPUP_ACTION_HORIZONTAL_PADDING]));
-        self.core.applet.popup_container(content).into()
+        self.core
+            .applet
+            .popup_container(widget::container(content).class(cosmic::style::Container::List))
+            .into()
     }
 
     fn view_connection_row(&self, row: &ConnectionRowState) -> Element<'static, Message> {
@@ -999,6 +1216,7 @@ impl AppModel {
             WindowMode::AddConnection => fl!("add-connection"),
             WindowMode::ModifyConnection(_) => "Modify Connection".into(),
             WindowMode::ImportLegacy => fl!("settings-import-title"),
+            WindowMode::GeneralSettings => GENERAL_SETTINGS_TITLE.into(),
         }));
 
         if let Some(notice) = &self.last_notice {
@@ -1006,6 +1224,7 @@ impl AppModel {
         }
 
         match self.window_mode {
+            WindowMode::GeneralSettings => unreachable!("General Settings has its own view"),
             WindowMode::AddConnection | WindowMode::ModifyConnection(_) => {
                 content = content.add(self.view_editor_actions());
                 content = self.view_wizard(content);
@@ -1300,7 +1519,7 @@ impl AppModel {
 
                 return primary_row.push(modify_row).into();
             }
-            WindowMode::ImportLegacy => {}
+            WindowMode::ImportLegacy | WindowMode::GeneralSettings => {}
         }
 
         primary_row.into()
@@ -1554,7 +1773,7 @@ impl AppModel {
                 &self.draft.remote_reference,
             )
             .on_input(Message::DraftRemote),
-            rclone_remote_help(provider),
+            rclone_remote_help(provider, self.window_mode == WindowMode::AddConnection),
         ));
 
         let matching = self.matching_rclone_remotes(provider);
@@ -1968,6 +2187,13 @@ impl AppModel {
         let should_install_onedriver_online_mount = is_onedriver_online_mount(&connection);
         let should_install_onedrive_offline_mirror = is_onedrive_offline_mirror(&connection);
         let saved_connection = connection.clone();
+        match load_runtime_config() {
+            Ok(config) => self.config = config,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        }
         let result = self.config.update_validated_with(&storage, |document| {
             if let Some(existing) = document
                 .connections
@@ -2020,11 +2246,11 @@ impl AppModel {
             }
             Ok(true) => {
                 self.last_notice = Some(format!("{name} saved to applet configuration."));
-                Task::none()
+                notify_runtime_task()
             }
             Ok(false) => {
                 self.last_notice = Some(format!("{name} was unchanged."));
-                Task::none()
+                notify_runtime_task()
             }
             Err(error) => {
                 self.last_notice = Some(format!("Failed to save {name}: {error}"));
@@ -2121,6 +2347,13 @@ impl AppModel {
         let mut imported = 0usize;
         let mut updated = 0usize;
         let mut selected = None;
+        match load_runtime_config() {
+            Ok(config) => self.config = config,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return;
+            }
+        }
         let result = self.config.update_validated_with(&storage, |document| {
             for detected in &detection.profiles {
                 if let Some(existing) = document
@@ -2498,6 +2731,13 @@ impl AppModel {
                 return Task::none();
             }
         };
+        match load_runtime_config() {
+            Ok(config) => self.config = config,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        }
         let result = self.config.update_validated_with(&storage, |document| {
             if !document
                 .connections
@@ -2576,6 +2816,13 @@ impl AppModel {
                 return Task::none();
             }
         };
+        match load_runtime_config() {
+            Ok(config) => self.config = config,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        }
         let result = self.config.update_validated_with(&storage, |document| {
             document
                 .connections
@@ -2914,6 +3161,7 @@ impl AppModel {
             Some("--settings") | Some("settings") | Some("--add-connection") => {
                 AppLaunchMode::AddConnection
             }
+            Some("--app-settings") => AppLaunchMode::GeneralSettings,
             Some("--import") => AppLaunchMode::ImportLegacy,
             Some("--modify-connection") => args
                 .next()
@@ -2939,6 +3187,9 @@ impl AppModel {
 
         let mut command = Command::new(executable);
         match mode {
+            AppLaunchMode::GeneralSettings => {
+                command.arg("--app-settings");
+            }
             AppLaunchMode::Applet | AppLaunchMode::AddConnection => {
                 command.arg("--settings");
             }
@@ -2951,10 +3202,58 @@ impl AppModel {
         }
 
         if let Err(error) = command.spawn() {
-            self.last_notice = Some(format!("Could not open connection settings: {error}"));
+            self.last_notice = Some(format!("Could not open settings: {error}"));
             self.last_notice_at = Some(Instant::now());
         }
     }
+}
+
+fn save_sleep_preference(
+    config: &mut Config,
+    storage: &AppConfigStorage,
+    command: RuntimeCommand,
+) -> Result<(), String> {
+    config
+        .update_validated_with(storage, |document| match command {
+            RuntimeCommand::SetUnmount(value) => document.unmount_before_sleep = value,
+            RuntimeCommand::SetRestore(value) => document.restore_after_wake = value,
+            _ => {}
+        })
+        .map(|_| ())
+        .map_err(|error| format!("Could not save setting: {error}"))
+}
+
+fn load_runtime_config() -> Result<Config, String> {
+    let report = Config::load_runtime();
+    if report.warnings.is_empty() {
+        Ok(report.config)
+    } else {
+        Err(format!(
+            "Could not reload configuration: {}",
+            report.warnings.join("; ")
+        ))
+    }
+}
+
+fn sleep_needs_attention(status: Option<&str>) -> bool {
+    status.is_some_and(|status| {
+        status.starts_with("Sleep cleanup unavailable")
+            || status.starts_with("Sleep cleanup incomplete")
+            || status.starts_with("Sleep already in progress")
+    })
+}
+
+fn runtime_request_task(command: RuntimeCommand) -> Task<cosmic::Action<Message>> {
+    Task::perform(runtime_ipc::request(command), move |result| {
+        cosmic::Action::App(Message::RuntimeResult(command, result))
+    })
+}
+
+fn notify_runtime_task() -> Task<cosmic::Action<Message>> {
+    Task::perform(
+        runtime_ipc::request(RuntimeCommand::ConfigurationChanged),
+        |result| cosmic::Action::App(Message::EditorNotified(result)),
+    )
 }
 
 fn primary_operation(row: &ConnectionRowState) -> Option<Operation> {
@@ -3063,6 +3362,7 @@ fn yes_no(value: bool) -> &'static str {
 
 fn window_mode_notice(mode: WindowMode) -> String {
     match mode {
+        WindowMode::GeneralSettings => "Manage connections and choose sleep behavior.".into(),
         WindowMode::AddConnection => {
             "Add connection selected. Choose provider, mode, remote/subtree, local target, VPN, and start at login.".into()
         }
@@ -4066,16 +4366,31 @@ fn rclone_remote_placeholder(provider: Provider) -> &'static str {
     }
 }
 
-fn rclone_remote_help(provider: Provider) -> &'static str {
+fn rclone_remote_help(provider: Provider, adding: bool) -> &'static str {
+    if !adding {
+        return match provider {
+            Provider::GoogleDrive => {
+                "Select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
+            }
+            Provider::Box => {
+                "Select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
+            }
+            Provider::Smb => {
+                "Select a detected SMB remote or enter its exact name from `rclone config`. The applet verifies backend type `smb` and share access before saving. Credentials remain in rclone configuration."
+            }
+            Provider::OneDrive => "OneDrive uses its own authentication workflow.",
+        };
+    }
+
     match provider {
         Provider::GoogleDrive => {
-            "Select a detected Google Drive rclone remote, or enter the exact remote name from `rclone config`. Use a clear name such as `personal_gdrive` or `work_gdrive`; the applet verifies backend type `drive`, authentication, and subtree access before saving."
+            "Enter a new rclone remote name, such as `personal_gdrive`, then click Create Google Drive Remote. To use an existing remote, select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
         }
         Provider::Box => {
-            "Select a detected Box rclone remote, or enter the exact remote name from `rclone config`. Use a clear name such as `box_personal` or `ua_box`; the applet verifies backend type `box`, authentication, and subtree access before saving."
+            "Enter a new rclone remote name, such as `box_personal`, then click Create Box Remote. To use an existing remote, select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
         }
         Provider::Smb => {
-            "Select a detected SMB rclone remote, or enter the exact remote name from `rclone config`. Use a clear name such as `office_smb`; the applet verifies backend type `smb`. Passwords stay in rclone, not applet configuration."
+            "Enter a new rclone remote name, such as `office_smb`, then fill in the SMB settings and click Create/Update SMB Remote. To use an existing remote, select a detected SMB remote or enter its exact name from `rclone config`. Create/Update SMB Remote can also update that remote. The applet verifies backend type `smb`. Passwords stay in rclone, not applet configuration."
         }
         Provider::OneDrive => "OneDrive does not use rclone in the approved provider matrix.",
     }
@@ -7459,6 +7774,139 @@ fn provider_engine_summary(provider: Provider, mode: AccessMode) -> &'static str
 mod tests {
     use super::*;
     use cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile;
+
+    #[tokio::test]
+    async fn refresh_completion_preserves_operation_notice_and_pending_action() {
+        use cosmic::Application;
+        let connection_id = ConnectionId::from_uuid(Uuid::new_v4());
+        let mut app = AppModel {
+            last_notice: Some("Mount failed: access denied".into()),
+            pending_repair: Some(connection_id),
+            ..AppModel::default()
+        };
+        let (reply, receiver) = runtime_ipc::Reply::channel();
+        let _ = app.update(Message::RuntimeRefreshCompleted(reply, BTreeMap::new()));
+        assert!(receiver.await.unwrap().is_ok());
+        assert_eq!(
+            app.last_notice.as_deref(),
+            Some("Mount failed: access denied")
+        );
+        assert_eq!(app.pending_repair, Some(connection_id));
+    }
+
+    #[test]
+    fn sleep_preference_persists_only_requested_field_and_rolls_back_on_failure() {
+        use cosmic_ext_applet_mounter::config::HostVisibleConfigStorage;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.ron");
+        let storage = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(path.clone()));
+        let mut config = Config::default();
+        config.document.notifications_enabled = true;
+        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetRestore(true)).unwrap();
+        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetUnmount(true)).unwrap();
+        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetUnmount(false)).unwrap();
+        let saved: ConfigDocument = ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved, config.document);
+        assert!(saved.notifications_enabled);
+        assert!(saved.restore_after_wake);
+        assert!(!saved.unmount_before_sleep);
+        let invalid = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(
+            path.join("impossible.ron"),
+        ));
+        assert!(
+            save_sleep_preference(&mut config, &invalid, RuntimeCommand::SetUnmount(true)).is_err()
+        );
+        assert_eq!(config.document, saved);
+    }
+
+    #[test]
+    fn settings_failures_do_not_change_effective_preferences_or_vanish_on_poll() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            standalone: true,
+            window_mode: WindowMode::GeneralSettings,
+            runtime_pending: true,
+            ..AppModel::default()
+        };
+        app.config.document.restore_after_wake = true;
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::SetUnmount(true),
+            Err("save failed".into()),
+        ));
+        assert!(!app.config.document.unmount_before_sleep);
+        assert!(app.config.document.restore_after_wake);
+        assert!(!app.runtime_pending);
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Status,
+            Ok(runtime_ipc::Status {
+                restore_after_wake: true,
+                ..runtime_ipc::Status::default()
+            }),
+        ));
+        assert_eq!(app.sleep_notice.as_deref(), Some("save failed"));
+        assert!(app.last_notice.is_none());
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Refresh,
+            Ok(runtime_ipc::Status::default()),
+        ));
+        assert!(app.last_notice.as_deref().unwrap().contains("refreshed"));
+        assert_eq!(app.sleep_notice.as_deref(), Some("save failed"));
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::SetRestore(true),
+            Ok(runtime_ipc::Status::default()),
+        ));
+        assert_eq!(app.sleep_notice.as_deref(), Some("Setting saved."));
+        assert!(app.last_notice.as_deref().unwrap().contains("refreshed"));
+    }
+
+    #[test]
+    fn settings_acknowledgment_updates_flags_without_owning_sleep_listener() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            standalone: true,
+            window_mode: WindowMode::GeneralSettings,
+            runtime_pending: true,
+            ..AppModel::default()
+        };
+        let _ = app.update(Message::RuntimeEvent(runtime_ipc::Event::Ready));
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::SetUnmount(true),
+            Ok(runtime_ipc::Status {
+                unmount_before_sleep: true,
+                restore_after_wake: true,
+                sleep_status: Some("ready".into()),
+            }),
+        ));
+        assert!(app.config.document.unmount_before_sleep);
+        assert!(app.config.document.restore_after_wake);
+        assert!(!app.runtime_owner);
+        assert!(!app.runtime_pending);
+        assert!(app.runtime_available);
+    }
+
+    #[test]
+    fn sleep_warning_stays_visible_while_normal_status_is_only_in_settings() {
+        assert!(!sleep_needs_attention(None));
+        assert!(!sleep_needs_attention(Some(
+            "Online mount cleanup before sleep is ready"
+        )));
+        assert!(sleep_needs_attention(Some(
+            "Sleep cleanup unavailable: no inhibitor"
+        )));
+        assert!(sleep_needs_attention(Some(
+            "Sleep cleanup incomplete (0 unmounted): busy"
+        )));
+    }
+
+    #[test]
+    fn remote_help_only_suggests_creation_in_add_mode() {
+        for provider in [Provider::GoogleDrive, Provider::Box, Provider::Smb] {
+            assert!(rclone_remote_help(provider, true).contains("Enter a new"));
+            assert!(rclone_remote_help(provider, true).contains("Create"));
+            assert!(!rclone_remote_help(provider, false).contains("Create"));
+            assert!(rclone_remote_help(provider, false).contains("rclone config"));
+        }
+    }
 
     #[test]
     fn flatpak_durable_roots_use_host_visible_home_paths() {

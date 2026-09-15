@@ -136,8 +136,9 @@ Cancel/Retry controls remain a planned UI improvement.
 
 ## Unmount Before Sleep (B)
 
-An app-wide **Unmount all Online connections before sleep** toggle appears
-below the connection list in the main popup and defaults to off. When enabled,
+An app-wide **Unmount when sleep** toggle is in the General
+Settings window and defaults to off. Its help specifies Online connections
+only. Version 0.4.5 moves this control out of the popup connection list. When enabled,
 the applet listens for system sleep preparation even while the popup is closed,
 cancels pending Online mount operations, and attempts clean unmount of its
 Online connections, including OneDrive and SMB. Offline mirrors and their
@@ -151,8 +152,10 @@ incomplete cleanup. This cannot guarantee that a stuck filesystem releases
 before sleep. App-owned runtime service drop-ins prevent forced killing during
 cleanup; these protections last for the user runtime session.
 
-A separate **Restore previously active Online connections after wake** toggle
-defaults to off. When enabled, connections successfully unmounted for sleep are
+A separate **Restore after wake up** toggle in General Settings defaults to
+off. Show it below Unmount when sleep, disabled while that option is off; retain
+its saved value and explain that it restores only previously active Online
+connections successfully unmounted for sleep. When enabled, connections successfully unmounted for sleep are
 restored only if still enabled, after network and VPN readiness checks pass.
 Saved login policies are preserved. Implementation is locally tested; live
 native/Flatpak acceptance remains tracked in `Task List.md` under “VPN
@@ -160,23 +163,65 @@ Authentication Wait and Sleep Cleanup”.
 
 ## User Interface
 
-Selecting the panel icon opens a compact popup. The popup shows the app name,
-active connection count, notification state, VPN summary, Add Connection,
-Refresh, and a scrollable list of configured storage connections.
+### Compact popup — September 15, 2026
 
-Each connection row shows the connection name and one primary state control. The
-connection name opens the Add/Modify editor for that connection. Static details
-such as provider, mode, remote, local target, cache, and VPN dependency are not
-repeated in the popup; they are shown in Add/Modify.
+Selecting the panel icon opens a compact popup containing the title **Cloud
+Mounter** aligned left, a clickable gear aligned to the right edge of the
+title row, runtime status, and the
+scrollable connection list. The gear has the accessible name **Settings** and a tooltip explaining what
+it opens. Add Connection, Refresh, and both sleep settings move into a
+separate **Cloud Mounter Settings** window. The implementation is locally
+verified; desktop and Flatpak visual acceptance remains pending.
 
-Online mount rows expose Mount or Unmount as the primary operation. Offline
-mirror rows expose Start or Stop as the primary operation for background
-synchronization. Secondary actions such as Preview, Sync Now, Retry, Repair,
-Details, and Remove belong in Add/Modify or diagnostics workflows rather than
-the main popup.
+Each connection row retains its clickable name and primary state control.
+The name opens its existing Add/Modify editor. Online mounts expose Mount or
+Unmount; Offline mirrors expose Start or Stop background synchronization.
+Static configuration and secondary operations remain in the connection editor.
 
-Long connection lists scroll inside the popup. Add Connection and Refresh remain
-available without requiring a separate global Settings control.
+The popup's status area must continue to show relevant operation feedback,
+errors, and sleep-cleanup warnings. The existing notice area is shared by more
+than Add Connection and Refresh, so moving those buttons must not remove it.
+Show notices only when needed; do not reserve an empty toolbar or settings
+footer. Use one continuous themed surface with a thin horizontal divider
+between status/notices and connections, without an empty background band. In the empty state, direct the user to Settings to add a connection.
+
+### General Settings window
+
+The gear opens or focuses one standalone window titled **Cloud Mounter
+Settings**, following the existing standalone connection-editor architecture.
+Its top row contains **Add Connection** and **Refresh**, with sleep settings
+below. The content surface uses the same COSMIC themed list background as the
+popup and Add/Modify windows. Button action messages appear directly below the
+top button row. The sleep section ends with “Applies only to Online connections.”
+and plain-text sleep feedback immediately below it, without a separate status
+heading or fixed-height status box. Long messages wrap within the window's
+scrollable content. It offers:
+
+- **Unmount when sleep** (Online connections only, default off).
+- **Restore after wake up** (default off, enabled only when unmount-on-sleep is
+  enabled, with its saved preference retained).
+- **Add Connection**, opening the existing standalone connection wizard.
+- **Refresh**, reloading the running applet's configuration and refreshing its
+  runtime status, with completion/failure feedback in General Settings.
+- Sleep-listener status and the latest cleanup details.
+
+Settings changes and Refresh must reach the running applet through an explicit
+runtime communication interface; changing only the settings process is
+insufficient. The panel applet remains the sole owner of the sleep listener and
+mount operations. Closing either settings window leaves it running. Background
+mount/sync errors stay visible in popup status; settings-action feedback stays
+in General Settings, and connection-editor feedback stays in its editor.
+
+```text
+Main popup                      Cloud Mounter Settings
+Cloud Mounter          [gear]    [Add Connection] [Refresh]
+Status / relevant notice        Button action feedback
+                                Sleep and wake
+Connection A             [on]   [ ] Unmount when sleep
+Connection B            [off]   [ ] Restore after wake up
+                                Applies only to Online connections.
+                                Sleep feedback / cleanup details
+```
 
 ## Add, Modify, Import, and Information
 
@@ -206,6 +251,11 @@ engine, generated unit validation, and safety or confirmation policy.
 Per-field help is attached to the relevant input, button, choice, or chip as a
 tooltip where the toolkit supports it. Longer dependency, safety, and
 troubleshooting guidance belongs in documentation.
+
+The rclone remote-name field accepts a new name for the provider's Create
+Remote action, a detected existing remote, or the exact name of a remote
+configured with `rclone config`. Its tooltip explains both paths. SMB uses
+Create/Update SMB Remote to create a remote or update an existing one.
 
 For Google Drive, Box, and SMB, the applet can detect existing rclone remotes
 and can start applet-driven remote creation. Google Drive and Box setup delegate

@@ -1,3 +1,15 @@
+cosmic-ext-applet-mounter (0.4.5) unstable; urgency=medium
+
+  * Add a standalone General Settings window with a right-aligned popup gear.
+  * Move Add Connection, Refresh and Online-only sleep preferences to Settings.
+  * Coordinate settings, refresh and editor saves with the running panel applet.
+  * Match themed surfaces and separate button feedback from sleep status.
+  * Replace the popup status/list gap with a thin divider.
+  * Clarify new versus existing rclone remote names in Add and Modify help.
+  * Update design documentation and Flatpak session-bus permissions.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Tue, 15 Sep 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.4) unstable; urgency=medium
 
   * Keep the Cisco authentication window alive while waiting for VPN readiness.
