@@ -11,6 +11,32 @@ The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
 unavailable. The applet attempts to pre-cache directory metadata when available.
 
+## Table of Contents
+
+- [Applet and Settings](#applet-and-settings)
+- [Modes and Providers](#modes-and-providers)
+- [Installation and Removal](#installation-and-removal)
+  - [Installation from Source](#installation-from-source)
+  - [Installation from Debian Package](#installation-from-debian-package)
+  - [Installation from Flatpak](#installation-from-flatpak)
+  - [Post Installation](#post-installation)
+  - [Uninstallation](#uninstallation)
+- [Data Integrity Warning](#data-integrity-warning)
+- [Applet Workflow](#applet-workflow)
+- [Settings](#settings)
+- [Authentication](#authentication)
+- [Conflict Recovery and Limitations](#conflict-recovery-and-limitations)
+- [VPN Integration](#vpn-integration)
+- [Connection Removal](#connection-removal)
+- [Project Development](#project-development)
+- [Contributing & Feature Requests](#contributing--feature-requests)
+  - [Feature Requests](#feature-requests)
+  - [Bug Reports](#bug-reports)
+- [License](#license)
+- [Appendix](#appendix)
+  - [Build from Source](#build-from-source)
+  - [Flatpak Packaging and Publication](#flatpak-packaging-and-publication)
+
 ## Applet and Settings
 
 The popup shows connection status and connections. Click a connection name in the
