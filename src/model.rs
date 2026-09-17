@@ -122,6 +122,64 @@ pub enum TuningProfile {
     Custom,
 }
 
+pub const DEFAULT_PRELOAD_SECONDS: u64 = 60;
+pub const DEFAULT_BOX_PRELOAD_DEPTH: u8 = 2;
+pub const DEFAULT_SMB_PRELOAD_DEPTH: u8 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreloadPolicy {
+    pub enabled: bool,
+    pub maximum_seconds: u64,
+    pub maximum_depth: Option<u8>,
+}
+
+impl PreloadPolicy {
+    #[must_use]
+    pub const fn without_depth() -> Self {
+        Self {
+            enabled: true,
+            maximum_seconds: DEFAULT_PRELOAD_SECONDS,
+            maximum_depth: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_depth(maximum_depth: u8) -> Self {
+        Self {
+            enabled: true,
+            maximum_seconds: DEFAULT_PRELOAD_SECONDS,
+            maximum_depth: Some(maximum_depth),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreloadSettings {
+    pub google_drive: PreloadPolicy,
+    pub onedrive: PreloadPolicy,
+    #[serde(rename = "box", alias = "box_provider")]
+    pub box_provider: PreloadPolicy,
+    pub smb: PreloadPolicy,
+}
+
+impl Default for PreloadSettings {
+    fn default() -> Self {
+        Self {
+            google_drive: PreloadPolicy::without_depth(),
+            onedrive: PreloadPolicy::without_depth(),
+            box_provider: PreloadPolicy::with_depth(DEFAULT_BOX_PRELOAD_DEPTH),
+            smb: PreloadPolicy::with_depth(DEFAULT_SMB_PRELOAD_DEPTH),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmbPreloadOverride {
+    pub enabled: bool,
+    pub maximum_seconds: u64,
+    pub maximum_depth: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub id: ConnectionId,
@@ -135,6 +193,8 @@ pub struct Connection {
     pub vpn_profile_id: Option<VpnProfileId>,
     pub disconnect_vpn_when_unused: bool,
     pub tuning_profile: TuningProfile,
+    #[serde(default)]
+    pub smb_preload_override: Option<SmbPreloadOverride>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

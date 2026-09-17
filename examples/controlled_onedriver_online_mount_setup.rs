@@ -50,6 +50,7 @@ async fn run() -> Result<(), String> {
         vpn_profile_id: None,
         disconnect_vpn_when_unused: false,
         tuning_profile: TuningProfile::Balanced,
+        smb_preload_override: None,
     };
 
     let config_root = std::env::var_os("XDG_CONFIG_HOME")

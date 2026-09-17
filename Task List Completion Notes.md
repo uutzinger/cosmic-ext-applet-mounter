@@ -31,6 +31,252 @@ Task List/Completion Notes separation.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## Release 0.4.6 — September 17, 2026
+
+User authorized the version bump, source commit, push, tag, GitHub release, and
+installation asset. Version 0.4.6 combines the provider preload work, Google
+Drive custom OAuth client and asynchronous fast-list refresh, bounded OneDrive,
+Box, and SMB directory walks, SMB per-connection overrides, rclone access gate,
+multi-panel runtime correction, Settings UI refinements, and lingering-FUSE
+unmount/repair fixes. The reorganized README and new Settings screenshot are
+included in the source commit.
+
+Aligned Cargo manifest/lockfile, Debian changelog, AppStream release metadata
+and screenshot URLs, README package commands, and the Flatpak source tag with
+0.4.6. Corrected the README preload defaults to match the implementation: all
+four provider policies default enabled for 60 seconds, with Box depth 2 and SMB
+depth 3.
+
+Release validation passed: formatting, `cargo check --all-targets`, all-target
+and all-feature Clippy with warnings denied, diff whitespace validation, and all
+194 tests (122 library and 72 app/runtime). The Debian build repeated all 194
+tests successfully. The documented nonfatal COSMIC desktop category and
+AppStream `binaries` compatibility findings remain unchanged.
+
+Inspected installation asset
+`cosmic-ext-applet-mounter_0.4.6_amd64.deb`: package version 0.4.6,
+architecture amd64, and contents include the applet binary, OneDrive
+authentication helper, desktop entry, AppStream metadata, and icon. SHA-256:
+`219c5ad99d6447b8bef6a4479451ef3a499d01f57d782b05796afaf12494bb35`.
+Prepared the matching `SHA256SUMS` for the GitHub release.
+
+## Google Drive recursive refresh fast-list — September 15, 2026
+
+Google Drive recursive `vfs/refresh` requests now use `fast_list=true`. Rclone
+reports that the command-line `--fast-list` option does nothing on a mount, so
+managed mount commands do not include it. Box and SMB do not start this Google
+Drive-specific refresh. Automated tests assert the refresh request and the
+mount-command exclusion.
+
+This does not affect rclone Offline mirror commands, connection configuration,
+or OAuth state. The mount-start path regenerates the applet-owned unit from the
+saved connection before starting it. Existing Google Drive connections receive
+the updated private RC endpoint on their next unmount/mount cycle without being
+resaved. Broader shared-drive and API-rate measurements remain open.
+
+**Configured UA Google Drive latency measurement:** September 15, 2026. Ran ten
+read-only whole-remote recursive directory listings against `ua_gdrive:` using
+rclone 1.75.0: five normal and five with `--fast-list`. Trials were ordered to
+alternate modes; the final four included ten-second spacing. Output names were
+not retained. Every run returned 510 directories, the sorted-result SHA-256
+matched across all runs, and rclone reported no errors.
+
+| Mode | Trials | Mean | Median | Range | Mean peak RSS |
+|---|---:|---:|---:|---:|---:|
+| Standard recursive listing | 5 | 30.18 s | 41.89 s | 5.97–44.75 s | 75,511 KiB |
+| `--fast-list` | 5 | 30.96 s | 40.24 s | 6.97–57.68 s | 74,988 KiB |
+
+The high run-to-run variability dominated the small median difference. For this
+510-directory UA remote and current Google-side conditions, `--fast-list` did
+not provide a meaningful latency or memory improvement. This test did not count
+HTTP/API transactions and does not represent a larger shared drive, so the
+broader API-volume and shared-drive evaluation remains open.
+
+## Google Drive custom OAuth client — September 15, 2026
+
+Implemented the first approved item from the directory-cache planning group.
+Google Drive Add/Modify now shows transient custom OAuth client ID and secret
+fields. New remotes accept either the complete pair or blank fields for shared
+client compatibility. Modify mode provides an explicit **Update Google OAuth
+Client** action for an existing `drive` remote; it invokes rclone's update flow,
+reauthorizes in the browser, and tells the user to remount active connections.
+An existing remote is never updated as a side effect of selection or saving.
+
+The client secret is masked. Both OAuth values use sensitive command arguments,
+are covered by fallback text redaction, are absent from sanitized commands, and
+are cleared from the draft after success or failure. Neither value is loaded
+from rclone or written into applet configuration. Rclone remains responsible
+for its persistent configuration and refresh token. Command-construction tests
+cover legacy creation, custom-client creation, explicit existing-remote update,
+pair validation, and redaction. `cargo check --all-targets` passed and the full
+suite passed with 178 tests (111 library and 67 app/runtime). A live Google
+OAuth authorization was not run because no disposable client credentials were
+supplied.
+
+## Google Drive asynchronous VFS refresh — September 15, 2026
+
+After a successful Google Drive mount, the runtime now waits up to 15 seconds
+for the mountpoint and connection-specific rclone RC endpoint, verifies the RC
+endpoint with `rc/noop`, submits recursive `vfs/refresh` with `fast_list=true`
+and `_async=true`, and retains the returned job ID and rclone execution ID. It
+polls `job/status` in the background and reports completion or a sanitized
+failure through the existing applet notice path. Mount completion is reported
+before the refresh starts and does not depend on refresh success.
+
+The same refresh path runs for manual mounts, wake restoration, and enabled
+Google Drive mounts already active when the applet runtime becomes ready.
+Refresh ownership is tracked per connection. Manual unmount, repair, connection
+removal, and pre-sleep cleanup cancel the job with `job/stop` before proceeding;
+the sleep operation gate prevents background refresh work from extending the
+sleep detach sequence indefinitely.
+
+Automated tests cover asynchronous command construction, retained job and
+execution identifiers, successful completion polling, cancellation with
+`job/stop`, and detection of an rclone restart through an execution-ID mismatch.
+Formatting, diff checks, and `cargo check --all-targets` passed. The full suite
+passed with 183 tests (115 library and 68 app/runtime). A live cloud refresh was
+not started as part of implementation validation.
+
+**Live failure diagnosis and correction, September 15, 2026:** The UA Google
+Drive journal showed that rclone rejected `vfs/refresh` because RC authentication
+had not been configured. Managed rclone mounts now pass `--rc-no-auth` only for
+their connection-specific Unix socket below the user's private runtime
+directory. The readiness probe now checks the mountpoint and uses `rc/noop`,
+avoiding the misleading `vfs/stats` error before a VFS was selected. Fast-list
+is supplied to the refresh request instead of the mount command, where rclone
+reported that the option had no effect. Global VPN status polling now checks
+only active connections. An unmounted connection configured for Cisco no longer
+starts a Cisco probe or adds an unrelated VPN status while Google Drive is
+mounted; its own mount operation still performs the required bounded Cisco
+activation and readiness wait.
+Formatting, all 190 tests (119 library and 71 app/runtime),
+`cargo check --all-targets`, Clippy with warnings denied, and the diff whitespace
+check pass.
+
+## OneDrive bounded directory preload — September 15, 2026
+
+Implemented the remaining approved OneDrive Online directory warm-up. After a
+manual mount, wake restoration, or discovery of an already-active onedriver
+mount at runtime startup, the applet waits up to 15 seconds for mount readiness
+and starts a background directory-only traversal.
+
+The traversal uses `find -P <mount> -xdev -type d -printf ""`: it does not
+follow symbolic links, cannot cross out of the mounted filesystem, emits no
+directory names, and does not intentionally open file contents. General
+Settings now provides a saved 5-to-600-second maximum with a 60-second default.
+The command is terminated automatically at that deadline and has no manual
+Cancel control.
+
+Preloads are tracked by connection and generation. Manual unmount, connection
+removal, repair, and pre-sleep cleanup cancel and wait briefly for the traversal
+before detaching. Completion, automatic timeout, and sanitized failures use the
+existing popup notice path. Automated coverage verifies command boundaries,
+normal completion, timeout, cancellation, configuration defaults, and validated
+bounds. Formatting, diff checks, and `cargo check --all-targets` passed. The
+full suite passed with 189 tests (119 library and 70 app/runtime). Cold-cache
+live testing remains open.
+
+## Box and SMB directory-preload evaluation — September 16, 2026
+
+Live directory-metadata-only tests were run against `ua_box:` and the UA ENGR
+SMB share through Cisco VPN. No file content was intentionally opened; rclone
+reported zero bytes in its VFS disk-content cache throughout the tests.
+
+**SMB recursive RC rejection:** A cold whole-share traversal reached 311
+accessible directories in 60 seconds while encountering expected permission
+denials outside the user's lab. A recursive RC refresh of the accessible
+`Utzinger` subtree did not finish within 60 seconds. `job/stop` returned but the
+backend job continued running and VPN counters continued increasing until the
+mount service was stopped. The canceled refresh did not commit incremental VFS
+directory metadata. The connection remote subpath was subsequently narrowed
+from `Research` to `Research/Utzinger`.
+
+**SMB directory-walk approval:** From a fresh mount, a directory-only walk to
+depth 3 completed in 15.84 seconds and visited 491 directories. The same walk
+against the warm cache completed in 0.10 seconds. During the cold walk, Cisco
+counters increased by approximately 0.33 MiB sent and 0.50 MiB received. The
+VFS metadata cache contained 525 directories and 1,299 files afterward, with no
+file-content cache use. The approved SMB design is therefore an app-managed
+depth-3 walk rooted at the configured subtree, not recursive RC refresh.
+
+**Box recursive RC rejection:** A cold recursive filesystem walk reached 163
+directories in 60 seconds and populated metadata for 200 directories and 1,081
+files. After a fresh mount, recursive RC refresh failed after 26.75 seconds with
+HTTP 429 `rate_limit_exceeded`; the cache retained only 42 directories and 42
+files from that attempt. A cooldown was required before further testing.
+
+**Box directory-walk approval:** After more than 10 minutes unmounted, a
+depth-2 directory-only walk completed in 16.67 seconds, visited and cached 212
+directories, and represented 653 files in metadata. Its warm repeat completed
+in 0.05 seconds, no new HTTP 429 appeared, and file-content cache use remained
+zero. The first immediate post-start traversal saw only the mount root, proving
+that Box preload must wait for a usable root listing in addition to mountpoint
+readiness.
+
+The approved settings design adds a General Settings **Preload** section.
+Google Drive, OneDrive, Box, and SMB default enabled with 60-second maxima; Box
+defaults to depth 2 and SMB to depth 3. SMB connections inherit the global
+policy by default and may independently override enabled state, duration, and
+depth. Google continues to use recursive asynchronous RC refresh with fast-list;
+OneDrive, Box, and SMB use directory-only walks. Box and SMB never use recursive
+RC refresh.
+
+The Box RC result also exposed a generic parsing requirement: rclone returned
+top-level `success: true` while `output.result` contained the provider error.
+Google refresh tracking must treat every non-`OK` nested result as failure and
+sanitize it before display. These findings and the approved implementation are
+tracked in `Task List.md`; no Box or SMB preload code was added during testing.
+
+## Rclone mount access gate and multi-panel runtime fix (after 0.4.5)
+
+The managed UA Box service journal showed repeated Box API failures with
+`invalid_grant` and rclone's instruction to reconnect `ua_box`. Rclone kept the
+FUSE mount active despite being unable to list its root. That combination made
+the applet appear mounted while `ls` returned `Input/output error` and file
+browsers waited on repeated provider requests.
+
+Reauthorized the existing `ua_box` rclone remote through Box OAuth. Added a
+bounded read-only remote/subtree access check before applet-requested rclone
+mounts. The check runs after required VPN readiness and before systemd starts
+the FUSE service, so expired credentials and inaccessible remotes now produce
+an actionable mount failure without exposing a broken filesystem. Wake
+restoration uses the same operation path and receives the same gate.
+
+The separate Settings communication warning came from two panel-hosted applet
+processes competing for the intentionally singleton runtime D-Bus name. The
+second instance was the healthy owner; the first treated the expected name
+collision as an error. A non-owning instance now verifies the existing runtime
+and remains a client, while only the owner runs the sleep listener.
+
+Formatting and diff checks passed. The full suite passed with 178 tests (111
+library and 67 app/IPC). Installed the release build and restarted COSMIC Panel.
+Live verification listed the Box root without delay; rclone VFS reported zero
+queued uploads, zero uploads in progress, and zero cache errors. The managed
+service then stopped cleanly, and the local mountpoint immediately listed as an
+empty ordinary directory. No version bump, commit, push, or release was made.
+
+## Settings background-poll UI fix (after 0.4.5)
+
+The Settings window polls runtime status every two seconds. Its controls had
+included `runtime_poll_pending` in their enabled-state condition, briefly
+switching Refresh and the sleep toggles to the disabled style on each poll.
+Removed that condition; user-requested work still disables controls, and sleep
+preferences still require an available runtime owner.
+
+Allowing clicks during polling exposes a reply-order race. A user action now
+marks any in-flight background poll obsolete. Its eventual success or failure
+is discarded before changing preferences, readiness, notices or availability,
+even if the newer action has already finished. Polls remain serialized and the
+next fresh result is applied normally.
+
+Added three regression tests covering background versus user activity, old
+success/error replies arriving after each type of user action, fresh-poll
+recovery, and old replies arriving while an action is still pending. All 65 app
+tests pass. All-target/all-feature Clippy with warnings denied, formatting/diff
+checks and the native debug build passed. Updated Applet Description,
+Requirements §9.5 and Task List. Live visual confirmation remains pending.
+No installation, version bump, commit or publication for this follow-up.
+
 ## Release 0.4.5 — September 15, 2026
 
 User authorized documentation alignment, version bump, commit, push and a
@@ -2454,3 +2700,69 @@ from `cosmic-flatpak-local`; `flatpak info --user` again reported version
 configuration document hash and provider count remained unchanged after
 reinstall, verifying that Flatpak uninstall removes packaged files without
 deleting user-created connection configuration, credentials, services, or state.
+
+**Provider preload settings and engines:** September 16, 2026. Replaced the
+single OneDrive duration control with saved Google Drive, OneDrive, Box, and SMB
+policies in General Settings. All providers default to enabled and 60 seconds;
+Box defaults to depth 2 and SMB to depth 3. Existing bare
+`onedriver_preload_seconds` values migrate into the OneDrive policy. SMB Online
+connections now default to the global policy and may save independent enabled,
+duration, and depth overrides.
+
+Google Drive mount and active-mount startup paths now honor its enabled and
+duration settings. RC job monitoring stops jobs at the configured limit and
+treats a nested non-`OK` provider result as a sanitized failure even when the
+top-level response reports success. OneDrive, Box, and SMB use one tracked,
+directory-only traversal engine. Box and SMB wait for mount and root readiness,
+then use bounded depth-limited walks; cancellation is shared with unmount,
+repair, removal, and sleep operation invalidation. The full Rust test suite
+passes: 122 library tests and 71 application tests. Live validation on UA Box,
+the narrowed UA Engineering SMB connection, and a separate LAN SMB connection
+remains open.
+
+**General Settings preload layout refinement:** September 16, 2026. Moved the
+General Settings content padding inside the scrollable region so the vertical
+scrollbar is placed at the window's right edge. Added spacing between each
+provider label and its switch and provider-specific hover help. Duration and
+depth explanations remain in hover help without visible captions, and each
+provider's controls stay on one horizontal row. Depth help explains the
+server-request and rate-limit cost of deeper directory scans.
+
+**Settings gear tooltip delay:** September 16, 2026. Replaced the settings icon
+button's immediate built-in tooltip with the shared delayed tooltip wrapper.
+The gear help now appears after one second, matching connection-list hover help,
+and its text includes sleep and directory-preload configuration.
+
+**Settings text and switch spacing refinement:** September 17, 2026. Added
+label-to-switch spacing to both sleep controls. Removed the standalone preload
+description and range line, moved duration and depth ranges into their delayed
+field tooltips, and clarified that browsing remains available throughout a
+background preload.
+
+**UA Box busy-unmount diagnosis and cross-provider fix:** September 17, 2026.
+The UA Box journal showed rclone receiving termination, failing clean unmount
+with `Device or resource busy`, and exiting while `/proc/self/mountinfo` still
+contained `ua_box:` at `/home/uutzinger/Cloud/UA_Box`. The endpoint then
+reported `Transport endpoint is not connected`. The applet had treated the
+successful systemd stop as unmount success, while mount-table state kept the
+toggle active. A second unmount entered unconditional runtime preparation and
+`create_dir_all` failed on the disconnected endpoint with `File exists`.
+
+The shared Google Drive, Box, and SMB path and the separate online OneDrive
+path now prepare directories only for Mount. Unmount cancels the applicable
+background preload, stops the service, waits briefly for the mount-table entry
+to disappear, and reports a busy-endpoint error if it remains. Inactive or
+failed services with lingering mount entries now restore as Error, which turns
+the primary control off and routes the next action through the existing
+two-step Repair confirmation. Lazy unmount remains explicit and is not run
+automatically. Regression tests cover rclone, onedriver, and controller status.
+
+**UA Box Repair false-failure correction:** September 17, 2026. Live follow-up
+confirmed that `fusermount3 -uz` successfully removed the UA Box mount-table
+entry immediately and restored ordinary access to the mountpoint. Repair then
+reported failure only because it unconditionally called `systemctl --user
+reset-failed` for a service already in `inactive/dead` with `Result=success`;
+systemd returned status 1 because there was no failed state to reset. Repair now
+queries service status after lazy detach and runs `reset-failed` only for an
+actual Failed state. A regression test covers Failed, Inactive, Active, and
+missing service status.

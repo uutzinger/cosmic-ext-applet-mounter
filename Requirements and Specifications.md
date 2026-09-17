@@ -346,6 +346,16 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   command arguments for the selected provider. Google Drive and Box setup shall
   delegate OAuth to rclone's browser flow. SMB setup shall create the remote
   without storing SMB passwords in applet configuration.
+- **FR-027B:** Google Drive remote creation and update shall accept a
+  user-provided OAuth client ID and its matching client secret. Both values
+  shall be supplied together or both left blank when creating a remote. An
+  existing Drive remote shall require both values and shall change only through
+  an explicit update action that repeats browser OAuth. The applet shall mask
+  the secret, redact both values from command and error text, clear the form
+  fields when the operation finishes, and retain neither value in applet
+  configuration. Existing remotes without a custom client ID shall remain
+  usable. The UI shall tell the user to remount active connections after an
+  update.
 - **FR-028:** The applet shall enumerate rclone remote names without loading
   credentials into applet state.
 - **FR-028A:** The applet may remove an unused rclone remote only after
@@ -382,6 +392,10 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-036:** The user may override the cache limit in advanced settings.
 - **FR-037:** Mount operations shall use bounded connection, operation, retry,
   and backoff values.
+- **FR-037A:** Before starting an rclone Online mount, the applet shall perform
+  a bounded read-only listing of the configured remote and subtree. If
+  authentication, authorization, network, or subtree access fails, it shall
+  report an actionable error and shall not start the FUSE service.
 - **FR-038:** The applet shall monitor network, VPN, service, mount-table, and
   provider health.
 - **FR-039:** For rclone mounts, the applet shall inspect VFS queue and cache
@@ -396,6 +410,63 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-043:** Automatic remount retries shall use bounded exponential backoff.
 - **FR-044:** An Online mount cache shall never be presented as complete offline
   availability.
+- **FR-044A:** Google Drive recursive VFS refresh requests shall enable
+  rclone's fast-list mode. Online mount service commands shall not include the
+  ignored `--fast-list` argument. Box and SMB shall not inherit the Google Drive
+  refresh behavior. Automated tests shall cover provider selection; live tests
+  shall compare ordinary and shared drives, directory-list latency, memory use,
+  and API/rate-limit behavior. Before starting an rclone Online mount, the
+  applet shall regenerate its owned unit from the current saved connection so
+  updated provider options apply without requiring the user to resave the
+  connection.
+- **FR-044B:** After a Google Drive mount, the applet shall wait a bounded time
+  for both the filesystem and its private per-user Unix RC endpoint and submit
+  recursive `vfs/refresh` with `fast_list=true` and `_async=true`. The service
+  shall explicitly allow unauthenticated commands on that private Unix socket.
+  It shall retain the returned job ID and rclone execution ID by connection,
+  poll `job/status` through completion, and enforce the configured provider
+  maximum. Completion parsing shall inspect the top-level status and every
+  string value in `output.result`; a value other than `OK` is a provider error
+  even when rclone returns top-level `success: true`. The applet shall report a
+  sanitized error. The refresh shall not delay the successful Mount result once
+  the filesystem itself is ready.
+- **FR-044C:** After a `jstaf/onedriver` Online mount is ready, the
+  applet shall start a background traversal that reads directory entries only.
+  It shall not intentionally read file contents, follow symbolic links, or
+  leave the selected mount tree.
+- **FR-044D:** General Settings shall contain a **Preload** section with saved
+  enabled and maximum-duration values for Google Drive, OneDrive, Box, and SMB.
+  All four providers shall default enabled with a 60-second maximum. Duration
+  bounds shall be 5 to 600 seconds. Box shall have a default maximum directory
+  depth of 2 and SMB a default maximum directory depth of 3, with validated
+  depth bounds from 1 to 10. Google Drive and OneDrive shall not expose depth.
+- **FR-044E:** Before a Google Drive connection is unmounted, repaired, removed,
+  or stopped for sleep, the applet shall cancel its active rclone refresh with
+  `job/stop`. Cancellation and detach shall remain bounded so the refresh cannot
+  delay system sleep indefinitely.
+- **FR-044EA:** Before a OneDrive, Box, or SMB connection is unmounted,
+  repaired, removed, or stopped for sleep, the applet shall cancel its active
+  directory walk and wait a short bounded interval for it to finish.
+  Cancellation and detach shall remain bounded so preload work cannot delay
+  system sleep indefinitely.
+- **FR-044F:** The existing notice mechanism shall report whether any provider
+  preload completed, stopped at its deadline, or failed. Failure details shall
+  remain sanitized. No manual Cancel control is required.
+- **FR-044G:** After a Box or SMB Online mount, the applet shall wait for both
+  the mountpoint and a usable root directory listing before starting an
+  app-managed, directory-only walk. Box shall stop at the configured depth-2
+  default and SMB at depth 3. The walk shall preserve directory-cache progress
+  when its deadline expires and shall not use recursive `vfs/refresh`, fast-list,
+  or intentionally read file contents.
+- **FR-044H:** Each SMB Online connection shall default to **Use global preload
+  settings**. Its editor may instead save connection-specific overrides for
+  enabled state, maximum duration, and maximum depth. Overrides shall apply only
+  to that connection and shall not mutate the global SMB defaults. Other
+  providers shall use their provider-wide settings.
+- **FR-044I:** Configuration migration shall preserve the existing OneDrive
+  60-second value, initialize missing Google Drive, Box, and SMB settings to the
+  documented defaults, and initialize every existing SMB connection to use the
+  global policy.
 
 ### 6.6 Offline mirror management
 
@@ -777,14 +848,23 @@ requires unjustified unrestricted host access.
   notification of saved connection changes. Use request/reply completion and
   status updates so General Settings never reports success for a request that
   did not reach the owner. Poll status every two seconds while Settings is open;
-  serialize its preference writes and acknowledge saved preferences separately
+  background polls shall not disable or visually blink Refresh or the sleep
+  controls. Disable controls for user-requested actions and unavailable runtime
+  state as appropriate. Discard replies from polls predating a user action,
+  including stale errors, even if the action finishes first.
+  Serialize preference writes and acknowledge saved preferences separately
   from the listener's readiness status. Reserve both Runtime and Settings bus
-  names without replacement to prevent duplicate owners/listeners. Check the corresponding Flatpak bus grants during
+  names without replacement to prevent duplicate owners/listeners. If multiple
+  panel instances contain the applet, non-owning instances shall use the
+  existing runtime service as clients and shall not report the expected name
+  ownership collision as a communication failure. Check the corresponding Flatpak bus grants during
   implementation; do not assume a separately launched process shares memory.
 - The runtime owner shall reload the latest document, validate and persist only
   the requested settings, update its in-memory config and subscriptions, then
   acknowledge the change. Preserve unrelated fields, defaults and current keys
-  `unmount_before_sleep` and `restore_after_wake`.
+  `unmount_before_sleep` and `restore_after_wake`. Preload updates shall apply
+  one complete validated provider policy at a time so concurrent settings
+  replies cannot combine stale enabled, duration, or depth values.
 - Refresh shall retain configuration reload and asynchronous VPN/status checks
   in the running applet and return completion/failure to General Settings. It
   shall not mount, unmount, sync, or replace an in-flight operation as a side
@@ -811,6 +891,11 @@ AppConfig
   notifications_enabled
   unmount_before_sleep: bool = false  # planned B
   restore_after_wake: bool = false    # planned B
+  preload:
+    google_drive: { enabled: true, maximum_seconds: 60 }
+    onedrive: { enabled: true, maximum_seconds: 60 }
+    box: { enabled: true, maximum_seconds: 60, maximum_depth: 2 }
+    smb: { enabled: true, maximum_seconds: 60, maximum_depth: 3 }
   connections[]
   vpn_profiles[]
 
@@ -830,6 +915,10 @@ Connection
   vpn_profile_id?
   disconnect_vpn_when_unused
   tuning_profile
+  smb_preload_override?:
+    enabled
+    maximum_seconds: integer 5..600
+    maximum_depth: integer 1..10
 
 VpnProfile
   id: UUID
@@ -890,6 +979,35 @@ Initial mount tuning:
 Provider-specific changes require tests and shall preserve bounded failure
 behavior.
 
+Google Drive post-mount directory warm-up:
+
+```text
+mountpoint --quiet <local mountpoint>
+rclone rc --unix-socket <connection socket> rc/noop
+rclone rc --unix-socket <connection socket> vfs/refresh recursive=true fast_list=true _async=true
+```
+
+The managed rclone service enables RC commands without authentication only on
+its connection-specific Unix socket below the user's private runtime directory.
+The applet retains the returned RC job ID and rclone execution ID, polls
+`job/status`, and uses `job/stop` to cancel it before unmount, repair, removal,
+or sleep cleanup. Status parsing treats non-`OK` values below `output.result` as
+provider failures even if rclone marks the RC job successful. The mount
+operation succeeds independently of this background job.
+
+OneDrive, Box, and SMB post-mount directory preload:
+
+```text
+find -P <mountpoint> -xdev [-maxdepth <Box or SMB depth>] -type d -printf ""
+```
+
+The applet shall construct this as a typed command rather than shell text. It
+shall wait for the mountpoint and root listing to become usable, enforce the
+effective provider or SMB-connection deadline, retain incremental VFS metadata
+on timeout, and cancel the child before detach. OneDrive traverses without a
+depth limit. Box defaults to depth 2 and SMB to depth 3. Box and SMB shall not
+use recursive `vfs/refresh`.
+
 ### 11.2 Rclone Offline mirror
 
 The generated service and timer shall:
@@ -945,6 +1063,14 @@ Remote deletion shall:
   offline.
 - A failed sync shall not trigger automatic destructive resync.
 - Clean unmount is always attempted before any alternative.
+- A successful service-stop command is not sufficient evidence of unmount
+  success. The mount-table entry shall disappear before the applet reports
+  completion or disconnects an applet-started VPN. A stopped or failed service
+  with a lingering mount entry shall report Error and offer the confirmed
+  Repair flow. Unmount shall not recreate or prepare the mountpoint. Repair
+  shall reset systemd failed state only when the service is actually Failed;
+  an already inactive/successful service shall not make a successful lazy
+  detach appear to fail.
 - If clean unmount fails, the applet may offer lazy unmount only after explicit
   user confirmation and a clear warning.
 - Queued or in-progress writes shall prevent lazy unmount.
@@ -1000,9 +1126,22 @@ Remote deletion shall:
   and restoration eligibility. The second toggle remains visible but disabled
   while the first is off, so changing the first does not resize the window.
 - Place Add Connection and Refresh together in the top row of the window,
-  above the sleep settings and status/feedback areas.
+  above the Preload and Sleep settings and status/feedback areas.
   Add Connection launches the existing editor rather than replacing General
   Settings with connection-specific fields. Refresh updates the runtime owner.
+- Add a **Preload** section with separate Google Drive, OneDrive, Box, and SMB
+  rows. Each row contains an enabled control and maximum seconds. Box and SMB
+  also contain maximum depth. Populate controls from saved values and show
+  defaults of 60 seconds for all providers, depth 2 for Box, and depth 3 for
+  SMB. Keep controls visible when disabled so toggling a provider does not
+  resize the window. Keep each provider's switch, duration field, and optional
+  depth field on one horizontal row. Explain maximum duration and recursive
+  depth, including their accepted ranges, through delayed hover help instead of
+  persistent captions or a standalone range line. Duration help shall state
+  that browsing remains available while preload runs. Depth help shall explain
+  that deeper scans increase server requests, can trigger provider rate limits,
+  and may consume the available preload time. Provider and sleep toggles shall
+  have visible spacing between their text labels and switches.
 - Use the same COSMIC themed list surface as the popup and Add/Modify content,
   including the area behind hover help; do not hardcode a background color.
 - Place Refresh results, Add Connection launch errors and connection-to-applet
@@ -1017,7 +1156,9 @@ Remote deletion shall:
 - All controls shall remain reachable with keyboard navigation, long translated
   labels, display scaling and small windows. Long status details shall wrap in
   the window’s overall scrollable content; do not reserve a separate status box
-  or reduce the main popup list height for hidden settings.
+  or reduce the main popup list height for hidden settings. Pad content inside
+  the scrollable region so its vertical scrollbar remains at the right edge of
+  the window.
 
 ### 13.2 Add, Modify, Import, and Field Help
 
@@ -1030,6 +1171,11 @@ Remote deletion shall:
 - Modify mode shall show connection actions at the top. Most connection types
   may use one action row. OneDrive Offline mirror and other action-heavy modes
   may split actions into two rows to avoid clipping.
+- An SMB Online connection shall show **Use global preload settings**, enabled
+  by default. Disabling it reveals or enables that connection's preload toggle,
+  maximum seconds, and maximum depth. Help text shall explain that the override
+  is useful when home, LAN, corporate, and VPN shares have different sizes and
+  latency.
 - The wizard step order is:
   1. Choose provider: OneDrive, Google Drive, Box, or SMB.
   2. Choose access mode: Online mount or Offline mirror. The provider/mode
@@ -1132,8 +1278,18 @@ sleep lifecycle and service-stop races, plus native/Flatpak live acceptance.
 - Provider argument construction without shell interpretation.
 - Rclone remote detection, creation request construction, duplicate-name
   rejection, confirmed removal, and in-use removal blocking.
+- Google Drive custom OAuth client pair validation, redacted create/update
+  command construction, explicit existing-remote update, and form clearing.
 - VFS queue states and safe/unsafe auto-detach decisions.
 - Automatic remount readiness and backoff.
+- Google Drive refresh-level fast-list selection, private Unix RC readiness,
+  background VFS refresh lifecycle, nested-result error handling, deadline, and
+  cancellation.
+- OneDrive, Box, and SMB directory-only traversal boundaries, root readiness,
+  provider defaults, depth limits, configurable deadlines, incremental timeout
+  behavior, and cancellation before unmount or sleep.
+- SMB global-policy inheritance and independent per-connection override
+  serialization, validation, migration, and effective-value selection.
 - Initial dry preview and confirmation gate.
 - Bidirectional create, modify, rename, delete, and conflict behavior.
 - Both-version conflict preservation.
@@ -1172,6 +1328,25 @@ or access real cloud data.
   connection editor. Check sleep warnings with General Settings closed.
 - Verify Google Drive, Box and SMB remote-name help covers creation and existing
   remote selection in Add mode and avoids hidden-action instructions in Modify.
+- Expire or invalidate a disposable rclone OAuth credential and verify Mount
+  fails before FUSE starts, reports reauthorization guidance, and leaves the
+  local mountpoint responsive.
+- Place Cloud Mounter on two panels and verify one runtime owner serves both
+  instances without a Settings communication warning or duplicate sleep listener.
+- For Google Drive, compare cold first-level and nested browsing with a
+  recursive fast-list VFS refresh; verify the refresh remains in the background
+  and is cancelled by unmount and sleep. Inject a top-level successful RC job
+  containing a provider error in `output.result` and verify it is reported as a
+  failure.
+- For OneDrive, verify the directory-only preload stops at the configured
+  60-second default, does not read file contents, and is cancelled before
+  unmount and sleep. Check completion/timeout notices only if implemented.
+- For Box, verify depth 2 warms first browsing without HTTP 429, preserves
+  partial progress at timeout, and cancels before unmount and sleep.
+- For SMB, test at least one LAN and one VPN connection. Verify depth 3 warms
+  first browsing, global defaults and per-connection overrides remain
+  independent, timeout preserves partial progress, and cancellation precedes
+  unmount and sleep.
 - Verify each popup row shows a clickable connection name, one primary
   compact state control, and no separate static provider/local/VPN chips.
 - Verify popup primary operation controls dispatch Mount, Unmount, Start, or

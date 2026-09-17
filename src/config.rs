@@ -8,15 +8,19 @@ use std::path::{Component, Path, PathBuf};
 use cosmic::cosmic_config::{
     self, ConfigGet, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{
-    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OnlineMountConfig, VpnProfile,
-    VpnProfileId,
+    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OnlineMountConfig,
+    PreloadPolicy, PreloadSettings, Provider, VpnProfile, VpnProfileId,
 };
 
 pub const APP_ID: &str = "io.github.uutzinger.cosmic-ext-applet-mounter";
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const MIN_PRELOAD_SECONDS: u64 = 5;
+pub const MAX_PRELOAD_SECONDS: u64 = 600;
+pub const MIN_PRELOAD_DEPTH: u8 = 1;
+pub const MAX_PRELOAD_DEPTH: u8 = 10;
 const DOCUMENT_KEY: &str = "document";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,8 +31,46 @@ pub struct ConfigDocument {
     pub unmount_before_sleep: bool,
     #[serde(default)]
     pub restore_after_wake: bool,
+    #[serde(default)]
+    pub preload: PreloadSettings,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_u64_compat",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub onedriver_preload_seconds: Option<u64>,
     pub connections: Vec<Connection>,
     pub vpn_profiles: Vec<VpnProfile>,
+}
+
+fn deserialize_optional_u64_compat<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptionalU64Visitor;
+    impl<'de> serde::de::Visitor<'de> for OptionalU64Visitor {
+        type Value = Option<u64>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("an unsigned integer or optional unsigned integer")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(Some(value))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            u64::deserialize(deserializer).map(Some)
+        }
+    }
+    deserializer.deserialize_any(OptionalU64Visitor)
 }
 
 impl Default for ConfigDocument {
@@ -38,6 +80,8 @@ impl Default for ConfigDocument {
             notifications_enabled: true,
             unmount_before_sleep: false,
             restore_after_wake: false,
+            preload: PreloadSettings::default(),
+            onedriver_preload_seconds: None,
             connections: Vec::new(),
             vpn_profiles: Vec::new(),
         }
@@ -108,6 +152,10 @@ pub enum ValidationError {
     InvalidSyncInterval(ConnectionId),
     InvalidVpnTimeout(VpnProfileId),
     InvalidReadinessValue(VpnProfileId),
+    InvalidPreloadSeconds(u64),
+    InvalidPreloadDepth(u8),
+    InvalidPreloadPolicy(&'static str),
+    InvalidSmbPreloadOverride(ConnectionId),
 }
 
 impl fmt::Display for ValidationError {
@@ -164,6 +212,7 @@ impl HostVisibleConfigStorage {
         match fs::read_to_string(&self.document_path) {
             Ok(contents) => match ron::from_str::<ConfigDocument>(&contents) {
                 Ok(document) => {
+                    let document = migrate_preload_settings(document);
                     let config = Config { document };
                     match config.validate() {
                         Ok(()) => LoadReport {
@@ -337,6 +386,7 @@ impl Config {
     ) -> LoadReport {
         match current.get_local::<ConfigDocument>("document") {
             Ok(document) => {
+                let document = migrate_preload_settings(document);
                 let config = Self { document };
                 match config.validate() {
                     Ok(()) => LoadReport {
@@ -451,6 +501,20 @@ impl Config {
                 self.document.schema_version,
             ));
         }
+        validate_preload_policy(
+            "google_drive",
+            self.document.preload.google_drive,
+            false,
+            &mut errors,
+        );
+        validate_preload_policy(
+            "onedrive",
+            self.document.preload.onedrive,
+            false,
+            &mut errors,
+        );
+        validate_preload_policy("box", self.document.preload.box_provider, true, &mut errors);
+        validate_preload_policy("smb", self.document.preload.smb, true, &mut errors);
 
         let mut vpn_ids = HashSet::new();
         for vpn in &self.document.vpn_profiles {
@@ -500,6 +564,23 @@ impl Config {
                 .is_some_and(|path| has_control_char(path) || is_unsafe_remote_subpath(path))
             {
                 errors.push(ValidationError::InvalidRemoteSubpath(connection.id));
+            }
+            if let Some(overrides) = connection.smb_preload_override {
+                if connection.provider != Provider::Smb
+                    || !matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                {
+                    errors.push(ValidationError::InvalidSmbPreloadOverride(connection.id));
+                }
+                validate_preload_policy(
+                    "smb_connection",
+                    PreloadPolicy {
+                        enabled: overrides.enabled,
+                        maximum_seconds: overrides.maximum_seconds,
+                        maximum_depth: Some(overrides.maximum_depth),
+                    },
+                    true,
+                    &mut errors,
+                );
             }
             if connection
                 .vpn_profile_id
@@ -553,6 +634,53 @@ impl Config {
         } else {
             Err(errors)
         }
+    }
+}
+
+impl ConfigDocument {
+    #[must_use]
+    pub fn preload_policy_for(&self, connection: &Connection) -> PreloadPolicy {
+        match connection.provider {
+            Provider::GoogleDrive => self.preload.google_drive,
+            Provider::OneDrive => self.preload.onedrive,
+            Provider::Box => self.preload.box_provider,
+            Provider::Smb => connection
+                .smb_preload_override
+                .map_or(self.preload.smb, |value| PreloadPolicy {
+                    enabled: value.enabled,
+                    maximum_seconds: value.maximum_seconds,
+                    maximum_depth: Some(value.maximum_depth),
+                }),
+        }
+    }
+}
+
+fn migrate_preload_settings(mut document: ConfigDocument) -> ConfigDocument {
+    if let Some(seconds) = document.onedriver_preload_seconds.take() {
+        document.preload.onedrive.maximum_seconds = seconds;
+    }
+    document
+}
+
+fn validate_preload_policy(
+    name: &'static str,
+    policy: PreloadPolicy,
+    requires_depth: bool,
+    errors: &mut Vec<ValidationError>,
+) {
+    if !(MIN_PRELOAD_SECONDS..=MAX_PRELOAD_SECONDS).contains(&policy.maximum_seconds) {
+        errors.push(ValidationError::InvalidPreloadSeconds(
+            policy.maximum_seconds,
+        ));
+    }
+    match (requires_depth, policy.maximum_depth) {
+        (true, Some(depth)) if !(MIN_PRELOAD_DEPTH..=MAX_PRELOAD_DEPTH).contains(&depth) => {
+            errors.push(ValidationError::InvalidPreloadDepth(depth));
+        }
+        (true, None) | (false, Some(_)) => {
+            errors.push(ValidationError::InvalidPreloadPolicy(name));
+        }
+        _ => {}
     }
 }
 
@@ -660,8 +788,8 @@ mod tests {
 
     use super::*;
     use crate::model::{
-        ConnectionMode, OfflineMirrorConfig, OnlineMountConfig, Provider, ReadinessCheck,
-        TuningProfile, VpnKind,
+        ConnectionMode, DEFAULT_PRELOAD_SECONDS, OfflineMirrorConfig, OnlineMountConfig, Provider,
+        ReadinessCheck, TuningProfile, VpnKind,
     };
 
     const CONNECTION_UUID: &str = "2a3f5d45-e867-47e7-943f-66cf60e777ad";
@@ -691,6 +819,7 @@ mod tests {
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 
@@ -717,10 +846,68 @@ mod tests {
         let mut document: ConfigDocument = ron::from_str(old).expect("old document");
         assert!(!document.unmount_before_sleep);
         assert!(!document.restore_after_wake);
+        assert_eq!(document.preload, PreloadSettings::default());
+        assert_eq!(document.onedriver_preload_seconds, None);
         document.unmount_before_sleep = true;
         document.restore_after_wake = true;
         let loaded: ConfigDocument = ron::from_str(&ron::to_string(&document).unwrap()).unwrap();
         assert_eq!(loaded, document);
+    }
+
+    #[test]
+    fn preload_policies_have_finite_validated_bounds_and_migrate_onedrive() {
+        let mut config = Config::default();
+        config.document.preload.onedrive.maximum_seconds = MIN_PRELOAD_SECONDS;
+        assert!(config.validate().is_ok());
+        config.document.preload.onedrive.maximum_seconds = MAX_PRELOAD_SECONDS;
+        assert!(config.validate().is_ok());
+        config.document.preload.onedrive.maximum_seconds = MIN_PRELOAD_SECONDS - 1;
+        assert!(matches!(
+            config.validate().unwrap_err().as_slice(),
+            [ValidationError::InvalidPreloadSeconds(_)]
+        ));
+        config.document.preload.onedrive.maximum_seconds = DEFAULT_PRELOAD_SECONDS;
+        config.document.preload.smb.maximum_depth = Some(MAX_PRELOAD_DEPTH + 1);
+        assert!(matches!(
+            config.validate().unwrap_err().as_slice(),
+            [ValidationError::InvalidPreloadDepth(_)]
+        ));
+
+        let legacy = "(schema_version:2,notifications_enabled:true,onedriver_preload_seconds:90,connections:[],vpn_profiles:[])";
+        let migrated = migrate_preload_settings(ron::from_str(legacy).expect("legacy document"));
+        assert_eq!(migrated.preload.onedrive.maximum_seconds, 90);
+        assert_eq!(migrated.onedriver_preload_seconds, None);
+    }
+
+    #[test]
+    fn smb_connection_override_replaces_only_its_global_policy() {
+        let mut document = ConfigDocument::default();
+        document.preload.smb = PreloadPolicy {
+            enabled: true,
+            maximum_seconds: 60,
+            maximum_depth: Some(3),
+        };
+        let mut connection = online_connection("/home/example/Cloud/SMB");
+        connection.provider = Provider::Smb;
+        assert_eq!(
+            document.preload_policy_for(&connection),
+            document.preload.smb
+        );
+
+        connection.smb_preload_override = Some(crate::model::SmbPreloadOverride {
+            enabled: false,
+            maximum_seconds: 25,
+            maximum_depth: 1,
+        });
+        assert_eq!(
+            document.preload_policy_for(&connection),
+            PreloadPolicy {
+                enabled: false,
+                maximum_seconds: 25,
+                maximum_depth: Some(1),
+            }
+        );
+        assert_eq!(document.preload.smb.maximum_seconds, 60);
     }
 
     #[test]

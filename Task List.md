@@ -15,6 +15,126 @@ release-candidate checks and user approval.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## Release 0.4.6
+
+- [x] Align Cargo, Debian, AppStream, README installation examples,
+  screenshots, and the Flatpak source tag with version 0.4.6.
+- [x] Run formatting, compilation, all-target/all-feature Clippy with warnings
+  denied, the complete 194-test suite, metadata checks, and diff validation.
+- [x] Build and inspect the amd64 Debian installation asset and prepare its
+  SHA256SUMS file.
+- [x] Record the final release scope and validation in Task List Completion
+  Notes.
+- User authorized commit, push, tag and GitHub release publication for
+  `v0.4.6` with the installation asset.
+
+## Online directory-cache optimization and Google OAuth client work
+
+**Planning recorded September 15–16, 2026. The OAuth client, Google Drive
+refresh-level fast-list, asynchronous Google Drive VFS refresh, and bounded
+OneDrive directory preload are implemented. Live Box and SMB prototypes reject
+recursive VFS refresh and approve bounded directory walks for implementation.**
+
+### Approved Google Drive and OneDrive work
+
+- [x] Add matching Google Drive custom OAuth client ID and client-secret fields
+  to the rclone remote create/update workflow. Keep both values out of applet
+  configuration, redact them from command/error output, clear the fields after
+  use, and preserve existing remotes unless the user explicitly updates one.
+  Existing-remote update repeats browser OAuth and advises remounting active
+  connections.
+- [x] Enable fast-list on Google Drive recursive VFS refresh requests and add
+  tests proving mount commands do not receive rclone's ignored `--fast-list`
+  argument. Regenerate the applet-owned unit before starting a mount so existing
+  saved Google Drive connections receive the private RC endpoint after an
+  unmount/remount.
+- [x] Measure whole-remote recursive directory-list latency and peak memory on
+  the configured `ua_gdrive:` remote. Five trials per mode returned identical
+  510-directory results; `--fast-list` showed no meaningful latency or memory
+  improvement under the measured conditions.
+- [ ] Complete broader Google Drive `--fast-list` testing with a larger ordinary
+  drive and a shared drive, including API-call/rate-limit behavior.
+- [x] After Google Drive mount and RC-socket readiness, run recursive
+  `vfs/refresh` as an asynchronous RC job. Retain its job ID and track its
+  connection and completion state.
+- [x] After onedriver mount readiness, run a directory-only background traversal
+  that neither opens file contents nor follows links outside the mount.
+- [x] Add an app-wide OneDrive preload-time setting to General Settings. Default
+  to 60 seconds, validate finite bounds, stop automatically at the deadline,
+  and provide no manual Cancel control.
+- [x] Use the existing notice path to report OneDrive preload
+  completion or timeout without adding persistent notification machinery.
+- [x] Cancel and finish a tracked Google Drive refresh before manual unmount,
+  connection removal, repair, and sleep cleanup. Keep cancellation and detach
+  bounded.
+- [x] Cancel and finish tracked OneDrive preload work before manual unmount,
+  connection removal, repair, and sleep cleanup. Keep cancellation and detach
+  bounded.
+- [x] Add unit/integration coverage for provider selection, command construction,
+  background lifecycle, timeout, cancellation, setting defaults, and bounds.
+- [ ] Perform cold-cache live tests without reading or modifying cloud file
+  contents.
+
+### Approved provider preload settings and remaining implementation
+
+- [x] Fix clean-unmount completion for all Online providers. Do not prepare a
+  mountpoint during unmount; verify mount-table disappearance after service
+  stop; classify an inactive/failed service with a lingering FUSE entry as
+  Error so the confirmed Repair flow is offered; and skip `reset-failed` when
+  the service is already inactive with a successful result.
+
+- [x] Test Box recursive `vfs/refresh` without fast-list. Reject it after the UA
+  Box prototype reached HTTP 429 `rate_limit_exceeded` and retained little useful
+  metadata.
+- [x] Test an SMB recursive VFS refresh through Cisco VPN. Reject it because the
+  60-second cancellation did not promptly stop backend work and partial cache
+  progress was not retained.
+- [x] Test bounded directory walks. Approve Box depth 2 after a 16.67-second cold
+  and 0.05-second warm traversal cached 212 directories without a new 429.
+  Approve SMB depth 3 after a 15.84-second cold and 0.10-second warm traversal
+  cached 491 directories with no file-content reads.
+- [x] Replace the single OneDrive preload control with a General Settings
+  **Preload** section. Add enabled and 5-to-600-second maximum controls for all
+  providers; add depth 2 for Box and depth 3 for SMB. Default all providers to
+  enabled and 60 seconds.
+- [x] Migrate the existing OneDrive duration into the new provider-policy model
+  and initialize missing Google Drive, Box, and SMB values safely.
+- [x] Add SMB per-connection **Use global preload settings**, enabled by default,
+  with independent enabled, duration, and depth overrides.
+- [x] Implement mount/root readiness and tracked directory-only walks for Box
+  and SMB. Preserve incremental progress on timeout and cancel before unmount,
+  repair, removal, and sleep.
+- [x] Harden Google RC completion parsing so any non-`OK` `output.result` value
+  is a failure even when rclone returns top-level `success: true`. Enforce the
+  configured Google maximum.
+- [x] Add configuration, migration, IPC, UI, command-boundary, timeout,
+  cancellation, nested-RC-error, and effective-SMB-policy tests.
+- [ ] Live-test the implementation on UA Box and the narrowed
+  `ua_engr:Research/Utzinger` SMB connection, then test a separate LAN/home SMB
+  connection with its own override.
+
+## Rclone mount access gate and multi-panel runtime fix (after 0.4.5)
+
+- [x] Diagnose UA Box `Input/output error` from the managed-service journal:
+  Box rejected the expired OAuth refresh token with `invalid_grant`.
+- [x] Reauthorize `ua_box` and verify read-only root access.
+- [x] Require a bounded remote/subtree listing before every applet-requested
+  rclone Online mount, including wake restoration; do not start FUSE when the
+  provider, credentials, network, or subtree is unavailable.
+- [x] Treat additional Cloud Mounter panel instances as clients of the existing
+  runtime owner instead of showing a false Settings communication warning.
+- [x] Pass formatting/diff checks and all 178 tests; install the repaired binary.
+- [x] Live-verify Box listing, healthy VFS state, clean unmount, and a responsive
+  empty mountpoint after unmount.
+
+## Settings background-poll UI fix (after 0.4.5)
+
+- [x] Keep Refresh and sleep toggles visually stable during background polling.
+- [x] Discard obsolete poll replies when a newer user action has started.
+- [x] Verify background polling, reply ordering and stale error handling with
+  regression tests; update design and completion documentation.
+- [ ] Verify the button remains stable in the installed desktop applet.
+
 ## Release 0.4.5
 
 - [x] Align design documentation and README with the final Settings/popup layout.

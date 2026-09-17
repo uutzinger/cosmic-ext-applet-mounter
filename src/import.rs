@@ -194,6 +194,7 @@ pub fn preview_import(
         vpn_profile_id: None,
         disconnect_vpn_when_unused: false,
         tuning_profile: crate::model::TuningProfile::Balanced,
+        smb_preload_override: None,
     };
     Ok(ImportPreview {
         original_path: unit.path.clone(),
@@ -676,6 +677,7 @@ mod tests {
                 vpn_profile_id: None,
                 disconnect_vpn_when_unused: false,
                 tuning_profile: crate::model::TuningProfile::Balanced,
+                smb_preload_override: None,
             }],
             &["rclone-ua-gdrive.service".to_owned()]
                 .into_iter()

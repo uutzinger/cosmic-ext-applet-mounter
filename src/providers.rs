@@ -359,6 +359,7 @@ pub fn rclone_mount_plan(
         "--cache-dir".to_owned(),
         cache_directory.display().to_string(),
         "--rc".to_owned(),
+        "--rc-no-auth".to_owned(),
         "--rc-addr".to_owned(),
         format!("unix://{}", rc_socket.display()),
     ];
@@ -476,6 +477,13 @@ pub const fn lazy_unmount_decision(health: &RcloneVfsHealth) -> LazyUnmountDecis
 pub fn rclone_online_status(snapshot: &OnlineRuntimeSnapshot) -> crate::model::OnlineMountStatus {
     use crate::model::OnlineMountStatus;
 
+    if snapshot.mount_present
+        && snapshot.service.as_ref().is_some_and(|status| {
+            matches!(status.active, ActiveState::Inactive | ActiveState::Failed)
+        })
+    {
+        return OnlineMountStatus::Error;
+    }
     if !snapshot.readiness.network_ready {
         return OnlineMountStatus::WaitingForNetwork;
     }
@@ -511,6 +519,13 @@ pub fn onedriver_online_status(
 
     if !snapshot.authenticated {
         return OnlineMountStatus::Unavailable;
+    }
+    if snapshot.mount_present
+        && snapshot.service.as_ref().is_some_and(|status| {
+            matches!(status.active, ActiveState::Inactive | ActiveState::Failed)
+        })
+    {
+        return OnlineMountStatus::Error;
     }
     if !snapshot.readiness.network_ready
         && matches!(
@@ -801,6 +816,7 @@ mod tests {
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 
@@ -845,6 +861,25 @@ mod tests {
                 .any(|pair| pair == ["--retries", "1"])
         );
         assert!(plan.service.arguments.contains(&"--rc".to_owned()));
+        assert!(plan.service.arguments.contains(&"--rc-no-auth".to_owned()));
+        assert!(!plan.service.arguments.contains(&"--fast-list".to_owned()));
+    }
+
+    #[test]
+    fn rclone_mount_plan_does_not_put_fast_list_on_mount_commands() {
+        for provider in [Provider::GoogleDrive, Provider::Box, Provider::Smb] {
+            let plan = rclone_mount_plan(
+                &connection(provider),
+                Path::new("/run/user/1000/cosmic-mounter"),
+                Path::new("/home/example/.cache/cosmic-mounter"),
+            )
+            .expect("plan");
+            assert!(
+                !plan.service.arguments.contains(&"--fast-list".to_owned()),
+                "{provider:?} mount must not receive a flag that rclone ignores"
+            );
+            assert!(plan.service.arguments.contains(&"--rc-no-auth".to_owned()));
+        }
     }
 
     #[test]
@@ -1040,8 +1075,14 @@ mod tests {
         assert_eq!(rclone_online_status(&snapshot), OnlineMountStatus::Mounting);
         snapshot.service = Some(UnitStatus {
             active: ActiveState::Failed,
+            ..service.clone()
+        });
+        assert_eq!(rclone_online_status(&snapshot), OnlineMountStatus::Error);
+        snapshot.service = Some(UnitStatus {
+            active: ActiveState::Inactive,
             ..service
         });
+        snapshot.mount_present = true;
         assert_eq!(rclone_online_status(&snapshot), OnlineMountStatus::Error);
     }
 
@@ -1126,6 +1167,17 @@ mod tests {
         assert_eq!(
             onedriver_online_status(&snapshot),
             OnlineMountStatus::Mounted
+        );
+        assert_eq!(
+            onedriver_online_status(&OnedriverRuntimeSnapshot {
+                service: Some(UnitStatus {
+                    active: ActiveState::Inactive,
+                    enabled: false,
+                    detail: "stopped with lingering mount".into(),
+                }),
+                ..snapshot.clone()
+            }),
+            OnlineMountStatus::Error
         );
         assert_eq!(
             onedriver_online_status(&OnedriverRuntimeSnapshot {

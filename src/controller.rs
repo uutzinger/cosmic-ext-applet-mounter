@@ -366,6 +366,20 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
     if !connection.enabled {
         return OnlineMountStatus::Unavailable;
     }
+    let mount_present = snapshot
+        .mount_entries
+        .iter()
+        .any(|entry| entry.target == connection.local_path);
+    if mount_present
+        && snapshot
+            .service_status
+            .get(&connection.id)
+            .is_some_and(|status| {
+                matches!(status.active, ActiveState::Inactive | ActiveState::Failed)
+            })
+    {
+        return OnlineMountStatus::Error;
+    }
     if !snapshot.network_ready {
         return OnlineMountStatus::WaitingForNetwork;
     }
@@ -374,13 +388,7 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
     }
     match snapshot.service_status.get(&connection.id) {
         Some(status) if status.active == ActiveState::Failed => OnlineMountStatus::Error,
-        _ if snapshot
-            .mount_entries
-            .iter()
-            .any(|entry| entry.target == connection.local_path) =>
-        {
-            OnlineMountStatus::Mounted
-        }
+        _ if mount_present => OnlineMountStatus::Mounted,
         Some(status) if matches!(status.active, ActiveState::Active | ActiveState::Activating) => {
             OnlineMountStatus::Mounting
         }
@@ -696,6 +704,7 @@ mod tests {
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 
@@ -716,6 +725,7 @@ mod tests {
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 
@@ -773,9 +783,9 @@ mod tests {
     }
 
     #[test]
-    fn failed_service_with_lingering_mount_is_error() {
+    fn stopped_or_failed_service_with_lingering_mount_is_error() {
         let connection = online(id("2a3f5d45-e867-47e7-943f-66cf60e777ad"));
-        let snapshot = ControllerSnapshot {
+        let mut snapshot = ControllerSnapshot {
             config: ConfigDocument {
                 connections: vec![connection.clone()],
                 ..ConfigDocument::default()
@@ -804,6 +814,17 @@ mod tests {
             ConnectionStatus::OnlineMount(OnlineMountStatus::Error)
         );
         assert!(decide_operation(&state.rows[0], Operation::Mount).allowed);
+
+        snapshot
+            .service_status
+            .get_mut(&connection.id)
+            .expect("service")
+            .active = ActiveState::Inactive;
+        let state = restore(&snapshot);
+        assert_eq!(
+            state.rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Error)
+        );
     }
 
     #[test]

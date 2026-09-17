@@ -98,6 +98,7 @@ async fn run() -> Result<(), String> {
         vpn_profile_id: None,
         disconnect_vpn_when_unused: false,
         tuning_profile: TuningProfile::Balanced,
+        smb_preload_override: None,
     };
 
     std::fs::create_dir_all(&connection.local_path).map_err(|error| {

@@ -1,3 +1,18 @@
+cosmic-ext-applet-mounter (0.4.6) unstable; urgency=medium
+
+  * Add provider-specific Online directory preload settings and background
+    preload engines for Google Drive, OneDrive, Box, and SMB.
+  * Add Google Drive custom OAuth client support and asynchronous fast-list
+    VFS refresh tracking.
+  * Add bounded Box and SMB directory walks with SMB per-connection overrides.
+  * Cancel preload work before unmount, repair, removal, and sleep cleanup.
+  * Validate rclone remote access before mounting and improve multi-panel IPC.
+  * Detect lingering FUSE endpoints and correct confirmed lazy-repair handling.
+  * Refine Settings layout, tooltips, themed surfaces, and status placement.
+  * Update screenshots, README, design documentation, and automated coverage.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Thu, 17 Sep 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.5) unstable; urgency=medium
 
   * Add a standalone General Settings window with a right-aligned popup gear.

@@ -29,6 +29,7 @@ pub enum Executable {
     Fusermount3,
     Mountpoint,
     Findmnt,
+    Find,
     Nmcli,
     Ip,
     Getent,
@@ -64,6 +65,7 @@ impl Executable {
             Self::Fusermount3 => "fusermount3",
             Self::Mountpoint => "mountpoint",
             Self::Findmnt => "findmnt",
+            Self::Find => "find",
             Self::Nmcli => "nmcli",
             Self::Ip => "ip",
             Self::Getent => "getent",
@@ -98,6 +100,7 @@ impl Executable {
             Self::Fusermount3 => vec!["fusermount3"],
             Self::Mountpoint => vec!["mountpoint"],
             Self::Findmnt => vec!["findmnt", "/usr/bin/findmnt"],
+            Self::Find => vec!["find", "/usr/bin/find"],
             Self::Nmcli => vec!["nmcli", "/usr/bin/nmcli", "/bin/nmcli"],
             Self::Ip => vec!["ip"],
             Self::Getent => vec!["getent"],
@@ -641,14 +644,22 @@ pub fn redact_text(value: &str) -> String {
             }
 
             let lower = token.to_ascii_lowercase();
+            let normalized_key = lower
+                .trim_matches(|character| matches!(character, '"' | '\'' | ':' | ',' | '{' | '}'));
             if lower == "authorization:" {
                 redact_remaining = 2;
                 return token.to_owned();
             }
             if matches!(
                 lower.as_str(),
-                "bearer" | "--password" | "--passwd" | "--token" | "--client-secret"
-            ) {
+                "bearer"
+                    | "--password"
+                    | "--passwd"
+                    | "--token"
+                    | "--client-id"
+                    | "--client-secret"
+            ) || matches!(normalized_key, "client_id" | "client_secret")
+            {
                 redact_remaining = 1;
                 return token.to_owned();
             }
@@ -668,6 +679,7 @@ fn redact_token(token: &str) -> String {
         "secret",
         "credential",
         "authorization",
+        "client_id",
         "client_secret",
         "refresh_token",
         "access_token",
@@ -971,6 +983,14 @@ mod tests {
         assert_eq!(
             redact_text("Authorization: Bearer abc123"),
             "Authorization: [REDACTED] [REDACTED]"
+        );
+        assert_eq!(
+            redact_text("client_id private-id client_secret=private-secret"),
+            "client_id [REDACTED] client_secret=[REDACTED]"
+        );
+        assert_eq!(
+            redact_text(r#"{"client_id": "private-id", "client_secret": "private-secret"}"#),
+            r#"{"client_id": [REDACTED] "client_secret": [REDACTED]"#
         );
     }
 

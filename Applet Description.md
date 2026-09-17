@@ -55,6 +55,24 @@ the network, VPN, or provider is slow.
 - New connections start manually by default.
 - The user may enable mounting at login.
 - The applet uses bounded connection and operation timeouts.
+- Before starting an rclone Online mount, the applet verifies that the selected
+  remote and subtree can be listed. Authentication and access failures stop the
+  mount before a FUSE filesystem can block applications.
+- Google Drive Online mount services expose a private per-user Unix RC socket.
+  The recursive refresh request enables rclone's fast-list mode to reduce
+  listing transactions at the cost of additional memory. The mount command
+  does not receive `--fast-list`, which rclone ignores for mounts. Box and SMB
+  do not receive this refresh behavior. Before starting an Online rclone
+  connection, the applet regenerates its managed unit from the saved connection
+  so updated provider options apply to existing connections on their next
+  mount.
+- After a Google Drive filesystem is mounted and its rclone RC/VFS endpoint is
+  ready, the applet submits a recursive `vfs/refresh` as an asynchronous rclone
+  job. Mount completion does not wait for this directory-metadata warm-up. The
+  applet retains the job and rclone execution identifiers, tracks completion,
+  and reports the result through its existing status notice.
+- Manual unmount, repair, connection removal, and pre-sleep cleanup cancel an
+  active Google Drive refresh before continuing the bounded detach sequence.
 - The applet monitors network, VPN, service, mount, and provider health.
 - For rclone mounts, the applet monitors the VFS upload queue and cache state.
 - When required connectivity is lost, the applet automatically detaches a mount
@@ -67,6 +85,76 @@ the network, VPN, or provider is slow.
 
 An online mount's cache improves compatibility and reliability, but it is not a
 complete offline copy and shall not be described as one.
+
+### Google Drive custom OAuth client
+
+Google Drive remote setup accepts a user-provided OAuth client ID and its
+matching client secret. New remotes may leave both fields blank for
+compatibility with rclone's shared client, while the UI explains that a private
+client is required to avoid interruption during the shared-client retirement.
+An existing Drive remote changes only when the user presses
+**Update Google OAuth Client**, which runs rclone's update and browser OAuth
+flow. Active connections using an updated remote must be remounted.
+
+The two OAuth values remain transient applet input: the secret is masked, both
+values are redacted from displayed command and error text, and both fields are
+cleared after success or failure. The applet does not copy them into its own
+configuration. Rclone owns the persistent remote configuration and token.
+
+### Online directory-cache preload
+
+General Settings contains a **Preload** section with one provider row per
+Online mount engine. Provider defaults are:
+
+| Provider | Enabled | Maximum | Method |
+|---|---:|---:|---|
+| Google Drive | Yes | 60 seconds | Recursive asynchronous `vfs/refresh` with fast-list |
+| OneDrive | Yes | 60 seconds | Directory-only walk of the mounted tree |
+| Box | Yes | 60 seconds | Directory-only walk, maximum depth 2 |
+| SMB | Yes | 60 seconds | Directory-only walk, maximum depth 3 |
+
+Durations accept 5 to 600 seconds. Box and SMB depths accept a finite validated
+range from 1 to 10. Google Drive and OneDrive use their provider-specific full
+tree mechanisms and do not expose a depth value.
+
+Each provider toggle has provider-specific hover help and visible spacing
+between its label and switch. A provider's switch, seconds field, and optional
+levels field remain on one horizontal row. Duration and recursive-depth details
+and their accepted ranges appear only as delayed hover help. Duration help
+clarifies that browsing remains available throughout preload; depth help
+explains the additional server requests, rate-limit risk, and preload-time cost
+of deeper scans. No standalone preload-description or range line is shown.
+
+Each SMB Online connection defaults to **Use global preload settings**. The
+connection editor can instead override preload enablement, maximum duration,
+and depth for that connection. This supports independent home, LAN, corporate,
+and VPN shares without requiring one compromise setting. Google Drive,
+OneDrive, and Box use their provider-wide values.
+
+- Google Drive waits for the mount and private RC socket, then submits its
+  recursive refresh. Job completion must inspect both the top-level RC status
+  and every `output.result` entry; only `OK` result values are successful.
+- OneDrive, Box, and SMB use app-managed walks that list directories without
+  intentionally opening file contents, following symbolic links, or leaving
+  the mounted filesystem. Box and SMB retain cache progress if their deadline
+  expires.
+- Box and SMB wait for both the mountpoint and a usable root listing. They do
+  not use recursive `vfs/refresh` or fast-list. Live testing showed that Box
+  recursive refresh reached HTTP 429 rate limiting and that SMB refresh did not
+  stop promptly or retain partial cache work.
+- Active preloads are tracked per connection. Unmount, repair, removal, and
+  pre-sleep cleanup cancel and finish preload work before continuing their
+  bounded detach sequence.
+- Manual unmount verifies that the mount-table entry disappears after the
+  generated service stops. If a busy FUSE endpoint remains, the applet reports
+  Error and exposes the existing two-step Repair confirmation instead of
+  reporting completion or attempting to recreate the mountpoint. This applies
+  to rclone mounts for Google Drive, Box, and SMB and to online OneDrive.
+  Repair resets the generated service only when it is actually failed; an
+  inactive successful service needs no reset.
+- Completion, timeout, and sanitized failure results use the existing applet
+  notice path. There is no manual Cancel control because ordinary browsing can
+  continue after the bounded preload ends.
 
 ### Offline mirror
 
@@ -168,7 +256,8 @@ Authentication Wait and Sleep Cleanup”.
 Selecting the panel icon opens a compact popup containing the title **Cloud
 Mounter** aligned left, a clickable gear aligned to the right edge of the
 title row, runtime status, and the
-scrollable connection list. The gear has the accessible name **Settings** and a tooltip explaining what
+scrollable connection list. The gear has the accessible name **Settings** and a
+one-second delayed tooltip, matching connection-list help, explaining what
 it opens. Add Connection, Refresh, and both sleep settings move into a
 separate **Cloud Mounter Settings** window. The implementation is locally
 verified; desktop and Flatpak visual acceptance remains pending.
@@ -189,13 +278,14 @@ between status/notices and connections, without an empty background band. In the
 
 The gear opens or focuses one standalone window titled **Cloud Mounter
 Settings**, following the existing standalone connection-editor architecture.
-Its top row contains **Add Connection** and **Refresh**, with sleep settings
-below. The content surface uses the same COSMIC themed list background as the
-popup and Add/Modify windows. Button action messages appear directly below the
-top button row. The sleep section ends with “Applies only to Online connections.”
+Its top row contains **Add Connection** and **Refresh**, with Preload and Sleep
+sections below. The content surface uses the same COSMIC themed list background
+as the popup and Add/Modify windows. Button action messages appear directly
+below the top button row. The sleep section ends with “Applies only to Online connections.”
 and plain-text sleep feedback immediately below it, without a separate status
 heading or fixed-height status box. Long messages wrap within the window's
-scrollable content. It offers:
+scrollable content. Content padding sits inside the scrollable region so the
+vertical scrollbar reaches the window's right edge. It offers:
 
 - **Unmount when sleep** (Online connections only, default off).
 - **Restore after wake up** (default off, enabled only when unmount-on-sleep is
@@ -203,12 +293,18 @@ scrollable content. It offers:
 - **Add Connection**, opening the existing standalone connection wizard.
 - **Refresh**, reloading the running applet's configuration and refreshing its
   runtime status, with completion/failure feedback in General Settings.
+- **Preload**, with enabled and maximum-duration settings for Google Drive,
+  OneDrive, Box, and SMB plus directory-depth defaults for Box and SMB.
 - Sleep-listener status and the latest cleanup details.
 
 Settings changes and Refresh must reach the running applet through an explicit
 runtime communication interface; changing only the settings process is
-insufficient. The panel applet remains the sole owner of the sleep listener and
-mount operations. Closing either settings window leaves it running. Background
+insufficient. Periodic background status checks leave controls visually stable;
+controls become busy only for user actions. Sleep controls also require an
+available runtime owner. When Cloud Mounter appears on multiple panels, one
+instance owns the runtime service and the other instances use it as clients
+without displaying a communication warning. The runtime owner remains the sole
+owner of the sleep listener. Closing either settings window leaves it running. Background
 mount/sync errors stay visible in popup status; settings-action feedback stays
 in General Settings, and connection-editor feedback stays in its editor.
 
@@ -261,6 +357,13 @@ For Google Drive, Box, and SMB, the applet can detect existing rclone remotes
 and can start applet-driven remote creation. Google Drive and Box setup delegate
 browser OAuth to rclone. SMB credentials remain in rclone's credential
 mechanism, not in applet configuration.
+
+Google Drive creation also accepts a matching custom OAuth client ID and secret.
+Modify mode exposes a separate **Update Google OAuth Client** action for an
+existing Drive remote. That action reauthorizes the remote in the browser;
+active connections using it must be remounted afterward. The transient fields
+are cleared after the operation, and the applet never stores their values in
+its own configuration.
 
 For OneDrive Online mount, setup uses `jstaf/onedriver` with applet-owned
 configuration and cache paths. For OneDrive Offline mirror, setup uses

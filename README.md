@@ -9,19 +9,17 @@ synchronization.
 
 The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
-unavailable.
+unavailable. The applet attempts to pre-cache directory metadata when available.
 
 ## Applet and Settings
 
-The popup shows connection status and controls. Use the gear at the top right
-of **Cloud Mounter** to open **Settings**. **Add Connection** and **Refresh** are
-at the top; Refresh updates the running applet. Click a connection name in the
+The popup shows connection status and connections. Click a connection name in the
 popup to open its Modify window.
-
-Settings also offers **Unmount when sleep** and **Restore after wake up**.
+Use the gear at the top right
+of **Cloud Mounter** to open **Settings**. **Add Connection** and **Refresh** are
+at the top. Settings also offers **Unmount when sleep** and **Restore after wake up**.
 Both default to off and apply only to applet-managed Online connections.
-Restore becomes available when unmount-before-sleep is enabled. Offline mirrors
-and their synchronization jobs are unaffected.
+Settings also alows to activate **directory preload** of the connection entries when they are mounted as a background task.
 
 ## Modes and Providers
 
@@ -31,7 +29,7 @@ large remote trees without keeping a full local copy.
 **Offline mirror** uses an ordinary local directory plus bidirectional sync.
 Automatic background sync pauses on metered networks by default.
 
-The following connection engines are used to connect to the providers:
+The following connection engines are used to connect to the providers ([external dependencies](Dependency%20Installation.md)):
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
@@ -40,11 +38,11 @@ The following connection engines are used to connect to the providers:
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 
-Example screenshots from the earlier layout (version 0.4.5 moves app-wide
-actions into the separate Settings window):
+Example screenshots of the applet and its separate windows:
 <table>
   <tr>
     <td valign="top"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="200"></td>
+    <td valign="top"><img src="./resources/Settings.png" alt="Cloud Mounter popup" width="200"></td>
     <td valign="top"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></td>
     <td valign="top"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
   </tr>
@@ -58,7 +56,7 @@ external storage engines you plan to use. The applet does not install them for y
 
 ### Installation from Source
 
-See [Build from Source](#build-from-source).
+See [Build from Source](#build-from-source) below.
 
 ### Installation from Debian Package
 
@@ -66,8 +64,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.5/cosmic-ext-applet-mounter_0.4.5_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.5_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.6/cosmic-ext-applet-mounter_0.4.6_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.6_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -144,9 +142,8 @@ network stalls.
 
 ## Applet Workflow
 
-The panel popup shows active connection count, notification
-state, VPN summary, `Add Connection`, `Refresh`, and a scrollable list of
-connections.
+The panel popup shows the active connection count, notification state, VPN
+summary, and a scrollable list of connections.
 
 Each connection row has the connection name and one primary state control:
 
@@ -155,11 +152,50 @@ Each connection row has the connection name and one primary state control:
 
 Clicking the connection name opens `Modify`.
 
-`Add` and `Modify` share the same editor. Modify mode exposes
+## Settings
+
+Open the Settings window by clicking the gear icon. `Add Connection` and
+`Refresh` are available at the top. Add and Modify connections share the same
+editor.
+
+Add mode exposes `Test Connection`, `Save Connection`, `Import`, and the
+provider-specific setup and rclone remote-management actions needed to create
+or select a storage remote.
+
+Modify mode exposes
 `Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline
 mirrors, `Disable` or `Enable`, and `Remove`. The Information section
 summarizes the selected engine, generated unit validation, and confirmation
 policy.
+
+Settings can `unmount` Online connections before the computer `sleeps` and restore
+them after wake. A mounted share can block or delay the sleep process.
+
+Settings can also enable `directory preloading`. Preload tasks do not open file
+contents.
+
+**Google Drive**: After its private Unix RC/VFS endpoint is ready, Cloud Mounter
+starts a recursive directory-cache refresh as an asynchronous rclone job using
+fast-list mode. Cloud Mounter tracks the job through completion.
+Unmount, repair, connection removal, and sleep cleanup cancel an active refresh
+before detaching the filesystem.
+
+**OneDrive** starts a directory-only metadata preload after onedriver is ready.
+The traversal does not follow symbolic links, stops at the configured deadline,
+and is cancelled before unmount, repair, removal, or sleep.
+
+**Box** waits for both the mountpoint and a usable root listing, then starts a
+bounded directory-only metadata walk. It does not use recursive rclone RC
+refresh or fast-list, which helps limit Box API requests and rate-limit risk.
+
+**SMB** also waits for the mountpoint and root listing before starting its
+bounded directory-only metadata walk. Each SMB connection can inherit the
+global preload policy or override its enabled state, duration, and depth.
+All provider preloads default to enabled with a 60-second maximum. Box uses a
+bounded directory-only walk with depth 2 to avoid API rate limits; SMB uses
+depth 3.
+SMB connections may override enablement, duration, and depth
+individually so local and VPN shares can use different policies.
 
 ## Authentication
 
@@ -169,6 +205,13 @@ The applet does not store provider credentials. Credentials stay with `rclone`,
 For Google Drive and Box, applet-driven setup delegates browser OAuth to
 `rclone`. For SMB, the password remains in rclone's credential mechanism, not
 in applet configuration.
+
+Google Drive setup accepts the client ID and matching client secret from a
+Google Cloud Desktop OAuth application. Supplying both values creates the
+remote with that private client; leaving both blank retains rclone's shared
+client for compatibility. In Modify mode, **Update Google OAuth Client**
+changes an existing Drive remote and opens browser authorization again.
+The form masks the secret and clears it when the operation finishes.
 
 For OneDrive Online mount, the applet uses `jstaf/onedriver` with applet-owned
 configuration and cache paths. For OneDrive Offline mirror, it uses
@@ -225,6 +268,43 @@ files.
 Unused rclone remotes can be removed separately from the Add Connection rclone
 management area. That action requires confirmation and changes rclone
 configuration, not only applet configuration.
+
+## Project Development
+
+This applet was developed with agent-assisted programming. The project starts
+from [Applet Description.md](Applet%20Description.md), which is translated into
+[Requirements and Specifications.md](Requirements%20and%20Specifications.md),
+including the Functional Requirements. The author reviews these documents before
+implementation. The requirements drive [Task List.md](Task%20List.md), and its
+execution history is documented in
+[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author
+supervises and approves each task and its verification.
+
+## Contributing & Feature Requests
+
+### Feature Requests
+
+You can implement additional features using agent-assisted programming. OpenAI Codex was used for the current version:
+
+- Clone the GitHub repository.
+- Ask your AI agent to read "Applet Description.md", "Requirements and Specifications.md".
+- Ask the AI agent to update the Description and Requirements with the feature you want.
+- Verify the modifications to the two files.
+- Have your AI agent add Tasks to the Task list based on the updated Specifications.
+- Have your AI agent execute the additions to the Task list.
+- Make sure your AI agent updates Task List Completion Notes.
+- Complete the verifications and test your implementation as instructed by your AI agent. Do not skip the testing.
+- Submit a pull request to this repo.
+
+### Bug Reports
+
+- Submit a report on GitHub.
+
+## License
+
+MIT, copyright Urs Utzinger and OpenAI Codex.
+
+# Appendix
 
 ## Build from Source
 
@@ -334,42 +414,3 @@ To regenerate the reproducible Flatpak source list after dependency changes:
 ```sh
 just flatpak-cargo-sources
 ```
-
-## Project Development
-
-This applet was developed with agent-assisted programming. The project starts
-from [Applet Description.md](Applet%20Description.md), which is translated into
-[Requirements and Specifications.md](Requirements%20and%20Specifications.md),
-including the Functional Requirements. The author reviews these documents before
-implementation. The requirements drive [Task List.md](Task%20List.md), and its
-execution history is documented in
-[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author
-supervises and approves each task and its verification.
-
-## Contributing & Feature Requests
-
-### Feature Requests
-
-You can implement additional features using agent-assisted programming. OpenAI Codex was used for the current version:
-
-- Clone the GitHub repository.
-- Update the Applet Description to include your request, or create a document
-  describing your request and ask your AI agent to include it in the Applet
-  Description.
-- Have your AI agent check and update the Applet Description.
-- Have your AI agent update the Requirements and Specifications based on the Applet Description.
-- Verify the modifications to the Requirements and Specifications.
-- Ask your AI agent to update the Functional Requirements based on your reviewed Requirements and Specifications.
-- Have your AI agent add Tasks to the Task list based on the updated Specifications.
-- Have your AI agent execute the additions to the Task list.
-- Make sure your AI agent updates Task List Completion Notes.
-- Complete the verifications and test your implementation as instructed by your AI agent. Do not skip the testing.
-- Submit a pull request to this repo.
-
-### Bug Reports
-
-- Submit a report on GitHub.
-
-## License
-
-MIT, copyright Urs Utzinger and OpenAI Codex.

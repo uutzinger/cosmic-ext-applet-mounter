@@ -21,10 +21,16 @@ use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_p
 use cosmic::iced::{Alignment, Color, Length, Limits, Subscription, window::Id};
 use cosmic::prelude::*;
 use cosmic::widget;
-use cosmic_ext_applet_mounter::config::{APP_ID, AppConfigStorage, Config, ConfigDocument};
+use cosmic_ext_applet_mounter::config::{
+    APP_ID, AppConfigStorage, Config, ConfigDocument, MAX_PRELOAD_DEPTH, MAX_PRELOAD_SECONDS,
+    MIN_PRELOAD_DEPTH, MIN_PRELOAD_SECONDS,
+};
 use cosmic_ext_applet_mounter::controller::{
     ConnectionRowState, ControllerSnapshot, aggregate_label, decide_operation, operation_label,
     provider_label, restore, status_label,
+};
+use cosmic_ext_applet_mounter::directory_preload::{
+    self, DirectoryPreloadJob, DirectoryPreloadOutcome,
 };
 use cosmic_ext_applet_mounter::import::{
     ImportPreview, ImportReplacementPlan, default_scan_directory, preview_import, replacement_plan,
@@ -32,8 +38,9 @@ use cosmic_ext_applet_mounter::import::{
 };
 use cosmic_ext_applet_mounter::model::{
     AccessMode, Connection, ConnectionId, ConnectionMode, ConnectionStatus, OfflineMirrorConfig,
-    OfflineMirrorStatus, OnlineMountConfig, OnlineMountStatus, Operation, Provider, TuningProfile,
-    VpnKind, VpnProfile, VpnProfileId,
+    OfflineMirrorStatus, OnlineMountConfig, OnlineMountStatus, Operation, PreloadPolicy,
+    PreloadSettings, Provider, SmbPreloadOverride, TuningProfile, VpnKind, VpnProfile,
+    VpnProfileId,
 };
 use cosmic_ext_applet_mounter::mounts::{MountEntry, MountTable, ProcMountTable, SyncRuntimeState};
 use cosmic_ext_applet_mounter::process::{
@@ -44,6 +51,7 @@ use cosmic_ext_applet_mounter::providers::{
     CommandRcloneProvider, OnedriverAuthState, ProviderError, lazy_unmount_request,
     onedriver_auth_state_for_plan, onedriver_mount_plan, rclone_mount_plan,
 };
+use cosmic_ext_applet_mounter::rclone_refresh::{self, RcloneRefreshJob, RcloneRefreshOutcome};
 use cosmic_ext_applet_mounter::services::{
     ActiveState, CommandSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction,
     SystemdManager, UnitController, UnitDocument, UnitKind, UnitName, UnitStatus,
@@ -74,6 +82,8 @@ const POPUP_EMPTY_ROW_HEIGHT: f32 = 40.0;
 const POPUP_ACTION_HORIZONTAL_PADDING: u16 = 24;
 const POPUP_CONNECTION_ROW_HORIZONTAL_PADDING: u16 = 0;
 const POPUP_NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+const CLEAN_UNMOUNT_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
+const CLEAN_UNMOUNT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SETTINGS_SECTION_TITLE_WIDTH: f32 = 150.0;
 const SETTINGS_SECTION_TITLE_TOP_PADDING: u16 = 8;
 const SETTINGS_RCLONE_REMOTE_BUTTONS_PER_ROW: usize = 3;
@@ -100,6 +110,98 @@ enum WindowMode {
     ImportLegacy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreloadProvider {
+    GoogleDrive,
+    OneDrive,
+    Box,
+    Smb,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreloadPolicyDraft {
+    enabled: bool,
+    maximum_seconds: String,
+    maximum_depth: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreloadSettingsDraft {
+    google_drive: PreloadPolicyDraft,
+    onedrive: PreloadPolicyDraft,
+    box_provider: PreloadPolicyDraft,
+    smb: PreloadPolicyDraft,
+}
+
+impl From<PreloadPolicy> for PreloadPolicyDraft {
+    fn from(value: PreloadPolicy) -> Self {
+        Self {
+            enabled: value.enabled,
+            maximum_seconds: value.maximum_seconds.to_string(),
+            maximum_depth: value.maximum_depth.map(|depth| depth.to_string()),
+        }
+    }
+}
+
+impl Default for PreloadSettingsDraft {
+    fn default() -> Self {
+        PreloadSettings::default().into()
+    }
+}
+
+impl From<PreloadSettings> for PreloadSettingsDraft {
+    fn from(settings: PreloadSettings) -> Self {
+        Self {
+            google_drive: settings.google_drive.into(),
+            onedrive: settings.onedrive.into(),
+            box_provider: settings.box_provider.into(),
+            smb: settings.smb.into(),
+        }
+    }
+}
+
+impl PreloadSettingsDraft {
+    fn policy_mut(&mut self, provider: PreloadProvider) -> &mut PreloadPolicyDraft {
+        match provider {
+            PreloadProvider::GoogleDrive => &mut self.google_drive,
+            PreloadProvider::OneDrive => &mut self.onedrive,
+            PreloadProvider::Box => &mut self.box_provider,
+            PreloadProvider::Smb => &mut self.smb,
+        }
+    }
+
+    fn validated(&self) -> Result<PreloadSettings, String> {
+        fn policy(draft: &PreloadPolicyDraft) -> Result<PreloadPolicy, String> {
+            let maximum_seconds = draft.maximum_seconds.parse::<u64>().map_err(|_| {
+                format!("Enter a preload time from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds.")
+            })?;
+            if !(MIN_PRELOAD_SECONDS..=MAX_PRELOAD_SECONDS).contains(&maximum_seconds) {
+                return Err(format!(
+                    "Enter a preload time from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds."
+                ));
+            }
+            let maximum_depth = draft.maximum_depth.as_ref().map(|value| {
+                let depth = value.parse::<u8>().map_err(|_| format!("Enter a directory depth from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH}."))?;
+                if !(MIN_PRELOAD_DEPTH..=MAX_PRELOAD_DEPTH).contains(&depth) {
+                    return Err(format!("Enter a directory depth from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH}."));
+                }
+                Ok(depth)
+            }).transpose()?;
+            Ok(PreloadPolicy {
+                enabled: draft.enabled,
+                maximum_seconds,
+                maximum_depth,
+            })
+        }
+        Ok(PreloadSettings {
+            google_drive: policy(&self.google_drive)?,
+            onedrive: policy(&self.onedrive)?,
+            box_provider: policy(&self.box_provider)?,
+            smb: policy(&self.smb)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ConnectionDraft {
     id: Option<ConnectionId>,
@@ -108,6 +210,8 @@ struct ConnectionDraft {
     access_mode: AccessMode,
     remote_reference: String,
     remote_subpath: String,
+    google_client_id: String,
+    google_client_secret: String,
     smb_host: String,
     smb_user: String,
     smb_domain: String,
@@ -121,6 +225,10 @@ struct ConnectionDraft {
     recovery_directory: String,
     vpn_profile_id: Option<VpnProfileId>,
     disconnect_vpn_when_unused: bool,
+    smb_preload_use_global: bool,
+    smb_preload_enabled: bool,
+    smb_preload_seconds: String,
+    smb_preload_depth: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +259,8 @@ impl Default for ConnectionDraft {
             access_mode: AccessMode::OnlineMount,
             remote_reference: String::new(),
             remote_subpath: String::new(),
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
             smb_host: String::new(),
             smb_user: std::env::var("USER").unwrap_or_default(),
             smb_domain: "WORKGROUP".into(),
@@ -164,6 +274,10 @@ impl Default for ConnectionDraft {
             recovery_directory: String::new(),
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
+            smb_preload_use_global: true,
+            smb_preload_enabled: true,
+            smb_preload_seconds: "60".into(),
+            smb_preload_depth: "3".into(),
         }
     }
 }
@@ -194,11 +308,19 @@ pub struct AppModel {
     sleep_status: Option<String>,
     sleep_notice: Option<String>,
     sleep_settings_pending: bool,
+    preload_notice: Option<String>,
+    preload_settings_pending: bool,
     runtime_owner: bool,
     runtime_available: bool,
     runtime_pending: bool,
     runtime_poll_pending: bool,
+    runtime_poll_obsolete: bool,
     runtime_error: Option<String>,
+    rclone_refresh_starting: BTreeSet<ConnectionId>,
+    rclone_refresh_jobs: BTreeMap<ConnectionId, u64>,
+    preload_draft: PreloadSettingsDraft,
+    preload_input_dirty: bool,
+    directory_preload_jobs: BTreeMap<ConnectionId, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,17 +334,38 @@ pub enum Message {
     EditorNotified(Result<runtime_ipc::Status, String>),
     UnmountBeforeSleep(bool),
     RestoreAfterWake(bool),
+    PreloadEnabled(PreloadProvider, bool),
+    PreloadSecondsInput(PreloadProvider, String),
+    PreloadDepthInput(PreloadProvider, String),
+    SavePreloadSettings,
     SleepEvent(cosmic_ext_applet_mounter::sleep::Event),
     OpenAddConnection,
     OpenModifyConnection(ConnectionId),
     PopupClosed(Id),
     OperationRequested(ConnectionId, Operation),
     OperationCompleted(String),
+    ManagedOnlineOperationCompleted(Connection, Operation, Result<(), String>),
+    RcloneRefreshStarted(String, ConnectionId, Result<RcloneRefreshJob, String>),
+    RcloneRefreshCompleted(
+        String,
+        ConnectionId,
+        u64,
+        Result<RcloneRefreshOutcome, String>,
+    ),
+    DirectoryPreloadStarted(String, Result<DirectoryPreloadJob, String>),
+    DirectoryPreloadCompleted(
+        String,
+        ConnectionId,
+        u64,
+        Result<DirectoryPreloadOutcome, String>,
+    ),
     DraftProvider(Provider),
     DraftAccessMode(AccessMode),
     DraftName(String),
     DraftRemote(String),
     DraftSubpath(String),
+    DraftGoogleClientId(String),
+    DraftGoogleClientSecret(String),
     DraftSmbHost(String),
     DraftSmbUser(String),
     DraftSmbDomain(String),
@@ -236,13 +379,17 @@ pub enum Message {
     DraftEnabled(bool),
     DraftStartAtLogin(bool),
     DraftSyncOnMetered(bool),
+    DraftSmbPreloadUseGlobal(bool),
+    DraftSmbPreloadEnabled(bool),
+    DraftSmbPreloadSeconds(String),
+    DraftSmbPreloadDepth(String),
     DraftVpn(Option<VpnProfileId>),
     DraftDisconnectVpn(bool),
     DraftOneDriveAuthResponse(String),
     DetectVpns,
     DetectRcloneRemotes,
-    CreateGoogleDriveRcloneRemote,
-    GoogleDriveRcloneRemoteCreated(Result<String, String>),
+    ApplyGoogleDriveRcloneRemote,
+    GoogleDriveRcloneRemoteApplied(Result<GoogleDriveRemoteApplyResult, String>),
     CreateBoxRcloneRemote,
     BoxRcloneRemoteCreated(Result<String, String>),
     CreateSmbRcloneRemote,
@@ -286,6 +433,7 @@ impl cosmic::Application for AppModel {
 
     fn init(core: cosmic::Core, flags: Self::Flags) -> (Self, Task<cosmic::Action<Self::Message>>) {
         let config = Config::load_runtime().config;
+        let preload_draft = config.document.preload.into();
         let main_window_id = core.main_window_id();
         let standalone = flags != AppLaunchMode::Applet;
         let window_mode = match flags {
@@ -320,11 +468,19 @@ impl cosmic::Application for AppModel {
             sleep_status: None,
             sleep_notice: None,
             sleep_settings_pending: false,
+            preload_notice: None,
+            preload_settings_pending: false,
             runtime_owner: false,
             runtime_available: false,
             runtime_pending: false,
             runtime_poll_pending: false,
+            runtime_poll_obsolete: false,
             runtime_error: None,
+            rclone_refresh_starting: BTreeSet::new(),
+            rclone_refresh_jobs: BTreeMap::new(),
+            preload_draft,
+            preload_input_dirty: false,
+            directory_preload_jobs: BTreeMap::new(),
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
@@ -412,6 +568,17 @@ impl cosmic::Application for AppModel {
             }
             Message::RuntimeEvent(runtime_ipc::Event::Ready) => {
                 self.runtime_owner = !self.standalone;
+                self.runtime_error = None;
+                if self.runtime_owner {
+                    return Task::batch([
+                        self.start_refresh_for_active_google_mounts(),
+                        self.start_preload_for_active_directory_mounts(),
+                    ]);
+                }
+            }
+            Message::RuntimeEvent(runtime_ipc::Event::ClientReady) => {
+                self.runtime_owner = false;
+                self.runtime_error = None;
             }
             Message::RuntimeEvent(runtime_ipc::Event::Activate) => {
                 if let Some(id) = self.core.main_window_id() {
@@ -471,9 +638,15 @@ impl cosmic::Application for AppModel {
             Message::RuntimeResult(command, result) => {
                 if command == RuntimeCommand::Status {
                     self.runtime_poll_pending = false;
+                    // A user action may have completed since this poll started.
+                    // Discard the entire stale reply, including availability/errors.
+                    if std::mem::take(&mut self.runtime_poll_obsolete) {
+                        return Task::none();
+                    }
                 } else {
                     self.runtime_pending = false;
                     self.sleep_settings_pending = false;
+                    self.preload_settings_pending = false;
                 }
                 match result {
                     Ok(status) => {
@@ -483,11 +656,20 @@ impl cosmic::Application for AppModel {
                         if !self.runtime_pending {
                             self.config.document.unmount_before_sleep = status.unmount_before_sleep;
                             self.config.document.restore_after_wake = status.restore_after_wake;
+                            self.config.document.preload = status.preload;
+                            if !self.preload_input_dirty {
+                                self.preload_draft = status.preload.into();
+                            }
                             self.sleep_status = status.sleep_status;
                         }
                         match command {
                             RuntimeCommand::SetUnmount(_) | RuntimeCommand::SetRestore(_) => {
                                 self.sleep_notice = Some("Setting saved.".into());
+                            }
+                            RuntimeCommand::SetPreload(value) => {
+                                self.preload_input_dirty = false;
+                                self.preload_draft = value.into();
+                                self.preload_notice = Some("Preload settings saved.".into());
                             }
                             RuntimeCommand::Refresh => {
                                 self.last_notice =
@@ -501,6 +683,9 @@ impl cosmic::Application for AppModel {
                         match command {
                             RuntimeCommand::SetUnmount(_) | RuntimeCommand::SetRestore(_) => {
                                 self.sleep_notice = Some(error);
+                            }
+                            RuntimeCommand::SetPreload(_) => {
+                                self.preload_notice = Some(error);
                             }
                             RuntimeCommand::Status => self.runtime_error = Some(error),
                             _ => self.last_notice = Some(error),
@@ -518,16 +703,51 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::UnmountBeforeSleep(value) => {
+                self.runtime_poll_obsolete = self.runtime_poll_pending;
                 self.runtime_pending = true;
                 self.sleep_settings_pending = true;
                 self.sleep_notice = None;
                 return runtime_request_task(RuntimeCommand::SetUnmount(value));
             }
             Message::RestoreAfterWake(value) => {
+                self.runtime_poll_obsolete = self.runtime_poll_pending;
                 self.runtime_pending = true;
                 self.sleep_settings_pending = true;
                 self.sleep_notice = None;
                 return runtime_request_task(RuntimeCommand::SetRestore(value));
+            }
+            Message::PreloadEnabled(provider, value) => {
+                self.preload_draft.policy_mut(provider).enabled = value;
+                self.preload_input_dirty = true;
+                self.preload_notice = None;
+            }
+            Message::PreloadSecondsInput(provider, value) => {
+                if value.len() <= 3 && value.chars().all(|character| character.is_ascii_digit()) {
+                    self.preload_draft.policy_mut(provider).maximum_seconds = value;
+                    self.preload_input_dirty = true;
+                    self.preload_notice = None;
+                }
+            }
+            Message::PreloadDepthInput(provider, value) => {
+                if value.len() <= 2 && value.chars().all(|character| character.is_ascii_digit()) {
+                    self.preload_draft.policy_mut(provider).maximum_depth = Some(value);
+                    self.preload_input_dirty = true;
+                    self.preload_notice = None;
+                }
+            }
+            Message::SavePreloadSettings => {
+                let value = match self.preload_draft.validated() {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.preload_notice = Some(error);
+                        return Task::none();
+                    }
+                };
+                self.runtime_poll_obsolete = self.runtime_poll_pending;
+                self.runtime_pending = true;
+                self.preload_settings_pending = true;
+                self.preload_notice = None;
+                return runtime_request_task(RuntimeCommand::SetPreload(value));
             }
             Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status(status)) => {
                 self.sleep_status = Some(status);
@@ -551,8 +771,17 @@ impl cosmic::Application for AppModel {
                         .collect::<Vec<_>>();
                     return Task::batch(connections.into_iter().map(|connection| {
                         Task::perform(
-                            async move { restore_online_after_wake(connection).await },
-                            |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                            async move {
+                                let result = restore_online_after_wake_result(&connection).await;
+                                (connection, result)
+                            },
+                            |(connection, result)| {
+                                cosmic::Action::App(Message::ManagedOnlineOperationCompleted(
+                                    connection,
+                                    Operation::Mount,
+                                    result,
+                                ))
+                            },
                         )
                     }));
                 }
@@ -628,6 +857,227 @@ impl cosmic::Application for AppModel {
                 self.last_notice = Some(notice);
                 self.last_notice_at = Some(Instant::now());
             }
+            Message::ManagedOnlineOperationCompleted(connection, operation, result) => {
+                self.config = Config::load_runtime().config;
+                self.pending_repair = None;
+                let label = operation_label(operation);
+                match result {
+                    Ok(()) => {
+                        self.last_notice =
+                            Some(format!("{label} completed for {}.", connection.name));
+                        self.last_notice_at = Some(Instant::now());
+                        if operation == Operation::Mount
+                            && connection.provider == Provider::GoogleDrive
+                            && self.config.document.preload.google_drive.enabled
+                        {
+                            let plan = match rclone_mount_plan(
+                                &connection,
+                                &default_runtime_root(),
+                                &default_cache_root(),
+                            ) {
+                                Ok(plan) => plan,
+                                Err(error) => {
+                                    self.last_notice = Some(format!(
+                                        "Mount completed for {}, but directory refresh planning failed: {error}",
+                                        connection.name
+                                    ));
+                                    return Task::none();
+                                }
+                            };
+                            let name = connection.name.clone();
+                            let connection_id = connection.id;
+                            let timeout = Duration::from_secs(
+                                self.config.document.preload.google_drive.maximum_seconds,
+                            );
+                            self.rclone_refresh_starting.insert(connection_id);
+                            self.last_notice = Some(format!(
+                                "Mount completed for {name}. Starting background directory refresh…"
+                            ));
+                            return Task::perform(
+                                async move {
+                                    rclone_refresh::start(
+                                        connection.id,
+                                        plan.rc_socket,
+                                        connection.local_path,
+                                        timeout,
+                                    )
+                                    .await
+                                },
+                                move |result| {
+                                    cosmic::Action::App(Message::RcloneRefreshStarted(
+                                        name.clone(),
+                                        connection_id,
+                                        result,
+                                    ))
+                                },
+                            );
+                        }
+                        let preload_policy = self.config.document.preload_policy_for(&connection);
+                        if operation == Operation::Mount
+                            && matches!(
+                                connection.provider,
+                                Provider::OneDrive | Provider::Box | Provider::Smb
+                            )
+                            && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                            && preload_policy.enabled
+                        {
+                            let name = connection.name.clone();
+                            let timeout = Duration::from_secs(preload_policy.maximum_seconds);
+                            let maximum_depth = preload_policy.maximum_depth;
+                            let wait_for_root =
+                                matches!(connection.provider, Provider::Box | Provider::Smb);
+                            let connection_id = connection.id;
+                            let mountpoint = connection.local_path.clone();
+                            self.last_notice = Some(format!(
+                                "Mount completed for {name}. Starting background directory preload…"
+                            ));
+                            return Task::perform(
+                                async move {
+                                    directory_preload::start(
+                                        connection_id,
+                                        mountpoint,
+                                        timeout,
+                                        maximum_depth,
+                                        wait_for_root,
+                                    )
+                                },
+                                move |result| {
+                                    cosmic::Action::App(Message::DirectoryPreloadStarted(
+                                        name.clone(),
+                                        result,
+                                    ))
+                                },
+                            );
+                        }
+                        if operation == Operation::Unmount {
+                            self.rclone_refresh_starting.remove(&connection.id);
+                            self.rclone_refresh_jobs.remove(&connection.id);
+                            self.directory_preload_jobs.remove(&connection.id);
+                        }
+                    }
+                    Err(error) => {
+                        self.last_notice =
+                            Some(format!("{label} failed for {}: {error}", connection.name));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                }
+            }
+            Message::RcloneRefreshStarted(name, connection_id, result) => {
+                self.rclone_refresh_starting.remove(&connection_id);
+                match result {
+                    Ok(job) => {
+                        self.rclone_refresh_jobs
+                            .insert(job.connection_id, job.job_id);
+                        self.last_notice = Some(format!(
+                            "{name} is mounted. Background directory refresh job {} is running.",
+                            job.job_id
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                        let connection_id = job.connection_id;
+                        let job_id = job.job_id;
+                        return Task::perform(
+                            async move { rclone_refresh::monitor(job).await },
+                            move |result| {
+                                cosmic::Action::App(Message::RcloneRefreshCompleted(
+                                    name.clone(),
+                                    connection_id,
+                                    job_id,
+                                    result,
+                                ))
+                            },
+                        );
+                    }
+                    Err(error) if error.contains("canceled") => {}
+                    Err(error) => {
+                        self.last_notice = Some(format!(
+                            "{name} is mounted, but its background directory refresh could not start: {error}"
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                }
+            }
+            Message::RcloneRefreshCompleted(name, connection_id, job_id, result) => {
+                if self.rclone_refresh_jobs.get(&connection_id) != Some(&job_id) {
+                    return Task::none();
+                }
+                self.rclone_refresh_jobs.remove(&connection_id);
+                match result {
+                    Ok(RcloneRefreshOutcome::Completed { duration_seconds }) => {
+                        self.last_notice = Some(format!(
+                            "Background directory refresh completed for {name} in {duration_seconds:.1} seconds."
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                    Ok(RcloneRefreshOutcome::TimedOut { duration_seconds }) => {
+                        self.last_notice = Some(format!(
+                            "Background directory refresh for {name} stopped after its {duration_seconds:.0}-second limit."
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                    Ok(RcloneRefreshOutcome::Cancelled) => {}
+                    Err(error) => {
+                        self.last_notice = Some(format!(
+                            "Background directory refresh failed for {name}: {error}"
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                }
+            }
+            Message::DirectoryPreloadStarted(name, result) => match result {
+                Ok(job) => {
+                    let connection_id = job.connection_id;
+                    let generation = job.generation;
+                    self.directory_preload_jobs
+                        .insert(connection_id, generation);
+                    self.last_notice = Some(format!(
+                        "{name} is mounted. Background directory preload is running."
+                    ));
+                    self.last_notice_at = Some(Instant::now());
+                    return Task::perform(
+                        async move { directory_preload::monitor(job).await },
+                        move |result| {
+                            cosmic::Action::App(Message::DirectoryPreloadCompleted(
+                                name.clone(),
+                                connection_id,
+                                generation,
+                                result,
+                            ))
+                        },
+                    );
+                }
+                Err(error) => {
+                    self.last_notice = Some(format!(
+                        "{name} is mounted, but its directory preload could not start: {error}"
+                    ));
+                    self.last_notice_at = Some(Instant::now());
+                }
+            },
+            Message::DirectoryPreloadCompleted(name, connection_id, generation, result) => {
+                if self.directory_preload_jobs.get(&connection_id) != Some(&generation) {
+                    return Task::none();
+                }
+                self.directory_preload_jobs.remove(&connection_id);
+                match result {
+                    Ok(DirectoryPreloadOutcome::Completed { duration_seconds }) => {
+                        self.last_notice = Some(format!(
+                            "Directory preload completed for {name} in {duration_seconds:.1} seconds."
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                    Ok(DirectoryPreloadOutcome::TimedOut { duration_seconds }) => {
+                        self.last_notice = Some(format!(
+                            "Directory preload for {name} stopped after its {duration_seconds:.0}-second limit. You can continue browsing normally."
+                        ));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                    Ok(DirectoryPreloadOutcome::Cancelled) => {}
+                    Err(error) => {
+                        self.last_notice =
+                            Some(format!("Directory preload failed for {name}: {error}"));
+                        self.last_notice_at = Some(Instant::now());
+                    }
+                }
+            }
             Message::DraftProvider(provider) => {
                 if matches!(self.window_mode, WindowMode::ModifyConnection(_)) {
                     self.last_notice = Some(
@@ -642,6 +1092,10 @@ impl cosmic::Application for AppModel {
                 self.draft.provider = provider;
                 if provider != Provider::Smb {
                     self.draft.smb_password.clear();
+                }
+                if provider != Provider::GoogleDrive {
+                    self.draft.google_client_id.clear();
+                    self.draft.google_client_secret.clear();
                 }
                 if provider == Provider::OneDrive {
                     self.draft.remote_reference = "onedrive".into();
@@ -674,6 +1128,14 @@ impl cosmic::Application for AppModel {
                 self.pending_shared_remote_ack = None;
                 self.validated_draft = None;
                 self.draft.remote_subpath = value;
+            }
+            Message::DraftGoogleClientId(value) => {
+                self.validated_draft = None;
+                self.draft.google_client_id = value;
+            }
+            Message::DraftGoogleClientSecret(value) => {
+                self.validated_draft = None;
+                self.draft.google_client_secret = value;
             }
             Message::DraftSmbHost(value) => {
                 self.validated_draft = None;
@@ -742,6 +1204,26 @@ impl cosmic::Application for AppModel {
                 self.validated_draft = None;
                 self.draft.sync_on_metered = value;
             }
+            Message::DraftSmbPreloadUseGlobal(value) => {
+                self.validated_draft = None;
+                self.draft.smb_preload_use_global = value;
+            }
+            Message::DraftSmbPreloadEnabled(value) => {
+                self.validated_draft = None;
+                self.draft.smb_preload_enabled = value;
+            }
+            Message::DraftSmbPreloadSeconds(value) => {
+                if value.len() <= 3 && value.chars().all(|c| c.is_ascii_digit()) {
+                    self.validated_draft = None;
+                    self.draft.smb_preload_seconds = value;
+                }
+            }
+            Message::DraftSmbPreloadDepth(value) => {
+                if value.len() <= 2 && value.chars().all(|c| c.is_ascii_digit()) {
+                    self.validated_draft = None;
+                    self.draft.smb_preload_depth = value;
+                }
+            }
             Message::DraftVpn(id) => {
                 self.validated_draft = None;
                 self.draft.vpn_profile_id = id;
@@ -759,24 +1241,35 @@ impl cosmic::Application for AppModel {
             Message::DetectRcloneRemotes => {
                 self.detect_rclone_remotes();
             }
-            Message::CreateGoogleDriveRcloneRemote => {
-                return self.create_google_drive_rclone_remote();
+            Message::ApplyGoogleDriveRcloneRemote => {
+                return self.apply_google_drive_rclone_remote();
             }
-            Message::GoogleDriveRcloneRemoteCreated(result) => match result {
-                Ok(remote_name) => {
-                    self.validated_draft = None;
-                    self.draft.remote_reference = remote_name.clone();
-                    self.detect_rclone_remotes();
-                    self.last_notice = Some(format!(
-                        "Created Google Drive rclone remote `{remote_name}`. It is selected; run Test Connection to verify access."
-                    ));
+            Message::GoogleDriveRcloneRemoteApplied(result) => {
+                self.draft.google_client_id.clear();
+                self.draft.google_client_secret.clear();
+                match result {
+                    Ok(result) => {
+                        self.validated_draft = None;
+                        self.draft.remote_reference = result.remote_name.clone();
+                        self.detect_rclone_remotes();
+                        let action = if result.updated { "Updated" } else { "Created" };
+                        let remount = if result.updated {
+                            " Remount active connections that use this remote."
+                        } else {
+                            ""
+                        };
+                        self.last_notice = Some(format!(
+                            "{action} Google Drive rclone remote `{}` with browser OAuth. The credential fields were cleared.{remount} Run Test Connection to verify access.",
+                            result.remote_name
+                        ));
+                    }
+                    Err(error) => {
+                        self.last_notice = Some(format!(
+                            "Could not create or update Google Drive rclone remote: {error}. The credential fields were cleared."
+                        ));
+                    }
                 }
-                Err(error) => {
-                    self.last_notice = Some(format!(
-                        "Could not create Google Drive rclone remote: {error}"
-                    ));
-                }
-            },
+            }
             Message::CreateBoxRcloneRemote => {
                 return self.create_box_rclone_remote();
             }
@@ -938,6 +1431,7 @@ impl cosmic::Application for AppModel {
                 return notify_runtime_task();
             }
             Message::Refresh => {
+                self.runtime_poll_obsolete = self.runtime_poll_pending;
                 self.runtime_pending = true;
                 return runtime_request_task(RuntimeCommand::Refresh);
             }
@@ -974,6 +1468,7 @@ impl AppModel {
         runtime_ipc::Status {
             unmount_before_sleep: self.config.document.unmount_before_sleep,
             restore_after_wake: self.config.document.restore_after_wake,
+            preload: self.config.document.preload,
             sleep_status: self.sleep_status.clone(),
         }
     }
@@ -987,7 +1482,7 @@ impl AppModel {
         }
         self.config = load_runtime_config()?;
         let storage = AppConfigStorage::runtime()?;
-        save_sleep_preference(&mut self.config, &storage, command)?;
+        save_runtime_preference(&mut self.config, &storage, command)?;
         if let RuntimeCommand::SetUnmount(value) = command {
             self.sleep_status = value.then(|| "Starting sleep listener…".into());
         }
@@ -995,7 +1490,7 @@ impl AppModel {
     }
 
     fn view_general_settings(&self) -> Element<'_, Message> {
-        let enabled = self.runtime_available && !self.runtime_pending && !self.runtime_poll_pending;
+        let enabled = self.runtime_available && !self.runtime_pending;
         let actions = widget::Row::new().spacing(8)
             .push(field_with_help(
                 widget::button::suggested(fl!("add-connection")).on_press(Message::OpenAddConnection),
@@ -1003,7 +1498,7 @@ impl AppModel {
             ))
             .push(field_with_help(
                 widget::button::standard(fl!("refresh"))
-                    .on_press_maybe((!self.runtime_pending && !self.runtime_poll_pending).then_some(Message::Refresh)),
+                    .on_press_maybe((!self.runtime_pending).then_some(Message::Refresh)),
                 "Reload saved connections and refresh VPN status in the running applet. Existing operations continue.",
             ));
         let mut action_section = widget::Column::new().spacing(8).push(actions);
@@ -1025,12 +1520,14 @@ impl AppModel {
             .push(field_with_help(
                 widget::toggler(self.config.document.unmount_before_sleep)
                     .label("Unmount when sleep".to_string())
+                    .spacing(8)
                     .on_toggle_maybe(enabled.then_some(Message::UnmountBeforeSleep)),
                 "Cleanly unmount applet-managed Online connections before system sleep. Offline mirrors and synchronization remain untouched. Busy mounts may outlast the system’s sleep delay; caches are preserved.",
             ))
             .push(field_with_help(
                 widget::toggler(self.config.document.restore_after_wake)
                     .label("Restore after wake up".to_string())
+                    .spacing(8)
                     .on_toggle_maybe((enabled && self.config.document.unmount_before_sleep).then_some(Message::RestoreAfterWake)),
                 "Restore only previously active, still-enabled Online connections after network and VPN readiness checks pass. Enable Unmount when sleep first; the saved restore preference is retained while disabled.",
             ))
@@ -1044,17 +1541,52 @@ impl AppModel {
         if let Some(status) = &self.sleep_status {
             sleep_section = sleep_section.push(widget::text::body(status.clone()));
         }
+        let preload_save = widget::button::standard("Save preload settings").on_press_maybe(
+            (enabled && self.preload_input_dirty).then_some(Message::SavePreloadSettings),
+        );
+        let mut preload_section = widget::Column::new()
+            .spacing(8)
+            .push(widget::text::title4("Directory preload"))
+            .push(preload_policy_row(
+                "Google Drive",
+                PreloadProvider::GoogleDrive,
+                &self.preload_draft.google_drive,
+            ))
+            .push(preload_policy_row(
+                "OneDrive",
+                PreloadProvider::OneDrive,
+                &self.preload_draft.onedrive,
+            ))
+            .push(preload_policy_row(
+                "Box",
+                PreloadProvider::Box,
+                &self.preload_draft.box_provider,
+            ))
+            .push(preload_policy_row(
+                "SMB",
+                PreloadProvider::Smb,
+                &self.preload_draft.smb,
+            ))
+            .push(preload_save);
+        if self.preload_settings_pending {
+            preload_section = preload_section.push(widget::text::body("Saving preload time…"));
+        }
+        if let Some(notice) = &self.preload_notice {
+            preload_section = preload_section.push(widget::text::body(notice.clone()));
+        }
         let content = widget::Column::new()
             .spacing(16)
             .push(action_section)
-            .push(sleep_section);
-        // Match the themed surface used by the popup and Add/Modify list content.
-        widget::container(widget::scrollable(content))
-            .padding(24)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .class(cosmic::style::Container::List)
-            .into()
+            .push(sleep_section)
+            .push(preload_section);
+        // Keep the scrollbar at the window edge while padding only its content.
+        widget::container(widget::scrollable(
+            widget::container(content).padding(24).width(Length::Fill),
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .class(cosmic::style::Container::List)
+        .into()
     }
 
     fn view_popup(&self) -> Element<'_, Message> {
@@ -1073,20 +1605,21 @@ impl AppModel {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(widget::container(widget::text::title4(fl!("app-title"))).width(Length::Fill))
-                    .push(
+                    .push(field_with_help_at(
                         widget::button::icon(widget::icon::from_svg_bytes(include_bytes!(
                             "../resources/settings-symbolic.svg"
                         )).symbolic(true))
                         .name("Settings")
-                        .tooltip("Open Settings to add connections, refresh the applet, and configure sleep behavior.")
                         .on_press(Message::OpenGeneralSettings),
-                    ),
+                        "Open Settings to add connections, refresh the applet, and configure sleep and directory preload behavior.",
+                        widget::tooltip::Position::Bottom,
+                    )),
             )
             .add(widget::text::body(format!(
                 "{}\n{}\n{}",
                 aggregate_label(&state.aggregate),
                 notification_status,
-                self.vpn_summary(&state.rows, &snapshot.vpn_ready, self.vpn_status_pending)
+                self.vpn_summary(&snapshot.vpn_ready, self.vpn_status_pending)
             )));
 
         let mut rows = widget::list_column().style(cosmic::style::Container::Transparent);
@@ -1344,9 +1877,8 @@ impl AppModel {
             ));
 
         content = match self.draft.access_mode {
-            AccessMode::OnlineMount => content.add(section_row(
-                "Online mount settings",
-                widget::Column::new()
+            AccessMode::OnlineMount => {
+                let mut online_settings = widget::Column::new()
                     .spacing(8)
                     .push(field_with_help(
                         toggle_button(
@@ -1363,8 +1895,49 @@ impl AppModel {
                         )
                         .on_input(Message::DraftCacheLimit),
                         "Maximum rclone VFS cache size. The approved default is 20 GiB.",
-                    )),
-            )),
+                    ));
+                if self.draft.provider == Provider::Smb {
+                    online_settings = online_settings.push(field_with_help(
+                        toggle_button(
+                            "Use global SMB preload settings",
+                            self.draft.smb_preload_use_global,
+                            Message::DraftSmbPreloadUseGlobal,
+                        ),
+                        "Use the SMB preload policy from Cloud Mounter Settings for this connection.",
+                    ));
+                    if !self.draft.smb_preload_use_global {
+                        online_settings = online_settings
+                            .push(toggle_button(
+                                "Preload directories after mount",
+                                self.draft.smb_preload_enabled,
+                                Message::DraftSmbPreloadEnabled,
+                            ))
+                            .push(
+                                widget::Row::new()
+                                    .spacing(8)
+                                    .push(
+                                        widget::text_input::text_input(
+                                            "60",
+                                            &self.draft.smb_preload_seconds,
+                                        )
+                                        .on_input(Message::DraftSmbPreloadSeconds)
+                                        .width(Length::Fixed(80.0)),
+                                    )
+                                    .push(widget::text::body("seconds"))
+                                    .push(
+                                        widget::text_input::text_input(
+                                            "3",
+                                            &self.draft.smb_preload_depth,
+                                        )
+                                        .on_input(Message::DraftSmbPreloadDepth)
+                                        .width(Length::Fixed(60.0)),
+                                    )
+                                    .push(widget::text::body("levels")),
+                            );
+                    }
+                }
+                content.add(section_row("Online mount settings", online_settings))
+            }
             AccessMode::OfflineMirror => content.add(section_row(
                 "Offline mirror settings",
                 widget::Column::new()
@@ -1475,6 +2048,13 @@ impl AppModel {
                         widget::button::standard("Update SMB Remote")
                             .on_press(Message::CreateSmbRcloneRemote),
                         "Update the selected rclone SMB remote. Enter a password to rotate it without saving the password in applet configuration; host, username, and domain are optional for existing remotes.",
+                    ));
+                }
+                if self.draft.provider == Provider::GoogleDrive {
+                    modify_row = modify_row.push(field_with_help(
+                        widget::button::standard("Update Google OAuth Client")
+                            .on_press(Message::ApplyGoogleDriveRcloneRemote),
+                        "Explicitly replace this rclone remote's Google OAuth client ID and secret and authorize it again in the browser. Both fields are required. Remount active connections afterward.",
                     ));
                 }
                 if self.saved_connection_is_offline_mirror(connection_id) {
@@ -1594,8 +2174,8 @@ impl AppModel {
         match self.draft.provider {
             Provider::GoogleDrive => field_with_help(
                 widget::button::suggested("Create Google Drive Remote")
-                    .on_press(Message::CreateGoogleDriveRcloneRemote),
-                "Create the rclone Google Drive remote with full-drive scope and local browser OAuth. Complete the browser authorization window, then run Test Connection. Credentials and refresh tokens stay in rclone config, not applet configuration.",
+                    .on_press(Message::ApplyGoogleDriveRcloneRemote),
+                "Create the rclone Google Drive remote with full-drive scope and local browser OAuth. A custom client ID requires its matching client secret. Complete browser authorization, then run Test Connection. OAuth values stay in rclone config, not applet configuration.",
             ),
             Provider::Box => field_with_help(
                 widget::button::suggested("Create Box Remote")
@@ -1790,6 +2370,8 @@ impl AppModel {
 
         if provider == Provider::Smb {
             column = column.push(self.view_smb_remote_setup_fields());
+        } else if provider == Provider::GoogleDrive {
+            column = column.push(self.view_google_drive_remote_setup_fields());
         }
 
         column
@@ -1800,6 +2382,30 @@ impl AppModel {
                 )
                 .on_input(Message::DraftSubpath),
                 "Leave empty for the whole rclone remote, or enter an existing folder/subtree to limit this connection.",
+            ))
+            .into()
+    }
+
+    fn view_google_drive_remote_setup_fields(&self) -> Element<'_, Message> {
+        widget::Column::new()
+            .spacing(8)
+            .push(field_with_help(
+                widget::text_input::text_input(
+                    "Google OAuth client ID",
+                    &self.draft.google_client_id,
+                )
+                .on_input(Message::DraftGoogleClientId),
+                "Use the OAuth client ID from a Google Cloud Desktop app with the Google Drive API enabled. Rclone says a private client is required to avoid interruption during its 2026 shared-client retirement. Leaving both OAuth fields blank attempts the shared client only for compatibility.",
+            ))
+            .push(field_with_safety_help(
+                widget::text_input::text_input(
+                    "Google OAuth client secret",
+                    &self.draft.google_client_secret,
+                )
+                .password()
+                .on_input(Message::DraftGoogleClientSecret),
+                "The applet does not save this value in its configuration or logs.",
+                "Enter the secret issued with the client ID. Client ID and secret must be supplied together. The value is passed directly to rclone and cleared from this form after the operation.",
             ))
             .into()
     }
@@ -2009,8 +2615,16 @@ impl AppModel {
             {
                 self.last_notice = Some(format!("{label} requested for {}...", connection.name));
                 Task::perform(
-                    async move { run_managed_online_mount_operation(connection, operation).await },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    async move {
+                        let result =
+                            run_managed_online_mount_operation_result(&connection, operation).await;
+                        (connection, result)
+                    },
+                    move |(connection, result)| {
+                        cosmic::Action::App(Message::ManagedOnlineOperationCompleted(
+                            connection, operation, result,
+                        ))
+                    },
                 )
             }
             (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount)
@@ -2019,9 +2633,18 @@ impl AppModel {
                 self.last_notice = Some(format!("{label} requested for {}...", connection.name));
                 Task::perform(
                     async move {
-                        run_managed_onedriver_online_mount_operation(connection, operation).await
+                        let result = run_managed_onedriver_online_mount_operation_result(
+                            &connection,
+                            operation,
+                        )
+                        .await;
+                        (connection, result)
                     },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    move |(connection, result)| {
+                        cosmic::Action::App(Message::ManagedOnlineOperationCompleted(
+                            connection, operation, result,
+                        ))
+                    },
                 )
             }
             (ConnectionMode::OnlineMount(_), Operation::Repair) => {
@@ -2070,6 +2693,106 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+
+    fn start_refresh_for_active_google_mounts(&mut self) -> Task<cosmic::Action<Message>> {
+        let mounts = ProcMountTable::default().entries().unwrap_or_default();
+        if !self.config.document.preload.google_drive.enabled {
+            return Task::none();
+        }
+        let timeout =
+            Duration::from_secs(self.config.document.preload.google_drive.maximum_seconds);
+        let connections = self
+            .config
+            .document
+            .connections
+            .iter()
+            .filter(|connection| {
+                connection.enabled
+                    && connection.provider == Provider::GoogleDrive
+                    && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                    && !self.rclone_refresh_starting.contains(&connection.id)
+                    && !self.rclone_refresh_jobs.contains_key(&connection.id)
+                    && mounts.iter().any(|mount| {
+                        mount.target == connection.local_path && mount.filesystem == "fuse.rclone"
+                    })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut tasks = Vec::new();
+        for connection in connections {
+            let Ok(plan) =
+                rclone_mount_plan(&connection, &default_runtime_root(), &default_cache_root())
+            else {
+                continue;
+            };
+            let name = connection.name.clone();
+            let connection_id = connection.id;
+            self.rclone_refresh_starting.insert(connection_id);
+            tasks.push(Task::perform(
+                async move {
+                    rclone_refresh::start(
+                        connection_id,
+                        plan.rc_socket,
+                        connection.local_path,
+                        timeout,
+                    )
+                    .await
+                },
+                move |result| {
+                    cosmic::Action::App(Message::RcloneRefreshStarted(
+                        name.clone(),
+                        connection_id,
+                        result,
+                    ))
+                },
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    fn start_preload_for_active_directory_mounts(&mut self) -> Task<cosmic::Action<Message>> {
+        let mounts = ProcMountTable::default().entries().unwrap_or_default();
+        let connections = self
+            .config
+            .document
+            .connections
+            .iter()
+            .filter(|connection| {
+                connection.enabled
+                    && matches!(
+                        connection.provider,
+                        Provider::OneDrive | Provider::Box | Provider::Smb
+                    )
+                    && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                    && self.config.document.preload_policy_for(connection).enabled
+                    && !self.directory_preload_jobs.contains_key(&connection.id)
+                    && mounts
+                        .iter()
+                        .any(|mount| mount.target == connection.local_path)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        Task::batch(connections.into_iter().map(|connection| {
+            let name = connection.name.clone();
+            let policy = self.config.document.preload_policy_for(&connection);
+            let timeout = Duration::from_secs(policy.maximum_seconds);
+            let wait_for_root = matches!(connection.provider, Provider::Box | Provider::Smb);
+            Task::perform(
+                async move {
+                    directory_preload::start(
+                        connection.id,
+                        connection.local_path,
+                        timeout,
+                        policy.maximum_depth,
+                        wait_for_root,
+                    )
+                },
+                move |result| {
+                    cosmic::Action::App(Message::DirectoryPreloadStarted(name.clone(), result))
+                },
+            )
+        }))
     }
 
     fn load_draft(&mut self, connection_id: ConnectionId) {
@@ -2512,7 +3235,7 @@ impl AppModel {
         )
     }
 
-    fn create_google_drive_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
+    fn apply_google_drive_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
         if self.draft.provider != Provider::GoogleDrive {
             self.last_notice = Some(
                 "Google Drive remote creation is only available for Google Drive connections."
@@ -2527,13 +3250,17 @@ impl AppModel {
                 return Task::none();
             }
         };
+        let action = match self.window_mode {
+            WindowMode::ModifyConnection(_) => GoogleDriveRemoteAction::Update,
+            _ => GoogleDriveRemoteAction::Create,
+        };
         self.last_notice = Some(format!(
-            "Starting Google Drive OAuth for rclone remote `{}`. Complete the browser authorization window; this can take a minute.",
+            "Starting Google Drive OAuth setup for rclone remote `{}`. Complete the browser authorization window; this can take a minute.",
             setup.name
         ));
         Task::perform(
-            async move { create_google_drive_rclone_remote_result(setup).await },
-            |result| cosmic::Action::App(Message::GoogleDriveRcloneRemoteCreated(result)),
+            async move { apply_google_drive_rclone_remote_result(setup, action).await },
+            |result| cosmic::Action::App(Message::GoogleDriveRcloneRemoteApplied(result)),
         )
     }
 
@@ -2915,18 +3642,10 @@ impl AppModel {
             .unwrap_or_else(|| profile_id.to_string())
     }
 
-    fn vpn_summary(
-        &self,
-        rows: &[ConnectionRowState],
-        vpn_ready: &BTreeMap<VpnProfileId, bool>,
-        pending: bool,
-    ) -> String {
-        let configured = rows
-            .iter()
-            .filter_map(|row| row.vpn_profile_id)
-            .collect::<BTreeSet<_>>();
+    fn vpn_summary(&self, vpn_ready: &BTreeMap<VpnProfileId, bool>, pending: bool) -> String {
+        let configured = vpn_ready.keys().copied().collect::<BTreeSet<_>>();
         if configured.is_empty() {
-            return "No VPN enabled".into();
+            return "No active connection uses VPN".into();
         }
         if pending {
             return "VPN status: checking".into();
@@ -3003,11 +3722,14 @@ fn runtime_offline_mirror_states(
 }
 
 async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfileId, bool> {
-    let referenced = config
+    let mounts = ProcMountTable::default().entries().unwrap_or_default();
+    let active_connection_ids = config
         .connections
         .iter()
-        .filter_map(|connection| connection.vpn_profile_id)
+        .filter(|connection| connection_appears_active(connection, &mounts))
+        .map(|connection| connection.id)
         .collect::<BTreeSet<_>>();
+    let referenced = referenced_active_vpn_profiles(&config.connections, &active_connection_ids);
     let profiles = config
         .vpn_profiles
         .iter()
@@ -3033,6 +3755,18 @@ async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfile
         ready.insert(profile.id, is_ready);
     }
     ready
+}
+
+fn referenced_active_vpn_profiles(
+    connections: &[Connection],
+    active_connection_ids: &BTreeSet<ConnectionId>,
+) -> BTreeSet<VpnProfileId> {
+    connections
+        .iter()
+        .filter(|connection| connection.enabled)
+        .filter(|connection| active_connection_ids.contains(&connection.id))
+        .filter_map(|connection| connection.vpn_profile_id)
+        .collect()
 }
 
 #[cfg(test)]
@@ -3208,7 +3942,7 @@ impl AppModel {
     }
 }
 
-fn save_sleep_preference(
+fn save_runtime_preference(
     config: &mut Config,
     storage: &AppConfigStorage,
     command: RuntimeCommand,
@@ -3217,6 +3951,7 @@ fn save_sleep_preference(
         .update_validated_with(storage, |document| match command {
             RuntimeCommand::SetUnmount(value) => document.unmount_before_sleep = value,
             RuntimeCommand::SetRestore(value) => document.restore_after_wake = value,
+            RuntimeCommand::SetPreload(value) => document.preload = value,
             _ => {}
         })
         .map(|_| ())
@@ -3414,6 +4149,7 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
             "WORKGROUP".into(),
         )
     };
+    let smb_override = connection.smb_preload_override;
     ConnectionDraft {
         id: Some(connection.id),
         name: connection.name.clone(),
@@ -3421,6 +4157,8 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         access_mode,
         remote_reference: connection.remote_reference.clone(),
         remote_subpath: connection.remote_subpath.clone().unwrap_or_default(),
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
         smb_host: String::new(),
         smb_user,
         smb_domain,
@@ -3434,6 +4172,14 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         recovery_directory,
         vpn_profile_id: connection.vpn_profile_id,
         disconnect_vpn_when_unused: connection.disconnect_vpn_when_unused,
+        smb_preload_use_global: smb_override.is_none(),
+        smb_preload_enabled: smb_override.is_none_or(|value| value.enabled),
+        smb_preload_seconds: smb_override
+            .map_or(60, |value| value.maximum_seconds)
+            .to_string(),
+        smb_preload_depth: smb_override
+            .map_or(3, |value| value.maximum_depth)
+            .to_string(),
     }
 }
 
@@ -3484,6 +4230,36 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
             })
         }
     };
+    let smb_preload_override = if draft.provider == Provider::Smb
+        && draft.access_mode == AccessMode::OnlineMount
+        && !draft.smb_preload_use_global
+    {
+        let maximum_seconds = draft.smb_preload_seconds.trim().parse::<u64>().map_err(|_| {
+            format!("SMB preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds.")
+        })?;
+        let maximum_depth = draft.smb_preload_depth.trim().parse::<u8>().map_err(|_| {
+            format!(
+                "SMB preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
+            )
+        })?;
+        if !(MIN_PRELOAD_SECONDS..=MAX_PRELOAD_SECONDS).contains(&maximum_seconds) {
+            return Err(format!(
+                "SMB preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds."
+            ));
+        }
+        if !(MIN_PRELOAD_DEPTH..=MAX_PRELOAD_DEPTH).contains(&maximum_depth) {
+            return Err(format!(
+                "SMB preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
+            ));
+        }
+        Some(SmbPreloadOverride {
+            enabled: draft.smb_preload_enabled,
+            maximum_seconds,
+            maximum_depth,
+        })
+    } else {
+        None
+    };
     Ok(Connection {
         id,
         name: name.into(),
@@ -3496,6 +4272,7 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
         vpn_profile_id: draft.vpn_profile_id,
         disconnect_vpn_when_unused: draft.disconnect_vpn_when_unused,
         tuning_profile: TuningProfile::Balanced,
+        smb_preload_override,
     })
 }
 
@@ -4040,6 +4817,73 @@ fn section_row_with_help<'a>(
     section_row(title, field_with_help(body, help))
 }
 
+fn preload_policy_row<'a>(
+    label: &'static str,
+    provider: PreloadProvider,
+    draft: &'a PreloadPolicyDraft,
+) -> Element<'a, Message> {
+    let provider_toggle = field_with_help(
+        widget::toggler(draft.enabled)
+            .label(label.to_string())
+            .spacing(8)
+            .on_toggle(move |value| Message::PreloadEnabled(provider, value)),
+        preload_provider_help(provider),
+    );
+    let duration = field_with_help(
+        widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(
+                widget::text_input::text_input("60", &draft.maximum_seconds)
+                    .on_input(move |value| Message::PreloadSecondsInput(provider, value))
+                    .width(Length::Fixed(80.0)),
+            )
+            .push(widget::text::body("seconds")),
+        "Maximum duration of the background preload task: 5–600 seconds. Browsing remains available while the preload runs and after it stops.",
+    );
+    let mut row = widget::Row::new()
+        .spacing(16)
+        .align_y(Alignment::Center)
+        .push(provider_toggle)
+        .push(duration);
+    if let Some(depth) = &draft.maximum_depth {
+        row = row.push(
+            field_with_help(
+                widget::Row::new()
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(
+                        widget::text_input::text_input("2", depth)
+                            .on_input(move |value| {
+                                Message::PreloadDepthInput(provider, value)
+                            })
+                            .width(Length::Fixed(60.0)),
+                    )
+                    .push(widget::text::body("levels")),
+                "Maximum recursive directory depth: 1–10 levels. Higher values create more storage-server requests, may trigger provider rate limits, and can consume the entire preload time.",
+            ),
+        );
+    }
+    row.into()
+}
+
+const fn preload_provider_help(provider: PreloadProvider) -> &'static str {
+    match provider {
+        PreloadProvider::GoogleDrive => {
+            "Enables a recursive Google Drive VFS directory-cache refresh in the background after mounting. File contents are not downloaded."
+        }
+        PreloadProvider::OneDrive => {
+            "Enables a directory-only OneDrive walk in the background after mounting so folders open faster. File contents are not downloaded."
+        }
+        PreloadProvider::Box => {
+            "Enables a depth-limited Box directory walk in the background after mounting. The depth limit reduces API requests and the risk of Box rate limiting."
+        }
+        PreloadProvider::Smb => {
+            "Enables a depth-limited SMB directory walk in the background after network and VPN readiness. Individual SMB connections may override this global policy."
+        }
+    }
+}
+
 fn field_with_help<'a, H>(
     body: impl Into<Element<'a, Message>> + 'a,
     help: H,
@@ -4370,7 +5214,7 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> &'static str {
     if !adding {
         return match provider {
             Provider::GoogleDrive => {
-                "Select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
+                "Select a detected Google Drive remote or enter its exact name from `rclone config`. To replace its OAuth client, enter the matching client ID and secret and click Update Google OAuth Client; this repeats browser authorization. The applet verifies backend type `drive`, authentication, and subtree access before saving."
             }
             Provider::Box => {
                 "Select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
@@ -4384,7 +5228,7 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> &'static str {
 
     match provider {
         Provider::GoogleDrive => {
-            "Enter a new rclone remote name, such as `personal_gdrive`, then click Create Google Drive Remote. To use an existing remote, select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
+            "Enter a new rclone remote name, such as `personal_gdrive`, optionally enter its matching custom OAuth client ID and secret, then click Create Google Drive Remote. To use an existing remote, select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
         }
         Provider::Box => {
             "Enter a new rclone remote name, such as `box_personal`, then click Create Box Remote. To use an existing remote, select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
@@ -4542,6 +5386,20 @@ struct BoxRemoteSetup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GoogleDriveRemoteSetup {
     name: String,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoogleDriveRemoteApplyResult {
+    remote_name: String,
+    updated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoogleDriveRemoteAction {
+    Create,
+    Update,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4563,8 +5421,18 @@ impl GoogleDriveRemoteSetup {
         }
         let name = draft.remote_reference.trim();
         validate_rclone_remote_create_name(name)?;
+        let client_id = optional_setup_value("Google OAuth client ID", &draft.google_client_id)?;
+        let client_secret =
+            optional_secret_value("Google OAuth client secret", &draft.google_client_secret)?;
+        if client_id.is_some() != client_secret.is_some() {
+            return Err(
+                "Google OAuth client ID and client secret must be entered together.".into(),
+            );
+        }
         Ok(Self {
             name: name.to_owned(),
+            client_id,
+            client_secret,
         })
     }
 }
@@ -4603,31 +5471,75 @@ impl SmbRemoteSetup {
     }
 }
 
-async fn create_google_drive_rclone_remote_result(
+async fn apply_google_drive_rclone_remote_result(
     setup: GoogleDriveRemoteSetup,
-) -> Result<String, String> {
-    create_google_drive_rclone_remote_with(&app_command_runner(), setup).await
+    action: GoogleDriveRemoteAction,
+) -> Result<GoogleDriveRemoteApplyResult, String> {
+    apply_google_drive_rclone_remote_with(&app_command_runner(), setup, action).await
 }
 
-async fn create_google_drive_rclone_remote_with(
+async fn apply_google_drive_rclone_remote_with(
     runner: &dyn CommandRunner,
     setup: GoogleDriveRemoteSetup,
-) -> Result<String, String> {
-    ensure_rclone_remote_name_available(runner, &setup.name).await?;
-    let create_result = runner
-        .run(
-            google_drive_rclone_config_create_request(&setup)?,
-            CancellationToken::new(),
-        )
-        .await;
-    if let Err(error) = create_result {
-        cleanup_failed_rclone_remote_create(runner, &setup.name).await;
-        return Err(rclone_setup_command_error(
-            "Google Drive OAuth setup",
-            error,
-        ));
-    }
-    Ok(setup.name)
+    action: GoogleDriveRemoteAction,
+) -> Result<GoogleDriveRemoteApplyResult, String> {
+    let backend = rclone_remote_backend(runner, &setup.name).await?;
+    let updated = match (action, backend) {
+        (GoogleDriveRemoteAction::Create, None) => {
+            let create_result = runner
+                .run(
+                    google_drive_rclone_config_create_request(&setup)?,
+                    CancellationToken::new(),
+                )
+                .await;
+            if let Err(error) = create_result {
+                cleanup_failed_rclone_remote_create(runner, &setup.name).await;
+                return Err(rclone_setup_command_error(
+                    "Google Drive OAuth setup",
+                    error,
+                ));
+            }
+            false
+        }
+        (GoogleDriveRemoteAction::Create, Some(backend)) => {
+            return Err(format!(
+                "rclone remote `{}` already exists with backend `{backend}`. Select it without recreating it, or use Modify to update its Google OAuth client.",
+                setup.name
+            ));
+        }
+        (GoogleDriveRemoteAction::Update, Some(backend)) if backend == "drive" => {
+            if setup.client_id.is_none() {
+                return Err(
+                    "Enter the Google OAuth client ID and matching client secret before updating this remote."
+                        .into(),
+                );
+            }
+            runner
+                .run(
+                    google_drive_rclone_config_update_request(&setup)?,
+                    CancellationToken::new(),
+                )
+                .await
+                .map_err(|error| rclone_setup_command_error("Google Drive OAuth update", error))?;
+            true
+        }
+        (GoogleDriveRemoteAction::Update, Some(backend)) => {
+            return Err(format!(
+                "rclone remote `{}` uses backend `{backend}`, not Google Drive. Its OAuth client was not changed.",
+                setup.name
+            ));
+        }
+        (GoogleDriveRemoteAction::Update, None) => {
+            return Err(format!(
+                "Google Drive rclone remote `{}` no longer exists. Detect remotes or create it again before updating its OAuth client.",
+                setup.name
+            ));
+        }
+    };
+    Ok(GoogleDriveRemoteApplyResult {
+        remote_name: setup.name,
+        updated,
+    })
 }
 
 async fn create_box_rclone_remote_result(setup: BoxRemoteSetup) -> Result<String, String> {
@@ -5048,7 +5960,7 @@ async fn cleanup_failed_rclone_remote_create(runner: &dyn CommandRunner, remote_
 fn google_drive_rclone_config_create_request(
     setup: &GoogleDriveRemoteSetup,
 ) -> Result<CommandRequest, String> {
-    CommandRequest::new(Executable::Rclone)
+    let mut request = CommandRequest::new(Executable::Rclone)
         .arg("config")
         .map_err(|error| error.to_string())?
         .arg("create")
@@ -5056,7 +5968,19 @@ fn google_drive_rclone_config_create_request(
         .arg(&setup.name)
         .map_err(|error| error.to_string())?
         .arg("drive")
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    if let (Some(client_id), Some(client_secret)) = (&setup.client_id, &setup.client_secret) {
+        request = request
+            .arg("client_id")
+            .map_err(|error| error.to_string())?
+            .sensitive_arg(client_id)
+            .map_err(|error| error.to_string())?
+            .arg("client_secret")
+            .map_err(|error| error.to_string())?
+            .sensitive_arg(client_secret)
+            .map_err(|error| error.to_string())?;
+    }
+    request
         .arg("scope")
         .map_err(|error| error.to_string())?
         .arg("drive")
@@ -5064,6 +5988,45 @@ fn google_drive_rclone_config_create_request(
         .arg("config_is_local")
         .map_err(|error| error.to_string())?
         .arg("true")
+        .map_err(|error| error.to_string())?
+        .arg("--obscure")
+        .map_err(|error| error.to_string())?
+        .arg("--non-interactive")
+        .map_err(|error| error.to_string())
+        .map(|request| request.with_timeout(Duration::from_secs(5 * 60)))
+}
+
+fn google_drive_rclone_config_update_request(
+    setup: &GoogleDriveRemoteSetup,
+) -> Result<CommandRequest, String> {
+    let client_id = setup
+        .client_id
+        .as_ref()
+        .ok_or_else(|| "Google OAuth client ID is required to update a remote.".to_owned())?;
+    let client_secret = setup
+        .client_secret
+        .as_ref()
+        .ok_or_else(|| "Google OAuth client secret is required to update a remote.".to_owned())?;
+    CommandRequest::new(Executable::Rclone)
+        .arg("config")
+        .map_err(|error| error.to_string())?
+        .arg("update")
+        .map_err(|error| error.to_string())?
+        .arg(&setup.name)
+        .map_err(|error| error.to_string())?
+        .arg("client_id")
+        .map_err(|error| error.to_string())?
+        .sensitive_arg(client_id)
+        .map_err(|error| error.to_string())?
+        .arg("client_secret")
+        .map_err(|error| error.to_string())?
+        .sensitive_arg(client_secret)
+        .map_err(|error| error.to_string())?
+        .arg("config_is_local")
+        .map_err(|error| error.to_string())?
+        .arg("true")
+        .map_err(|error| error.to_string())?
+        .arg("--obscure")
         .map_err(|error| error.to_string())?
         .arg("--non-interactive")
         .map_err(|error| error.to_string())
@@ -5418,6 +6381,16 @@ const fn is_onedriver_online_mount(connection: &Connection) -> bool {
     )
 }
 
+const fn uses_directory_preload(connection: &Connection) -> bool {
+    matches!(
+        (&connection.provider, &connection.mode),
+        (
+            Provider::OneDrive | Provider::Box | Provider::Smb,
+            ConnectionMode::OnlineMount(_)
+        )
+    )
+}
+
 const fn is_onedrive_offline_mirror(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
@@ -5706,6 +6679,14 @@ async fn remove_generated_units_for_connection(connection: Connection) -> String
 async fn remove_generated_units_for_connection_result(
     connection: &Connection,
 ) -> Result<usize, String> {
+    if connection.provider == Provider::GoogleDrive
+        && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+    {
+        let _ = rclone_refresh::cancel(connection.id).await;
+    }
+    if uses_directory_preload(connection) {
+        directory_preload::cancel(connection.id).await;
+    }
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
     let controller = UnitController::new(store, CommandSystemdManager::new(app_command_runner()));
@@ -5746,9 +6727,9 @@ fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
     }
 }
 
-async fn restore_online_after_wake(connection: Connection) -> String {
+async fn restore_online_after_wake_result(connection: &Connection) -> Result<(), String> {
     let Ok(token) = cosmic_ext_applet_mounter::sleep::online_operation_token() else {
-        return format!("Wake restoration canceled for {}", connection.name);
+        return Err(format!("Wake restoration canceled for {}", connection.name));
     };
     let wait = async {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
@@ -5757,46 +6738,35 @@ async fn restore_online_after_wake(connection: Connection) -> String {
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
-                return format!(
+                return Err(format!(
                     "Wake restoration for {} is waiting for network; retry manually",
                     connection.name
-                );
+                ));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
         // Re-read after waiting: a removal or disable must override restoration.
         let config = Config::load_runtime().config;
         if !config.document.unmount_before_sleep || !config.document.restore_after_wake {
-            return format!("Wake restoration disabled for {}", connection.name);
+            return Err(format!("Wake restoration disabled for {}", connection.name));
         }
         let Some(current) = config.document.connections.into_iter().find(|item| {
             item.id == connection.id
                 && item.enabled
                 && matches!(item.mode, ConnectionMode::OnlineMount(_))
         }) else {
-            return format!("Wake restoration skipped for {}", connection.name);
+            return Err(format!("Wake restoration skipped for {}", connection.name));
         };
         if current.provider == Provider::OneDrive {
-            run_managed_onedriver_online_mount_operation(current, Operation::Mount).await
+            run_managed_onedriver_online_mount_operation_result(&current, Operation::Mount).await
         } else {
-            run_managed_online_mount_operation(current, Operation::Mount).await
+            run_managed_online_mount_operation_result(&current, Operation::Mount).await
         }
     };
     tokio::select! {
         biased;
-        () = token.cancelled() => format!("Wake restoration canceled for {}", connection.name),
+        () = token.cancelled() => Err(format!("Wake restoration canceled for {}", connection.name)),
         result = wait => result,
-    }
-}
-
-async fn run_managed_online_mount_operation(
-    connection: Connection,
-    operation: Operation,
-) -> String {
-    let label = operation_label(operation);
-    match run_managed_online_mount_operation_result(&connection, operation).await {
-        Ok(()) => format!("{label} completed for {}.", connection.name),
-        Err(error) => format!("{label} failed for {}: {error}", connection.name),
     }
 }
 
@@ -5827,9 +6797,12 @@ async fn run_managed_online_mount_operation_result_inner(
         }
     };
     let unit = UnitName::new(connection.id, UnitKind::Service);
-    prepare_online_mount_runtime(connection)?;
     if action == SystemdAction::Start {
+        prepare_online_mount_runtime(connection)?;
         ensure_vpn_ready_for_connection(connection).await?;
+        verify_rclone_access(connection)
+            .await
+            .map_err(|error| format!("Remote access check failed before mounting: {error}"))?;
         let current = Config::load_runtime().config;
         if !current
             .document
@@ -5839,18 +6812,15 @@ async fn run_managed_online_mount_operation_result_inner(
         {
             return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
         }
+        // Refresh applet-owned units so provider tuning added by an app update
+        // applies to saved connections without requiring an edit-and-save cycle.
+        install_rclone_online_mount_unit_result(connection)
+            .await
+            .map_err(|error| format!("Could not refresh managed mount service: {error}"))?;
     }
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
-        manager
-            .action(
-                SystemdAction::DaemonReload,
-                None,
-                cancellation.child_token(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
         let _ = manager
             .action(
                 SystemdAction::ResetFailed,
@@ -5858,26 +6828,25 @@ async fn run_managed_online_mount_operation_result_inner(
                 cancellation.child_token(),
             )
             .await;
+    } else {
+        if connection.provider == Provider::GoogleDrive {
+            // Stop cache warm-up while its RC socket is still available. A failed
+            // job/stop does not block service stop, which also ends the job.
+            let _ = rclone_refresh::cancel(connection.id).await;
+        }
+        if uses_directory_preload(connection) {
+            directory_preload::cancel(connection.id).await;
+        }
     }
     manager
         .action(action, Some(&unit), cancellation)
         .await
         .map_err(|error| error.to_string())?;
     if action == SystemdAction::Stop {
+        require_mount_disappearance_after_clean_stop(connection).await?;
         maybe_shutdown_vpn_after_unmount(connection).await?;
     }
     Ok(())
-}
-
-async fn run_managed_onedriver_online_mount_operation(
-    connection: Connection,
-    operation: Operation,
-) -> String {
-    let label = operation_label(operation);
-    match run_managed_onedriver_online_mount_operation_result(&connection, operation).await {
-        Ok(()) => format!("{label} completed for {}.", connection.name),
-        Err(error) => format!("{label} failed for {}: {error}", connection.name),
-    }
 }
 
 async fn run_managed_onedriver_online_mount_operation_result(
@@ -5907,8 +6876,8 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
         }
     };
     let unit = UnitName::new(connection.id, UnitKind::Service);
-    prepare_onedriver_online_mount_runtime(connection)?;
     if action == SystemdAction::Start {
+        prepare_onedriver_online_mount_runtime(connection)?;
         ensure_vpn_ready_for_connection(connection).await?;
         let current = Config::load_runtime().config;
         if !current
@@ -5938,21 +6907,47 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
                 cancellation.child_token(),
             )
             .await;
+    } else {
+        directory_preload::cancel(connection.id).await;
     }
     manager
         .action(action, Some(&unit), cancellation)
         .await
         .map_err(|error| error.to_string())?;
     if action == SystemdAction::Stop {
+        require_mount_disappearance_after_clean_stop(connection).await?;
         maybe_shutdown_vpn_after_unmount(connection).await?;
     }
     Ok(())
 }
 
+async fn require_mount_disappearance_after_clean_stop(
+    connection: &Connection,
+) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
+    loop {
+        let mounted = ProcMountTable::default()
+            .entries()
+            .map_err(|error| format!("could not verify unmount: {error}"))?
+            .iter()
+            .any(|entry| entry.target == connection.local_path);
+        if !mounted {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "clean unmount left a busy FUSE endpoint at {}. Close file-browser windows and terminals using it, then select Repair and confirm the lazy unmount",
+                connection.local_path.display()
+            ));
+        }
+        tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
+    }
+}
+
 async fn run_online_mount_repair_operation(connection: Connection) -> String {
     match run_online_mount_repair_operation_result(&connection).await {
         Ok(()) => format!(
-            "Repair completed for {}. Lazy unmount recovery detached the mountpoint and reset the generated service state.",
+            "Repair completed for {}. Lazy unmount recovery detached the mountpoint and left the generated service ready for the next mount.",
             connection.name
         ),
         Err(error) => format!("Repair failed for {}: {error}", connection.name),
@@ -5968,6 +6963,12 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
 
+    if connection.provider == Provider::GoogleDrive {
+        let _ = rclone_refresh::cancel(connection.id).await;
+    }
+    if uses_directory_preload(connection) {
+        directory_preload::cancel(connection.id).await;
+    }
     let _ = manager
         .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
         .await;
@@ -5980,12 +6981,27 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
         .await
         .map_err(|error| error.to_string())?;
 
-    manager
-        .action(SystemdAction::ResetFailed, Some(&unit), cancellation)
+    let status = manager
+        .action(
+            SystemdAction::Status,
+            Some(&unit),
+            cancellation.child_token(),
+        )
         .await
-        .map_err(|error| error.to_string())?;
+        .ok()
+        .flatten();
+    if repair_requires_failed_reset(status.as_ref()) {
+        manager
+            .action(SystemdAction::ResetFailed, Some(&unit), cancellation)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
 
     Ok(())
+}
+
+fn repair_requires_failed_reset(status: Option<&UnitStatus>) -> bool {
+    status.is_some_and(|status| status.active == ActiveState::Failed)
 }
 
 async fn run_managed_offline_mirror_operation(
@@ -7795,28 +8811,209 @@ mod tests {
     }
 
     #[test]
-    fn sleep_preference_persists_only_requested_field_and_rolls_back_on_failure() {
+    fn stale_rclone_refresh_completion_cannot_replace_current_job_status() {
+        use cosmic::Application;
+        let connection_id = ConnectionId::from_uuid(Uuid::new_v4());
+        let mut app = AppModel {
+            last_notice: Some("Current directory refresh job 8 is running.".into()),
+            rclone_refresh_jobs: BTreeMap::from([(connection_id, 8)]),
+            ..AppModel::default()
+        };
+
+        let _ = app.update(Message::RcloneRefreshCompleted(
+            "Google Drive".into(),
+            connection_id,
+            7,
+            Ok(RcloneRefreshOutcome::Completed {
+                duration_seconds: 2.0,
+            }),
+        ));
+
+        assert_eq!(app.rclone_refresh_jobs.get(&connection_id), Some(&8));
+        assert_eq!(
+            app.last_notice.as_deref(),
+            Some("Current directory refresh job 8 is running.")
+        );
+    }
+
+    #[test]
+    fn stale_onedriver_preload_completion_cannot_replace_current_status() {
+        use cosmic::Application;
+        let connection_id = ConnectionId::from_uuid(Uuid::new_v4());
+        let mut app = AppModel {
+            last_notice: Some("Current OneDrive preload is running.".into()),
+            directory_preload_jobs: BTreeMap::from([(connection_id, 8)]),
+            ..AppModel::default()
+        };
+
+        let _ = app.update(Message::DirectoryPreloadCompleted(
+            "OneDrive".into(),
+            connection_id,
+            7,
+            Ok(DirectoryPreloadOutcome::Completed {
+                duration_seconds: 2.0,
+            }),
+        ));
+
+        assert_eq!(app.directory_preload_jobs.get(&connection_id), Some(&8));
+        assert_eq!(
+            app.last_notice.as_deref(),
+            Some("Current OneDrive preload is running.")
+        );
+    }
+
+    #[test]
+    fn preload_setting_rejects_out_of_range_input() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            preload_draft: PreloadSettingsDraft {
+                onedrive: PreloadPolicyDraft {
+                    maximum_seconds: "4".into(),
+                    ..PreloadSettings::default().onedrive.into()
+                },
+                ..PreloadSettings::default().into()
+            },
+            preload_input_dirty: true,
+            runtime_available: true,
+            ..AppModel::default()
+        };
+
+        let _ = app.update(Message::SavePreloadSettings);
+
+        assert!(!app.runtime_pending);
+        assert!(
+            app.preload_notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("5 to 600"))
+        );
+    }
+
+    #[test]
+    fn runtime_preferences_persist_only_requested_fields_and_roll_back_on_failure() {
         use cosmic_ext_applet_mounter::config::HostVisibleConfigStorage;
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.ron");
         let storage = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(path.clone()));
         let mut config = Config::default();
         config.document.notifications_enabled = true;
-        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetRestore(true)).unwrap();
-        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetUnmount(true)).unwrap();
-        save_sleep_preference(&mut config, &storage, RuntimeCommand::SetUnmount(false)).unwrap();
+        save_runtime_preference(&mut config, &storage, RuntimeCommand::SetRestore(true)).unwrap();
+        save_runtime_preference(&mut config, &storage, RuntimeCommand::SetUnmount(true)).unwrap();
+        save_runtime_preference(
+            &mut config,
+            &storage,
+            RuntimeCommand::SetPreload(PreloadSettings {
+                onedrive: PreloadPolicy {
+                    maximum_seconds: 90,
+                    ..PreloadSettings::default().onedrive
+                },
+                ..PreloadSettings::default()
+            }),
+        )
+        .unwrap();
+        save_runtime_preference(&mut config, &storage, RuntimeCommand::SetUnmount(false)).unwrap();
         let saved: ConfigDocument = ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved, config.document);
         assert!(saved.notifications_enabled);
         assert!(saved.restore_after_wake);
         assert!(!saved.unmount_before_sleep);
+        assert_eq!(saved.preload.onedrive.maximum_seconds, 90);
         let invalid = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(
             path.join("impossible.ron"),
         ));
         assert!(
-            save_sleep_preference(&mut config, &invalid, RuntimeCommand::SetUnmount(true)).is_err()
+            save_runtime_preference(&mut config, &invalid, RuntimeCommand::SetUnmount(true))
+                .is_err()
         );
         assert_eq!(config.document, saved);
+    }
+
+    #[test]
+    fn background_poll_does_not_start_a_user_action() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            runtime_available: true,
+            ..AppModel::default()
+        };
+        let _ = app.update(Message::RuntimePoll);
+        assert!(app.runtime_poll_pending);
+        assert!(!app.runtime_pending);
+        assert!(app.runtime_available);
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Status,
+            Ok(runtime_ipc::Status::default()),
+        ));
+        assert!(!app.runtime_poll_pending);
+        assert!(!app.runtime_pending);
+        assert!(app.runtime_available);
+    }
+
+    #[test]
+    fn late_poll_cannot_undo_a_completed_user_action() {
+        use cosmic::Application;
+        for command in [
+            RuntimeCommand::SetUnmount(true),
+            RuntimeCommand::SetRestore(true),
+            RuntimeCommand::Refresh,
+        ] {
+            for poll_fails in [false, true] {
+                let mut app = AppModel {
+                    runtime_available: true,
+                    ..AppModel::default()
+                };
+                let _ = app.update(Message::RuntimePoll);
+                let action = match command {
+                    RuntimeCommand::SetUnmount(value) => Message::UnmountBeforeSleep(value),
+                    RuntimeCommand::SetRestore(value) => Message::RestoreAfterWake(value),
+                    _ => Message::Refresh,
+                };
+                let _ = app.update(action);
+                assert!(app.runtime_pending);
+                let updated = runtime_ipc::Status {
+                    unmount_before_sleep: true,
+                    restore_after_wake: true,
+                    preload: PreloadSettings::default(),
+                    sleep_status: Some("Current cleanup status".into()),
+                };
+                let _ = app.update(Message::RuntimeResult(command, Ok(updated.clone())));
+                let stale = if poll_fails {
+                    Err("old poll timed out".into())
+                } else {
+                    Ok(runtime_ipc::Status::default())
+                };
+                let _ = app.update(Message::RuntimeResult(RuntimeCommand::Status, stale));
+                assert_eq!(app.runtime_status(), updated);
+                assert!(app.runtime_available);
+                assert!(app.runtime_error.is_none());
+                assert!(!app.runtime_pending);
+                assert!(!app.runtime_poll_pending);
+                // The next fresh poll must still be applied.
+                let _ = app.update(Message::RuntimePoll);
+                let _ = app.update(Message::RuntimeResult(
+                    RuntimeCommand::Status,
+                    Ok(runtime_ipc::Status::default()),
+                ));
+                assert_eq!(app.runtime_status(), runtime_ipc::Status::default());
+            }
+        }
+    }
+
+    #[test]
+    fn obsolete_poll_does_not_clear_in_flight_action_or_connection_error() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            runtime_error: Some("last connection error".into()),
+            ..AppModel::default()
+        };
+        let _ = app.update(Message::RuntimePoll);
+        let _ = app.update(Message::Refresh);
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Status,
+            Ok(runtime_ipc::Status::default()),
+        ));
+        assert!(app.runtime_pending);
+        assert!(!app.runtime_available);
+        assert_eq!(app.runtime_error.as_deref(), Some("last connection error"));
+        assert!(!app.runtime_poll_pending);
     }
 
     #[test]
@@ -7874,6 +9071,7 @@ mod tests {
             Ok(runtime_ipc::Status {
                 unmount_before_sleep: true,
                 restore_after_wake: true,
+                preload: PreloadSettings::default(),
                 sleep_status: Some("ready".into()),
             }),
         ));
@@ -7882,6 +9080,21 @@ mod tests {
         assert!(!app.runtime_owner);
         assert!(!app.runtime_pending);
         assert!(app.runtime_available);
+    }
+
+    #[test]
+    fn additional_panel_instance_uses_existing_runtime_without_warning() {
+        use cosmic::Application;
+        let mut app = AppModel {
+            runtime_owner: true,
+            runtime_error: Some("runtime name is already owned".into()),
+            ..AppModel::default()
+        };
+
+        let _ = app.update(Message::RuntimeEvent(runtime_ipc::Event::ClientReady));
+
+        assert!(!app.runtime_owner);
+        assert!(app.runtime_error.is_none());
     }
 
     #[test]
@@ -7974,6 +9187,36 @@ mod tests {
     }
 
     #[test]
+    fn vpn_status_polling_includes_only_active_enabled_connections() {
+        let enabled_profile = VpnProfileId::from_uuid(
+            Uuid::parse_str("11111111-1111-4111-8111-111111111111").expect("UUID"),
+        );
+        let disabled_profile = VpnProfileId::from_uuid(
+            Uuid::parse_str("22222222-2222-4222-8222-222222222222").expect("UUID"),
+        );
+        let mut enabled = test_connection(Provider::GoogleDrive);
+        enabled.id = ConnectionId::from_uuid(
+            Uuid::parse_str("33333333-3333-4333-8333-333333333333").expect("UUID"),
+        );
+        enabled.vpn_profile_id = Some(enabled_profile);
+        let mut disabled = test_connection(Provider::Box);
+        disabled.id = ConnectionId::from_uuid(
+            Uuid::parse_str("44444444-4444-4444-8444-444444444444").expect("UUID"),
+        );
+        disabled.enabled = false;
+        disabled.vpn_profile_id = Some(disabled_profile);
+
+        assert_eq!(
+            referenced_active_vpn_profiles(
+                &[enabled.clone(), disabled.clone()],
+                &BTreeSet::from([enabled.id, disabled.id])
+            ),
+            BTreeSet::from([enabled_profile])
+        );
+        assert!(referenced_active_vpn_profiles(&[enabled, disabled], &BTreeSet::new()).is_empty());
+    }
+
+    #[test]
     fn rclone_remote_button_rows_have_bounded_capacity() {
         assert_eq!(rclone_remote_buttons_per_row(), 3);
         let remote_count = 7usize;
@@ -8014,6 +9257,25 @@ mod tests {
         };
 
         assert_eq!(primary_operation(&row), Some(Operation::Repair));
+    }
+
+    #[test]
+    fn repair_resets_only_a_failed_service() {
+        let status = |active| UnitStatus {
+            active,
+            enabled: false,
+            detail: "test".into(),
+        };
+        assert!(repair_requires_failed_reset(Some(&status(
+            ActiveState::Failed
+        ))));
+        assert!(!repair_requires_failed_reset(Some(&status(
+            ActiveState::Inactive
+        ))));
+        assert!(!repair_requires_failed_reset(Some(&status(
+            ActiveState::Active
+        ))));
+        assert!(!repair_requires_failed_reset(None));
     }
 
     #[test]
@@ -8302,9 +9564,22 @@ mod tests {
 
         assert_eq!(
             request.sanitized_command(),
-            "rclone config create test_drive drive scope drive config_is_local true --non-interactive"
+            "rclone config create test_drive drive scope drive config_is_local true --obscure --non-interactive"
         );
         assert_eq!(request.timeout, Duration::from_secs(5 * 60));
+
+        let custom = GoogleDriveRemoteSetup {
+            name: "test_drive".into(),
+            client_id: Some("private-client.apps.googleusercontent.com".into()),
+            client_secret: Some("private-secret".into()),
+        };
+        let request = google_drive_rclone_config_create_request(&custom).expect("custom request");
+        assert_eq!(
+            request.sanitized_command(),
+            "rclone config create test_drive drive client_id [REDACTED] client_secret [REDACTED] scope drive config_is_local true --obscure --non-interactive"
+        );
+        assert!(!request.sanitized_command().contains("private-client"));
+        assert!(!request.sanitized_command().contains("private-secret"));
     }
 
     #[test]
@@ -8321,7 +9596,7 @@ mod tests {
 
     #[test]
     fn google_drive_remote_setup_rejects_bad_name() {
-        let draft = ConnectionDraft {
+        let mut draft = ConnectionDraft {
             provider: Provider::GoogleDrive,
             remote_reference: "bad remote".into(),
             ..ConnectionDraft::default()
@@ -8329,6 +9604,18 @@ mod tests {
 
         let error = GoogleDriveRemoteSetup::from_draft(&draft).expect_err("bad name must fail");
         assert!(error.contains("rclone remote name"));
+
+        draft.remote_reference = "valid_remote".into();
+        draft.google_client_id = "client.apps.googleusercontent.com".into();
+        let error = GoogleDriveRemoteSetup::from_draft(&draft)
+            .expect_err("client ID without secret must fail");
+        assert!(error.contains("must be entered together"));
+
+        draft.google_client_id.clear();
+        draft.google_client_secret = "secret".into();
+        let error = GoogleDriveRemoteSetup::from_draft(&draft)
+            .expect_err("client secret without ID must fail");
+        assert!(error.contains("must be entered together"));
     }
 
     #[tokio::test]
@@ -8410,21 +9697,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_google_drive_remote_blocks_duplicates_and_uses_fixed_commands() {
+    async fn google_drive_remote_create_and_update_use_fixed_redacted_commands() {
         let duplicate_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
             .with_resolved([Executable::Rclone]);
         duplicate_runner.push(Ok(command_output(r#"{"existing": {"type": "drive"}}"#)));
         let duplicate = GoogleDriveRemoteSetup {
             name: "existing".into(),
+            client_id: None,
+            client_secret: None,
         };
 
-        let error = create_google_drive_rclone_remote_with(&duplicate_runner, duplicate)
-            .await
-            .expect_err("duplicate must fail");
+        let error = apply_google_drive_rclone_remote_with(
+            &duplicate_runner,
+            duplicate,
+            GoogleDriveRemoteAction::Create,
+        )
+        .await
+        .expect_err("duplicate create must fail");
         assert!(error.contains("already exists"));
         let requests = duplicate_runner.requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].sanitized_command(), "rclone config dump");
+
+        let missing_credentials_runner =
+            cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+                .with_resolved([Executable::Rclone]);
+        missing_credentials_runner.push(Ok(command_output(r#"{"existing": {"type": "drive"}}"#)));
+        let error = apply_google_drive_rclone_remote_with(
+            &missing_credentials_runner,
+            GoogleDriveRemoteSetup {
+                name: "existing".into(),
+                client_id: None,
+                client_secret: None,
+            },
+            GoogleDriveRemoteAction::Update,
+        )
+        .await
+        .expect_err("update without credentials must fail");
+        assert!(error.contains("client ID and matching client secret"));
+        assert_eq!(missing_credentials_runner.requests().len(), 1);
 
         let runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
             .with_resolved([Executable::Rclone]);
@@ -8432,19 +9743,48 @@ mod tests {
         runner.push(Ok(command_output("")));
         let setup = GoogleDriveRemoteSetup {
             name: "new_drive".into(),
+            client_id: None,
+            client_secret: None,
         };
 
-        let created = create_google_drive_rclone_remote_with(&runner, setup)
-            .await
-            .expect("new remote should be created");
-        assert_eq!(created, "new_drive");
+        let created =
+            apply_google_drive_rclone_remote_with(&runner, setup, GoogleDriveRemoteAction::Create)
+                .await
+                .expect("new remote should be created");
+        assert_eq!(created.remote_name, "new_drive");
+        assert!(!created.updated);
         let requests = runner.requests();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].sanitized_command(), "rclone config dump");
         assert_eq!(
             requests[1].sanitized_command(),
-            "rclone config create new_drive drive scope drive config_is_local true --non-interactive"
+            "rclone config create new_drive drive scope drive config_is_local true --obscure --non-interactive"
         );
+
+        let update_runner = cosmic_ext_applet_mounter::process::FakeCommandRunner::default()
+            .with_resolved([Executable::Rclone]);
+        update_runner.push(Ok(command_output(r#"{"existing": {"type": "drive"}}"#)));
+        update_runner.push(Ok(command_output("")));
+        let updated = apply_google_drive_rclone_remote_with(
+            &update_runner,
+            GoogleDriveRemoteSetup {
+                name: "existing".into(),
+                client_id: Some("private-client.apps.googleusercontent.com".into()),
+                client_secret: Some("private-secret".into()),
+            },
+            GoogleDriveRemoteAction::Update,
+        )
+        .await
+        .expect("existing Drive remote should update");
+        assert!(updated.updated);
+        let requests = update_runner.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].sanitized_command(),
+            "rclone config update existing client_id [REDACTED] client_secret [REDACTED] config_is_local true --obscure --non-interactive"
+        );
+        assert!(!requests[1].sanitized_command().contains("private-client"));
+        assert!(!requests[1].sanitized_command().contains("private-secret"));
     }
 
     #[tokio::test]
@@ -9444,6 +10784,7 @@ mod tests {
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 

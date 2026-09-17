@@ -17,11 +17,11 @@ wording can be mapped back into `src/app.rs`.
 - Keep dynamic placeholders such as `{provider}`, `{connection}`, `{remote}`,
   `{backend}`, `{status}`, `{action}`, and `{reason}` intact when present.
 
-## General Settings Layout — September 15, 2026
+## General Settings Layout and Preload Policies — September 15–16, 2026
 
 The popup keeps title/gear, status/notices and connections. Add Connection,
 Refresh occupy the top row of a standalone General Settings window, with
-sleep settings below.
+Preload and Sleep settings below.
 Existing `popup.add_connection` and `popup.refresh` IDs below remain stable for
 review history; their controls are now hosted in General Settings. Remote-name guidance from the preceding review stays
 in the connection editor, not General Settings. In Modify, where Create is
@@ -32,10 +32,12 @@ hidden, the implemented help describes existing remotes without instructing user
 Reviewed text:
 
 ```text
-Open Settings to add connections, refresh the applet, and configure sleep behavior.
+Open Settings to add connections, refresh the applet, and configure sleep and directory preload behavior.
 ```
 
-Accessible label: `Settings`. Align the clickable gear to the right edge of the title row; keep the title left-aligned.
+Accessible label: `Settings`. Align the clickable gear to the right edge of the
+title row; keep the title left-aligned. Use the shared one-second tooltip delay
+used by connection-list help instead of the icon button's immediate tooltip.
 
 ### settings.unmount_before_sleep
 
@@ -61,6 +63,108 @@ Keep this toggle visible but disabled when Unmount when sleep is off, retaining
 its saved preference. Show listener status and cleanup details as plain text
 below “Applies only to Online connections.”, without a separate heading;
 keep a concise unresolved-warning indication in popup status.
+
+### settings.preload
+
+Visible heading: `Directory preload`.
+
+No standalone descriptive sentence is shown below the heading. Provider and
+field details are available from their delayed hover help.
+
+### settings.google_preload
+
+Visible label: `Google Drive`.
+
+Reviewed text:
+
+```text
+Enables a recursive Google Drive VFS directory-cache refresh in the background after mounting. File contents are not downloaded.
+```
+
+### settings.onedrive_preload
+
+Visible label: `OneDrive`.
+
+Reviewed text:
+
+```text
+Enables a directory-only OneDrive walk in the background after mounting so folders open faster. File contents are not downloaded.
+```
+
+The legacy ID `settings.onedriver_preload_seconds` maps to this provider row
+during implementation and configuration migration.
+
+### settings.box_preload
+
+Visible label: `Box`.
+
+Reviewed text:
+
+```text
+Enables a depth-limited Box directory walk in the background after mounting. The depth limit reduces API requests and the risk of Box rate limiting.
+```
+
+### settings.smb_preload
+
+Visible label: `SMB`.
+
+Reviewed text:
+
+```text
+Enables a depth-limited SMB directory walk in the background after network and VPN readiness. Individual SMB connections may override this global policy.
+```
+
+Provider duration fields accept 5 to 600 seconds. Box and SMB depth fields
+accept 1 to 10. All provider preload toggles default on. Save one complete
+provider row atomically so enabled, duration, and depth cannot be mixed with
+stale values.
+
+Each provider's switch, seconds field, and optional levels field remain on one
+horizontal row. Duration and depth explanations appear only in delayed hover
+help. Provider toggles use the reviewed provider-specific descriptions above
+and keep a small gap between label and switch.
+
+### settings.preload_duration
+
+Control: unlabeled seconds field followed by visible text `seconds`.
+
+Reviewed text:
+
+```text
+Maximum duration of the background preload task: 5–600 seconds. Browsing remains available while the preload runs and after it stops.
+```
+
+This field is present in every provider row and uses seconds. Accepted values
+are 5 through 600.
+
+### settings.preload_depth
+
+Control: unlabeled depth field followed by visible text `levels`.
+
+Reviewed text:
+
+```text
+Maximum recursive directory depth: 1–10 levels. Higher values create more storage-server requests, may trigger provider rate limits, and can consume the entire preload time.
+```
+
+This field appears only for Box and SMB. Accepted values are 1 through 10.
+
+### connection.smb_preload_use_global
+
+Visible label: `Use global preload settings`.
+
+Reviewed text:
+
+```text
+Use the SMB preload policy from Cloud Mounter Settings for this connection.
+```
+
+The per-connection override controls are available only for SMB Online mounts.
+They default to global inheritance and are useful when home, LAN, corporate,
+and VPN shares have different performance. When global inheritance is off, the
+connection editor shows `Preload directories after mount`, duration in seconds,
+and depth in levels. These use the same bounds and field meanings as the global
+SMB row.
 
 ## Popup
 
@@ -329,13 +433,43 @@ Remove this applet-managed connection after confirmation. User data and external
 Current text:
 
 ```text
-Create the rclone Google Drive remote with full-drive scope and local browser OAuth. Complete the browser authorization window, then run Test Connection. Credentials and refresh tokens stay in rclone config, not applet configuration.
+Create the rclone Google Drive remote with full-drive scope and local browser OAuth. A custom client ID requires its matching client secret. Complete browser authorization, then run Test Connection. OAuth values stay in rclone config, not applet configuration.
 ```
 
 Reviewed text:
 
 ```text
-Create the rclone Google Drive remote with full-drive scope and local browser OAuth. Complete the browser authorization window, then run Test Connection. Credentials and refresh tokens stay in rclone config, not applet configuration.
+Create the rclone Google Drive remote with full-drive scope and local browser OAuth. A custom client ID requires its matching client secret. Complete browser authorization, then run Test Connection. OAuth values stay in rclone config, not applet configuration.
+```
+
+### rclone.google_client_id
+
+Reviewed text:
+
+```text
+Use the OAuth client ID from a Google Cloud Desktop app with the Google Drive API enabled. Rclone says a private client is required to avoid interruption during its 2026 shared-client retirement. Leaving both OAuth fields blank attempts the shared client only for compatibility.
+```
+
+### rclone.google_client_secret
+
+Reviewed safety text:
+
+```text
+The applet does not save this value in its configuration or logs.
+```
+
+Reviewed detail text:
+
+```text
+Enter the secret issued with the client ID. Client ID and secret must be supplied together. The value is passed directly to rclone and cleared from this form after the operation.
+```
+
+### rclone.update_google_oauth_client
+
+Reviewed text:
+
+```text
+Explicitly replace this rclone remote's Google OAuth client ID and secret and authorize it again in the browser. Both fields are required. Remount active connections afterward.
 ```
 
 ### rclone.create_box_remote

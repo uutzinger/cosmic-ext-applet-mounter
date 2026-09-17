@@ -794,6 +794,7 @@ mod tests {
             vpn_profile_id,
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
+            smb_preload_override: None,
         }
     }
 

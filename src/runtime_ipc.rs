@@ -8,6 +8,8 @@ use cosmic::iced::{Subscription, futures::SinkExt, stream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
+use cosmic_ext_applet_mounter::model::PreloadSettings;
+
 pub const RUNTIME_NAME: &str = "io.github.uutzinger.cosmic-ext-applet-mounter.Runtime";
 const SETTINGS_NAME: &str = "io.github.uutzinger.cosmic-ext-applet-mounter.Settings";
 const OBJECT_PATH: &str = "/io/github/uutzinger/CloudMounter";
@@ -20,6 +22,7 @@ pub enum Command {
     Refresh,
     SetUnmount(bool),
     SetRestore(bool),
+    SetPreload(PreloadSettings),
     ConfigurationChanged,
 }
 
@@ -27,6 +30,7 @@ pub enum Command {
 pub struct Status {
     pub unmount_before_sleep: bool,
     pub restore_after_wake: bool,
+    pub preload: PreloadSettings,
     pub sleep_status: Option<String>,
 }
 
@@ -51,6 +55,7 @@ impl Reply {
 #[derive(Debug, Clone)]
 pub enum Event {
     Ready,
+    ClientReady,
     Request(Command, Reply),
     Activate,
     DuplicateWindow,
@@ -171,6 +176,10 @@ async fn serve(settings: bool, mut output: cosmic::iced::futures::channel::mpsc:
         Err(error) => {
             if settings && activate_settings().await {
                 let _ = output.send(Event::DuplicateWindow).await;
+            } else if !settings && request(Command::Status).await.is_ok() {
+                // More than one panel may contain the applet. Only one instance
+                // owns the runtime bus name; the others remain usable clients.
+                let _ = output.send(Event::ClientReady).await;
             } else {
                 let _ = output
                     .send(Event::Error(format!(
@@ -245,12 +254,14 @@ mod tests {
             Command::Status,
             Command::SetUnmount(true),
             Command::SetRestore(true),
+            Command::SetPreload(PreloadSettings::default()),
             Command::Refresh,
             Command::ConfigurationChanged,
         ] {
             let expected = Status {
                 unmount_before_sleep: true,
                 restore_after_wake: true,
+                preload: PreloadSettings::default(),
                 sleep_status: Some("ready".into()),
             };
             let json = serde_json::to_string(&command).unwrap();
