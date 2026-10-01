@@ -213,6 +213,7 @@ pub fn provider_label(provider: Provider) -> &'static str {
         Provider::GoogleDrive => "Google Drive",
         Provider::Box => "Box",
         Provider::Smb => "SMB",
+        Provider::Sftp => "SFTP",
     }
 }
 
@@ -705,6 +706,7 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
     }
 
@@ -726,6 +728,7 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
     }
 

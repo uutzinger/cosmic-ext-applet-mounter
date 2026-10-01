@@ -56,6 +56,7 @@ pub enum Provider {
     GoogleDrive,
     Box,
     Smb,
+    Sftp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +136,15 @@ pub struct PreloadPolicy {
 
 impl PreloadPolicy {
     #[must_use]
+    pub const fn sftp_default() -> Self {
+        Self {
+            enabled: false,
+            maximum_seconds: 30,
+            maximum_depth: Some(2),
+        }
+    }
+
+    #[must_use]
     pub const fn without_depth() -> Self {
         Self {
             enabled: true,
@@ -160,6 +170,8 @@ pub struct PreloadSettings {
     #[serde(rename = "box", alias = "box_provider")]
     pub box_provider: PreloadPolicy,
     pub smb: PreloadPolicy,
+    #[serde(default = "PreloadPolicy::sftp_default")]
+    pub sftp: PreloadPolicy,
 }
 
 impl Default for PreloadSettings {
@@ -169,16 +181,19 @@ impl Default for PreloadSettings {
             onedrive: PreloadPolicy::without_depth(),
             box_provider: PreloadPolicy::with_depth(DEFAULT_BOX_PRELOAD_DEPTH),
             smb: PreloadPolicy::with_depth(DEFAULT_SMB_PRELOAD_DEPTH),
+            sftp: PreloadPolicy::sftp_default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SmbPreloadOverride {
+pub struct ConnectionPreloadOverride {
     pub enabled: bool,
     pub maximum_seconds: u64,
     pub maximum_depth: u8,
 }
+
+pub type SmbPreloadOverride = ConnectionPreloadOverride;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
@@ -195,6 +210,8 @@ pub struct Connection {
     pub tuning_profile: TuningProfile,
     #[serde(default)]
     pub smb_preload_override: Option<SmbPreloadOverride>,
+    #[serde(default)]
+    pub sftp_preload_override: Option<ConnectionPreloadOverride>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

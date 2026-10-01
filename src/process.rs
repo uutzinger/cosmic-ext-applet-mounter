@@ -24,6 +24,7 @@ pub type CommandFuture<'a> =
 pub enum Executable {
     FlatpakSpawn,
     Rclone,
+    Sh,
     Onedriver,
     OneDrive,
     Fusermount3,
@@ -60,6 +61,7 @@ impl Executable {
         match self {
             Self::FlatpakSpawn => "flatpak-spawn",
             Self::Rclone => "rclone",
+            Self::Sh => "sh",
             Self::Onedriver => "onedriver",
             Self::OneDrive => "onedrive",
             Self::Fusermount3 => "fusermount3",
@@ -95,6 +97,7 @@ impl Executable {
         match self {
             Self::FlatpakSpawn => vec!["flatpak-spawn"],
             Self::Rclone => vec!["rclone"],
+            Self::Sh => vec!["/usr/bin/sh"],
             Self::Onedriver => vec!["onedriver"],
             Self::OneDrive => vec!["onedrive"],
             Self::Fusermount3 => vec!["fusermount3"],
@@ -635,39 +638,41 @@ fn resolve_candidate(candidate: &str) -> Option<PathBuf> {
 #[must_use]
 pub fn redact_text(value: &str) -> String {
     let mut redact_remaining = 0_u8;
-    value
-        .split_whitespace()
-        .map(|token| {
-            if redact_remaining > 0 {
-                redact_remaining -= 1;
-                return "[REDACTED]".into();
-            }
-
-            let lower = token.to_ascii_lowercase();
-            let normalized_key = lower
-                .trim_matches(|character| matches!(character, '"' | '\'' | ':' | ',' | '{' | '}'));
-            if lower == "authorization:" {
-                redact_remaining = 2;
-                return token.to_owned();
-            }
-            if matches!(
-                lower.as_str(),
-                "bearer"
-                    | "--password"
-                    | "--passwd"
-                    | "--token"
-                    | "--client-id"
-                    | "--client-secret"
-            ) || matches!(normalized_key, "client_id" | "client_secret")
-            {
-                redact_remaining = 1;
-                return token.to_owned();
-            }
-
-            redact_token(token)
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut result = String::with_capacity(value.len());
+    let mut rest = value;
+    while !rest.is_empty() {
+        let whitespace = rest
+            .find(|character: char| !character.is_whitespace())
+            .unwrap_or(rest.len());
+        result.push_str(&rest[..whitespace]);
+        rest = &rest[whitespace..];
+        if rest.is_empty() {
+            break;
+        }
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let token = &rest[..end];
+        let lower = token.to_ascii_lowercase();
+        let normalized_key =
+            lower.trim_matches(|character| matches!(character, '"' | '\'' | ':' | ',' | '{' | '}'));
+        if redact_remaining > 0 {
+            redact_remaining -= 1;
+            result.push_str("[REDACTED]");
+        } else if lower == "authorization:" {
+            redact_remaining = 2;
+            result.push_str(token);
+        } else if matches!(
+            lower.as_str(),
+            "bearer" | "--password" | "--passwd" | "--token" | "--client-id" | "--client-secret"
+        ) || matches!(normalized_key, "client_id" | "client_secret")
+        {
+            redact_remaining = 1;
+            result.push_str(token);
+        } else {
+            result.push_str(&redact_token(token));
+        }
+        rest = &rest[end..];
+    }
+    result
 }
 
 fn redact_token(token: &str) -> String {
@@ -983,6 +988,10 @@ mod tests {
         assert_eq!(
             redact_text("Authorization: Bearer abc123"),
             "Authorization: [REDACTED] [REDACTED]"
+        );
+        assert_eq!(
+            redact_text("SendSIGKILL=no\npassword=hunter2\nTimeoutStopUSec=2s\n"),
+            "SendSIGKILL=no\npassword=[REDACTED]\nTimeoutStopUSec=2s\n"
         );
         assert_eq!(
             redact_text("client_id private-id client_secret=private-secret"),

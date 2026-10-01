@@ -5,7 +5,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
-use cosmic_ext_applet_mounter::import::{preview_import, scan_legacy_units};
+use cosmic_ext_applet_mounter::import::{parse_rclone_backends, preview_import, scan_legacy_units};
 
 fn main() {
     let home = env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
@@ -26,8 +26,15 @@ fn main() {
     println!("Compatible units: {}", units.len());
 
     let active_units = active_unit_names(units.iter().map(|unit| unit.name.as_str()));
+    let rclone_backends = Command::new("rclone")
+        .args(["config", "dump"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| parse_rclone_backends(&String::from_utf8_lossy(&output.stdout)).ok())
+        .unwrap_or_default();
     for unit in units {
-        match preview_import(&unit, &[], &active_units, &home) {
+        match preview_import(&unit, &[], &active_units, &home, &rclone_backends) {
             Ok(preview) => {
                 println!();
                 println!("Unit: {}", preview.original_unit_name);

@@ -67,6 +67,7 @@ pub enum RcloneBackend {
     GoogleDrive,
     Box,
     Smb,
+    Sftp,
 }
 
 impl RcloneBackend {
@@ -75,6 +76,7 @@ impl RcloneBackend {
             Self::GoogleDrive => "drive",
             Self::Box => "box",
             Self::Smb => "smb",
+            Self::Sftp => "sftp",
         }
     }
 }
@@ -87,6 +89,7 @@ impl TryFrom<Provider> for RcloneBackend {
             Provider::GoogleDrive => Ok(Self::GoogleDrive),
             Provider::Box => Ok(Self::Box),
             Provider::Smb => Ok(Self::Smb),
+            Provider::Sftp => Ok(Self::Sftp),
             Provider::OneDrive => Err(ProviderError::UnsupportedProvider(provider)),
         }
     }
@@ -319,6 +322,7 @@ pub fn rclone_mount_plan(
     let remote = rclone_remote_path(
         &connection.remote_reference,
         connection.remote_subpath.as_deref(),
+        connection.provider == Provider::Sftp,
     )?;
     let cache_directory = options.cache_directory.clone().unwrap_or_else(|| {
         default_cache_root
@@ -377,6 +381,7 @@ pub fn rclone_mount_plan(
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
             restart_on_failure: true,
+            skip_on_metered: false,
         },
     })
 }
@@ -384,7 +389,9 @@ pub fn rclone_mount_plan(
 fn rclone_mount_timeouts(provider: Provider) -> (&'static str, &'static str) {
     match provider {
         Provider::Smb => ("90s", "15s"),
-        Provider::GoogleDrive | Provider::Box | Provider::OneDrive => ("10s", "5s"),
+        Provider::GoogleDrive | Provider::Box | Provider::OneDrive | Provider::Sftp => {
+            ("10s", "5s")
+        }
     }
 }
 
@@ -424,6 +431,7 @@ pub fn onedriver_mount_plan(
             executable: PathBuf::from(DEFAULT_ONEDRIVER),
             arguments,
             restart_on_failure: true,
+            skip_on_metered: false,
         },
     })
 }
@@ -617,11 +625,19 @@ fn online_options(connection: &Connection) -> Result<&OnlineMountConfig, Provide
     }
 }
 
-fn rclone_remote_path(reference: &str, subpath: Option<&str>) -> Result<String, ProviderError> {
+pub fn sftp_remote_path(reference: &str, subpath: Option<&str>) -> Result<String, ProviderError> {
+    rclone_remote_path(reference, subpath, true)
+}
+
+fn rclone_remote_path(
+    reference: &str,
+    subpath: Option<&str>,
+    allow_absolute: bool,
+) -> Result<String, ProviderError> {
     validate_remote_name(reference)?;
     match subpath {
         Some(subpath) => {
-            validate_remote_subpath(subpath)?;
+            validate_remote_subpath(subpath, allow_absolute)?;
             Ok(format!("{reference}:{subpath}"))
         }
         None => Ok(format!("{reference}:")),
@@ -640,10 +656,10 @@ fn validate_remote_name(value: &str) -> Result<(), ProviderError> {
     }
 }
 
-fn validate_remote_subpath(value: &str) -> Result<(), ProviderError> {
+fn validate_remote_subpath(value: &str, allow_absolute: bool) -> Result<(), ProviderError> {
     let path = Path::new(value);
     let valid = !value.trim().is_empty()
-        && !path.is_absolute()
+        && (allow_absolute || !path.is_absolute())
         && !value.contains('\\')
         && !value.chars().any(char::is_control)
         && !path
@@ -807,6 +823,7 @@ mod tests {
                 Provider::GoogleDrive => "ua_gdrive",
                 Provider::Box => "ua_box",
                 Provider::Smb => "ua_engr",
+                Provider::Sftp => "test_sftp",
                 Provider::OneDrive => "unused",
             }
             .into(),
@@ -817,7 +834,26 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
+    }
+
+    #[test]
+    fn sftp_mount_preserves_absolute_and_relative_paths() {
+        for path in [None, Some("projects"), Some("/srv/files"), Some("/")] {
+            let mut connection = connection(Provider::Sftp);
+            connection.remote_subpath = path.map(str::to_owned);
+            let plan = rclone_mount_plan(
+                &connection,
+                Path::new("/run/test"),
+                Path::new("/cache/test"),
+            )
+            .unwrap();
+            assert_eq!(plan.remote, format!("test_sftp:{}", path.unwrap_or("")));
+        }
+        assert!(sftp_remote_path("test", Some("/srv/../etc")).is_err());
+        assert!(sftp_remote_path("test", Some("/srv/\nfiles")).is_err());
+        assert!(rclone_remote_path("test", Some("/srv/files"), false).is_err());
     }
 
     #[test]

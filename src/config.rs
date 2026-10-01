@@ -156,6 +156,7 @@ pub enum ValidationError {
     InvalidPreloadDepth(u8),
     InvalidPreloadPolicy(&'static str),
     InvalidSmbPreloadOverride(ConnectionId),
+    InvalidSftpPreloadOverride(ConnectionId),
 }
 
 impl fmt::Display for ValidationError {
@@ -515,6 +516,7 @@ impl Config {
         );
         validate_preload_policy("box", self.document.preload.box_provider, true, &mut errors);
         validate_preload_policy("smb", self.document.preload.smb, true, &mut errors);
+        validate_preload_policy("sftp", self.document.preload.sftp, true, &mut errors);
 
         let mut vpn_ids = HashSet::new();
         for vpn in &self.document.vpn_profiles {
@@ -558,11 +560,10 @@ impl Config {
             {
                 errors.push(ValidationError::InvalidRemoteReference(connection.id));
             }
-            if connection
-                .remote_subpath
-                .as_deref()
-                .is_some_and(|path| has_control_char(path) || is_unsafe_remote_subpath(path))
-            {
+            if connection.remote_subpath.as_deref().is_some_and(|path| {
+                has_control_char(path)
+                    || is_unsafe_remote_subpath(path, connection.provider == Provider::Sftp)
+            }) {
                 errors.push(ValidationError::InvalidRemoteSubpath(connection.id));
             }
             if let Some(overrides) = connection.smb_preload_override {
@@ -573,6 +574,23 @@ impl Config {
                 }
                 validate_preload_policy(
                     "smb_connection",
+                    PreloadPolicy {
+                        enabled: overrides.enabled,
+                        maximum_seconds: overrides.maximum_seconds,
+                        maximum_depth: Some(overrides.maximum_depth),
+                    },
+                    true,
+                    &mut errors,
+                );
+            }
+            if let Some(overrides) = connection.sftp_preload_override {
+                if connection.provider != Provider::Sftp
+                    || !matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                {
+                    errors.push(ValidationError::InvalidSftpPreloadOverride(connection.id));
+                }
+                validate_preload_policy(
+                    "sftp_connection",
                     PreloadPolicy {
                         enabled: overrides.enabled,
                         maximum_seconds: overrides.maximum_seconds,
@@ -644,6 +662,13 @@ impl ConfigDocument {
             Provider::GoogleDrive => self.preload.google_drive,
             Provider::OneDrive => self.preload.onedrive,
             Provider::Box => self.preload.box_provider,
+            Provider::Sftp => connection
+                .sftp_preload_override
+                .map_or(self.preload.sftp, |value| PreloadPolicy {
+                    enabled: value.enabled,
+                    maximum_seconds: value.maximum_seconds,
+                    maximum_depth: Some(value.maximum_depth),
+                }),
             Provider::Smb => connection
                 .smb_preload_override
                 .map_or(self.preload.smb, |value| PreloadPolicy {
@@ -734,13 +759,14 @@ fn has_control_char(value: &str) -> bool {
     value.chars().any(char::is_control)
 }
 
-fn is_unsafe_remote_subpath(value: &str) -> bool {
+fn is_unsafe_remote_subpath(value: &str, allow_absolute: bool) -> bool {
     let path = Path::new(value);
     value.trim().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
+        || (!allow_absolute && path.is_absolute())
+        || path.components().any(|component| {
+            matches!(component, Component::ParentDir)
+                || (!allow_absolute && matches!(component, Component::RootDir))
+        })
 }
 
 fn normalize_absolute(path: &Path) -> Option<PathBuf> {
@@ -820,6 +846,24 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
+        }
+    }
+
+    #[test]
+    fn sftp_config_allows_absolute_paths_but_not_parent_traversal() {
+        assert!(!is_unsafe_remote_subpath("/srv/files", true));
+        assert!(is_unsafe_remote_subpath("/srv/files", false));
+        assert!(is_unsafe_remote_subpath("/srv/../files", true));
+        for provider in [
+            Provider::OneDrive,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let serialized = ron::to_string(&provider).unwrap();
+            assert_eq!(ron::from_str::<Provider>(&serialized).unwrap(), provider);
         }
     }
 
@@ -877,6 +921,65 @@ mod tests {
         let migrated = migrate_preload_settings(ron::from_str(legacy).expect("legacy document"));
         assert_eq!(migrated.preload.onedrive.maximum_seconds, 90);
         assert_eq!(migrated.onedriver_preload_seconds, None);
+    }
+
+    #[test]
+    fn sftp_preload_migrates_and_overrides_independently() {
+        let mut document = ConfigDocument::default();
+        document.preload.smb.maximum_seconds = 95;
+        let mut connection = online_connection("/home/example/Cloud/SFTP");
+        connection.provider = Provider::Sftp;
+        document.connections.push(connection.clone());
+        let mut legacy = serde_json::to_value(&document).unwrap();
+        legacy["preload"].as_object_mut().unwrap().remove("sftp");
+        legacy["connections"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("sftp_preload_override");
+        let migrated: ConfigDocument = serde_json::from_value(legacy).unwrap();
+        assert_eq!(migrated.preload.sftp, PreloadPolicy::sftp_default());
+        assert_eq!(migrated.preload.smb.maximum_seconds, 95);
+        assert_eq!(migrated.connections[0].sftp_preload_override, None);
+        document.preload.sftp.enabled = true;
+        assert_eq!(
+            document.preload_policy_for(&connection),
+            document.preload.sftp
+        );
+        connection.sftp_preload_override = Some(crate::model::ConnectionPreloadOverride {
+            enabled: false,
+            maximum_seconds: 12,
+            maximum_depth: 1,
+        });
+        assert_eq!(
+            document.preload_policy_for(&connection),
+            PreloadPolicy {
+                enabled: false,
+                maximum_seconds: 12,
+                maximum_depth: Some(1)
+            }
+        );
+        assert_eq!(document.preload.sftp.maximum_seconds, 30);
+        assert_eq!(document.preload.smb.maximum_seconds, 95);
+        let mut config = Config::default();
+        config.document.connections.push(connection.clone());
+        assert!(config.validate().is_ok());
+        config.document.connections[0].provider = Provider::Box;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidSftpPreloadOverride(_)))
+        );
+        config.document.connections.clear();
+        config.document.preload.sftp.maximum_depth = None;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidPreloadPolicy("sftp")))
+        );
     }
 
     #[test]

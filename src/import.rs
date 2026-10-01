@@ -114,6 +114,27 @@ pub fn scan_legacy_units(directory: &Path) -> Result<Vec<LegacyUnit>, ImportErro
     Ok(units)
 }
 
+pub fn parse_rclone_backends(output: &str) -> Result<BTreeMap<String, Provider>, ImportError> {
+    let config: serde_json::Value = serde_json::from_str(output)
+        .map_err(|_| ImportError::Malformed("rclone config dump is not valid JSON".into()))?;
+    let remotes = config.as_object().ok_or_else(|| {
+        ImportError::Malformed("rclone config dump did not return an object".into())
+    })?;
+    Ok(remotes
+        .iter()
+        .filter_map(|(name, options)| {
+            let provider = match options.get("type")?.as_str()? {
+                "drive" => Provider::GoogleDrive,
+                "box" => Provider::Box,
+                "smb" => Provider::Smb,
+                "sftp" => Provider::Sftp,
+                _ => return None,
+            };
+            Some((name.clone(), provider))
+        })
+        .collect())
+}
+
 pub fn parse_unit(path: &Path, content: &str) -> Result<LegacyUnit, ImportError> {
     let mut section = String::new();
     let mut values: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -161,6 +182,7 @@ pub fn preview_import(
     existing_connections: &[Connection],
     active_units: &BTreeSet<String>,
     home: &Path,
+    rclone_backends: &BTreeMap<String, Provider>,
 ) -> Result<ImportPreview, ImportError> {
     let engine = classify_unit(unit)?;
     let start_at_login = unit
@@ -168,7 +190,7 @@ pub fn preview_import(
         .iter()
         .any(|value| value == "default.target");
     let parsed = match engine {
-        LegacyEngine::RcloneMount => parse_rclone_mount(unit, home)?,
+        LegacyEngine::RcloneMount => parse_rclone_mount(unit, home, rclone_backends)?,
         LegacyEngine::Onedriver => parse_onedriver(unit, home)?,
     };
     let local_target_conflict = existing_connections
@@ -195,6 +217,7 @@ pub fn preview_import(
         disconnect_vpn_when_unused: false,
         tuning_profile: crate::model::TuningProfile::Balanced,
         smb_preload_override: None,
+        sftp_preload_override: None,
     };
     Ok(ImportPreview {
         original_path: unit.path.clone(),
@@ -273,6 +296,7 @@ fn classify_unit(unit: &LegacyUnit) -> Result<LegacyEngine, ImportError> {
 fn parse_rclone_mount(
     unit: &LegacyUnit,
     home: &Path,
+    rclone_backends: &BTreeMap<String, Provider>,
 ) -> Result<ParsedLegacyConnection, ImportError> {
     if unit.exec_start.len() < 4 {
         return Err(ImportError::Malformed(
@@ -282,13 +306,33 @@ fn parse_rclone_mount(
     let remote = &unit.exec_start[2];
     let target = expand_home(&unit.exec_start[3], home);
     let (remote_reference, remote_subpath) = parse_remote(remote)?;
-    let provider = infer_provider(&remote_reference);
+    let provider = rclone_backends
+        .get(&remote_reference)
+        .copied()
+        .ok_or_else(|| {
+            ImportError::Unsupported(format!(
+                "rclone remote {remote_reference} has no configured supported backend"
+            ))
+        })?;
     let mut cache_directory = None;
     let mut unsupported = unit.unsupported_options.clone();
     let mut index = 4;
     while index < unit.exec_start.len() {
         let option = &unit.exec_start[index];
         match option.as_str() {
+            "--config" => {
+                let Some(value) = unit.exec_start.get(index + 1) else {
+                    return Err(ImportError::Malformed(
+                        "rclone --config lacks a path".into(),
+                    ));
+                };
+                if expand_home(value, home) != home.join(".config/rclone/rclone.conf") {
+                    return Err(ImportError::Unsupported(
+                        "legacy service uses a non-default rclone config file".into(),
+                    ));
+                }
+                index += 2;
+            }
             "--cache-dir" => {
                 if let Some(value) = unit.exec_start.get(index + 1) {
                     cache_directory = Some(expand_home(value, home));
@@ -298,8 +342,7 @@ fn parse_rclone_mount(
                     index += 1;
                 }
             }
-            "--config"
-            | "--vfs-cache-mode"
+            "--vfs-cache-mode"
             | "--vfs-cache-max-age"
             | "--vfs-cache-max-size"
             | "--vfs-cache-poll-interval"
@@ -416,17 +459,6 @@ fn parse_remote(value: &str) -> Result<(String, Option<String>), ImportError> {
     }
     let subpath = (!subpath.is_empty()).then(|| subpath.to_owned());
     Ok((reference.to_owned(), subpath))
-}
-
-fn infer_provider(remote_reference: &str) -> Provider {
-    let lower = remote_reference.to_ascii_lowercase();
-    if lower.contains("box") {
-        Provider::Box
-    } else if lower.contains("smb") || lower.contains("engr") || lower.contains("share") {
-        Provider::Smb
-    } else {
-        Provider::GoogleDrive
-    }
 }
 
 fn logical_lines(content: &str) -> Vec<String> {
@@ -555,13 +587,43 @@ mod tests {
         ),
     ];
 
+    fn fixture_backends() -> BTreeMap<String, Provider> {
+        [
+            ("ua_box", Provider::Box),
+            ("ua_engr", Provider::Smb),
+            ("ua_gdrive", Provider::GoogleDrive),
+            ("uutzinger_gdrive", Provider::GoogleDrive),
+            ("remote", Provider::Box),
+        ]
+        .into_iter()
+        .map(|(name, provider)| (name.to_owned(), provider))
+        .collect()
+    }
+
+    #[test]
+    fn configured_backend_parser_selects_sftp_without_using_remote_name() {
+        let backends = parse_rclone_backends(
+            r#"{"vps":{"type":"sftp","pass":"secret"},"sftp_nickname":{"type":"drive"},"other":{"type":"ftp"}}"#,
+        )
+        .expect("backends");
+        assert_eq!(backends.get("vps"), Some(&Provider::Sftp));
+        assert_eq!(backends.get("sftp_nickname"), Some(&Provider::GoogleDrive));
+        assert!(!backends.contains_key("other"));
+    }
+
     #[test]
     fn parses_all_archived_rclone_services_without_mutating_fixtures() {
         for (name, content) in FIXTURES {
             let before = *content;
             let unit = parse_unit(Path::new(name), content).expect("unit");
-            let preview =
-                preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME)).expect("preview");
+            let preview = preview_import(
+                &unit,
+                &[],
+                &BTreeSet::new(),
+                Path::new(HOME),
+                &fixture_backends(),
+            )
+            .expect("preview");
             assert_eq!(before, *content);
             assert_eq!(preview.engine, LegacyEngine::RcloneMount);
             assert!(preview.local_target.is_absolute());
@@ -582,8 +644,14 @@ mod tests {
             include_str!("../archive/services/rclone-ua-engr.service"),
         )
         .expect("unit");
-        let preview = preview_import(&unit, &[], &BTreeSet::new(), Path::new("/home/uutzinger"))
-            .expect("preview");
+        let preview = preview_import(
+            &unit,
+            &[],
+            &BTreeSet::new(),
+            Path::new("/home/uutzinger"),
+            &fixture_backends(),
+        )
+        .expect("preview");
         assert_eq!(preview.provider, Provider::Smb);
         assert_eq!(preview.remote_reference, "ua_engr");
         assert_eq!(preview.remote_subpath, Some("Research".into()));
@@ -599,11 +667,79 @@ mod tests {
     }
 
     #[test]
+    fn sftp_import_uses_configured_backend_and_preserves_directory_forms() {
+        let backends = [("vps".to_owned(), Provider::Sftp)].into();
+        for (remote, expected_subpath) in [
+            ("vps:", None),
+            ("vps:Documents", Some("Documents")),
+            ("vps:/var/www", Some("/var/www")),
+        ] {
+            let content =
+                format!("[Service]\nExecStart=/usr/bin/rclone mount {remote} %h/Cloud/VPS\n");
+            let unit = parse_unit(Path::new("legacy-vps.service"), &content).expect("unit");
+            let preview = preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME), &backends)
+                .expect("preview");
+            assert_eq!(preview.provider, Provider::Sftp);
+            assert_eq!(preview.remote_subpath.as_deref(), expected_subpath);
+            let plan = replacement_plan(
+                preview,
+                true,
+                true,
+                false,
+                Path::new("/run/user/1000/cosmic-mounter"),
+                Path::new("/home/example/.cache/cosmic-mounter"),
+                Path::new("/home/example/.config/cosmic-mounter"),
+            )
+            .expect("replacement");
+            assert!(plan.managed_service.content.contains(remote));
+        }
+    }
+
+    #[test]
+    fn import_does_not_guess_backend_from_remote_name() {
+        let unit = parse_unit(
+            Path::new("legacy-vps.service"),
+            "[Service]\nExecStart=/usr/bin/rclone mount sftp_nickname: %h/Cloud/VPS\n",
+        )
+        .expect("unit");
+        assert!(matches!(
+            preview_import(
+                &unit,
+                &[],
+                &BTreeSet::new(),
+                Path::new(HOME),
+                &BTreeMap::new()
+            ),
+            Err(ImportError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_nondefault_rclone_config() {
+        let unit = parse_unit(
+            Path::new("legacy-vps.service"),
+            "[Service]\nExecStart=/usr/bin/rclone mount vps: %h/Cloud/VPS --config %h/private/rclone.conf\n",
+        )
+        .expect("unit");
+        let backends = [("vps".to_owned(), Provider::Sftp)].into();
+        assert!(matches!(
+            preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME), &backends),
+            Err(ImportError::Unsupported(_))
+        ));
+    }
+
+    #[test]
     fn onedriver_preview_is_supported() {
         let content = "[Unit]\nDescription=OneDrive legacy\n\n[Service]\nExecStart=/usr/bin/onedriver --config-file %h/.config/onedriver/config.json --cache-dir %h/.cache/onedriver %h/Cloud/OneDrive\n\n[Install]\nWantedBy=default.target\n";
         let unit = parse_unit(Path::new("onedriver.service"), content).expect("unit");
-        let preview =
-            preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME)).expect("preview");
+        let preview = preview_import(
+            &unit,
+            &[],
+            &BTreeSet::new(),
+            Path::new(HOME),
+            &fixture_backends(),
+        )
+        .expect("preview");
         assert_eq!(preview.engine, LegacyEngine::Onedriver);
         assert_eq!(preview.provider, Provider::OneDrive);
         assert_eq!(
@@ -623,8 +759,14 @@ mod tests {
             include_str!("../archive/services/rclone-ua-box.service"),
         )
         .expect("unit");
-        let preview =
-            preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME)).expect("preview");
+        let preview = preview_import(
+            &unit,
+            &[],
+            &BTreeSet::new(),
+            Path::new(HOME),
+            &fixture_backends(),
+        )
+        .expect("preview");
         assert!(
             replacement_plan(
                 preview.clone(),
@@ -678,11 +820,13 @@ mod tests {
                 disconnect_vpn_when_unused: false,
                 tuning_profile: crate::model::TuningProfile::Balanced,
                 smb_preload_override: None,
+                sftp_preload_override: None,
             }],
             &["rclone-ua-gdrive.service".to_owned()]
                 .into_iter()
                 .collect(),
             Path::new(HOME),
+            &fixture_backends(),
         )
         .expect("preview");
         assert!(preview.active_conflict);
@@ -722,8 +866,14 @@ mod tests {
     fn unsupported_options_are_reported() {
         let content = "[Service]\nExecStart=/usr/bin/rclone mount remote: %h/Cloud --evil value --cache-dir %h/.cache/rclone\nEnvironment=SECRET=hidden\n";
         let unit = parse_unit(Path::new("unsupported.service"), content).expect("unit");
-        let preview =
-            preview_import(&unit, &[], &BTreeSet::new(), Path::new(HOME)).expect("preview");
+        let preview = preview_import(
+            &unit,
+            &[],
+            &BTreeSet::new(),
+            Path::new(HOME),
+            &fixture_backends(),
+        )
+        .expect("preview");
         assert!(preview.unsupported_options.contains(&"--evil".to_owned()));
         assert!(
             preview

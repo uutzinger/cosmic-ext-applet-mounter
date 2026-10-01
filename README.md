@@ -3,7 +3,7 @@
 <img src="./resources/icon.svg" alt="Cloud Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
 Cloud Mounter is an applet for the COSMIC™ desktop for managing storage
-connections to **OneDrive**, **Google Drive**, **Box**, and **SMB**. It supports
+connections to **OneDrive**, **Google Drive**, **Box**, **SMB**, and **SFTP**. It supports
 direct **Online mount** and **Offline mirror** modes with background
 synchronization.
 
@@ -37,16 +37,6 @@ unavailable. The applet attempts to pre-cache directory metadata when available.
   - [Build from Source](#build-from-source)
   - [Flatpak Packaging and Publication](#flatpak-packaging-and-publication)
 
-## Applet and Settings
-
-The popup shows connection status and connections. Click a connection name in the
-popup to open its Modify window.
-Use the gear at the top right
-of **Cloud Mounter** to open **Settings**. **Add Connection** and **Refresh** are
-at the top. Settings also offers **Unmount when sleep** and **Restore after wake up**.
-Both default to off and apply only to applet-managed Online connections.
-Settings also alows to activate **directory preload** of the connection entries when they are mounted as a background task.
-
 ## Modes and Providers
 
 **Online mount** uses a network-backed FUSE filesystem. It is useful for browsing
@@ -63,6 +53,7 @@ The following connection engines are used to connect to the providers ([external
 | Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
+| SFTP | `rclone mount` | `rclone bisync` |
 
 Example screenshots of the applet and its separate windows:
 <table>
@@ -90,8 +81,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.6/cosmic-ext-applet-mounter_0.4.6_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.6_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.7/cosmic-ext-applet-mounter_0.4.7_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.4.7_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -217,7 +208,9 @@ refresh or fast-list, which helps limit Box API requests and rate-limit risk.
 **SMB** also waits for the mountpoint and root listing before starting its
 bounded directory-only metadata walk. Each SMB connection can inherit the
 global preload policy or override its enabled state, duration, and depth.
-All provider preloads default to enabled with a 60-second maximum. Box uses a
+SFTP uses the same bounded directory walk, but defaults to disabled with a
+30-second maximum and depth 2.
+Other provider preloads default to enabled with a 60-second maximum. Box uses a
 bounded directory-only walk with depth 2 to avoid API rate limits; SMB uses
 depth 3.
 SMB connections may override enablement, duration, and depth
@@ -231,6 +224,7 @@ The applet does not store provider credentials. Credentials stay with `rclone`,
 For Google Drive and Box, applet-driven setup delegates browser OAuth to
 `rclone`. For SMB, the password remains in rclone's credential mechanism, not
 in applet configuration.
+SFTP supports a password, SSH key, or SSH agent and requires a known-hosts file.
 
 Google Drive setup accepts the client ID and matching client secret from a
 Google Cloud Desktop OAuth application. Supplying both values creates the

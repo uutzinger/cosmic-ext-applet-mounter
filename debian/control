@@ -30,4 +30,4 @@ Description: applet for COSMIC to manage cloud mounts and offline storage mirror
  COSMIC panel.
  .
  It can manage online mounts and offline mirrors for OneDrive, Google Drive,
- Box, and SMB through external tools such as rclone, onedriver, and onedrive.
+ Box, SMB, and SFTP through external tools such as rclone, onedriver, and onedrive.

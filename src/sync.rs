@@ -200,7 +200,7 @@ pub fn rclone_bisync_plan(
     work_root: &Path,
 ) -> Result<RcloneBisyncPlan, SyncError> {
     match connection.provider {
-        Provider::GoogleDrive | Provider::Box | Provider::Smb => {}
+        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {}
         provider => return Err(SyncError::UnsupportedProvider(provider)),
     }
     let options = offline_options(connection)?;
@@ -209,10 +209,18 @@ pub fn rclone_bisync_plan(
         work_root,
         &options.recovery_directory,
     )?;
-    let remote = rclone_remote_path(
-        &connection.remote_reference,
-        connection.remote_subpath.as_deref(),
-    )?;
+    let remote = if connection.provider == Provider::Sftp {
+        crate::providers::sftp_remote_path(
+            &connection.remote_reference,
+            connection.remote_subpath.as_deref(),
+        )
+        .map_err(|_| SyncError::InvalidRemoteSubpath)?
+    } else {
+        rclone_remote_path(
+            &connection.remote_reference,
+            connection.remote_subpath.as_deref(),
+        )?
+    };
     let work_directory = work_root
         .join("rclone-bisync")
         .join(connection.id.to_string());
@@ -235,6 +243,8 @@ pub fn rclone_bisync_plan(
         options.recovery_directory.display().to_string(),
         "--resilient".to_owned(),
         "--recover".to_owned(),
+        "--max-lock".to_owned(),
+        "2m".to_owned(),
         "--conflict-resolve".to_owned(),
         "none".to_owned(),
         "--conflict-loser".to_owned(),
@@ -265,6 +275,7 @@ pub fn rclone_bisync_plan(
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
             restart_on_failure: false,
+            skip_on_metered: !options.sync_on_metered,
         },
         timer: TimerSpec {
             connection_id: connection.id,
@@ -404,6 +415,7 @@ pub fn one_drive_mirror_plan(
             executable: PathBuf::from(DEFAULT_ONEDRIVE),
             arguments,
             restart_on_failure: true,
+            skip_on_metered: false,
         },
     })
 }
@@ -603,8 +615,26 @@ pub fn google_native_filter_file() -> String {
 #[must_use]
 pub fn parse_preview(output: &str) -> PreviewSummary {
     let mut summary = PreviewSummary::default();
+    let mut rclone_copy_direction = None;
     for line in output.lines() {
         let lower = line.to_ascii_lowercase();
+        if (lower.contains("copying files to") || lower.contains("copying path"))
+            && let (Some(path1), Some(path2)) = (lower.find("path1"), lower.find("path2"))
+        {
+            rclone_copy_direction = Some(path2 < path1);
+            continue;
+        }
+        if lower.contains("skipped copy as --dry-run is set") {
+            match rclone_copy_direction {
+                Some(true) => summary.uploads += 1,
+                Some(false) => summary.downloads += 1,
+                None => {}
+            }
+            continue;
+        }
+        if lower.contains("skipped storing filters file hash") {
+            continue;
+        }
         if is_google_native_document(&lower) {
             summary.skipped += 1;
             summary.google_native_skips.push(PathBuf::from(line.trim()));
@@ -624,10 +654,9 @@ pub fn parse_preview(output: &str) -> PreviewSummary {
             summary.uploads += 1;
         } else if lower.contains("path1 to path2") && lower.contains("copy") {
             summary.downloads += 1;
-        } else if lower.contains("upload") {
+        } else if lower.contains("would upload") || lower.contains(": uploading ") {
             summary.uploads += 1;
-        } else if lower.contains("download") || lower.contains("transfer") || lower.contains("copy")
-        {
+        } else if lower.contains("would download") || lower.contains(": downloading ") {
             summary.downloads += 1;
         }
         if let Some(bytes) = parse_first_bytes(&lower) {
@@ -823,6 +852,7 @@ mod tests {
                 Provider::GoogleDrive => "ua_gdrive",
                 Provider::Box => "ua_box",
                 Provider::Smb => "ua_engr",
+                Provider::Sftp => "test_sftp",
             }
             .into(),
             remote_subpath: Some("Projects".into()),
@@ -832,6 +862,7 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
     }
 
@@ -844,6 +875,7 @@ mod tests {
         .expect("plan");
         assert_eq!(plan.path1_remote, "ua_gdrive:Projects");
         assert_eq!(plan.timer.interval, Duration::from_secs(900));
+        assert!(plan.service.skip_on_metered);
         assert!(
             !plan
                 .service
@@ -852,6 +884,22 @@ mod tests {
         );
         assert!(plan.service.arguments.contains(&"--resilient".to_owned()));
         assert!(plan.service.arguments.contains(&"--recover".to_owned()));
+        assert!(
+            plan.service
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["--max-lock", "2m"])
+        );
+        let mut allowed = offline(Provider::Sftp);
+        if let ConnectionMode::OfflineMirror(options) = &mut allowed.mode {
+            options.sync_on_metered = true;
+        }
+        assert!(
+            !rclone_bisync_plan(&allowed, Path::new("/state"))
+                .unwrap()
+                .service
+                .skip_on_metered
+        );
         assert!(
             plan.service
                 .arguments
@@ -869,6 +917,20 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--max-delete", "1000"])
         );
+    }
+
+    #[test]
+    fn sftp_mirror_preserves_absolute_path_and_recovery_stays_outside_subtree() {
+        let mut connection = offline(Provider::Sftp);
+        connection.remote_subpath = Some("/srv/files".into());
+        let plan = rclone_bisync_plan(&connection, Path::new("/state")).unwrap();
+        assert_eq!(plan.path1_remote, "test_sftp:/srv/files");
+        assert!(
+            plan.remote_recovery_path
+                .starts_with("test_sftp:.cosmic-mounter-recovery/")
+        );
+        connection.remote_subpath = Some("/srv/../etc".into());
+        assert!(rclone_bisync_plan(&connection, Path::new("/state")).is_err());
     }
 
     #[test]
@@ -1149,6 +1211,30 @@ Excluded proposal.gdoc\n",
         assert!(preview.destructive);
         assert_eq!(preview.transfer_bytes, Some(15 * 1024 * 1024));
         assert_eq!(preview.google_native_skips.len(), 1);
+    }
+
+    #[test]
+    fn parse_preview_counts_dry_run_files_without_counting_rclone_progress() {
+        let preview = parse_preview(
+            "\"DownloadHash\": false\n\
+Copying Path2 files to Path1\n\
+There was nothing to transfer\n\
+Skipped storing filters file hash to filters.txt.md5 as --dry-run is set\n\
+Path1 Resync is copying files to Path2\n\
+one.txt: Skipped copy as --dry-run is set (size 4)\n\
+Transferred: 4 B / 4 B, 100%\n\
+Transferred: 1 / 1, 100%\n",
+        );
+        assert_eq!(preview.uploads, 0);
+        assert_eq!(preview.downloads, 1);
+        assert_eq!(preview.skipped, 0);
+        assert_eq!(preview.transfer_bytes, Some(4));
+
+        let upload = parse_preview(
+            "Copying Path2 files to Path1\nlocal.txt: Skipped copy as --dry-run is set (size 3)\n",
+        );
+        assert_eq!(upload.uploads, 1);
+        assert_eq!(upload.downloads, 0);
     }
 
     #[test]

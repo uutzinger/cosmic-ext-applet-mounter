@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+mod sftp;
+use sftp::{SftpAuth, SftpDraft, SftpField};
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -10,7 +13,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use crate::fl;
@@ -33,23 +36,26 @@ use cosmic_ext_applet_mounter::directory_preload::{
     self, DirectoryPreloadJob, DirectoryPreloadOutcome,
 };
 use cosmic_ext_applet_mounter::import::{
-    ImportPreview, ImportReplacementPlan, default_scan_directory, preview_import, replacement_plan,
-    scan_legacy_units,
+    ImportPreview, ImportReplacementPlan, default_scan_directory, parse_rclone_backends,
+    preview_import, replacement_plan, scan_legacy_units,
 };
+use cosmic_ext_applet_mounter::mirror_script;
 use cosmic_ext_applet_mounter::model::{
     AccessMode, Connection, ConnectionId, ConnectionMode, ConnectionStatus, OfflineMirrorConfig,
     OfflineMirrorStatus, OnlineMountConfig, OnlineMountStatus, Operation, PreloadPolicy,
     PreloadSettings, Provider, SmbPreloadOverride, TuningProfile, VpnKind, VpnProfile,
     VpnProfileId,
 };
-use cosmic_ext_applet_mounter::mounts::{MountEntry, MountTable, ProcMountTable, SyncRuntimeState};
+use cosmic_ext_applet_mounter::mounts::{
+    MountEntry, MountTable, MountTableError, ProcMountTable, SyncRuntimeState,
+};
 use cosmic_ext_applet_mounter::process::{
     CommandError, CommandExecutionMode, CommandOutput, CommandRequest, CommandRunner, Executable,
     RuntimeCommandRunner, redact_text,
 };
 use cosmic_ext_applet_mounter::providers::{
-    CommandRcloneProvider, OnedriverAuthState, ProviderError, lazy_unmount_request,
-    onedriver_auth_state_for_plan, onedriver_mount_plan, rclone_mount_plan,
+    CommandRcloneProvider, OnedriverAuthState, ProviderError, clean_unmount_request,
+    lazy_unmount_request, onedriver_auth_state_for_plan, onedriver_mount_plan, rclone_mount_plan,
 };
 use cosmic_ext_applet_mounter::rclone_refresh::{self, RcloneRefreshJob, RcloneRefreshOutcome};
 use cosmic_ext_applet_mounter::services::{
@@ -116,6 +122,7 @@ pub enum PreloadProvider {
     OneDrive,
     Box,
     Smb,
+    Sftp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +138,7 @@ struct PreloadSettingsDraft {
     onedrive: PreloadPolicyDraft,
     box_provider: PreloadPolicyDraft,
     smb: PreloadPolicyDraft,
+    sftp: PreloadPolicyDraft,
 }
 
 impl From<PreloadPolicy> for PreloadPolicyDraft {
@@ -156,6 +164,7 @@ impl From<PreloadSettings> for PreloadSettingsDraft {
             onedrive: settings.onedrive.into(),
             box_provider: settings.box_provider.into(),
             smb: settings.smb.into(),
+            sftp: settings.sftp.into(),
         }
     }
 }
@@ -167,6 +176,7 @@ impl PreloadSettingsDraft {
             PreloadProvider::OneDrive => &mut self.onedrive,
             PreloadProvider::Box => &mut self.box_provider,
             PreloadProvider::Smb => &mut self.smb,
+            PreloadProvider::Sftp => &mut self.sftp,
         }
     }
 
@@ -198,6 +208,7 @@ impl PreloadSettingsDraft {
             onedrive: policy(&self.onedrive)?,
             box_provider: policy(&self.box_provider)?,
             smb: policy(&self.smb)?,
+            sftp: policy(&self.sftp)?,
         })
     }
 }
@@ -216,6 +227,7 @@ struct ConnectionDraft {
     smb_user: String,
     smb_domain: String,
     smb_password: String,
+    sftp: SftpDraft,
     local_path: String,
     enabled: bool,
     start_at_login: bool,
@@ -225,10 +237,10 @@ struct ConnectionDraft {
     recovery_directory: String,
     vpn_profile_id: Option<VpnProfileId>,
     disconnect_vpn_when_unused: bool,
-    smb_preload_use_global: bool,
-    smb_preload_enabled: bool,
-    smb_preload_seconds: String,
-    smb_preload_depth: String,
+    connection_preload_use_global: bool,
+    connection_preload_enabled: bool,
+    connection_preload_seconds: String,
+    connection_preload_depth: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +277,7 @@ impl Default for ConnectionDraft {
             smb_user: std::env::var("USER").unwrap_or_default(),
             smb_domain: "WORKGROUP".into(),
             smb_password: String::new(),
+            sftp: SftpDraft::default(),
             local_path: String::new(),
             enabled: true,
             start_at_login: false,
@@ -274,10 +287,10 @@ impl Default for ConnectionDraft {
             recovery_directory: String::new(),
             vpn_profile_id: None,
             disconnect_vpn_when_unused: false,
-            smb_preload_use_global: true,
-            smb_preload_enabled: true,
-            smb_preload_seconds: "60".into(),
-            smb_preload_depth: "3".into(),
+            connection_preload_use_global: true,
+            connection_preload_enabled: true,
+            connection_preload_seconds: "60".into(),
+            connection_preload_depth: "3".into(),
         }
     }
 }
@@ -298,12 +311,18 @@ pub struct AppModel {
     pending_rclone_remote_remove: Option<String>,
     removing_connection: Option<ConnectionId>,
     removing_rclone_remote: Option<String>,
+    sftp_setup_pending: bool,
+    sftp_settings_dirty: bool,
+    sftp_settings_revision: u64,
+    sftp_update_ack: Option<(String, SftpDraft)>,
+    sftp_retry_secret_auth: Option<SftpAuth>,
     onedrive_auth_open_command: String,
     onedrive_auth_response_url: String,
     validated_draft: Option<ValidatedDraft>,
     last_notice: Option<String>,
     last_notice_at: Option<Instant>,
     vpn_ready: BTreeMap<VpnProfileId, bool>,
+    network_ready: Option<bool>,
     vpn_status_pending: bool,
     sleep_status: Option<String>,
     sleep_notice: Option<String>,
@@ -321,6 +340,7 @@ pub struct AppModel {
     preload_draft: PreloadSettingsDraft,
     preload_input_dirty: bool,
     directory_preload_jobs: BTreeMap<ConnectionId, u64>,
+    unmount_pending: BTreeSet<ConnectionId>,
 }
 
 #[derive(Debug, Clone)]
@@ -352,7 +372,6 @@ pub enum Message {
         u64,
         Result<RcloneRefreshOutcome, String>,
     ),
-    DirectoryPreloadStarted(String, Result<DirectoryPreloadJob, String>),
     DirectoryPreloadCompleted(
         String,
         ConnectionId,
@@ -366,6 +385,10 @@ pub enum Message {
     DraftSubpath(String),
     DraftGoogleClientId(String),
     DraftGoogleClientSecret(String),
+    DraftSftp(SftpField, String),
+    DraftSftpAuth(SftpAuth),
+    ApplySftpRemote,
+    SftpRemoteApplied(String, u64, Option<SftpAuth>, Result<bool, String>),
     DraftSmbHost(String),
     DraftSmbUser(String),
     DraftSmbDomain(String),
@@ -379,10 +402,10 @@ pub enum Message {
     DraftEnabled(bool),
     DraftStartAtLogin(bool),
     DraftSyncOnMetered(bool),
-    DraftSmbPreloadUseGlobal(bool),
-    DraftSmbPreloadEnabled(bool),
-    DraftSmbPreloadSeconds(String),
-    DraftSmbPreloadDepth(String),
+    DraftConnectionPreloadUseGlobal(bool),
+    DraftConnectionPreloadEnabled(bool),
+    DraftConnectionPreloadSeconds(String),
+    DraftConnectionPreloadDepth(String),
     DraftVpn(Option<VpnProfileId>),
     DraftDisconnectVpn(bool),
     DraftOneDriveAuthResponse(String),
@@ -414,6 +437,7 @@ pub enum Message {
     Refresh,
     NoticeTick(Instant),
     VpnStatusChecked(BTreeMap<VpnProfileId, bool>),
+    NetworkStatusChecked(bool),
 }
 
 impl cosmic::Application for AppModel {
@@ -458,12 +482,18 @@ impl cosmic::Application for AppModel {
             pending_rclone_remote_remove: None,
             removing_connection: None,
             removing_rclone_remote: None,
+            sftp_setup_pending: false,
+            sftp_settings_dirty: false,
+            sftp_settings_revision: 0,
+            sftp_update_ack: None,
+            sftp_retry_secret_auth: None,
             onedrive_auth_open_command: String::new(),
             onedrive_auth_response_url: String::new(),
             validated_draft: None,
             last_notice: None,
             last_notice_at: None,
             vpn_ready: BTreeMap::new(),
+            network_ready: None,
             vpn_status_pending: false,
             sleep_status: None,
             sleep_notice: None,
@@ -481,6 +511,7 @@ impl cosmic::Application for AppModel {
             preload_draft,
             preload_input_dirty: false,
             directory_preload_jobs: BTreeMap::new(),
+            unmount_pending: BTreeSet::new(),
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
@@ -632,7 +663,12 @@ impl cosmic::Application for AppModel {
             Message::RuntimePoll => {
                 if !self.runtime_pending && !self.runtime_poll_pending {
                     self.runtime_poll_pending = true;
-                    return runtime_request_task(RuntimeCommand::Status);
+                    return Task::batch([
+                        runtime_request_task(RuntimeCommand::Status),
+                        Task::perform(current_network_ready(), |ready| {
+                            cosmic::Action::App(Message::NetworkStatusChecked(ready))
+                        }),
+                    ]);
                 }
             }
             Message::RuntimeResult(command, result) => {
@@ -821,6 +857,9 @@ impl cosmic::Application for AppModel {
                             async move { current_vpn_ready_states(config).await },
                             |ready| cosmic::Action::App(Message::VpnStatusChecked(ready)),
                         ),
+                        Task::perform(current_network_ready(), |ready| {
+                            cosmic::Action::App(Message::NetworkStatusChecked(ready))
+                        }),
                     ])
                 };
             }
@@ -858,6 +897,9 @@ impl cosmic::Application for AppModel {
                 self.last_notice_at = Some(Instant::now());
             }
             Message::ManagedOnlineOperationCompleted(connection, operation, result) => {
+                if operation == Operation::Unmount {
+                    self.unmount_pending.remove(&connection.id);
+                }
                 self.config = Config::load_runtime().config;
                 self.pending_repair = None;
                 let label = operation_label(operation);
@@ -916,7 +958,7 @@ impl cosmic::Application for AppModel {
                         if operation == Operation::Mount
                             && matches!(
                                 connection.provider,
-                                Provider::OneDrive | Provider::Box | Provider::Smb
+                                Provider::OneDrive | Provider::Box | Provider::Smb | Provider::Sftp
                             )
                             && matches!(connection.mode, ConnectionMode::OnlineMount(_))
                             && preload_policy.enabled
@@ -924,30 +966,20 @@ impl cosmic::Application for AppModel {
                             let name = connection.name.clone();
                             let timeout = Duration::from_secs(preload_policy.maximum_seconds);
                             let maximum_depth = preload_policy.maximum_depth;
-                            let wait_for_root =
-                                matches!(connection.provider, Provider::Box | Provider::Smb);
-                            let connection_id = connection.id;
-                            let mountpoint = connection.local_path.clone();
+                            let wait_for_root = matches!(
+                                connection.provider,
+                                Provider::Box | Provider::Smb | Provider::Sftp
+                            );
                             self.last_notice = Some(format!(
                                 "Mount completed for {name}. Starting background directory preload…"
                             ));
-                            return Task::perform(
-                                async move {
-                                    directory_preload::start(
-                                        connection_id,
-                                        mountpoint,
-                                        timeout,
-                                        maximum_depth,
-                                        wait_for_root,
-                                    )
-                                },
-                                move |result| {
-                                    cosmic::Action::App(Message::DirectoryPreloadStarted(
-                                        name.clone(),
-                                        result,
-                                    ))
-                                },
+                            let result = directory_preload::start_for_connection(
+                                &connection,
+                                timeout,
+                                maximum_depth,
+                                wait_for_root,
                             );
+                            return self.register_directory_preload(name, result);
                         }
                         if operation == Operation::Unmount {
                             self.rclone_refresh_starting.remove(&connection.id);
@@ -964,6 +996,17 @@ impl cosmic::Application for AppModel {
             }
             Message::RcloneRefreshStarted(name, connection_id, result) => {
                 self.rclone_refresh_starting.remove(&connection_id);
+                if self.unmount_pending.contains(&connection_id) {
+                    if result.is_ok() {
+                        return Task::perform(
+                            async move {
+                                let _ = rclone_refresh::cancel(connection_id).await;
+                            },
+                            |_| cosmic::Action::App(Message::RuntimePoll),
+                        );
+                    }
+                    return Task::none();
+                }
                 match result {
                     Ok(job) => {
                         self.rclone_refresh_jobs
@@ -1001,20 +1044,16 @@ impl cosmic::Application for AppModel {
                     return Task::none();
                 }
                 self.rclone_refresh_jobs.remove(&connection_id);
+                if self.unmount_pending.contains(&connection_id) {
+                    return Task::none();
+                }
                 match result {
-                    Ok(RcloneRefreshOutcome::Completed { duration_seconds }) => {
-                        self.last_notice = Some(format!(
-                            "Background directory refresh completed for {name} in {duration_seconds:.1} seconds."
-                        ));
-                        self.last_notice_at = Some(Instant::now());
+                    Ok(outcome) => {
+                        if let Some(notice) = outcome.notice(&name) {
+                            self.last_notice = Some(notice);
+                            self.last_notice_at = Some(Instant::now());
+                        }
                     }
-                    Ok(RcloneRefreshOutcome::TimedOut { duration_seconds }) => {
-                        self.last_notice = Some(format!(
-                            "Background directory refresh for {name} stopped after its {duration_seconds:.0}-second limit."
-                        ));
-                        self.last_notice_at = Some(Instant::now());
-                    }
-                    Ok(RcloneRefreshOutcome::Cancelled) => {}
                     Err(error) => {
                         self.last_notice = Some(format!(
                             "Background directory refresh failed for {name}: {error}"
@@ -1023,54 +1062,21 @@ impl cosmic::Application for AppModel {
                     }
                 }
             }
-            Message::DirectoryPreloadStarted(name, result) => match result {
-                Ok(job) => {
-                    let connection_id = job.connection_id;
-                    let generation = job.generation;
-                    self.directory_preload_jobs
-                        .insert(connection_id, generation);
-                    self.last_notice = Some(format!(
-                        "{name} is mounted. Background directory preload is running."
-                    ));
-                    self.last_notice_at = Some(Instant::now());
-                    return Task::perform(
-                        async move { directory_preload::monitor(job).await },
-                        move |result| {
-                            cosmic::Action::App(Message::DirectoryPreloadCompleted(
-                                name.clone(),
-                                connection_id,
-                                generation,
-                                result,
-                            ))
-                        },
-                    );
-                }
-                Err(error) => {
-                    self.last_notice = Some(format!(
-                        "{name} is mounted, but its directory preload could not start: {error}"
-                    ));
-                    self.last_notice_at = Some(Instant::now());
-                }
-            },
             Message::DirectoryPreloadCompleted(name, connection_id, generation, result) => {
                 if self.directory_preload_jobs.get(&connection_id) != Some(&generation) {
                     return Task::none();
                 }
                 self.directory_preload_jobs.remove(&connection_id);
+                if self.unmount_pending.contains(&connection_id) {
+                    return Task::none();
+                }
                 match result {
-                    Ok(DirectoryPreloadOutcome::Completed { duration_seconds }) => {
-                        self.last_notice = Some(format!(
-                            "Directory preload completed for {name} in {duration_seconds:.1} seconds."
-                        ));
-                        self.last_notice_at = Some(Instant::now());
+                    Ok(outcome) => {
+                        if let Some(notice) = outcome.notice(&name) {
+                            self.last_notice = Some(notice);
+                            self.last_notice_at = Some(Instant::now());
+                        }
                     }
-                    Ok(DirectoryPreloadOutcome::TimedOut { duration_seconds }) => {
-                        self.last_notice = Some(format!(
-                            "Directory preload for {name} stopped after its {duration_seconds:.0}-second limit. You can continue browsing normally."
-                        ));
-                        self.last_notice_at = Some(Instant::now());
-                    }
-                    Ok(DirectoryPreloadOutcome::Cancelled) => {}
                     Err(error) => {
                         self.last_notice =
                             Some(format!("Directory preload failed for {name}: {error}"));
@@ -1089,7 +1095,19 @@ impl cosmic::Application for AppModel {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
                 self.validated_draft = None;
+                self.sftp_update_ack = None;
+                self.draft.sftp.clear_secrets();
+                self.reset_sftp_settings_tracking();
                 self.draft.provider = provider;
+                self.draft.connection_preload_use_global = true;
+                let policy = if provider == Provider::Sftp {
+                    self.config.document.preload.sftp
+                } else {
+                    self.config.document.preload.smb
+                };
+                self.draft.connection_preload_enabled = policy.enabled;
+                self.draft.connection_preload_seconds = policy.maximum_seconds.to_string();
+                self.draft.connection_preload_depth = policy.maximum_depth.unwrap_or(2).to_string();
                 if provider != Provider::Smb {
                     self.draft.smb_password.clear();
                 }
@@ -1123,6 +1141,10 @@ impl cosmic::Application for AppModel {
                 self.pending_rclone_remote_remove = None;
                 self.validated_draft = None;
                 self.draft.remote_reference = value;
+                self.sftp_update_ack = None;
+                if self.draft.provider == Provider::Sftp {
+                    self.load_sftp_details();
+                }
             }
             Message::DraftSubpath(value) => {
                 self.pending_shared_remote_ack = None;
@@ -1136,6 +1158,56 @@ impl cosmic::Application for AppModel {
             Message::DraftGoogleClientSecret(value) => {
                 self.validated_draft = None;
                 self.draft.google_client_secret = value;
+            }
+            Message::DraftSftp(field, value) => {
+                self.validated_draft = None;
+                self.sftp_update_ack = None;
+                let before = self.draft.sftp.clone();
+                self.draft.sftp.set(field, value);
+                if self.draft.sftp != before {
+                    self.mark_sftp_settings_changed();
+                }
+            }
+            Message::DraftSftpAuth(auth) => {
+                self.validated_draft = None;
+                self.sftp_update_ack = None;
+                if self.draft.sftp.auth != auth {
+                    self.draft.sftp.clear_secrets();
+                    self.draft.sftp.auth = auth;
+                    self.sftp_retry_secret_auth = None;
+                    self.mark_sftp_settings_changed();
+                }
+            }
+            Message::ApplySftpRemote => return self.apply_sftp_remote(),
+            Message::SftpRemoteApplied(name, revision, attempted_secret, result) => {
+                self.finish_sftp_settings_update(&name, revision, result.is_ok());
+                self.sftp_setup_pending = false;
+                self.sftp_update_ack = None;
+                self.validated_draft = None;
+                self.detect_rclone_remotes();
+                self.sftp_retry_secret_auth = if result.is_err()
+                    && self.draft.provider == Provider::Sftp
+                    && self.draft.remote_reference.trim() == name
+                    && attempted_secret == Some(self.draft.sftp.auth)
+                {
+                    attempted_secret
+                } else {
+                    None
+                };
+                self.last_notice = Some(match result {
+                    Ok(updated) => format!(
+                        "{} SFTP remote `{name}`. Credential fields cleared. Restart connections using this remote, then run Test Connection.",
+                        if updated { "Updated" } else { "Created" }
+                    ),
+                    Err(error) => format!(
+                        "Could not apply SFTP remote `{name}`: {error}. Credential fields cleared.{}",
+                        if attempted_secret.is_some() {
+                            " Re-enter the credential before retrying."
+                        } else {
+                            ""
+                        }
+                    ),
+                });
             }
             Message::DraftSmbHost(value) => {
                 self.validated_draft = None;
@@ -1204,24 +1276,24 @@ impl cosmic::Application for AppModel {
                 self.validated_draft = None;
                 self.draft.sync_on_metered = value;
             }
-            Message::DraftSmbPreloadUseGlobal(value) => {
+            Message::DraftConnectionPreloadUseGlobal(value) => {
                 self.validated_draft = None;
-                self.draft.smb_preload_use_global = value;
+                self.draft.connection_preload_use_global = value;
             }
-            Message::DraftSmbPreloadEnabled(value) => {
+            Message::DraftConnectionPreloadEnabled(value) => {
                 self.validated_draft = None;
-                self.draft.smb_preload_enabled = value;
+                self.draft.connection_preload_enabled = value;
             }
-            Message::DraftSmbPreloadSeconds(value) => {
+            Message::DraftConnectionPreloadSeconds(value) => {
                 if value.len() <= 3 && value.chars().all(|c| c.is_ascii_digit()) {
                     self.validated_draft = None;
-                    self.draft.smb_preload_seconds = value;
+                    self.draft.connection_preload_seconds = value;
                 }
             }
-            Message::DraftSmbPreloadDepth(value) => {
+            Message::DraftConnectionPreloadDepth(value) => {
                 if value.len() <= 2 && value.chars().all(|c| c.is_ascii_digit()) {
                     self.validated_draft = None;
-                    self.draft.smb_preload_depth = value;
+                    self.draft.connection_preload_depth = value;
                 }
             }
             Message::DraftVpn(id) => {
@@ -1378,6 +1450,14 @@ impl cosmic::Application for AppModel {
             Message::SubmitOneDriveMirrorAuthResponse => {
                 self.submit_onedrive_mirror_auth_response();
             }
+            Message::TestDraft if self.sftp_setup_pending => {
+                self.last_notice =
+                    Some("Wait for SFTP remote setup to finish before testing.".into());
+            }
+            Message::SaveDraft if self.sftp_setup_pending => {
+                self.last_notice =
+                    Some("Wait for SFTP remote setup to finish before saving.".into());
+            }
             Message::TestDraft => {
                 return self.test_draft_plan();
             }
@@ -1448,6 +1528,9 @@ impl cosmic::Application for AppModel {
             Message::VpnStatusChecked(ready) => {
                 self.vpn_ready = ready;
                 self.vpn_status_pending = false;
+            }
+            Message::NetworkStatusChecked(ready) => {
+                self.network_ready = Some(ready);
             }
         }
 
@@ -1548,24 +1631,29 @@ impl AppModel {
             .spacing(8)
             .push(widget::text::title4("Directory preload"))
             .push(preload_policy_row(
-                "Google Drive",
+                fl!("provider-google-drive"),
                 PreloadProvider::GoogleDrive,
                 &self.preload_draft.google_drive,
             ))
             .push(preload_policy_row(
-                "OneDrive",
+                fl!("provider-onedrive"),
                 PreloadProvider::OneDrive,
                 &self.preload_draft.onedrive,
             ))
             .push(preload_policy_row(
-                "Box",
+                fl!("provider-box"),
                 PreloadProvider::Box,
                 &self.preload_draft.box_provider,
             ))
             .push(preload_policy_row(
-                "SMB",
+                fl!("provider-smb"),
                 PreloadProvider::Smb,
                 &self.preload_draft.smb,
+            ))
+            .push(preload_policy_row(
+                fl!("sftp-provider"),
+                PreloadProvider::Sftp,
+                &self.preload_draft.sftp,
             ))
             .push(preload_save);
         if self.preload_settings_pending {
@@ -1809,19 +1897,35 @@ impl AppModel {
         let modify_locked = matches!(self.window_mode, WindowMode::ModifyConnection(_));
         let provider_choices = choice_row(vec![
             provider_choice(
-                "OneDrive",
+                fl!("provider-onedrive"),
                 Provider::OneDrive,
                 self.draft.provider,
                 modify_locked,
             ),
             provider_choice(
-                "Google Drive",
+                fl!("provider-google-drive"),
                 Provider::GoogleDrive,
                 self.draft.provider,
                 modify_locked,
             ),
-            provider_choice("Box", Provider::Box, self.draft.provider, modify_locked),
-            provider_choice("SMB", Provider::Smb, self.draft.provider, modify_locked),
+            provider_choice(
+                fl!("provider-box"),
+                Provider::Box,
+                self.draft.provider,
+                modify_locked,
+            ),
+            provider_choice(
+                fl!("provider-smb"),
+                Provider::Smb,
+                self.draft.provider,
+                modify_locked,
+            ),
+            provider_choice(
+                fl!("sftp-provider"),
+                Provider::Sftp,
+                self.draft.provider,
+                modify_locked,
+            ),
         ]);
         let mode_choices = choice_row(vec![
             mode_choice(
@@ -1844,7 +1948,7 @@ impl AppModel {
             } else {
                 section_row_with_help(
                     "Provider",
-                    "Choose the storage provider. OneDrive uses OneDrive-specific engines; Google Drive, Box, and SMB use rclone.",
+                    fl!("provider-choice-help"),
                     provider_choices,
                 )
             })
@@ -1896,21 +2000,21 @@ impl AppModel {
                         .on_input(Message::DraftCacheLimit),
                         "Maximum rclone VFS cache size. The approved default is 20 GiB.",
                     ));
-                if self.draft.provider == Provider::Smb {
+                if matches!(self.draft.provider, Provider::Smb | Provider::Sftp) {
                     online_settings = online_settings.push(field_with_help(
                         toggle_button(
-                            "Use global SMB preload settings",
-                            self.draft.smb_preload_use_global,
-                            Message::DraftSmbPreloadUseGlobal,
+                            if self.draft.provider == Provider::Sftp { sftp_preload_global_label() } else { smb_preload_global_label() },
+                            self.draft.connection_preload_use_global,
+                            Message::DraftConnectionPreloadUseGlobal,
                         ),
-                        "Use the SMB preload policy from Cloud Mounter Settings for this connection.",
+                        "Use this provider's preload policy from Cloud Mounter Settings for this connection.",
                     ));
-                    if !self.draft.smb_preload_use_global {
+                    if !self.draft.connection_preload_use_global {
                         online_settings = online_settings
                             .push(toggle_button(
                                 "Preload directories after mount",
-                                self.draft.smb_preload_enabled,
-                                Message::DraftSmbPreloadEnabled,
+                                self.draft.connection_preload_enabled,
+                                Message::DraftConnectionPreloadEnabled,
                             ))
                             .push(
                                 widget::Row::new()
@@ -1918,18 +2022,18 @@ impl AppModel {
                                     .push(
                                         widget::text_input::text_input(
                                             "60",
-                                            &self.draft.smb_preload_seconds,
+                                            &self.draft.connection_preload_seconds,
                                         )
-                                        .on_input(Message::DraftSmbPreloadSeconds)
+                                        .on_input(Message::DraftConnectionPreloadSeconds)
                                         .width(Length::Fixed(80.0)),
                                     )
                                     .push(widget::text::body("seconds"))
                                     .push(
                                         widget::text_input::text_input(
                                             "3",
-                                            &self.draft.smb_preload_depth,
+                                            &self.draft.connection_preload_depth,
                                         )
-                                        .on_input(Message::DraftSmbPreloadDepth)
+                                        .on_input(Message::DraftConnectionPreloadDepth)
                                         .width(Length::Fixed(60.0)),
                                     )
                                     .push(widget::text::body("levels")),
@@ -2007,7 +2111,7 @@ impl AppModel {
                 "Validate the current form values, dependencies, remote/account access, and generated plan before saving.",
             ))
             .push(field_with_safety_help(
-                action_button("Save Connection", primary_ready, Message::SaveDraft),
+                action_button("Save Connection", self.draft.provider == Provider::Sftp || primary_ready, Message::SaveDraft),
                 "Preview and confirm before initial synchronization.",
                 "Save this connection after validation. Potentially destructive sync setup still requires preview and confirmation.",
             ));
@@ -2019,11 +2123,11 @@ impl AppModel {
                 if self.draft_uses_rclone() {
                     primary_row = primary_row
                         .push(field_with_help(
-                            widget::button::standard("Detect rclone remotes")
+                            widget::button::standard(fl!("rclone-detect"))
                                 .on_press(Message::DetectRcloneRemotes),
-                            format!(
-                                "Read rclone config dump, filter remotes by provider backend, and offer matching remotes as selectable account choices. If no {} remotes are detected, enter an existing remote name or create one here.",
-                                provider_label(self.draft.provider)
+                            fl!(
+                                "rclone-detect-help",
+                                provider = provider_editor_label(self.draft.provider)
                             ),
                         ))
                         .push(self.view_create_rclone_remote_action());
@@ -2043,18 +2147,21 @@ impl AppModel {
                         .into()
                 };
                 let mut modify_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
+                if self.draft.provider == Provider::Sftp {
+                    modify_row = modify_row.push(self.view_sftp_action(false));
+                }
                 if self.draft.provider == Provider::Smb {
                     modify_row = modify_row.push(field_with_help(
-                        widget::button::standard("Update SMB Remote")
+                        widget::button::standard(fl!("smb-update"))
                             .on_press(Message::CreateSmbRcloneRemote),
-                        "Update the selected rclone SMB remote. Enter a password to rotate it without saving the password in applet configuration; host, username, and domain are optional for existing remotes.",
+                        fl!("smb-update-help"),
                     ));
                 }
                 if self.draft.provider == Provider::GoogleDrive {
                     modify_row = modify_row.push(field_with_help(
-                        widget::button::standard("Update Google OAuth Client")
+                        widget::button::standard(fl!("google-drive-update"))
                             .on_press(Message::ApplyGoogleDriveRcloneRemote),
-                        "Explicitly replace this rclone remote's Google OAuth client ID and secret and authorize it again in the browser. Both fields are required. Remount active connections afterward.",
+                        fl!("google-drive-update-help"),
                     ));
                 }
                 if self.saved_connection_is_offline_mirror(connection_id) {
@@ -2131,20 +2238,20 @@ impl AppModel {
 
         Some(match self.draft.access_mode {
             AccessMode::OnlineMount => field_with_help(
-                widget::button::suggested("Start OneDrive Setup")
+                widget::button::suggested(fl!("onedrive-setup-online"))
                     .on_press(Message::StartOnedriverSetup),
                 onedrive_setup_guidance(self.draft.access_mode),
             ),
             AccessMode::OfflineMirror => choice_row(vec![
                 field_with_help(
-                    widget::button::suggested("Start OneDrive Mirror Setup")
+                    widget::button::suggested(fl!("onedrive-setup-offline"))
                         .on_press(Message::StartOneDriveMirrorSetup),
                     onedrive_setup_guidance(self.draft.access_mode),
                 ),
                 field_with_help(
-                    widget::button::standard("Use Manual Auth Handoff")
+                    widget::button::standard(fl!("onedrive-auth-manual"))
                         .on_press(Message::StartOneDriveMirrorManualSetup),
-                    "Fallback for browser or tenant cases where onedrive cannot capture the redirect automatically. The applet prepares auth-files and a response URL field.",
+                    fl!("onedrive-auth-manual-help"),
                 ),
             ]),
         })
@@ -2173,20 +2280,21 @@ impl AppModel {
     fn view_create_rclone_remote_action(&self) -> Element<'static, Message> {
         match self.draft.provider {
             Provider::GoogleDrive => field_with_help(
-                widget::button::suggested("Create Google Drive Remote")
+                widget::button::suggested(fl!("google-drive-create"))
                     .on_press(Message::ApplyGoogleDriveRcloneRemote),
-                "Create the rclone Google Drive remote with full-drive scope and local browser OAuth. A custom client ID requires its matching client secret. Complete browser authorization, then run Test Connection. OAuth values stay in rclone config, not applet configuration.",
+                fl!("google-drive-create-help"),
             ),
             Provider::Box => field_with_help(
-                widget::button::suggested("Create Box Remote")
+                widget::button::suggested(fl!("box-create"))
                     .on_press(Message::CreateBoxRcloneRemote),
-                "Create the rclone Box remote with local browser OAuth. Complete the browser authorization window that rclone opens, then run Test Connection. Credentials and refresh tokens stay in rclone config, not applet configuration.",
+                fl!("box-create-help"),
             ),
             Provider::Smb => field_with_help(
-                widget::button::suggested("Create/Update SMB Remote")
+                widget::button::suggested(fl!("smb-create-update"))
                     .on_press(Message::CreateSmbRcloneRemote),
-                "Create or update the rclone SMB remote with host/user/domain metadata. If the SMB password field is filled, the applet updates the rclone password and then clears the field. Passwords stay in rclone, not applet configuration.",
+                fl!("smb-create-update-help"),
             ),
+            Provider::Sftp => self.view_sftp_action(true),
             Provider::OneDrive => widget::Space::new().width(Length::Shrink).into(),
         }
     }
@@ -2194,11 +2302,14 @@ impl AppModel {
     fn draft_uses_rclone(&self) -> bool {
         matches!(
             self.draft.provider,
-            Provider::GoogleDrive | Provider::Box | Provider::Smb
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp
         )
     }
 
     fn draft_primary_actions_ready(&self) -> bool {
+        if self.sftp_setup_pending {
+            return false;
+        }
         if self.draft.provider == Provider::OneDrive {
             return self.draft_onedrive_setup_ready();
         }
@@ -2253,7 +2364,7 @@ impl AppModel {
     fn view_remote_account_fields(&self) -> Element<'_, Message> {
         match self.draft.provider {
             Provider::OneDrive => self.view_onedrive_account_fields(),
-            Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
                 self.view_rclone_remote_fields()
             }
         }
@@ -2273,11 +2384,11 @@ impl AppModel {
             ))
             .push(field_with_help(
                 widget::text_input::text_input(
-                    "optional OneDrive folder/subtree",
+                    onedrive_folder_placeholder(),
                     &self.draft.remote_subpath,
                 )
                 .on_input(Message::DraftSubpath),
-                "Leave empty for the whole OneDrive account, or enter an existing folder/subtree to limit this connection.",
+                fl!("onedrive-folder-help"),
             ));
         if self.draft.access_mode == AccessMode::OfflineMirror
             && let Some(connection_id) = self.draft.id
@@ -2292,51 +2403,40 @@ impl AppModel {
         _connection_id: ConnectionId,
     ) -> Element<'_, Message> {
         if self.onedrive_auth_open_command.is_empty() {
-            return widget::text::body(
-                "Press Start OneDrive Mirror Setup to prepare the auth URL handoff files.",
-            )
-            .into();
+            return widget::text::body(fl!("onedrive-auth-prompt")).into();
         }
         widget::container(
             widget::Column::new()
                 .spacing(8)
-                .push(widget::text::body(
-                    "OneDrive mirror authentication handoff",
-                ))
-                .push(widget::text::body(
-                    "After pressing Start OneDrive Mirror Setup, wait a moment for onedrive to create the auth URL, then open it in your browser:",
-                ))
+                .push(widget::text::body(fl!("onedrive-auth-title")))
+                .push(widget::text::body(fl!("onedrive-auth-intro")))
                 .push(field_with_help(
-                widget::button::suggested("Open OneDrive Auth Helper")
+                    widget::button::suggested(fl!("onedrive-auth-open"))
                         .on_press(Message::OpenOneDriveMirrorAuthUrl),
-                    "Open the generated onedrive auth URL in the WebKitGTK helper when available. The helper attempts to capture the final Microsoft redirect automatically; otherwise the applet falls back to xdg-open.",
+                    fl!("onedrive-auth-open-help"),
                 ))
-                .push(widget::text::body(
-                    "Shell fallback:",
-                ))
+                .push(widget::text::body(fl!("onedrive-auth-shell-fallback")))
                 .push(field_with_help(
                     widget::text_input::text_input(
-                        "shell command",
+                        onedrive_auth_shell_placeholder(),
                         &self.onedrive_auth_open_command,
                     )
-                        .on_input(|_| Message::DraftOneDriveAuthResponse(String::new())),
-                    "This selectable command opens the same auth URL in your normal browser if the WebKitGTK helper cannot be used.",
+                    .on_input(|_| Message::DraftOneDriveAuthResponse(String::new())),
+                    fl!("onedrive-auth-shell-help"),
                 ))
-                .push(widget::text::body(
-                    "After Microsoft redirects to the native-client page, paste the full browser address-bar URL below. The applet writes it to the transient response file for onedrive and does not save it in configuration.",
-                ))
+                .push(widget::text::body(fl!("onedrive-auth-redirect-intro")))
                 .push(field_with_help(
                     widget::text_input::text_input(
-                        "paste full Microsoft redirect URL",
+                        onedrive_auth_redirect_placeholder(),
                         &self.onedrive_auth_response_url,
                     )
                     .on_input(Message::DraftOneDriveAuthResponse),
-                    "Paste the full URL beginning with https://login.microsoftonline.com/... and containing code=.",
+                    fl!("onedrive-auth-redirect-help"),
                 ))
                 .push(field_with_help(
-                    widget::button::suggested("Submit OneDrive Response URL")
+                    widget::button::suggested(fl!("onedrive-auth-submit"))
                         .on_press(Message::SubmitOneDriveMirrorAuthResponse),
-                    "Write the pasted response URL to the transient response file expected by the running onedrive authentication process.",
+                    fl!("onedrive-auth-submit-help"),
                 )),
         )
         .padding(12)
@@ -2358,9 +2458,9 @@ impl AppModel {
 
         let matching = self.matching_rclone_remotes(provider);
         if !matching.is_empty() {
-            column = column.push(widget::text::body(format!(
-                "Detected {} rclone remotes:",
-                provider_label(provider)
+            column = column.push(widget::text::body(fl!(
+                "rclone-detected-remotes",
+                provider = provider_editor_label(provider)
             )));
             column = column.push(self.view_rclone_remote_choices(matching.clone()));
             if self.window_mode == WindowMode::AddConnection {
@@ -2370,6 +2470,8 @@ impl AppModel {
 
         if provider == Provider::Smb {
             column = column.push(self.view_smb_remote_setup_fields());
+        } else if provider == Provider::Sftp {
+            column = column.push(self.view_sftp_fields());
         } else if provider == Provider::GoogleDrive {
             column = column.push(self.view_google_drive_remote_setup_fields());
         }
@@ -2377,11 +2479,19 @@ impl AppModel {
         column
             .push(field_with_help(
                 widget::text_input::text_input(
-                    "optional remote subtree/folder",
+                    if provider == Provider::Sftp {
+                        sftp_remote_directory_placeholder()
+                    } else {
+                        rclone_remote_directory_placeholder()
+                    },
                     &self.draft.remote_subpath,
                 )
                 .on_input(Message::DraftSubpath),
-                "Leave empty for the whole rclone remote, or enter an existing folder/subtree to limit this connection.",
+                if provider == Provider::Sftp {
+                    fl!("sftp-remote-directory-help")
+                } else {
+                    fl!("rclone-remote-directory-help")
+                },
             ))
             .into()
     }
@@ -2391,21 +2501,21 @@ impl AppModel {
             .spacing(8)
             .push(field_with_help(
                 widget::text_input::text_input(
-                    "Google OAuth client ID",
+                    google_drive_client_id_placeholder(),
                     &self.draft.google_client_id,
                 )
                 .on_input(Message::DraftGoogleClientId),
-                "Use the OAuth client ID from a Google Cloud Desktop app with the Google Drive API enabled. Rclone says a private client is required to avoid interruption during its 2026 shared-client retirement. Leaving both OAuth fields blank attempts the shared client only for compatibility.",
+                fl!("google-drive-client-id-help"),
             ))
             .push(field_with_safety_help(
                 widget::text_input::text_input(
-                    "Google OAuth client secret",
+                    google_drive_client_secret_placeholder(),
                     &self.draft.google_client_secret,
                 )
                 .password()
                 .on_input(Message::DraftGoogleClientSecret),
-                "The applet does not save this value in its configuration or logs.",
-                "Enter the secret issued with the client ID. Client ID and secret must be supplied together. The value is passed directly to rclone and cleared from this form after the operation.",
+                fl!("google-drive-client-secret-warning"),
+                fl!("google-drive-client-secret-help"),
             ))
             .into()
     }
@@ -2414,29 +2524,29 @@ impl AppModel {
         widget::Column::new()
             .spacing(8)
             .push(field_with_help(
-                widget::text_input::text_input("SMB server host", &self.draft.smb_host)
+                widget::text_input::text_input(smb_host_placeholder(), &self.draft.smb_host)
                     .on_input(Message::DraftSmbHost),
-                "Server DNS name or IP address used for rclone's SMB `host` option. Create/Update SMB Remote uses these fields and leaves passwords in rclone, not applet configuration.",
+                fl!("smb-host-help"),
             ))
             .push(field_with_help(
-                widget::text_input::text_input("SMB username", &self.draft.smb_user)
+                widget::text_input::text_input(smb_username_placeholder(), &self.draft.smb_user)
                     .on_input(Message::DraftSmbUser),
-                "Optional SMB username. Leave blank for guest or rclone defaults.",
+                fl!("smb-username-help"),
             ))
             .push(field_with_help(
-                widget::text_input::text_input("SMB domain or WORKGROUP", &self.draft.smb_domain)
+                widget::text_input::text_input(smb_domain_placeholder(), &self.draft.smb_domain)
                     .on_input(Message::DraftSmbDomain),
-                "Optional NTLM domain. WORKGROUP is rclone's default.",
+                fl!("smb-domain-help"),
             ))
             .push(field_with_safety_help(
                 widget::text_input::text_input(
-                    "SMB password (leave blank to keep existing)",
+                    smb_password_placeholder(),
                     &self.draft.smb_password,
                 )
                 .password()
                 .on_input(Message::DraftSmbPassword),
-                "The applet does not save this password.",
-                "Enter a password only when creating a new SMB remote or changing an expired/incorrect SMB password. On success it is stored in rclone's config and cleared from this form.",
+                fl!("smb-password-warning"),
+                fl!("smb-password-help"),
             ))
             .into()
     }
@@ -2462,9 +2572,10 @@ impl AppModel {
             for remote in row_remotes {
                 let selected = self.draft.remote_reference == remote.name;
                 let label = remote.name.clone();
-                let help = format!(
-                    "Use rclone remote `{}` with backend `{}` for this connection.",
-                    remote.name, remote.backend
+                let help = fl!(
+                    "rclone-use-remote-help",
+                    name = remote.name.clone(),
+                    backend = remote.backend.clone()
                 );
                 row = row.push(field_with_help(
                     select_button(label, selected, Message::DraftRemote(remote.name.clone())),
@@ -2482,39 +2593,33 @@ impl AppModel {
     ) -> Element<'static, Message> {
         let mut column = widget::Column::new()
             .spacing(6)
-            .push(widget::text::body("Manage unused rclone remotes:"));
+            .push(widget::text::body(fl!("rclone-manage-remotes")));
         for remote in remotes {
             let in_use = self.rclone_remote_is_referenced(&remote.name);
             let confirm =
                 self.pending_rclone_remote_remove.as_deref() == Some(remote.name.as_str());
             let removing = self.removing_rclone_remote.as_deref() == Some(remote.name.as_str());
             let button: Element<'_, Message> = if in_use {
-                widget::button::standard("In use")
+                widget::button::standard(fl!("rclone-remote-in-use"))
                     .on_press_maybe(None)
                     .into()
             } else if removing {
-                widget::button::standard("Removing...")
+                widget::button::standard(fl!("rclone-remote-removing"))
                     .on_press_maybe(None)
                     .into()
             } else if confirm {
-                widget::button::destructive("Confirm Remove")
+                widget::button::destructive(fl!("rclone-remote-confirm-remove"))
                     .on_press(Message::RequestRemoveRcloneRemote(remote.name.clone()))
                     .into()
             } else {
-                widget::button::standard("Remove remote")
+                widget::button::standard(fl!("rclone-remote-remove"))
                     .on_press(Message::RequestRemoveRcloneRemote(remote.name.clone()))
                     .into()
             };
             let help = if in_use {
-                format!(
-                    "rclone remote `{}` is referenced by a saved connection and cannot be removed here.",
-                    remote.name
-                )
+                fl!("rclone-remote-in-use-help", name = remote.name.clone())
             } else {
-                format!(
-                    "Remove rclone remote `{}` from rclone configuration. This does not remove applet connections, local data, or cloud files.",
-                    remote.name
-                )
+                fl!("rclone-remote-remove-help", name = remote.name.clone())
             };
             column = column.push(
                 widget::Row::new()
@@ -2613,7 +2718,24 @@ impl AppModel {
             (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount)
                 if is_rclone_online_mount(&connection) =>
             {
-                self.last_notice = Some(format!("{label} requested for {}...", connection.name));
+                if operation == Operation::Unmount {
+                    self.unmount_pending.insert(connection_id);
+                    let preload_active = self.directory_preload_jobs.contains_key(&connection_id)
+                        || self.rclone_refresh_jobs.contains_key(&connection_id)
+                        || self.rclone_refresh_starting.contains(&connection_id);
+                    self.last_notice = Some(if preload_active {
+                        format!(
+                            "Unmounting {}… stopping background preload first.",
+                            connection.name
+                        )
+                    } else {
+                        format!("Unmounting {}…", connection.name)
+                    });
+                } else {
+                    self.last_notice =
+                        Some(format!("{label} requested for {}...", connection.name));
+                }
+                self.last_notice_at = Some(Instant::now());
                 Task::perform(
                     async move {
                         let result =
@@ -2630,7 +2752,24 @@ impl AppModel {
             (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount)
                 if is_onedriver_online_mount(&connection) =>
             {
-                self.last_notice = Some(format!("{label} requested for {}...", connection.name));
+                if operation == Operation::Unmount {
+                    self.unmount_pending.insert(connection_id);
+                    let preload_active = self.directory_preload_jobs.contains_key(&connection_id)
+                        || self.rclone_refresh_jobs.contains_key(&connection_id)
+                        || self.rclone_refresh_starting.contains(&connection_id);
+                    self.last_notice = Some(if preload_active {
+                        format!(
+                            "Unmounting {}… stopping background preload first.",
+                            connection.name
+                        )
+                    } else {
+                        format!("Unmounting {}…", connection.name)
+                    });
+                } else {
+                    self.last_notice =
+                        Some(format!("{label} requested for {}...", connection.name));
+                }
+                self.last_notice_at = Some(Instant::now());
                 Task::perform(
                     async move {
                         let result = run_managed_onedriver_online_mount_operation_result(
@@ -2696,7 +2835,7 @@ impl AppModel {
     }
 
     fn start_refresh_for_active_google_mounts(&mut self) -> Task<cosmic::Action<Message>> {
-        let mounts = ProcMountTable::default().entries().unwrap_or_default();
+        let mounts = HostVisibleMountTable.entries().unwrap_or_default();
         if !self.config.document.preload.google_drive.enabled {
             return Task::none();
         }
@@ -2751,8 +2890,47 @@ impl AppModel {
         Task::batch(tasks)
     }
 
+    fn register_directory_preload(
+        &mut self,
+        name: String,
+        result: Result<DirectoryPreloadJob, String>,
+    ) -> Task<cosmic::Action<Message>> {
+        match result {
+            Ok(job) => {
+                let connection_id = job.connection_id;
+                let generation = job.generation;
+                self.directory_preload_jobs
+                    .insert(connection_id, generation);
+                if !self.unmount_pending.contains(&connection_id) {
+                    self.last_notice = Some(format!(
+                        "{name} is mounted. Background directory preload is running."
+                    ));
+                    self.last_notice_at = Some(Instant::now());
+                }
+                Task::perform(
+                    async move { directory_preload::monitor(job).await },
+                    move |result| {
+                        cosmic::Action::App(Message::DirectoryPreloadCompleted(
+                            name.clone(),
+                            connection_id,
+                            generation,
+                            result,
+                        ))
+                    },
+                )
+            }
+            Err(error) => {
+                self.last_notice = Some(format!(
+                    "{name} is mounted, but its directory preload could not start: {error}"
+                ));
+                self.last_notice_at = Some(Instant::now());
+                Task::none()
+            }
+        }
+    }
+
     fn start_preload_for_active_directory_mounts(&mut self) -> Task<cosmic::Action<Message>> {
-        let mounts = ProcMountTable::default().entries().unwrap_or_default();
+        let mounts = HostVisibleMountTable.entries().unwrap_or_default();
         let connections = self
             .config
             .document
@@ -2762,7 +2940,7 @@ impl AppModel {
                 connection.enabled
                     && matches!(
                         connection.provider,
-                        Provider::OneDrive | Provider::Box | Provider::Smb
+                        Provider::OneDrive | Provider::Box | Provider::Smb | Provider::Sftp
                     )
                     && matches!(connection.mode, ConnectionMode::OnlineMount(_))
                     && self.config.document.preload_policy_for(connection).enabled
@@ -2773,26 +2951,24 @@ impl AppModel {
             })
             .cloned()
             .collect::<Vec<_>>();
-        Task::batch(connections.into_iter().map(|connection| {
+        let mut tasks = Vec::new();
+        for connection in connections {
             let name = connection.name.clone();
             let policy = self.config.document.preload_policy_for(&connection);
             let timeout = Duration::from_secs(policy.maximum_seconds);
-            let wait_for_root = matches!(connection.provider, Provider::Box | Provider::Smb);
-            Task::perform(
-                async move {
-                    directory_preload::start(
-                        connection.id,
-                        connection.local_path,
-                        timeout,
-                        policy.maximum_depth,
-                        wait_for_root,
-                    )
-                },
-                move |result| {
-                    cosmic::Action::App(Message::DirectoryPreloadStarted(name.clone(), result))
-                },
-            )
-        }))
+            let wait_for_root = matches!(
+                connection.provider,
+                Provider::Box | Provider::Smb | Provider::Sftp
+            );
+            let result = directory_preload::start_for_connection(
+                &connection,
+                timeout,
+                policy.maximum_depth,
+                wait_for_root,
+            );
+            tasks.push(self.register_directory_preload(name, result));
+        }
+        Task::batch(tasks)
     }
 
     fn load_draft(&mut self, connection_id: ConnectionId) {
@@ -2808,6 +2984,10 @@ impl AppModel {
         };
         self.pending_shared_remote_ack = None;
         self.draft = draft_from_connection(connection);
+        if connection.provider == Provider::Sftp {
+            self.load_sftp_details();
+            return;
+        }
         if connection.provider == Provider::Smb {
             match load_smb_remote_details(&connection.remote_reference) {
                 Ok(Some(details)) => {
@@ -3589,6 +3769,14 @@ impl AppModel {
         };
         let directory = default_scan_directory(&home);
         let active_units = BTreeSet::new();
+        let rclone_remotes = run_sync_host_command("rclone", &["config", "dump"])
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| {
+                parse_rclone_backends(&String::from_utf8_lossy(&output.stdout)).ok()
+            });
+        let rclone_config_unavailable = rclone_remotes.is_none();
+        let rclone_backends = rclone_remotes.unwrap_or_default();
         match scan_legacy_units(&directory) {
             Ok(units) => {
                 let mut previews = Vec::new();
@@ -3599,6 +3787,7 @@ impl AppModel {
                         &self.config.document.connections,
                         &active_units,
                         &home,
+                        &rclone_backends,
                     ) {
                         Ok(preview) => previews.push(preview),
                         Err(error) => errors.push(format!("{}: {error}", unit.name)),
@@ -3606,7 +3795,11 @@ impl AppModel {
                 }
                 let count = previews.len();
                 self.import_previews = previews;
-                self.last_notice = Some(if errors.is_empty() {
+                self.last_notice = Some(if rclone_config_unavailable {
+                    format!(
+                        "Import scan found {count} service preview(s). Could not read host rclone configuration; rclone mounts cannot be identified for import."
+                    )
+                } else if errors.is_empty() {
                     format!("Import scan found {count} compatible service preview(s).")
                 } else {
                     format!(
@@ -3692,9 +3885,10 @@ impl AppModel {
             service_status: runtime_service_statuses(&self.config.document.connections),
             sync_state,
             paused_syncs,
-            mount_entries: ProcMountTable::default().entries().unwrap_or_default(),
+            mount_entries: HostVisibleMountTable.entries().unwrap_or_default(),
             import_previews: self.import_previews.clone(),
             vpn_ready: self.vpn_ready.clone(),
+            network_ready: self.network_ready.unwrap_or(true),
             ..ControllerSnapshot::default()
         }
     }
@@ -3722,7 +3916,7 @@ fn runtime_offline_mirror_states(
 }
 
 async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfileId, bool> {
-    let mounts = ProcMountTable::default().entries().unwrap_or_default();
+    let mounts = HostVisibleMountTable.entries().unwrap_or_default();
     let active_connection_ids = config
         .connections
         .iter()
@@ -3805,7 +3999,7 @@ fn runtime_offline_mirror_state(connection: &Connection) -> SyncRuntimeState {
                 SyncRuntimeState::Paused
             }
         }
-        Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
             if service_status.as_ref().is_some_and(|status| {
                 matches!(status.active, ActiveState::Active | ActiveState::Activating)
             }) {
@@ -4083,6 +4277,27 @@ fn run_sync_host_command(executable: &str, args: &[&str]) -> std::io::Result<std
     }
 }
 
+struct HostVisibleMountTable;
+
+impl MountTable for HostVisibleMountTable {
+    fn entries(&self) -> Result<Vec<MountEntry>, MountTableError> {
+        if !running_in_flatpak() {
+            return ProcMountTable::default().entries();
+        }
+        let output = run_sync_host_command("cat", &["/proc/self/mountinfo"])
+            .map_err(|error| MountTableError(format!("read host mount table: {error}")))?;
+        if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
+            return Err(MountTableError(
+                "host mount table is unavailable or too large".into(),
+            ));
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(cosmic_ext_applet_mounter::mounts::parse_mountinfo_line)
+            .collect()
+    }
+}
+
 fn row_operation_label(status: &ConnectionStatus, operation: Operation) -> &'static str {
     match (status, operation) {
         (ConnectionStatus::OfflineMirror(_), Operation::PauseSync) => "Stop",
@@ -4149,7 +4364,16 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
             "WORKGROUP".into(),
         )
     };
-    let smb_override = connection.smb_preload_override;
+    let smb_override = if connection.provider == Provider::Sftp {
+        connection.sftp_preload_override
+    } else {
+        connection.smb_preload_override
+    };
+    let preload_default = if connection.provider == Provider::Sftp {
+        PreloadPolicy::sftp_default()
+    } else {
+        PreloadSettings::default().smb
+    };
     ConnectionDraft {
         id: Some(connection.id),
         name: connection.name.clone(),
@@ -4163,6 +4387,7 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         smb_user,
         smb_domain,
         smb_password: String::new(),
+        sftp: SftpDraft::default(),
         local_path: connection.local_path.display().to_string(),
         enabled: connection.enabled,
         start_at_login,
@@ -4172,13 +4397,18 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         recovery_directory,
         vpn_profile_id: connection.vpn_profile_id,
         disconnect_vpn_when_unused: connection.disconnect_vpn_when_unused,
-        smb_preload_use_global: smb_override.is_none(),
-        smb_preload_enabled: smb_override.is_none_or(|value| value.enabled),
-        smb_preload_seconds: smb_override
-            .map_or(60, |value| value.maximum_seconds)
+        connection_preload_use_global: smb_override.is_none(),
+        connection_preload_enabled: smb_override
+            .map_or(preload_default.enabled, |value| value.enabled),
+        connection_preload_seconds: smb_override
+            .map_or(preload_default.maximum_seconds, |value| {
+                value.maximum_seconds
+            })
             .to_string(),
-        smb_preload_depth: smb_override
-            .map_or(3, |value| value.maximum_depth)
+        connection_preload_depth: smb_override
+            .map_or(preload_default.maximum_depth.unwrap_or(2), |value| {
+                value.maximum_depth
+            })
             .to_string(),
     }
 }
@@ -4230,30 +4460,34 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
             })
         }
     };
-    let smb_preload_override = if draft.provider == Provider::Smb
+    let preload_override = if matches!(draft.provider, Provider::Smb | Provider::Sftp)
         && draft.access_mode == AccessMode::OnlineMount
-        && !draft.smb_preload_use_global
+        && !draft.connection_preload_use_global
     {
-        let maximum_seconds = draft.smb_preload_seconds.trim().parse::<u64>().map_err(|_| {
-            format!("SMB preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds.")
+        let maximum_seconds = draft.connection_preload_seconds.trim().parse::<u64>().map_err(|_| {
+            format!("Preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds.")
         })?;
-        let maximum_depth = draft.smb_preload_depth.trim().parse::<u8>().map_err(|_| {
-            format!(
-                "SMB preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
-            )
-        })?;
+        let maximum_depth = draft
+            .connection_preload_depth
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| {
+                format!(
+                    "Preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
+                )
+            })?;
         if !(MIN_PRELOAD_SECONDS..=MAX_PRELOAD_SECONDS).contains(&maximum_seconds) {
             return Err(format!(
-                "SMB preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds."
+                "Preload time must be from {MIN_PRELOAD_SECONDS} to {MAX_PRELOAD_SECONDS} seconds."
             ));
         }
         if !(MIN_PRELOAD_DEPTH..=MAX_PRELOAD_DEPTH).contains(&maximum_depth) {
             return Err(format!(
-                "SMB preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
+                "Preload depth must be from {MIN_PRELOAD_DEPTH} to {MAX_PRELOAD_DEPTH} levels."
             ));
         }
         Some(SmbPreloadOverride {
-            enabled: draft.smb_preload_enabled,
+            enabled: draft.connection_preload_enabled,
             maximum_seconds,
             maximum_depth,
         })
@@ -4272,7 +4506,16 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
         vpn_profile_id: draft.vpn_profile_id,
         disconnect_vpn_when_unused: draft.disconnect_vpn_when_unused,
         tuning_profile: TuningProfile::Balanced,
-        smb_preload_override,
+        smb_preload_override: if draft.provider == Provider::Smb {
+            preload_override
+        } else {
+            None
+        },
+        sftp_preload_override: if draft.provider == Provider::Sftp {
+            preload_override
+        } else {
+            None
+        },
     })
 }
 
@@ -4811,20 +5054,20 @@ fn section_row<'a>(
 
 fn section_row_with_help<'a>(
     title: &'static str,
-    help: &'static str,
+    help: impl Into<Cow<'a, str>> + 'a,
     body: impl Into<Element<'a, Message>> + 'a,
 ) -> Element<'a, Message> {
     section_row(title, field_with_help(body, help))
 }
 
 fn preload_policy_row<'a>(
-    label: &'static str,
+    label: impl Into<String>,
     provider: PreloadProvider,
     draft: &'a PreloadPolicyDraft,
 ) -> Element<'a, Message> {
     let provider_toggle = field_with_help(
         widget::toggler(draft.enabled)
-            .label(label.to_string())
+            .label(label.into())
             .spacing(8)
             .on_toggle(move |value| Message::PreloadEnabled(provider, value)),
         preload_provider_help(provider),
@@ -4867,20 +5110,13 @@ fn preload_policy_row<'a>(
     row.into()
 }
 
-const fn preload_provider_help(provider: PreloadProvider) -> &'static str {
+fn preload_provider_help(provider: PreloadProvider) -> Cow<'static, str> {
     match provider {
-        PreloadProvider::GoogleDrive => {
-            "Enables a recursive Google Drive VFS directory-cache refresh in the background after mounting. File contents are not downloaded."
-        }
-        PreloadProvider::OneDrive => {
-            "Enables a directory-only OneDrive walk in the background after mounting so folders open faster. File contents are not downloaded."
-        }
-        PreloadProvider::Box => {
-            "Enables a depth-limited Box directory walk in the background after mounting. The depth limit reduces API requests and the risk of Box rate limiting."
-        }
-        PreloadProvider::Smb => {
-            "Enables a depth-limited SMB directory walk in the background after network and VPN readiness. Individual SMB connections may override this global policy."
-        }
+        PreloadProvider::GoogleDrive => fl!("preload-google-drive-help").into(),
+        PreloadProvider::OneDrive => fl!("preload-onedrive-help").into(),
+        PreloadProvider::Box => fl!("preload-box-help").into(),
+        PreloadProvider::Sftp => fl!("sftp-preload-help").into(),
+        PreloadProvider::Smb => fl!("preload-smb-help").into(),
     }
 }
 
@@ -4969,7 +5205,7 @@ impl<'a> From<Cow<'a, str>> for TooltipHelp<'a> {
 }
 
 fn provider_choice(
-    label: &'static str,
+    label: impl Into<Cow<'static, str>>,
     provider: Provider,
     selected: Provider,
     locked: bool,
@@ -5197,84 +5433,149 @@ fn rclone_backend_name(provider: Provider) -> Option<&'static str> {
         Provider::GoogleDrive => Some("drive"),
         Provider::Box => Some("box"),
         Provider::Smb => Some("smb"),
+        Provider::Sftp => Some("sftp"),
         Provider::OneDrive => None,
     }
 }
 
-fn rclone_remote_placeholder(provider: Provider) -> &'static str {
+fn sftp_preload_global_label() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("sftp-preload-global"));
+    &LABEL
+}
+
+fn smb_preload_global_label() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("preload-smb-global"));
+    &LABEL
+}
+
+fn rclone_remote_directory_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("rclone-remote-directory"));
+    &LABEL
+}
+
+fn onedrive_folder_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("onedrive-folder"));
+    &LABEL
+}
+
+fn onedrive_auth_shell_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("onedrive-auth-shell-command"));
+    &LABEL
+}
+
+fn onedrive_auth_redirect_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("onedrive-auth-redirect"));
+    &LABEL
+}
+
+fn google_drive_client_id_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("google-drive-client-id"));
+    &LABEL
+}
+
+fn google_drive_client_secret_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("google-drive-client-secret"));
+    &LABEL
+}
+
+fn smb_host_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-host"));
+    &LABEL
+}
+
+fn smb_username_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-username"));
+    &LABEL
+}
+
+fn smb_domain_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-domain"));
+    &LABEL
+}
+
+fn smb_password_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-password"));
+    &LABEL
+}
+
+fn provider_editor_label(provider: Provider) -> String {
     match provider {
-        Provider::GoogleDrive => "Google Drive rclone remote name",
-        Provider::Box => "Box rclone remote name",
-        Provider::Smb => "SMB rclone remote name",
+        Provider::OneDrive => fl!("provider-onedrive"),
+        Provider::GoogleDrive => fl!("provider-google-drive"),
+        Provider::Box => fl!("provider-box"),
+        Provider::Smb => fl!("provider-smb"),
+        Provider::Sftp => fl!("sftp-provider"),
+    }
+}
+
+fn sftp_remote_directory_placeholder() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| fl!("sftp-remote-directory"));
+    &LABEL
+}
+
+fn rclone_remote_placeholder(provider: Provider) -> &'static str {
+    static GOOGLE_DRIVE_LABEL: LazyLock<String> = LazyLock::new(|| fl!("google-drive-remote-name"));
+    static BOX_LABEL: LazyLock<String> = LazyLock::new(|| fl!("box-remote-name"));
+    static SMB_LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-remote-name"));
+    static SFTP_LABEL: LazyLock<String> = LazyLock::new(|| fl!("sftp-remote-name"));
+    match provider {
+        Provider::GoogleDrive => &GOOGLE_DRIVE_LABEL,
+        Provider::Box => &BOX_LABEL,
+        Provider::Smb => &SMB_LABEL,
+        Provider::Sftp => &SFTP_LABEL,
         Provider::OneDrive => "remote name",
     }
 }
 
-fn rclone_remote_help(provider: Provider, adding: bool) -> &'static str {
+fn rclone_remote_help(provider: Provider, adding: bool) -> String {
     if !adding {
         return match provider {
-            Provider::GoogleDrive => {
-                "Select a detected Google Drive remote or enter its exact name from `rclone config`. To replace its OAuth client, enter the matching client ID and secret and click Update Google OAuth Client; this repeats browser authorization. The applet verifies backend type `drive`, authentication, and subtree access before saving."
-            }
-            Provider::Box => {
-                "Select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
-            }
-            Provider::Smb => {
-                "Select a detected SMB remote or enter its exact name from `rclone config`. The applet verifies backend type `smb` and share access before saving. Credentials remain in rclone configuration."
-            }
-            Provider::OneDrive => "OneDrive uses its own authentication workflow.",
+            Provider::GoogleDrive => fl!("google-drive-remote-help-modify"),
+            Provider::Box => fl!("box-remote-help-modify"),
+            Provider::Smb => fl!("smb-remote-help-modify"),
+            Provider::Sftp => fl!("sftp-remote-help-modify"),
+            Provider::OneDrive => "OneDrive uses its own authentication workflow.".into(),
         };
     }
 
     match provider {
-        Provider::GoogleDrive => {
-            "Enter a new rclone remote name, such as `personal_gdrive`, optionally enter its matching custom OAuth client ID and secret, then click Create Google Drive Remote. To use an existing remote, select a detected Google Drive remote or enter its exact name from `rclone config`. The applet verifies backend type `drive`, authentication, and subtree access before saving."
+        Provider::GoogleDrive => fl!("google-drive-remote-help-add"),
+        Provider::Box => fl!("box-remote-help-add"),
+        Provider::Smb => fl!("smb-remote-help-add"),
+        Provider::Sftp => fl!("sftp-remote-help-add"),
+        Provider::OneDrive => {
+            "OneDrive does not use rclone in the approved provider matrix.".into()
         }
-        Provider::Box => {
-            "Enter a new rclone remote name, such as `box_personal`, then click Create Box Remote. To use an existing remote, select a detected Box remote or enter its exact name from `rclone config`. The applet verifies backend type `box`, authentication, and subtree access before saving."
-        }
-        Provider::Smb => {
-            "Enter a new rclone remote name, such as `office_smb`, then fill in the SMB settings and click Create/Update SMB Remote. To use an existing remote, select a detected SMB remote or enter its exact name from `rclone config`. Create/Update SMB Remote can also update that remote. The applet verifies backend type `smb`. Passwords stay in rclone, not applet configuration."
-        }
-        Provider::OneDrive => "OneDrive does not use rclone in the approved provider matrix.",
     }
 }
 
 fn onedrive_account_placeholder(mode: AccessMode) -> &'static str {
+    static ONLINE: LazyLock<String> = LazyLock::new(|| fl!("onedrive-account-online"));
+    static OFFLINE: LazyLock<String> = LazyLock::new(|| fl!("onedrive-account-offline"));
     match mode {
-        AccessMode::OnlineMount => "onedriver account/setup reference",
-        AccessMode::OfflineMirror => "onedrive account/setup reference",
+        AccessMode::OnlineMount => &ONLINE,
+        AccessMode::OfflineMirror => &OFFLINE,
     }
 }
 
-fn onedrive_account_help(mode: AccessMode) -> &'static str {
+fn onedrive_account_help(mode: AccessMode) -> String {
     match mode {
-        AccessMode::OnlineMount => {
-            "Label this OneDrive Online Mount account so you can recognize it later, for example `onedriver-work`. Test Connection and Save validate jstaf/onedriver, app-owned auth metadata, mountpoint safety, and active onedriver overlaps without reading provider tokens."
-        }
-        AccessMode::OfflineMirror => {
-            "Label this OneDrive Offline Mirror account so you can recognize it later, for example `onedrive-personal`. Test Connection and Save validate auth metadata, directory safety, active onedriver overlap, and a bounded dry-run preview."
-        }
+        AccessMode::OnlineMount => fl!("onedrive-account-online-help"),
+        AccessMode::OfflineMirror => fl!("onedrive-account-offline-help"),
     }
 }
 
-fn onedrive_account_safety_warning(mode: AccessMode) -> &'static str {
+fn onedrive_account_safety_warning(mode: AccessMode) -> String {
     match mode {
-        AccessMode::OnlineMount => "Do not reuse this mountpoint for a OneDrive mirror.",
-        AccessMode::OfflineMirror => {
-            "Do not reuse this mirror directory for a OneDrive Online mount."
-        }
+        AccessMode::OnlineMount => fl!("onedrive-account-online-warning"),
+        AccessMode::OfflineMirror => fl!("onedrive-account-offline-warning"),
     }
 }
 
-fn onedrive_setup_guidance(mode: AccessMode) -> &'static str {
+fn onedrive_setup_guidance(mode: AccessMode) -> String {
     match mode {
-        AccessMode::OnlineMount => {
-            "Complete all required fields before setup, then finish onedriver authorization in the browser. After authorization, run Test Connection and Save Connection."
-        }
-        AccessMode::OfflineMirror => {
-            "Complete all required fields before setup, then finish OneDrive authorization in the browser. After browser authorization, Cloud Mounter waits for onedrive and runs dry-run validation; this can take several minutes. Save reuses that validation if the form is unchanged."
-        }
+        AccessMode::OnlineMount => fl!("onedrive-setup-online-help"),
+        AccessMode::OfflineMirror => fl!("onedrive-setup-offline-help"),
     }
 }
 
@@ -5292,7 +5593,7 @@ fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, 
         let Some(backend) = remote_config.get("type").and_then(|value| value.as_str()) else {
             continue;
         };
-        if matches!(backend, "drive" | "box" | "smb") {
+        if matches!(backend, "drive" | "box" | "smb" | "sftp") {
             remotes.push(RcloneDraftRemote {
                 name: name.clone(),
                 backend: backend.to_owned(),
@@ -5661,7 +5962,7 @@ async fn remove_rclone_remote_with(
 async fn run_onedriver_online_setup_result(connection: Connection) -> Result<String, String> {
     run_onedriver_online_setup_with(
         &app_command_runner(),
-        &ProcMountTable::default(),
+        &HostVisibleMountTable,
         &connection,
         &default_cache_root(),
         &default_config_root(),
@@ -5716,7 +6017,7 @@ async fn run_onedrive_mirror_interactive_setup_result(
 ) -> Result<String, String> {
     run_onedrive_mirror_interactive_setup_with(
         &app_command_runner(),
-        &ProcMountTable::default(),
+        &HostVisibleMountTable,
         &connection,
         &default_config_root(),
     )
@@ -5729,7 +6030,7 @@ async fn run_onedrive_mirror_manual_setup_result(
 ) -> Result<String, String> {
     run_onedrive_mirror_manual_setup_with(
         &app_command_runner(),
-        &ProcMountTable::default(),
+        &HostVisibleMountTable,
         &connection,
         &default_config_root(),
         &auth_files,
@@ -6306,7 +6607,7 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     .map_err(|error| error.to_string())?;
                     UnitDocument::service(&plan.service).map_err(|error| error.to_string())?
                 }
-                Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+                Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
                     let plan = rclone_mount_plan(
                         connection,
                         &default_runtime_root(),
@@ -6338,11 +6639,11 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     document.name.file_name()
                 ))
             }
-            Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
                 let plan = rclone_bisync_plan(connection, &default_work_root())
                     .map_err(|error| error.to_string())?;
-                let service =
-                    UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
+                let service = UnitDocument::service(&mirror_script::service_spec(&plan))
+                    .map_err(|error| error.to_string())?;
                 let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
                 Ok(format!(
                     "Managed bisync service {} and timer {} validate structurally.",
@@ -6358,7 +6659,7 @@ const fn is_rclone_online_mount(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
         (
-            Provider::GoogleDrive | Provider::Box | Provider::Smb,
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp,
             ConnectionMode::OnlineMount(_)
         )
     )
@@ -6368,7 +6669,7 @@ const fn is_rclone_offline_mirror(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
         (
-            Provider::GoogleDrive | Provider::Box | Provider::Smb,
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp,
             ConnectionMode::OfflineMirror(_)
         )
     )
@@ -6385,7 +6686,7 @@ const fn uses_directory_preload(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
         (
-            Provider::OneDrive | Provider::Box | Provider::Smb,
+            Provider::OneDrive | Provider::Box | Provider::Smb | Provider::Sftp,
             ConnectionMode::OnlineMount(_)
         )
     )
@@ -6468,7 +6769,9 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
     prepare_offline_mirror_runtime(connection)?;
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
-    let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
+    prepare_rclone_bisync_work_files(connection, &plan)?;
+    let service = UnitDocument::service(&mirror_script::service_spec(&plan))
+        .map_err(|error| error.to_string())?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
@@ -6623,7 +6926,7 @@ async fn install_import_replacement_unit_result(
     let connection = &plan.preview.connection;
     match connection.provider {
         Provider::OneDrive => prepare_onedriver_online_mount_runtime(connection)?,
-        Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
             prepare_online_mount_runtime(connection)?;
         }
     }
@@ -6719,7 +7022,7 @@ fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
         ConnectionMode::OnlineMount(_) => vec![UnitName::new(connection.id, UnitKind::Service)],
         ConnectionMode::OfflineMirror(_) => match connection.provider {
             Provider::OneDrive => vec![UnitName::new(connection.id, UnitKind::Service)],
-            Provider::GoogleDrive | Provider::Box | Provider::Smb => vec![
+            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => vec![
                 UnitName::new(connection.id, UnitKind::Timer),
                 UnitName::new(connection.id, UnitKind::Service),
             ],
@@ -6835,8 +7138,9 @@ async fn run_managed_online_mount_operation_result_inner(
             let _ = rclone_refresh::cancel(connection.id).await;
         }
         if uses_directory_preload(connection) {
-            directory_preload::cancel(connection.id).await;
+            directory_preload::cancel_before_unmount(connection.id).await?;
         }
+        clean_detach_before_service_stop(connection, cancellation.child_token()).await?;
     }
     manager
         .action(action, Some(&unit), cancellation)
@@ -6908,7 +7212,8 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
             )
             .await;
     } else {
-        directory_preload::cancel(connection.id).await;
+        directory_preload::cancel_before_unmount(connection.id).await?;
+        clean_detach_before_service_stop(connection, cancellation.child_token()).await?;
     }
     manager
         .action(action, Some(&unit), cancellation)
@@ -6921,12 +7226,65 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
     Ok(())
 }
 
+async fn clean_detach_before_service_stop(
+    connection: &Connection,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    // Keep the service alive when a holder still has the FUSE mount open.
+    // A preload child can release its handle just after it exits, so briefly
+    // retry a busy clean detach before reporting failure.
+    let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
+    loop {
+        let mounted = HostVisibleMountTable
+            .entries()
+            .map_err(|error| format!("could not check mount before unmount: {error}"))?
+            .iter()
+            .any(|entry| entry.target == connection.local_path);
+        if !mounted {
+            return Ok(());
+        }
+        let result = app_command_runner()
+            .run(
+                clean_unmount_request(&connection.local_path).map_err(|error| error.to_string())?,
+                cancellation.child_token(),
+            )
+            .await;
+        if result.is_ok() {
+            return Ok(());
+        }
+        let error = result.expect_err("checked unsuccessful clean unmount");
+        // Reconcile the helper exit with the actual mount table. A helper can
+        // report failure after another process has already detached the mount.
+        let still_mounted = HostVisibleMountTable
+            .entries()
+            .map_err(|check_error| {
+                format!(
+                    "Clean unmount failed for {}: {error}; could not verify mount: {check_error}",
+                    connection.local_path.display()
+                )
+            })?
+            .iter()
+            .any(|entry| entry.target == connection.local_path);
+        if !still_mounted {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline || !matches!(error, CommandError::NonZero { .. })
+        {
+            return Err(format!(
+                "Clean unmount could not detach {}: {error}. The mount service was left running; close processes using it and retry",
+                connection.local_path.display()
+            ));
+        }
+        tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
+    }
+}
+
 async fn require_mount_disappearance_after_clean_stop(
     connection: &Connection,
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
     loop {
-        let mounted = ProcMountTable::default()
+        let mounted = HostVisibleMountTable
             .entries()
             .map_err(|error| format!("could not verify unmount: {error}"))?
             .iter()
@@ -6947,7 +7305,7 @@ async fn require_mount_disappearance_after_clean_stop(
 async fn run_online_mount_repair_operation(connection: Connection) -> String {
     match run_online_mount_repair_operation_result(&connection).await {
         Ok(()) => format!(
-            "Repair completed for {}. Lazy unmount recovery detached the mountpoint and left the generated service ready for the next mount.",
+            "Repair completed for {}. The mountpoint is detached and the generated service is ready for the next mount.",
             connection.name
         ),
         Err(error) => format!("Repair failed for {}: {error}", connection.name),
@@ -6973,13 +7331,25 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
         .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
         .await;
 
-    app_command_runner()
-        .run(
-            lazy_unmount_request(&connection.local_path).map_err(|error| error.to_string())?,
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+    if repair_needs_lazy_detach(connection, &host_mount_entries().await?)? {
+        app_command_runner()
+            .run(
+                lazy_unmount_request(&connection.local_path).map_err(|error| error.to_string())?,
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
+    while repair_needs_lazy_detach(connection, &host_mount_entries().await?)? {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(
+                "repair could not detach the mountpoint; inspect the mount before retrying".into(),
+            );
+        }
+        tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
+    }
 
     let status = manager
         .action(
@@ -6998,6 +7368,53 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
     }
 
     Ok(())
+}
+
+async fn host_mount_entries() -> Result<Vec<cosmic_ext_applet_mounter::mounts::MountEntry>, String>
+{
+    let request = CommandRequest::new(Executable::Cat)
+        .arg("/proc/self/mountinfo")
+        .map_err(|error| error.to_string())?
+        .with_output_limit(4 * 1024 * 1024);
+    let output = app_command_runner()
+        .run(request, CancellationToken::new())
+        .await
+        .map_err(|error| error.to_string())?;
+    if output.stdout.truncated {
+        return Err("host mount table is truncated".into());
+    }
+    output
+        .stdout
+        .text
+        .lines()
+        .map(|line| {
+            cosmic_ext_applet_mounter::mounts::parse_mountinfo_line(line)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+fn repair_needs_lazy_detach(
+    connection: &Connection,
+    mounts: &[cosmic_ext_applet_mounter::mounts::MountEntry],
+) -> Result<bool, String> {
+    let Some(mount) = mounts
+        .iter()
+        .find(|entry| entry.target == connection.local_path)
+    else {
+        return Ok(false);
+    };
+    let expected = if connection.provider == Provider::OneDrive {
+        "fuse.onedriver"
+    } else {
+        "fuse.rclone"
+    };
+    if mount.filesystem != expected {
+        return Err(
+            "repair found an unexpected filesystem at the mountpoint; left it untouched".into(),
+        );
+    }
+    Ok(true)
 }
 
 fn repair_requires_failed_reset(status: Option<&UnitStatus>) -> bool {
@@ -7075,6 +7492,7 @@ async fn start_rclone_offline_mirror_background(
         );
     }
     ensure_background_sync_may_start(connection).await?;
+    install_rclone_offline_mirror_units_result(connection).await?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
@@ -7209,12 +7627,13 @@ async fn current_network_ready() -> bool {
         .run(request, CancellationToken::new())
         .await
     {
-        Ok(output) => {
-            let state = output.stdout.text.to_ascii_lowercase();
-            state.contains("connected")
-        }
+        Ok(output) => network_manager_connected(&output.stdout.text),
         Err(_) => true,
     }
+}
+
+fn network_manager_connected(state: &str) -> bool {
+    state.trim().to_ascii_lowercase().starts_with("connected")
 }
 
 async fn current_metered_network() -> bool {
@@ -7461,7 +7880,7 @@ fn active_connections_using_vpn(
     exclude_connection: Option<ConnectionId>,
 ) -> BTreeSet<ConnectionId> {
     let config = Config::load_runtime().config.document;
-    let mount_entries = ProcMountTable::default().entries().unwrap_or_default();
+    let mount_entries = HostVisibleMountTable.entries().unwrap_or_default();
     config
         .connections
         .iter()
@@ -7558,6 +7977,15 @@ async fn preview_rclone_offline_mirror(
     } else {
         rclone_bisync_initial_preview_request(plan).map_err(|error| error.to_string())?
     };
+    let request = managed_rclone_bisync_request(
+        plan,
+        if initialized {
+            "preview"
+        } else {
+            "initial-preview"
+        },
+        request,
+    )?;
     let output = app_command_runner()
         .run(request, CancellationToken::new())
         .await
@@ -7638,6 +8066,11 @@ async fn sync_rclone_offline_mirror(
     } else {
         rclone_bisync_initial_sync_request(plan).map_err(|error| error.to_string())?
     };
+    let request = managed_rclone_bisync_request(
+        plan,
+        if initialized { "sync" } else { "initial-sync" },
+        request,
+    )?;
     let output = app_command_runner()
         .run(request, CancellationToken::new())
         .await
@@ -7652,6 +8085,23 @@ async fn sync_rclone_offline_mirror(
             sync_output_summary(&output)
         ))
     }
+}
+
+fn managed_rclone_bisync_request(
+    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
+    mode: &str,
+    original: CommandRequest,
+) -> Result<CommandRequest, String> {
+    CommandRequest::new(Executable::Sh)
+        .arg(mirror_script::script_path(plan))
+        .and_then(|request| request.arg(mode))
+        .map(|request| {
+            request
+                .with_timeout(original.timeout)
+                .with_retry(original.retry)
+                .with_output_limit(original.output_limit)
+        })
+        .map_err(|error| error.to_string())
 }
 
 async fn sync_onedrive_offline_mirror(
@@ -8020,6 +8470,31 @@ fn prepare_rclone_bisync_work_files(
             plan.filters_file.display()
         )
     })?;
+    let script_path = mirror_script::script_path(plan);
+    if script_path.exists() {
+        let existing = fs::read_to_string(&script_path)
+            .map_err(|error| format!("could not inspect managed mirror script: {error}"))?;
+        let owner_line = format!("# Cloud Mounter managed bisync script: '{}'", connection.id);
+        if !existing.lines().any(|line| line == owner_line) {
+            return Err("mirror script path contains an unowned file".into());
+        }
+    }
+    let content = mirror_script::render(plan).map_err(|error| error.to_string())?;
+    let staging = script_path.with_extension(format!("sh.tmp.{}", Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staging)
+        .map_err(|error| format!("could not stage managed mirror script: {error}"))?;
+    #[cfg(unix)]
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("could not restrict managed mirror script: {error}"))?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("could not write managed mirror script: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("could not sync managed mirror script: {error}"))?;
+    fs::rename(&staging, &script_path)
+        .map_err(|error| format!("could not install managed mirror script: {error}"))?;
     Ok(())
 }
 
@@ -8191,7 +8666,9 @@ fn offline_mirror_command_error(stage: &str, error: CommandError) -> String {
             } else {
                 stderr.text.trim()
             };
-            if detail.is_empty() {
+            if detail.contains("prior lock file found") {
+                "Sync is locked. Retry after the active run or two minutes; older locks may need manual recovery.".into()
+            } else if detail.is_empty() {
                 format!("rclone {stage} failed without diagnostic output")
             } else {
                 format!("rclone {stage} failed: {detail}")
@@ -8213,7 +8690,7 @@ async fn test_connection_plan_and_access(connection: &Connection) -> Result<Stri
     ensure_vpn_ready_for_connection(connection).await?;
 
     match connection.provider {
-        Provider::GoogleDrive | Provider::Box | Provider::Smb => {
+        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
             match verify_rclone_access(connection).await {
                 Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
                 Err(error) => Err(error),
@@ -8254,7 +8731,7 @@ fn verify_onedriver_online_mount_setup(connection: &Connection) -> Result<String
     verify_onedriver_online_mount_setup_with(
         connection,
         &app_command_runner(),
-        &ProcMountTable::default(),
+        &HostVisibleMountTable,
         &default_cache_root(),
         &default_config_root(),
     )
@@ -8356,7 +8833,7 @@ async fn verify_onedrive_offline_mirror_setup(connection: &Connection) -> Result
     verify_onedrive_offline_mirror_setup_with(
         connection,
         &app_command_runner(),
-        &ProcMountTable::default(),
+        &HostVisibleMountTable,
         &default_config_root(),
     )
     .await
@@ -8561,6 +9038,9 @@ fn onedrive_auth_files_completion_error(error: &CommandError) -> bool {
 }
 
 async fn verify_rclone_access(connection: &Connection) -> Result<String, String> {
+    if connection.provider == Provider::Sftp {
+        sftp::verify_host_verification(&app_command_runner(), &connection.remote_reference).await?;
+    }
     let expected_backend = rclone_backend_name(connection.provider)
         .ok_or_else(|| "selected provider does not use rclone".to_owned())?;
     let provider = CommandRcloneProvider::new(app_command_runner());
@@ -8586,7 +9066,13 @@ async fn verify_rclone_access(connection: &Connection) -> Result<String, String>
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| rclone_access_error(&target, error))?;
+        .map_err(|error| {
+            if connection.provider == Provider::Sftp {
+                sftp_access_error(error)
+            } else {
+                rclone_access_error(&target, error)
+            }
+        })?;
     let visible_items = output.stdout.text.lines().count();
     Ok(format!(
         "Rclone remote `{}` exists, backend `{expected_backend}` matches {}, and `{target}` is accessible with {visible_items} visible item(s) at depth 1.",
@@ -8682,6 +9168,95 @@ fn rclone_access_error(target: &str, error: CommandError) -> String {
     }
 }
 
+fn sftp_access_error(error: CommandError) -> String {
+    // Rclone diagnostics may include paths or credential-bearing option text.
+    // Match known signatures, but never display the raw command output.
+    match error {
+        CommandError::MissingExecutable(_) => {
+            "rclone is missing; install it before testing SFTP access.".into()
+        }
+        CommandError::InvalidArgument => {
+            "SFTP access request contains unsupported characters.".into()
+        }
+        CommandError::Timeout { .. } => {
+            "SFTP access timed out. Check the server address, port, network, and VPN.".into()
+        }
+        CommandError::Cancelled { .. } => "SFTP access check was cancelled.".into(),
+        CommandError::Spawn { .. } => "Could not start rclone for the SFTP access check.".into(),
+        CommandError::NonZero { stderr, stdout, .. } => {
+            let detail = if stderr.text.trim().is_empty() {
+                stdout.text.as_str()
+            } else {
+                stderr.text.as_str()
+            };
+            let lower = detail.to_ascii_lowercase();
+            if lower.contains("known_hosts_file")
+                && (lower.contains("no such file")
+                    || lower.contains("permission denied")
+                    || lower.contains("couldn't parse")
+                    || lower.contains("cannot read"))
+            {
+                "SFTP known-hosts file is missing, unreadable, or invalid. Check its host path and permissions.".into()
+            } else if lower.contains("knownhosts:")
+                || lower.contains("host key")
+                || lower.contains("hostkey")
+                || lower.contains("remote host identification has changed")
+                || lower.contains("no authorities for hostname")
+            {
+                "SFTP host-key verification failed. Verify the server identity and its entry in the known-hosts file; do not accept an unexpected key.".into()
+            } else if (lower.contains("key_file") || lower.contains("private key"))
+                && (lower.contains("no such file")
+                    || lower.contains("permission denied")
+                    || lower.contains("cannot read")
+                    || lower.contains("failed to load"))
+            {
+                "SFTP private-key file is missing or unreadable. Check its host path and permissions.".into()
+            } else if lower.contains("ssh_auth_sock")
+                || lower.contains("ssh agent")
+                || lower.contains("ssh-agent")
+            {
+                "SFTP SSH agent is unavailable or has no usable unlocked key. Check SSH_AUTH_SOCK and loaded identities.".into()
+            } else if lower.contains("i/o timeout")
+                || lower.contains("connection timed out")
+                || lower.contains("context deadline exceeded")
+            {
+                "SFTP connection timed out. Check the server response, port, network, and VPN."
+                    .into()
+            } else if lower.contains("unable to authenticate")
+                || lower.contains("authentication failed")
+                || lower.contains("no supported methods remain")
+                || lower.contains("too many authentication failures")
+                || (lower.contains("handshake") && lower.contains("permission denied"))
+            {
+                "SFTP authentication failed. Check the username and password, private key, or SSH-agent identity.".into()
+            } else if lower.contains("permission denied")
+                || lower.contains("access denied")
+                || lower.contains("operation not permitted")
+            {
+                "SFTP login succeeded, but the selected directory is not readable. Check server permissions.".into()
+            } else if lower.contains("directory not found")
+                || lower.contains("object not found")
+                || lower.contains("path not found")
+                || lower.contains("no such file")
+                || lower.contains("not a directory")
+                || lower.contains("doesn't exist")
+            {
+                "SFTP directory was not found. Check the remote directory and whether it is relative to the login directory or starts at server root.".into()
+            } else if lower.contains("connection refused")
+                || lower.contains("no route to host")
+                || lower.contains("network is unreachable")
+                || lower.contains("no such host")
+                || lower.contains("dial tcp")
+            {
+                "SFTP server could not be reached. Check its address, port, network, and VPN."
+                    .into()
+            } else {
+                "SFTP access check failed. Check the server settings and rclone diagnostics.".into()
+            }
+        }
+    }
+}
+
 fn import_preview_summary(preview: &ImportPreview) -> String {
     let status = if preview.active_conflict || preview.local_target_conflict {
         "blocked"
@@ -8693,12 +9268,21 @@ fn import_preview_summary(preview: &ImportPreview) -> String {
     } else {
         preview.unsupported_options.join(", ")
     };
+    let subtree =
+        preview
+            .remote_subpath
+            .as_deref()
+            .unwrap_or(if preview.provider == Provider::Sftp {
+                "SFTP login directory"
+            } else {
+                "Whole remote"
+            });
     format!(
         "{} {} -> {}\nRemote subtree: {}\nStart at login: {}\nUnsupported options: {unsupported}\nStatus: {status}. Import replacement still requires explicit confirmation.",
         provider_label(preview.provider),
         preview.remote_reference,
         preview.local_target.display(),
-        preview.remote_subpath.as_deref().unwrap_or("Whole remote"),
+        subtree,
         yes_no(preview.start_at_login),
     )
 }
@@ -8824,9 +9408,14 @@ mod tests {
             "Google Drive".into(),
             connection_id,
             7,
-            Ok(RcloneRefreshOutcome::Completed {
-                duration_seconds: 2.0,
-            }),
+            Ok(RcloneRefreshOutcome::Completed(
+                cosmic_ext_applet_mounter::preload_report::PreloadReport {
+                    duration_seconds: 2.0,
+                    limit_seconds: 60.0,
+                    maximum_depth: None,
+                    excluded_paths: 0,
+                },
+            )),
         ));
 
         assert_eq!(app.rclone_refresh_jobs.get(&connection_id), Some(&8));
@@ -8834,6 +9423,29 @@ mod tests {
             app.last_notice.as_deref(),
             Some("Current directory refresh job 8 is running.")
         );
+    }
+
+    #[test]
+    fn preload_completion_does_not_replace_unmount_progress_notice() {
+        use cosmic::Application;
+        let connection_id = ConnectionId::new();
+        let mut app = AppModel {
+            last_notice: Some("Unmounting VPS… stopping background preload first.".into()),
+            unmount_pending: BTreeSet::from([connection_id]),
+            directory_preload_jobs: BTreeMap::from([(connection_id, 5)]),
+            ..AppModel::default()
+        };
+        let _ = app.update(Message::DirectoryPreloadCompleted(
+            "VPS".into(),
+            connection_id,
+            5,
+            Ok(DirectoryPreloadOutcome::Cancelled),
+        ));
+        assert_eq!(
+            app.last_notice.as_deref(),
+            Some("Unmounting VPS… stopping background preload first.")
+        );
+        assert!(!app.directory_preload_jobs.contains_key(&connection_id));
     }
 
     #[test]
@@ -8850,9 +9462,14 @@ mod tests {
             "OneDrive".into(),
             connection_id,
             7,
-            Ok(DirectoryPreloadOutcome::Completed {
-                duration_seconds: 2.0,
-            }),
+            Ok(DirectoryPreloadOutcome::Completed(
+                cosmic_ext_applet_mounter::preload_report::PreloadReport {
+                    duration_seconds: 2.0,
+                    limit_seconds: 60.0,
+                    maximum_depth: None,
+                    excluded_paths: 0,
+                },
+            )),
         ));
 
         assert_eq!(app.directory_preload_jobs.get(&connection_id), Some(&8));
@@ -8860,6 +9477,42 @@ mod tests {
             app.last_notice.as_deref(),
             Some("Current OneDrive preload is running.")
         );
+    }
+
+    #[test]
+    fn sftp_preload_settings_and_connection_override_round_trip() {
+        let mut app = AppModel::default();
+        use cosmic::Application;
+        let _ = app.update(Message::DraftProvider(Provider::Sftp));
+        assert!(!app.draft.connection_preload_enabled);
+        assert_eq!(app.draft.connection_preload_seconds, "30");
+        assert_eq!(app.draft.connection_preload_depth, "2");
+        let mut settings = PreloadSettingsDraft::default();
+        settings.policy_mut(PreloadProvider::Sftp).enabled = true;
+        let policy = settings.validated().unwrap();
+        assert!(policy.sftp.enabled);
+        assert_eq!(policy.sftp.maximum_seconds, 30);
+        let mut draft = ConnectionDraft {
+            provider: Provider::Sftp,
+            name: "SFTP".into(),
+            remote_reference: "sftp".into(),
+            local_path: "/tmp/server".into(),
+            ..ConnectionDraft::default()
+        };
+        draft.connection_preload_use_global = false;
+        draft.connection_preload_enabled = true;
+        draft.connection_preload_seconds = "20".into();
+        draft.connection_preload_depth = "2".into();
+        let connection = connection_from_draft(&draft).unwrap();
+        assert!(connection.smb_preload_override.is_none());
+        assert_eq!(
+            connection.sftp_preload_override.unwrap().maximum_seconds,
+            20
+        );
+        let restored = draft_from_connection(&connection);
+        assert!(!restored.connection_preload_use_global);
+        assert_eq!(restored.connection_preload_seconds, "20");
+        assert!(uses_directory_preload(&connection));
     }
 
     #[test]
@@ -9276,6 +9929,632 @@ mod tests {
             ActiveState::Active
         ))));
         assert!(!repair_requires_failed_reset(None));
+    }
+
+    #[test]
+    fn repair_skips_an_already_detached_mount_and_rejects_foreign_filesystems() {
+        let connection = test_connection(Provider::Sftp);
+        assert!(!repair_needs_lazy_detach(&connection, &[]).unwrap());
+        let mut mount = cosmic_ext_applet_mounter::mounts::MountEntry {
+            target: connection.local_path.clone(),
+            source: "rclone".into(),
+            filesystem: "fuse.rclone".into(),
+            options: Vec::new(),
+        };
+        assert!(repair_needs_lazy_detach(&connection, &[mount.clone()]).unwrap());
+        mount.filesystem = "ext4".into();
+        assert!(repair_needs_lazy_detach(&connection, &[mount]).is_err());
+    }
+
+    #[test]
+    fn disconnected_network_manager_state_updates_online_status() {
+        use cosmic::Application;
+
+        assert!(network_manager_connected("connected\n"));
+        assert!(network_manager_connected("connected (site only)\n"));
+        assert!(!network_manager_connected("disconnected\n"));
+        assert!(!network_manager_connected("connecting\n"));
+
+        let mut app = AppModel::default();
+        app.config
+            .document
+            .connections
+            .push(test_connection(Provider::Sftp));
+        let _ = app.update(Message::NetworkStatusChecked(false));
+        assert_eq!(
+            app.view_state().rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork)
+        );
+        let _ = app.update(Message::NetworkStatusChecked(true));
+        assert_ne!(
+            app.view_state().rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires disposable localhost SFTP, host FUSE, and user systemd"]
+    async fn live_sftp_online_unmount_repair_and_sleep_cleanup() {
+        use cosmic_ext_applet_mounter::process::SystemCommandRunner;
+        use cosmic_ext_applet_mounter::services::UnitStore;
+
+        let root = PathBuf::from(std::env::var("COSMIC_SFTP_LIFECYCLE_ROOT").expect("probe root"));
+        let config = PathBuf::from(std::env::var("COSMIC_SFTP_LIFECYCLE_CONFIG").expect("config"));
+        let mut connection = test_connection(Provider::Sftp);
+        connection.id = ConnectionId::new();
+        connection.remote_reference = "probe".into();
+        connection.local_path = root.join("mount");
+        connection.mode = ConnectionMode::OnlineMount(OnlineMountConfig {
+            cache_directory: Some(root.join("cache")),
+            cache_limit_bytes: 64 * 1024 * 1024,
+            start_at_login: false,
+        });
+        prepare_online_mount_runtime(&connection).unwrap();
+        let mut plan =
+            rclone_mount_plan(&connection, &default_runtime_root(), &default_cache_root()).unwrap();
+        // Keep a disposable write queued long enough to exercise sleep safety.
+        plan.service
+            .arguments
+            .extend(["--vfs-write-back".into(), "20s".into()]);
+        plan.service
+            .arguments
+            .extend(["--config".into(), config.display().to_string()]);
+        let document = UnitDocument::service(&plan.service).unwrap();
+
+        struct ProbeGuard {
+            unit: UnitName,
+            mountpoint: PathBuf,
+        }
+        impl Drop for ProbeGuard {
+            fn drop(&mut self) {
+                let name = self.unit.file_name();
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "stop", &name])
+                    .status();
+                if ProcMountTable::default()
+                    .find_target(&self.mountpoint)
+                    .is_ok_and(|mount| mount.is_some())
+                {
+                    let _ = std::process::Command::new("fusermount3")
+                        .arg("-uz")
+                        .arg(&self.mountpoint)
+                        .status();
+                }
+                if let Ok(store) = FileUnitStore::user(Arc::new(StructuralUnitValidator)) {
+                    let _ = store.remove(&self.unit);
+                }
+                if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+                    let directory = PathBuf::from(runtime)
+                        .join("systemd/user")
+                        .join(format!("{name}.d"));
+                    let config_path = directory.join("91-disposable-sftp-config.conf");
+                    if fs::read_to_string(&config_path).is_ok_and(|content| {
+                        content.starts_with("# Disposable SFTP lifecycle config")
+                    }) {
+                        let _ = fs::remove_file(config_path);
+                    }
+                    let path = directory.join("90-cosmic-mounter-sleep.conf");
+                    if fs::read_to_string(&path).is_ok_and(|content| {
+                        content.starts_with("# Cloud Mounter Online sleep cleanup")
+                    }) {
+                        let _ = fs::remove_file(path);
+                        let _ = fs::remove_dir(directory);
+                    }
+                }
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "daemon-reload"])
+                    .status();
+            }
+        }
+        let _guard = ProbeGuard {
+            unit: document.name.clone(),
+            mountpoint: connection.local_path.clone(),
+        };
+        let unit_dropin = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap())
+            .join("systemd/user")
+            .join(format!("{}.d", document.name.file_name()));
+        fs::create_dir_all(&unit_dropin).unwrap();
+        fs::write(
+            unit_dropin.join("91-disposable-sftp-config.conf"),
+            format!(
+                "# Disposable SFTP lifecycle config\n[Service]\nEnvironment=RCLONE_CONFIG={}\n",
+                config.display()
+            ),
+        )
+        .unwrap();
+        let store = FileUnitStore::user(Arc::new(StructuralUnitValidator)).unwrap();
+        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let controller = UnitController::new(store, manager);
+        controller
+            .install(&document, CancellationToken::new())
+            .await
+            .unwrap();
+        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let start = || async {
+            manager
+                .action(
+                    SystemdAction::Start,
+                    Some(&document.name),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            for _ in 0..50 {
+                if ProcMountTable::default()
+                    .find_target(&connection.local_path)
+                    .unwrap()
+                    .is_some()
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            panic!("disposable SFTP mount did not appear");
+        };
+
+        start().await;
+        assert_eq!(
+            fs::read_to_string(connection.local_path.join("probe.txt")).unwrap(),
+            "probe\n"
+        );
+        let health = CommandRcloneProvider::new(SystemCommandRunner)
+            .vfs_health(&plan.rc_socket, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(health.healthy_cache());
+        assert!(!health.pending_or_active_writes());
+        let status = runtime_service_status(connection.id).unwrap();
+        assert_eq!(status.active, ActiveState::Active);
+        let snapshot = ControllerSnapshot {
+            config: ConfigDocument {
+                connections: vec![connection.clone()],
+                ..ConfigDocument::default()
+            },
+            service_status: BTreeMap::from([(connection.id, status)]),
+            mount_entries: ProcMountTable::default().entries().unwrap(),
+            ..ControllerSnapshot::default()
+        };
+        assert_eq!(
+            restore(&snapshot).rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted)
+        );
+        let flatpak_mounts = std::process::Command::new("flatpak-builder")
+            .args([
+                "--run",
+                "target/flatpak-gui-prototype",
+                "packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json",
+                "/usr/bin/cat",
+                "/proc/self/mountinfo",
+            ])
+            .output()
+            .unwrap();
+        assert!(flatpak_mounts.status.success());
+        println!(
+            "Flatpak sandbox sees disposable mount: {}",
+            String::from_utf8_lossy(&flatpak_mounts.stdout)
+                .contains(&connection.local_path.display().to_string())
+        );
+        let host_mounts = std::process::Command::new("flatpak-builder")
+            .args([
+                "--run",
+                "target/flatpak-gui-prototype",
+                "packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json",
+                "flatpak-spawn",
+                "--host",
+                "/usr/bin/cat",
+                "/proc/self/mountinfo",
+            ])
+            .output()
+            .unwrap();
+        assert!(host_mounts.status.success());
+        assert!(
+            String::from_utf8_lossy(&host_mounts.stdout)
+                .contains(&connection.local_path.display().to_string())
+        );
+        run_managed_online_mount_operation_result_inner(&connection, Operation::Unmount)
+            .await
+            .unwrap();
+        assert!(
+            ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_none()
+        );
+
+        start().await;
+        run_online_mount_repair_operation_result(&connection)
+            .await
+            .unwrap();
+        assert!(
+            ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_none()
+        );
+
+        start().await;
+        fs::write(connection.local_path.join("queued.txt"), "queued upload\n").unwrap();
+        let health = CommandRcloneProvider::new(SystemCommandRunner)
+            .vfs_health(&plan.rc_socket, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(health.pending_or_active_writes(), "{health:?}");
+        let pending = cosmic_ext_applet_mounter::sleep::cleanup(
+            &SystemCommandRunner,
+            &[connection.clone()],
+            tokio::time::Instant::now() + Duration::from_secs(15),
+        )
+        .await;
+        assert!(pending.active.is_empty(), "{}", pending.summary);
+        assert!(
+            pending.summary.contains("pending uploads"),
+            "{}",
+            pending.summary
+        );
+        assert!(
+            ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_some()
+        );
+        for _ in 0..300 {
+            let health = CommandRcloneProvider::new(SystemCommandRunner)
+                .vfs_health(&plan.rc_socket, CancellationToken::new())
+                .await
+                .unwrap();
+            if !health.pending_or_active_writes() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(
+            fs::read_to_string(root.join("data/queued.txt")).unwrap(),
+            "queued upload\n"
+        );
+
+        let mut runtime_config = Config::default();
+        runtime_config
+            .update_validated_runtime(|document| {
+                document.unmount_before_sleep = true;
+                document.restore_after_wake = true;
+                document.connections.push(connection.clone());
+            })
+            .unwrap();
+        let report = cosmic_ext_applet_mounter::sleep::cleanup(
+            &SystemCommandRunner,
+            &[connection.clone()],
+            tokio::time::Instant::now() + Duration::from_secs(15),
+        )
+        .await;
+        assert_eq!(report.active, vec![connection.id], "{}", report.summary);
+        assert!(
+            ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_none()
+        );
+        restore_online_after_wake_result(&connection).await.unwrap();
+        for _ in 0..50 {
+            if ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            ProcMountTable::default()
+                .find_target(&connection.local_path)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            fs::read_to_string(connection.local_path.join("probe.txt")).unwrap(),
+            "probe\n"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires disposable localhost SFTP, host rclone, and user systemd"]
+    async fn live_sftp_offline_mirror_controls_and_recovery() {
+        let root = PathBuf::from(std::env::var("COSMIC_SFTP_MIRROR_ROOT").expect("probe root"));
+        let remote_data = root.join("data");
+        let mut connection = test_connection(Provider::Sftp);
+        connection.id = ConnectionId::new();
+        connection.name = "Disposable SFTP mirror".into();
+        connection.remote_reference = "probe".into();
+        connection.remote_subpath = Some("share".into());
+        connection.local_path = root.join("local");
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            recovery_directory: root.join("recovery"),
+            sync_interval_minutes: 15,
+            sync_on_metered: true,
+        });
+        let plan = rclone_bisync_plan(&connection, &default_work_root()).unwrap();
+
+        let missing_preview =
+            run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
+                .await
+                .expect_err("initial sync needs a preview");
+        assert!(missing_preview.contains("Preview first"));
+        let preview =
+            run_managed_offline_mirror_operation_result(&connection, Operation::PreviewInitialSync)
+                .await
+                .unwrap();
+        assert!(preview.contains("press Sync Now"));
+        assert!(initial_preview_marker(&plan).exists());
+        assert!(!connection.local_path.join("remote-only.txt").exists());
+        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
+            .await
+            .unwrap();
+        assert!(initial_sync_marker(&plan).exists());
+        assert!(!initial_preview_marker(&plan).exists());
+        assert_eq!(
+            fs::read_to_string(connection.local_path.join("remote-only.txt")).unwrap(),
+            "remote\n"
+        );
+        fs::write(connection.local_path.join("local-only.txt"), "local\n").unwrap();
+        run_managed_offline_mirror_operation_result(&connection, Operation::PreviewInitialSync)
+            .await
+            .unwrap();
+        assert!(!remote_data.join("share/local-only.txt").exists());
+        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(remote_data.join("share/local-only.txt")).unwrap(),
+            "local\n"
+        );
+
+        let copy_remote = |source: &Path, destination: &str| {
+            let output = Command::new("rclone")
+                .arg("copyto")
+                .arg(source)
+                .arg(destination)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        let remote_recovery = remote_data
+            .join(".cosmic-mounter-recovery")
+            .join(connection.id.to_string());
+        let old_remote = remote_recovery.join("2000-01-01");
+        let unowned_remote = remote_recovery.join("2000-01-02");
+        let old_local = root.join("recovery/2000-01-01");
+        let unowned_local = root.join("recovery/2000-01-02");
+        for directory in [&old_local, &unowned_local] {
+            fs::create_dir_all(directory).unwrap();
+            fs::write(directory.join("old.txt"), "old\n").unwrap();
+        }
+        fs::write(
+            old_local.join(".cosmic-mounter-owner"),
+            connection.id.to_string(),
+        )
+        .unwrap();
+        for day in ["2000-01-01", "2000-01-02"] {
+            copy_remote(
+                &root.join("recovery").join(day).join("old.txt"),
+                &format!("{}/{day}/old.txt", plan.remote_recovery_path),
+            );
+        }
+        copy_remote(
+            &old_local.join(".cosmic-mounter-owner"),
+            &format!(
+                "{}/2000-01-01/.cosmic-mounter-owner",
+                plan.remote_recovery_path
+            ),
+        );
+        let delete_source = root.join("delete-source.txt");
+        fs::write(&delete_source, "delete\n").unwrap();
+        copy_remote(&delete_source, "probe:share/delete-me.txt");
+        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
+            .await
+            .unwrap();
+        assert!(connection.local_path.join("delete-me.txt").exists());
+        let delete = Command::new("rclone")
+            .args(["deletefile", "probe:share/delete-me.txt"])
+            .output()
+            .unwrap();
+        assert!(delete.status.success());
+        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
+            .await
+            .unwrap();
+        assert!(!connection.local_path.join("delete-me.txt").exists());
+        assert!(!old_remote.exists());
+        assert!(!old_local.exists());
+        assert!(unowned_remote.exists());
+        assert!(unowned_local.exists());
+        assert!(
+            fs::read_dir(root.join("recovery"))
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| entry.path().is_dir() && entry.path() != unowned_local)
+        );
+
+        use cosmic_ext_applet_mounter::services::UnitStore;
+        use std::os::unix::fs::PermissionsExt;
+
+        struct MirrorProbeGuard {
+            service: UnitName,
+            timer: UnitName,
+            service_dropin: PathBuf,
+            timer_dropin: PathBuf,
+        }
+        impl Drop for MirrorProbeGuard {
+            fn drop(&mut self) {
+                let timer = self.timer.file_name();
+                let service = self.service.file_name();
+                let _ = Command::new("systemctl")
+                    .args(["--user", "disable", "--now", &timer])
+                    .output();
+                let _ = Command::new("systemctl")
+                    .args(["--user", "stop", &service])
+                    .output();
+                for path in [&self.service_dropin, &self.timer_dropin] {
+                    let _ = fs::remove_file(path);
+                    if let Some(parent) = path.parent() {
+                        let _ = fs::remove_dir(parent);
+                    }
+                }
+                if let Ok(store) = FileUnitStore::user(Arc::new(StructuralUnitValidator)) {
+                    let _ = store.remove(&self.timer);
+                    let _ = store.remove(&self.service);
+                }
+                let _ = Command::new("systemctl")
+                    .args(["--user", "daemon-reload"])
+                    .output();
+            }
+        }
+
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            recovery_directory: root.join("recovery"),
+            sync_interval_minutes: 15,
+            sync_on_metered: false,
+        });
+        let runtime = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap());
+        let service = UnitName::new(connection.id, UnitKind::Service);
+        let timer = UnitName::new(connection.id, UnitKind::Timer);
+        let service_dropin = runtime
+            .join("systemd/user")
+            .join(format!("{}.d/90-mirror-probe.conf", service.file_name()));
+        let timer_dropin = runtime
+            .join("systemd/user")
+            .join(format!("{}.d/90-mirror-probe.conf", timer.file_name()));
+        let _guard = MirrorProbeGuard {
+            service: service.clone(),
+            timer: timer.clone(),
+            service_dropin: service_dropin.clone(),
+            timer_dropin: timer_dropin.clone(),
+        };
+        install_rclone_offline_mirror_units_result(&connection)
+            .await
+            .unwrap();
+        let store = FileUnitStore::user(Arc::new(StructuralUnitValidator)).unwrap();
+        let service_content = store.read(&service).unwrap().unwrap();
+        let timer_content = store.read(&timer).unwrap().unwrap();
+        assert!(service_content.contains("ExecCondition="));
+        assert!(service_content.contains("managed-bisync.sh"));
+        assert!(timer_content.contains("OnUnitInactiveSec=900s"));
+        for unit in [service.file_name(), timer.file_name()] {
+            let host_unit = Command::new("flatpak-builder")
+                .args([
+                    "--run",
+                    "target/flatpak-gui-prototype",
+                    "packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json",
+                    "flatpak-spawn",
+                    "--host",
+                    "/usr/bin/systemctl",
+                    "--user",
+                    "cat",
+                    &unit,
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                host_unit.status.success(),
+                "{}",
+                String::from_utf8_lossy(&host_unit.stderr)
+            );
+            assert!(String::from_utf8_lossy(&host_unit.stdout).contains(&unit));
+        }
+
+        let fake_bin = root.join("fake-bin");
+        fs::create_dir_all(&fake_bin).unwrap();
+        let fake_nmcli = fake_bin.join("nmcli");
+        let metered_flag = root.join("metered-state");
+        fs::write(&metered_flag, "no\n").unwrap();
+        fs::write(
+            &fake_nmcli,
+            format!(
+                "#!/bin/sh\nprintf 'GENERAL.METERED:'\ncat '{}'\n",
+                metered_flag.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake_nmcli, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::create_dir_all(service_dropin.parent().unwrap()).unwrap();
+        fs::create_dir_all(timer_dropin.parent().unwrap()).unwrap();
+        let rclone_config = std::env::var("RCLONE_CONFIG").unwrap();
+        fs::write(
+            &service_dropin,
+            format!(
+                "[Service]\nEnvironment=RCLONE_CONFIG={rclone_config}\nEnvironment=PATH={}:{}\n",
+                fake_bin.display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &timer_dropin,
+            "[Timer]\nOnUnitInactiveSec=\nOnActiveSec=3s\n",
+        )
+        .unwrap();
+        let reload = Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output()
+            .unwrap();
+        assert!(reload.status.success());
+
+        fs::write(connection.local_path.join("timer-only.txt"), "timer\n").unwrap();
+        run_managed_offline_mirror_operation_result(&connection, Operation::ResumeSync)
+            .await
+            .unwrap();
+        for _ in 0..600 {
+            if remote_data.join("share/timer-only.txt").exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !remote_data.join("share/timer-only.txt").exists() {
+            for unit in [timer.file_name(), service.file_name()] {
+                let status = Command::new("systemctl")
+                    .args(["--user", "status", &unit, "--no-pager"])
+                    .output()
+                    .unwrap();
+                println!("{}", String::from_utf8_lossy(&status.stdout));
+                let journal = Command::new("journalctl")
+                    .args(["--user", "-u", &unit, "-n", "25", "--no-pager"])
+                    .output()
+                    .unwrap();
+                println!("{}", String::from_utf8_lossy(&journal.stdout));
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(remote_data.join("share/timer-only.txt")).unwrap(),
+            "timer\n"
+        );
+        run_managed_offline_mirror_operation_result(&connection, Operation::PauseSync)
+            .await
+            .unwrap();
+        fs::write(&metered_flag, "yes\n").unwrap();
+        fs::write(connection.local_path.join("metered-only.txt"), "metered\n").unwrap();
+        let guarded_start = Command::new("systemctl")
+            .args(["--user", "start", &service.file_name()])
+            .output()
+            .unwrap();
+        assert!(guarded_start.status.success());
+        let journal = Command::new("journalctl")
+            .args([
+                "--user",
+                "-u",
+                &service.file_name(),
+                "-n",
+                "8",
+                "--no-pager",
+            ])
+            .output()
+            .unwrap();
+        assert!(journal.status.success());
+        assert!(
+            String::from_utf8_lossy(&journal.stdout).contains("Skipped due to 'exec-condition'")
+        );
+        assert!(!remote_data.join("share/metered-only.txt").exists());
     }
 
     #[test]
@@ -9968,6 +11247,76 @@ mod tests {
     }
 
     #[test]
+    fn sftp_access_errors_identify_failures_without_echoing_rclone_output() {
+        let cases = [
+            ("knownhosts: key mismatch", "host-key verification"),
+            ("knownhosts: key is unknown", "host-key verification"),
+            (
+                "couldn't parse known_hosts_file: open /secret/path: no such file",
+                "known-hosts file",
+            ),
+            (
+                "failed to load key_file /secret/key: permission denied",
+                "private-key file",
+            ),
+            (
+                "ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain",
+                "authentication failed",
+            ),
+            (
+                "SSH_AUTH_SOCK is not set; ssh agent unavailable",
+                "SSH agent",
+            ),
+            ("failed to list: permission denied", "not readable"),
+            (
+                "failed to list: directory not found",
+                "directory was not found",
+            ),
+            ("dial tcp: connection refused", "could not be reached"),
+            (
+                "ssh: handshake failed: read tcp 127.0.0.1:1234->127.0.0.1:2222: i/o timeout",
+                "connection timed out",
+            ),
+            (
+                "unknown failure with password=hunter2",
+                "access check failed",
+            ),
+        ];
+        for (detail, expected) in cases {
+            let error = CommandError::NonZero {
+                command: "rclone lsf private-remote:".into(),
+                code: Some(1),
+                stdout: cosmic_ext_applet_mounter::process::CapturedOutput {
+                    text: String::new(),
+                    truncated: false,
+                    invalid_utf8: false,
+                },
+                stderr: cosmic_ext_applet_mounter::process::CapturedOutput {
+                    text: detail.into(),
+                    truncated: false,
+                    invalid_utf8: false,
+                },
+                attempts: 1,
+            };
+            let message = sftp_access_error(error);
+            assert!(message.contains(expected), "{detail}: {message}");
+            assert!(!message.contains("/secret/") && !message.contains("hunter2"));
+            assert!(!message.contains("private-remote"));
+        }
+
+        let timeout = sftp_access_error(CommandError::Timeout {
+            command: "rclone lsf private-remote:".into(),
+            timeout: Duration::from_secs(20),
+        });
+        assert!(timeout.contains("timed out") && !timeout.contains("private-remote"));
+        let spawn = sftp_access_error(CommandError::Spawn {
+            command: "rclone lsf private-remote:".into(),
+            message: "password=hunter2".into(),
+        });
+        assert!(spawn.contains("Could not start rclone") && !spawn.contains("hunter2"));
+    }
+
+    #[test]
     fn offline_mirror_preview_summary_reports_confirmation_context() {
         let output = command_output(
             "Path2 to Path1: copy local.txt\nPath1 to Path2: copy remote.txt\nDelete old.txt\nConflict same.txt\nSkipped native.gdoc\nTransferred: 15 MiB\n",
@@ -9976,7 +11325,7 @@ mod tests {
         let summary = preview_summary_text(&output);
 
         assert!(summary.contains("uploads 1"));
-        assert!(summary.contains("downloads 2"));
+        assert!(summary.contains("downloads 1"));
         assert!(summary.contains("deletes 1"));
         assert!(summary.contains("conflicts 1"));
         assert!(summary.contains("skipped 1"));
@@ -10012,12 +11361,32 @@ mod tests {
         assert!(plan.filters_file.starts_with(&plan.work_directory));
         assert!(initial_preview_marker(&plan).starts_with(&plan.work_directory));
         assert!(initial_sync_marker(&plan).starts_with(&plan.work_directory));
+        assert!(mirror_script::script_path(&plan).starts_with(&plan.work_directory));
         assert!(!initial_preview_marker(&plan).starts_with(&mirror));
         assert!(!initial_sync_marker(&plan).starts_with(&mirror));
+        assert!(
+            fs::read_to_string(mirror_script::script_path(&plan))
+                .expect("managed script")
+                .contains("Cloud Mounter managed bisync script")
+        );
+        let managed = managed_rclone_bisync_request(
+            &plan,
+            "preview",
+            rclone_bisync_preview_request(&plan).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(managed.executable, Executable::Sh);
+        assert!(managed.sanitized_command().contains("managed-bisync.sh"));
         assert!(
             fs::read_to_string(&plan.filters_file)
                 .expect("filters")
                 .contains("Google cloud-native documents")
+        );
+        fs::write(mirror_script::script_path(&plan), "unowned script").unwrap();
+        assert!(
+            prepare_rclone_bisync_work_files(&connection, &plan)
+                .unwrap_err()
+                .contains("unowned")
         );
     }
 
@@ -10785,6 +12154,7 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
     }
 
@@ -10835,6 +12205,19 @@ mod tests {
             },
             attempts: 1,
         }
+    }
+
+    #[test]
+    fn bisync_lock_error_gives_bounded_recovery_guidance_without_a_work_path() {
+        let message = offline_mirror_command_error(
+            "sync",
+            nonzero_command_error(
+                "Failed to bisync: prior lock file found: /home/user/private/work/state.lck",
+            ),
+        );
+        assert!(message.contains("two minutes"));
+        assert!(message.contains("older locks may need manual recovery"));
+        assert!(!message.contains("/home/user/private"));
     }
 
     fn command_output(stdout: &str) -> CommandOutput {

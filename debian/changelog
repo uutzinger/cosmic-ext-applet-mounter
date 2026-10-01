@@ -1,3 +1,13 @@
+cosmic-ext-applet-mounter (0.4.7) unstable; urgency=medium
+
+  * Add SFTP Online mounts and Offline mirrors through rclone, including
+    password, SSH key, and SSH agent authentication.
+  * Add SFTP directory preload settings and protect pending uploads during
+    unmount and sleep cleanup.
+  * Improve SFTP setup feedback and Offline preview counts.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Thu, 01 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.6) unstable; urgency=medium
 
   * Add provider-specific Online directory preload settings and background

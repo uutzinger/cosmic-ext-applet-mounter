@@ -30,12 +30,8 @@ pub struct RcloneRefreshJob {
     timeout: Duration,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum RcloneRefreshOutcome {
-    Completed { duration_seconds: f64 },
-    TimedOut { duration_seconds: f64 },
-    Cancelled,
-}
+pub use crate::preload_report::PreloadOutcome as RcloneRefreshOutcome;
+use crate::preload_report::PreloadReport;
 
 #[derive(Debug)]
 struct ActiveRefresh {
@@ -181,13 +177,17 @@ async fn monitor_with(
 
     let started = Instant::now();
     let deadline = started + job.timeout;
+    let report = || PreloadReport {
+        duration_seconds: started.elapsed().as_secs_f64(),
+        limit_seconds: job.timeout.as_secs_f64(),
+        maximum_depth: None,
+        excluded_paths: 0,
+    };
     let result = async {
         loop {
             if Instant::now() >= deadline {
                 let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
-                break Ok(RcloneRefreshOutcome::TimedOut {
-                    duration_seconds: started.elapsed().as_secs_f64(),
-                });
+                break Ok(RcloneRefreshOutcome::TimedOut(report()));
             }
             let request = rc_request(&job.rc_socket, "job/status")?
                 .arg(format!("jobid={}", job.job_id))
@@ -209,9 +209,7 @@ async fn monitor_with(
             let status = parse_job_status(&output.stdout.text, &job.execute_id, job.job_id)?;
             if status.finished {
                 if status.success {
-                    break Ok(RcloneRefreshOutcome::Completed {
-                        duration_seconds: status.duration_seconds,
-                    });
+                    break Ok(RcloneRefreshOutcome::Completed(report()));
                 }
                 break Err(if status.error.is_empty() {
                     "rclone directory refresh finished without success".into()
@@ -332,7 +330,6 @@ fn parse_job_start(output: &str) -> Result<(u64, String), String> {
 struct JobStatus {
     finished: bool,
     success: bool,
-    duration_seconds: f64,
     error: String,
 }
 
@@ -378,7 +375,6 @@ fn parse_job_status(output: &str, execute_id: &str, job_id: u64) -> Result<JobSt
             .and_then(Value::as_bool)
             .unwrap_or(false),
         success,
-        duration_seconds: value.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
         error,
     })
 }
@@ -436,12 +432,13 @@ mod tests {
         .expect("start");
         assert_eq!(job.job_id, 7);
         assert_eq!(job.execute_id, "instance-a");
-        assert_eq!(
-            monitor_with(&runner, job).await.expect("monitor"),
-            RcloneRefreshOutcome::Completed {
-                duration_seconds: 2.5
-            }
-        );
+        let RcloneRefreshOutcome::Completed(report) =
+            monitor_with(&runner, job).await.expect("monitor")
+        else {
+            panic!("expected successful recursive refresh");
+        };
+        assert_eq!(report.limit_seconds, 60.0);
+        assert_eq!(report.maximum_depth, None);
 
         let requests = runner.requests();
         assert_eq!(
@@ -460,6 +457,42 @@ mod tests {
             requests[3].sanitized_command(),
             "rclone rc --unix-socket /run/user/1000/rclone-test.sock job/status jobid=7"
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_timeout_retains_limit_and_requests_stop() {
+        let runner = FakeCommandRunner::default();
+        runner.push(Ok(output("{}")));
+        let connection_id = ConnectionId::new();
+        let socket = PathBuf::from("/tmp/refresh-report.sock");
+        let control = Arc::new(ActiveRefresh {
+            rc_socket: socket.clone(),
+            cancellation: CancellationToken::new(),
+            job_id: Mutex::new(Some(12)),
+        });
+        ACTIVE_REFRESHES
+            .lock()
+            .unwrap()
+            .insert(connection_id, control);
+        let job = RcloneRefreshJob {
+            connection_id,
+            job_id: 12,
+            execute_id: "test-instance".into(),
+            rc_socket: socket,
+            // Force the deadline branch without a real-time sleep.
+            timeout: Duration::ZERO,
+        };
+        let RcloneRefreshOutcome::TimedOut(report) = monitor_with(&runner, job).await.unwrap()
+        else {
+            panic!("expected timeout report");
+        };
+        assert_eq!(report.limit_seconds, 0.0);
+        assert_eq!(report.maximum_depth, None);
+        assert_eq!(
+            runner.requests()[0].sanitized_command(),
+            "rclone rc --unix-socket /tmp/refresh-report.sock job/stop jobid=12"
+        );
+        assert!(current_control(connection_id, 12).is_none());
     }
 
     #[tokio::test]

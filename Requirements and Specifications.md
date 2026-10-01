@@ -36,7 +36,7 @@ mechanism.
   connections.
 - Configure optional NetworkManager or Cisco VPN dependencies.
 - Detect, create, select, and safely remove unused rclone remotes for Google
-  Drive, Box, and SMB workflows.
+  Drive, Box, SMB, and SFTP workflows.
 - Generate and manage applet-owned systemd user services and timers.
 - Import compatible existing rclone and `jstaf/onedriver` user services.
 - Preserve both sides of synchronization conflicts and provide recovery copies.
@@ -54,8 +54,11 @@ mechanism.
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
+| SFTP | `rclone mount` | `rclone bisync` |
 
-Only the providers and engines in this matrix are included.
+Only the providers and engines in this matrix are included. SFTP editor support is implemented; remaining implementation and acceptance
+are tracked in Section 17 and
+`Task List.md`.
 
 ### 3.2 Included
 
@@ -107,7 +110,7 @@ trees when required connectivity is available.
 Offline mirror mode uses:
 
 - `abraunegg/onedrive` for Microsoft OneDrive.
-- `rclone bisync` for Google Drive, Box, and SMB.
+- `rclone bisync` for Google Drive, Box, SMB, and SFTP.
 
 ### 4.3 Google cloud-native documents
 
@@ -282,21 +285,21 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-011J:** Add, Modify, and Import shall open in a standalone COSMIC
   settings application window titled `Cloud Mounter Connection Settings`, not as
   embedded applet child windows.
-- **FR-011K:** In Add mode for Google Drive, Box, and SMB, Detect rclone
+- **FR-011K:** In Add mode for Google Drive, Box, SMB, and SFTP, Detect rclone
   remotes and the provider-specific Create Remote action shall appear in the
   top action row. These remote-creation actions shall not appear while modifying
   an existing connection. Test Connection and Save Connection shall use
   non-primary visual styling until a selected existing remote is detected or a
   remote has been created and selected.
-- **FR-011L:** In Add mode for Google Drive, Box, and SMB, detected rclone
+- **FR-011L:** In Add mode for Google Drive, Box, SMB, and SFTP, detected rclone
   remote choices shall wrap across bounded rows at the default settings-window
   width rather than clipping horizontally.
-- **FR-011M:** In Add mode for Google Drive, Box, and SMB, the UI shall provide
+- **FR-011M:** In Add mode for Google Drive, Box, SMB, and SFTP, the UI shall provide
   an advanced rclone management area for unused remotes. It shall prevent
   removal of remotes referenced by saved connections, require explicit
   confirmation before deletion, and state that deletion changes rclone
   configuration rather than only applet configuration.
-- **FR-011MA:** Google Drive, Box, and SMB remote-name help shall explain both
+- **FR-011MA:** Google Drive, Box, SMB, and SFTP remote-name help shall explain both
   entering a new name before using the provider's Create Remote action and
   selecting/entering an existing remote name from `rclone config`. SMB help
   shall identify its Create/Update action and distinguish updating an existing
@@ -340,7 +343,7 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 
 ### 6.4 Provider behavior
 
-- **FR-027:** Google Drive, Box, and SMB shall use an existing or newly
+- **FR-027:** Google Drive, Box, SMB, and SFTP shall use an existing or newly
   configured rclone remote.
 - **FR-027A:** Applet-driven rclone remote creation shall use fixed validated
   command arguments for the selected provider. Google Drive and Box setup shall
@@ -462,7 +465,8 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   settings**. Its editor may instead save connection-specific overrides for
   enabled state, maximum duration, and maximum depth. Overrides shall apply only
   to that connection and shall not mutate the global SMB defaults. Other
-  providers shall use their provider-wide settings.
+  providers with preload support shall use their provider-wide settings.
+  SFTP has equivalent per-connection overrides, as specified in FR-SFTP-015.
 - **FR-044I:** Configuration migration shall preserve the existing OneDrive
   60-second value, initialize missing Google Drive, Box, and SMB settings to the
   documented defaults, and initialize every existing SMB connection to use the
@@ -708,8 +712,8 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 
 | Capability | Required software |
 |---|---|
-| Google Drive, Box, SMB Online mount | Current stable `rclone` and FUSE 3 |
-| Google Drive, Box, SMB Offline mirror | Current stable `rclone` with required bisync safety features |
+| Google Drive, Box, SMB, SFTP Online mount | Current stable `rclone` and FUSE 3 |
+| Google Drive, Box, SMB, SFTP Offline mirror | Current stable `rclone` with required bisync safety features |
 | OneDrive Online mount | Current supported `jstaf/onedriver` |
 | OneDrive Offline mirror | Current supported `abraunegg/onedrive` |
 | NetworkManager VPN | NetworkManager D-Bus service |
@@ -896,13 +900,14 @@ AppConfig
     onedrive: { enabled: true, maximum_seconds: 60 }
     box: { enabled: true, maximum_seconds: 60, maximum_depth: 2 }
     smb: { enabled: true, maximum_seconds: 60, maximum_depth: 3 }
+    sftp: { enabled: false, maximum_seconds: 30, maximum_depth: 2 }
   connections[]
   vpn_profiles[]
 
 Connection
   id: UUID
   name
-  provider: OneDrive | GoogleDrive | Box | Smb
+  provider: OneDrive | GoogleDrive | Box | Smb | Sftp
   mode: OnlineMount | OfflineMirror
   remote_reference
   remote_subpath?
@@ -916,6 +921,10 @@ Connection
   disconnect_vpn_when_unused
   tuning_profile
   smb_preload_override?:
+    enabled
+    maximum_seconds: integer 5..600
+    maximum_depth: integer 1..10
+  sftp_preload_override?:
     enabled
     maximum_seconds: integer 5..600
     maximum_depth: integer 1..10
@@ -1008,6 +1017,18 @@ on timeout, and cancel the child before detach. OneDrive traverses without a
 depth limit. Box defaults to depth 2 and SMB to depth 3. Box and SMB shall not
 use recursive `vfs/refresh`.
 
+All preload mechanisms (Google Drive recursive refresh and OneDrive, Box, SMB,
+and SFTP directory walks) shall use consistent, brief outcome notices readable
+before automatic dismissal. Show completion (including requested depth where
+applicable), time limit reached with an incomplete scan, or skipped. Omit configured
+and elapsed times and routine browsing/exclusion explanations from completion and
+timeout notices. Elapsed time may exceed the
+limit while work stops; strict wall-clock termination is not an acceptance
+requirement. Report excluded SFTP targets as skipped, never completed. Capture
+report settings from the running job rather than rereading settings on completion.
+Successful traversal is not proof of faster browsing; validate usefulness through
+repeatable fresh-mount comparisons with preload disabled and enabled.
+
 ### 11.2 Rclone Offline mirror
 
 The generated service and timer shall:
@@ -1018,9 +1039,14 @@ The generated service and timer shall:
 - prevent concurrent runs;
 - preserve conflict losers rather than deleting them;
 - use recovery directories for deleted or overwritten files;
+- date and mark new local and remote recovery batches, preserve each version,
+  and prune only applet-owned batches after at least 30 days; legacy unmarked
+  recovery data shall remain untouched until reviewed;
 - skip cloud-native Google documents for Google Drive;
 - run every 15 minutes while readiness permits;
 - preserve state after interruption;
+- renew locks held by active bisync runs and allow locks left by interrupted
+  runs to expire after a bounded interval, without removing a live run's lock;
 - never add routine `--resync` behavior.
 
 ### 11.3 OneDrive services
@@ -1063,6 +1089,14 @@ Remote deletion shall:
   offline.
 - A failed sync shall not trigger automatic destructive resync.
 - Clean unmount is always attempted before any alternative.
+- Manual Online unmount shall show in-progress status and, when preload is
+  active, indicate that background preload is stopping first. Directory-walk
+  subprocesses shall be cancelled and reaped before clean detach. If they do
+  not exit within the bounded wait, leave the mount service running and report
+  that unmount can be retried. Attempt clean FUSE detach while the service is
+  still available, preserving a usable mount if another process holds it busy.
+  Retry a transient busy result briefly after preload cancellation, and use the
+  mount table to resolve a helper error after the mount has already detached.
 - A successful service-stop command is not sufficient evidence of unmount
   success. The mount-table entry shall disappear before the applet reports
   completion or disconnects an applet-started VPN. A stopped or failed service
@@ -1129,8 +1163,8 @@ Remote deletion shall:
   above the Preload and Sleep settings and status/feedback areas.
   Add Connection launches the existing editor rather than replacing General
   Settings with connection-specific fields. Refresh updates the runtime owner.
-- Add a **Preload** section with separate Google Drive, OneDrive, Box, and SMB
-  rows. Each row contains an enabled control and maximum seconds. Box and SMB
+- Add a **Preload** section with separate Google Drive, OneDrive, Box, SMB, and
+  SFTP rows, placing SFTP immediately below SMB. Each row contains an enabled control and maximum seconds. Box and SMB
   also contain maximum depth. Populate controls from saved values and show
   defaults of 60 seconds for all providers, depth 2 for Box, and depth 3 for
   SMB. Keep controls visible when disabled so toggling a provider does not
@@ -1177,11 +1211,12 @@ Remote deletion shall:
   is useful when home, LAN, corporate, and VPN shares have different sizes and
   latency.
 - The wizard step order is:
-  1. Choose provider: OneDrive, Google Drive, Box, or SMB.
+  1. Choose provider: OneDrive, Google Drive, Box, SMB, or SFTP.
+     Place SFTP immediately to the right of SMB with matching button styling.
   2. Choose access mode: Online mount or Offline mirror. The provider/mode
      matrix determines the engine.
   3. Choose account or remote. OneDrive Online uses `jstaf/onedriver`; OneDrive Offline
-     uses `abraunegg/onedrive`; Google Drive, Box, and SMB use rclone remotes.
+     uses `abraunegg/onedrive`; Google Drive, Box, SMB, and SFTP use rclone remotes.
   4. Choose whole remote or remote subtree.
   5. Choose local target: mountpoint for Online mount or mirror directory for
      Offline mirror. Mountpoints and mirror directories are not interchangeable.
@@ -1417,8 +1452,8 @@ The current implemented scope is acceptable when:
 
 The following decisions are approved and are no longer implementation choices:
 
-1. **Provider scope:** Support only Microsoft OneDrive, Google Drive, Box, and
-   SMB using the matrix in Section 3.1.
+1. **Provider scope:** Support only Microsoft OneDrive, Google Drive, Box, SMB, and
+   SFTP using the matrix in Section 3.1.
 2. **Access modes:** Include both Online mount and Offline mirror in version 0.1.
 3. **Offline synchronization:** Use bidirectional synchronization; propagate
    deletions; preserve both conflict versions; retain deleted/overwritten files
@@ -1426,7 +1461,7 @@ The following decisions are approved and are no longer implementation choices:
    initial synchronization; skip Google cloud-native documents.
 4. **Tool selection:** Use `jstaf/onedriver` for OneDrive Online mount,
    `abraunegg/onedrive` for OneDrive Offline mirror, and current stable rclone
-   for Google Drive, Box, and SMB.
+   for Google Drive, Box, SMB, and SFTP.
 5. **Legacy imports:** Scan `~/.config/systemd/user/` and allow confirmed import
    of compatible existing rclone and `jstaf/onedriver` services while preserving
    originals by default.
@@ -1445,9 +1480,10 @@ The following decisions are approved and are no longer implementation choices:
    shall prevent lazy unmount.
 9. **VPN shutdown:** Automatically disconnect only a VPN the applet activated,
    and only when no active connection still depends on it.
-10. **Applet-driven rclone setup:** The applet may create Google Drive, Box, and
-    SMB rclone remotes through fixed validated `rclone config create` commands.
-    Provider authentication and SMB password storage remain with rclone.
+10. **Applet-driven rclone setup:** The applet may create Google Drive, Box, SMB, and
+    SFTP rclone remotes through fixed validated `rclone config create` commands.
+    Provider authentication and SMB/SFTP password storage remain with rclone
+    or the selected SSH agent.
 11. **Rclone remote removal:** The applet may remove unused rclone remotes from
     rclone configuration only after explicit confirmation and only when no saved
     applet connection references the remote.
@@ -1461,3 +1497,178 @@ The following decisions are approved and are no longer implementation choices:
 All current design decisions required for the implemented scope are resolved.
 Future feature work shall update this specification and `Task List.md` before
 implementation.
+
+## 17. SFTP Provider Extension — September 29, 2026
+
+This section specifies the SFTP extension to the provider matrix. The provider
+and Add/Modify editor are implemented; installed-service and live-server
+acceptance remain pending. Existing completion evidence for other providers
+does not establish SFTP acceptance.
+
+### 17.1 Provider and editor requirements
+
+- **FR-SFTP-001:** Add `Provider::Sftp` and an rclone backend mapping to `sftp`.
+  Support Online mount through `rclone mount` and Offline mirror through
+  `rclone bisync`, reusing existing lifecycle and data-protection rules.
+  Existing configurations shall load without rewriting other providers.
+- **FR-SFTP-002:** Add Connection shall place the **SFTP** button immediately
+  to the right of **SMB** in provider order. Match SMB's button styling,
+  selection feedback, section order, field spacing, tooltips, and action
+  placement. Both buttons shall remain adjacent without clipping at the default
+  editor width; narrower layouts shall preserve their order and accessibility.
+- **FR-SFTP-003:** Show remote name, server host, port defaulting to 22,
+  username, authentication choice, known-hosts file, and remote directory.
+  Require a host, username, and integer port from 1 to 65535 for applet-created
+  remotes. Do not show SMB domain/workgroup inputs. Retain the shared mode,
+  local-target, VPN, startup, cache, and mirror controls as applicable.
+- **FR-SFTP-004:** Detect and select existing remotes whose backend is `sftp`,
+  including remotes configured outside the applet. In Add mode, place
+  **Create/Update SFTP Remote** beside the existing detection action in the top
+  action row. Follow FR-011K through FR-011MA for selection, wrapped remote
+  choices, name help, and protected remote removal. Modify shall preserve the
+  provider/mode lock and expose **Update SFTP Remote** for existing remotes,
+  matching the current SMB editor. It shall not create missing remotes.
+  In Add mode, a new remote's Create/Update action shall use the blue/theme-accent
+  suggested style. Changed server/authentication settings shall also highlight
+  Update in Add and Modify. Successful application clears the highlight unless
+  newer edits exist; failure retains it. Unchanged existing remotes use standard
+  styling. This
+  explicit update action is an exception to the generic Modify setup-control
+  restriction in FR-011K and Section 13.2.
+- **FR-SFTP-005:** Support password, private-key file with optional passphrase,
+  and SSH-agent authentication. Show only applicable authentication fields.
+  Each authentication choice shall expose delayed hover help describing the
+  credential source, required server setup, and relevant key/agent limitations.
+  Validate key-format support in the installed rclone; encrypted OpenSSH keys
+  shall use an SSH agent when direct passphrase loading is unsupported.
+  Secrets shall be masked, transient, redacted from command/error output, and
+  cleared after setup success or failure. Never persist passwords, passphrases,
+  or private-key contents in applet configuration or generated services.
+- **FR-SFTP-006:** Require server identity verification through rclone's
+  `known_hosts_file`, defaulting to the host user's `~/.ssh/known_hosts`.
+  Missing/unreadable files and unknown or changed host keys shall fail with
+  actionable guidance. Do not disable verification or silently add/replace keys.
+- **FR-SFTP-007:** Preserve SFTP directory semantics: blank means the login
+  directory, relative paths remain relative, and leading `/` remains absolute
+  within the server account's permitted filesystem. Do not strip the leading
+  slash or apply SMB share-name rules. Test, preview, mount, bisync, and import
+  shall resolve the same target.
+
+### 17.2 Setup and runtime specification
+
+- **FR-SFTP-008:** Use validated argument-based `rclone config create/update`
+  with backend `sftp` and provider options `host`, `port`, `user`,
+  `known_hosts_file`, and applicable authentication options. Use the existing
+  protected rclone password-handling mechanism for `pass` and `key_file_pass`;
+  retain key paths as `key_file`. No shell interpolation or pasted private keys.
+  Reject updates to an existing remote of another backend. Preserve unrelated
+  remote options and existing secrets when no replacement is requested; an
+  authentication-mode change shall explicitly reconcile incompatible options.
+- **FR-SFTP-009:** Remote creation/update shall require the explicit setup
+  action. Before an update, identify saved connections sharing that remote and
+  explain restart implications. Test Connection and Save Connection shall not
+  implicitly change remote credentials. The applet connection record shall
+  reference the rclone remote and directory; rclone owns persistent setup data.
+  Save Connection shall remain blue for SFTP and may persist a connection after
+  configuration/plan validation even when access testing has failed or has not
+  been performed. This does not imply successful authentication and does not
+  apply edited remote credentials.
+- **FR-SFTP-010:** Test Connection shall perform a bounded listing of the exact
+  selected directory using the configured network/VPN readiness path. Distinguish
+  unreachable host/port, authentication failure, host-key failure, missing
+  directory, and permission errors without exposing secrets. Mount access
+  preflight shall use the same target and authentication context.
+- **FR-SFTP-011:** Generated host user services shall use the same host rclone
+  configuration, readable key and known-hosts paths, and selected authentication
+  as setup. For agent authentication, validate service access to `SSH_AUTH_SOCK`
+  and the required unlocked identity. Missing or expired agent access shall fail
+  without a hanging prompt. Verify this for native and Flatpak operation; an
+  interactive terminal success alone is insufficient.
+- **FR-SFTP-012:** Reuse mount status, VFS upload/cache monitoring, network/VPN
+  recovery, safe detach, repair, sleep cleanup, and wake restoration. SFTP shall
+  not inherit Google Drive recursive refresh or SMB-specific timeout assumptions.
+  SFTP preload is optional as specified in FR-SFTP-015; existing provider
+  preload defaults remain unchanged.
+- **FR-SFTP-013:** Offline mirrors shall retain the existing size estimate,
+  preview, explicit initial-sync confirmation, scheduling, metered policy,
+  conflict preservation, deletion recovery, and interrupted-sync safeguards.
+  Do not require remote shell commands or checksums unavailable on an SFTP-only
+  account; validate the selected bisync comparison strategy on that server.
+- **FR-SFTP-014:** Extend compatible legacy import, remote-reference protection,
+  configuration validation, localized labels/tooltips, and provider-specific
+  diagnostics to SFTP without changing existing providers' saved behavior.
+
+- **FR-SFTP-015:** General Settings shall show an SFTP preload row immediately
+  below SMB, with an enabled switch, maximum seconds, and maximum depth.
+  Defaults shall be off, 30 seconds, and depth 2; accepted bounds shall be
+  5–600 seconds and 1–10 levels. Each SFTP Online connection shall inherit the
+  global policy by default and may override all three values independently.
+  Older configurations shall initialize missing SFTP settings to these defaults
+  and missing overrides to inheritance without changing existing providers.
+- **FR-SFTP-016:** Enabled SFTP preload shall use the existing cancellable,
+  bounded directory-only walk after mount readiness, including restored mounts.
+  It shall not read file contents or follow symbolic links. For an absolute
+  server-root target, prune `/proc`, `/sys`, and `/dev` before descending. If
+  the remote target is itself inside one of those trees, skip preload entirely,
+  including readiness probes. Apply exclusions using remote absolute paths;
+  ordinary project directories named `sys`, `proc`, or `dev` remain eligible.
+  Login-relative paths cannot be classified as server absolute paths from the
+  saved configuration alone. Exclusion patterns shall match mountpoint names
+  literally, including spaces and glob characters. Cancel through the shared
+  lifecycle before unmount, repair, removal, or sleep; report bounded outcomes.
+
+### 17.3 Verification and acceptance
+
+- Automated checks shall cover provider serialization and old-config loading,
+  backend filtering, field validation, remote setup/update argument handling,
+  secret redaction and clearing, authentication-mode changes, and exact relative
+  versus absolute target preservation throughout mount and mirror planning.
+- Isolated integration checks shall exercise password/key/agent authentication,
+  trusted/unknown/changed host keys, permission failures, bounded timeouts,
+  service environment access, and SFTP-only servers without shell/hash commands.
+- Desktop acceptance shall verify the SFTP button immediately beside SMB,
+  comparable editor layout, conditional fields, keyboard navigation, and no
+  clipping in native and Flatpak Add/Modify windows.
+- Use disposable server data to verify mount/read/write/unmount, pending-write
+  protection, network/VPN recovery, sleep/wake, and Offline mirror preview,
+  initial/repeated sync, conflicts, deletion recovery, and interruption recovery.
+- Report automated, packaged-service, and live-server evidence separately.
+  SFTP support is complete only after the corresponding implementation and
+  acceptance tasks have passed; existing SMB results cannot substitute.
+
+Technical reference: [rclone SFTP documentation](https://rclone.org/sftp/)
+(authentication, host verification, path semantics, and shell-access limitations).
+
+## 18. SharePoint (Teams Files) Provider — Planning Placeholder, September 30, 2026
+
+This is a future provider, not a claim of implemented support. SharePoint
+document libraries used by Teams are separate from the applet's current
+OneDrive account workflow. The proposed provider label is **SharePoint (Teams
+files)**. Each connection shall identify one site, one document library, and an
+optional folder within that library; setup must verify the library identity and
+the signed-in account's access. The site/library URL must not be treated as an
+ordinary OneDrive folder path.
+
+Retain the existing mutually exclusive **Online mount** and **Offline mirror**
+access modes. The first implementation milestone is Online mount using rclone's
+`onedrive` backend for a selected SharePoint document library, initially by
+detecting a preconfigured remote. Reuse managed rclone mount lifecycle, bounded
+access checks, host-service configuration, cache/write protection, VPN/network
+handling, safe unmount, and repair. In-app site/library discovery and OAuth
+setup are separate follow-up design work.
+
+Offline mirror is a later milestone using a distinct `abraunegg/onedrive`
+configuration, SharePoint library `drive_id`, and local sync directory. Do not
+expose it as supported until preview, initial confirmation, scheduling,
+conflict preservation, deletion recovery, and interrupted-sync behavior pass
+isolated and live tests with disposable SharePoint data.
+
+Before implementation, specify URL-to-site/library parsing, the verified
+library identifier persisted per connection, authentication and tenant-consent
+failure handling, provider-specific dependency checks, legacy import behavior,
+preload defaults, and native/Flatpak acceptance. Existing OneDrive connections
+and credentials must retain their current behavior.
+
+References: [Microsoft Teams and SharePoint integration](https://learn.microsoft.com/en-us/sharepoint/teams-connected-sites),
+[rclone Microsoft OneDrive backend](https://rclone.org/onedrive/), and
+[abraunegg/onedrive SharePoint library setup](https://github.com/abraunegg/onedrive/blob/master/docs/sharepoint-libraries.md).

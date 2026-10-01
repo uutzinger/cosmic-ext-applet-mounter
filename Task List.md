@@ -52,8 +52,6 @@ recursive VFS refresh and approve bounded directory walks for implementation.**
   the configured `ua_gdrive:` remote. Five trials per mode returned identical
   510-directory results; `--fast-list` showed no meaningful latency or memory
   improvement under the measured conditions.
-- [ ] Complete broader Google Drive `--fast-list` testing with a larger ordinary
-  drive and a shared drive, including API-call/rate-limit behavior.
 - [x] After Google Drive mount and RC-socket readiness, run recursive
   `vfs/refresh` as an asynchronous RC job. Retain its job ID and track its
   connection and completion state.
@@ -72,8 +70,8 @@ recursive VFS refresh and approve bounded directory walks for implementation.**
   bounded.
 - [x] Add unit/integration coverage for provider selection, command construction,
   background lifecycle, timeout, cancellation, setting defaults, and bounds.
-- [ ] Perform cold-cache live tests without reading or modifying cloud file
-  contents.
+Further Google Drive and cloud cold-cache trials are tracked under Deferred
+validation after the SFTP native release.
 
 ### Approved provider preload settings and remaining implementation
 
@@ -109,9 +107,8 @@ recursive VFS refresh and approve bounded directory walks for implementation.**
   configured Google maximum.
 - [x] Add configuration, migration, IPC, UI, command-boundary, timeout,
   cancellation, nested-RC-error, and effective-SMB-policy tests.
-- [ ] Live-test the implementation on UA Box and the narrowed
-  `ua_engr:Research/Utzinger` SMB connection, then test a separate LAN/home SMB
-  connection with its own override.
+The remaining UA Box, narrowed `ua_engr:Research/Utzinger` SMB, and LAN/home
+SMB live checks are tracked under Deferred validation.
 
 ## Rclone mount access gate and multi-panel runtime fix (after 0.4.5)
 
@@ -133,7 +130,8 @@ recursive VFS refresh and approve bounded directory walks for implementation.**
 - [x] Discard obsolete poll replies when a newer user action has started.
 - [x] Verify background polling, reply ordering and stale error handling with
   regression tests; update design and completion documentation.
-- [ ] Verify the button remains stable in the installed desktop applet.
+The installed desktop button-stability check is tracked under Deferred
+validation.
 
 ## Release 0.4.5
 
@@ -179,8 +177,8 @@ and sleep toggles. Earlier completed layout tasks remain historical evidence.
   Remove the extra Offline sentence and separate cleanup-status heading/box.
 - [x] Align the title left and Settings gear right; replace the status/list
   background gap with a thin divider on a continuous themed surface.
-- [ ] Live-check native/Flatpak title/focus, keyboard access, scaling, empty/long
-  lists, editor-save propagation and closing either window during runtime work.
+Broader native/Flatpak window and editor visual checks are tracked under
+Deferred validation.
 
 ## Rclone Remote Name Help Clarification
 
@@ -211,8 +209,8 @@ Requirements: FR-086 through FR-087A (A), FR-097 through FR-102 (B).
   wrapping, transient readiness failure and hung-probe deadline handling.
 - [ ] A: Add dedicated waiting/progress, Cancel and Retry UI (existing mount
   control remains the retry action). Add explicit authentication-rejection UI.
-- [ ] A: Live-check native and Flatpak NetworkManager/Cisco password/MFA followed
-  by SMB mount; verify concurrent requests and credentials rejected by client.
+The live NetworkManager/Cisco authentication workflow is tracked under
+Deferred validation.
 - [x] B: Add persistent, default-off sleep cleanup toggle below the main popup
   connection list and optional wake restoration beneath it.
 - [x] B: Implement logind listener/delay inhibitor independent of popup visibility,
@@ -227,11 +225,9 @@ Requirements: FR-086 through FR-087A (A), FR-097 through FR-102 (B).
 - [x] B: Test Online-only selection, mirror-only no-op, repeated sleep gate,
   old-operation invalidation, deadlines, queue-state parsing, foreign mounts,
   runtime drop-in ownership and effective stop-policy checks.
-- [ ] B: Exercise live logind signal/inhibitor lifecycle, busy mounts, failed
-  service stops, denied bus permissions, canceled sleep, connection edits during
-  wake and native/Flatpak lid/menu suspend over repeated sleep/wake cycles.
-- [ ] B: Capture sleep journal/service evidence to isolate the reported OneDrive
-  hang; source changes do not establish its live root cause.
+The broader logind fault-cycle checks and OneDrive sleep-hang investigation
+are tracked under Deferred validation. The next native SFTP release gate
+includes one normal SFTP sleep/wake cycle.
 - [x] Final local formatting, all-target checks, warning-free Clippy, all 167
   tests and debug build passed; results are recorded in Completion Notes.
 
@@ -1436,8 +1432,8 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 - [x] Ensure AppStream includes stable remote icon and screenshot URLs that are
   reachable without authentication and will remain valid for the submitted
   release.
-- [ ] Validate metadata with `desktop-file-validate` and
-  `appstreamcli validate --pedantic`.
+Metadata validation for the next build is tracked in the final
+release-candidate check below.
 
 ### Local Build and Installation
 
@@ -1668,9 +1664,8 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   under the Developer Certificate of Origin.
 - [ ] Address repository CI and maintainer review, updating the source tag/hash
   when a packaging fix requires a new application release.
-- [ ] After merge and publication, install from the public COSMIC remote on a
-  clean user profile and repeat a minimal mount, mirror, VPN, and uninstall
-  smoke test.
+The clean-profile public COSMIC remote smoke test is tracked under Deferred
+validation; it follows repository merge and publication.
 
 ### Community Review
 
@@ -1692,3 +1687,425 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
 - [libcosmic project and applet documentation](https://github.com/pop-os/libcosmic)
 - [Flatpak manifest documentation](https://docs.flatpak.org/en/latest/manifests.html)
 - [Flathub submission documentation](https://docs.flathub.org/docs/for-app-authors/submission)
+
+
+## SFTP Provider Extension — September 29, 2026
+
+SFTP extends the earlier four-provider scope. Historical completed tasks above
+retain their original scope and evidence. Requirements are FR-SFTP-001 through
+FR-SFTP-016 in Section 17 of `Requirements and Specifications.md`.
+
+### Description and specification
+
+- [x] Add SFTP to `Applet Description.md` with rclone Online mount and Offline
+  mirror, an SFTP button immediately to the right of SMB, and an SMB-style form.
+- [x] Update `Requirements and Specifications.md` with the provider matrix,
+  editor behavior, authentication, host verification, directory semantics,
+  runtime integration, and acceptance criteria.
+- [x] Record the implementation and verification work below. Documentation
+  completion does not establish implemented or tested SFTP support.
+
+### Provider and connection editor
+
+- [x] Add the SFTP provider/backend, configuration compatibility, remote
+  detection/filtering, and protected removal.
+- [x] Extend compatible legacy import to identify SFTP remotes from their
+  configured rclone backend, without guessing from the remote name. Unknown
+  backends and non-default legacy config files are not silently imported.
+- [x] Place the SFTP provider button immediately to the right of SMB; match
+  styling, spacing, selection behavior, and accessible keyboard order.
+- [x] Reuse the SMB editor layout and top action row with SFTP host, port 22,
+  username, authentication, known-hosts file, and remote-directory fields.
+  Omit SMB domain/workgroup inputs; preserve shared mode, local-path, and VPN UI.
+- [x] Add conditional password, key-file/passphrase, and SSH-agent controls;
+  mask and clear secrets and keep them out of applet configuration and logs.
+- [x] Implement explicit Create/Update SFTP Remote in Add mode, existing-remote
+  selection, backend validation, shared-remote update feedback, preservation of
+  unchanged options/secrets, and authentication-mode transitions.
+- [x] Preserve Modify's provider/mode lock, prefill non-secret remote settings,
+  and provide explicit Update SFTP Remote with delayed field help matching SMB.
+- [x] Move SFTP editor labels and hover help into the English Fluent catalog,
+  including remote setup, authentication, directory, and preload text. Other
+  language catalogs can add translations when available.
+- [x] Make Create/Update SFTP Remote use the blue/theme-accent suggested style
+  when adding a new remote. Unchanged existing remotes retain standard styling.
+- [x] Add delayed hover help to Password, SSH Key, and SSH Agent choices.
+
+### Runtime and safety
+
+- [x] Preserve blank, relative, and absolute SFTP directories in connection
+  validation, access-test targets, mount plans, and bisync plans.
+- [x] Verify SFTP blank, relative, and absolute directory semantics through
+  legacy import preview and generated replacement-plan tests.
+- [x] Require a known-hosts path in setup and before Test/Save access checks;
+  leave unknown/changed-key handling to rclone without adding or replacing keys.
+- [x] Live-verify missing/unreadable key and known-hosts files and
+  unknown/changed host-key errors against a disposable localhost SFTP server.
+- [x] Use the bounded read-only rclone access check for SFTP Test Connection and
+  before mounting the generated host service; validate the selected directory.
+- [x] Classify SFTP host, authentication, host-key, directory, permission,
+  key/known-hosts file, and SSH-agent failures in Test Connection and mount
+  preflight; return short guidance without echoing raw rclone diagnostics.
+  Automated cases cover each category, fallback, timeout, and redaction.
+- [x] Verify that generated host services can read host rclone, key, and
+  known-hosts paths and use an available unlocked SSH agent in native and Flatpak
+  execution. An isolated service rendered by the applet's SFTP mount plan and
+  unit generator mounted and read disposable data with a key file and a private
+  agent. The Flatpak GUI prototype's host bridge read the same SFTP data with
+  both methods and inspected the generated unit. Installed native GUI actions
+  are in the next-release gate; public Flatpak acceptance is deferred.
+- [x] Wire SFTP into the shared rclone mount/mirror provider branches and
+  generated plans. SFTP preload defaults to disabled; retain bounded rclone
+  defaults rather than SMB-specific timeout settings.
+- [x] Correct SFTP Online lifecycle plumbing exposed by disposable live tests:
+  skip redundant lazy unmount after systemd has detached the mount, preserve
+  multiline systemd output during redaction, read the host mount table from
+  Flatpak, and report disconnected NetworkManager state accurately. Unit and
+  disposable localhost SFTP lifecycle tests passed.
+- [x] Enforce metered-network policy at each scheduled rclone mirror run with a
+  generated service condition. A disposable systemd probe skipped the command
+  for a metered response and ran it for an unmetered response without changing
+  the real network. The later SFTP generated-unit probe confirmed a metered
+  skip in the host journal; installed applet controls remain in the release gate.
+- [x] Put new local and remote bisync recovery copies in dated, applet-marked
+  directories with unique run suffixes, and prune only marked directories after
+  at least 30 days. A disposable local/alias integration test passed creation,
+  preservation, and aged cleanup; preexisting unmarked files remain untouched.
+- [x] Live-check dated recovery and cleanup through an SFTP-only server. The
+  applet's managed runner preserved deletion recovery, pruned old marked local
+  and remote folders, and left old unmarked folders untouched.
+- [x] Verify an applet-generated native SFTP mirror service/timer uses the
+  managed runner. An accelerated disposable timer fired the service and synced
+  a file; systemd confirmed the metered condition skipped a later run. The
+  Flatpak prototype's host bridge read both generated units.
+- [x] On disposable SFTP data, verify initial and repeat dry previews, confirmed
+  two-way sync, both conflict versions, deletion propagation into the recovery
+  directory, and byte-equal completion after an interrupted transfer.
+- [x] Verify initial mirror preview/sync against a disposable SFTP-only server
+  that rejects shell commands, with client shell use and hash checks disabled.
+- [x] Verify a transient user timer starts an SFTP bisync service and transfers
+  a file. A later applet-generated timer and metered-policy probe also passed.
+- [x] Add rclone's two-minute renewable `--max-lock` to every generated bisync
+  service and preview, and require the capability in dependency checks. A live
+  disposable test confirmed active and fresh locks block another run; an
+  expired lock allows `--recover` without `--resync` when prior listings exist.
+  The applet gives path-free lock guidance. It never deletes an active lock.
+Legacy unbounded locks and interrupted runs without prior bisync listings need
+a reviewed recovery path. This is deferred implementation work, not a new
+SFTP-release test; document the limitation before the next release. Any
+destructive state rebuild/resync must still require preview and confirmation.
+
+Installed SFTP notice, Online lifecycle, and Offline mirror acceptance is
+tracked only in Remaining tests before the next SFTP release below. Public
+Flatpak acceptance is tracked under Deferred validation.
+
+### SFTP preload — approved implementation
+
+User approved optional directory preload with configurable depth/duration and
+an SFTP row immediately below SMB in General Settings. Defaults are off,
+30 seconds, and depth 2. The user explicitly required excluding `/proc`, `/sys`,
+and `/dev`. This supersedes the initial no-preload scope and deferred note.
+
+- [x] Update the source description and requirements with defaults, settings-row
+  placement, per-connection overrides, and remote-system-directory exclusions.
+- [x] Add the SFTP settings row, persistence, range validation, and migration
+  defaults that preserve existing provider settings.
+- [x] Add SFTP Online connection global-policy inheritance and independent
+  enabled/duration/depth overrides in Add/Modify.
+- [x] Connect SFTP to the bounded directory-only preload lifecycle, including
+  restored mounts and cancellation before unmount, repair, removal, or sleep.
+- [x] Prune `/proc`, `/sys`, and `/dev` for absolute server-root mounts; skip
+  preload entirely for targets inside those trees and never follow symlinks.
+- [x] Validate migration, overrides, depth limits, cancellation, and real local
+  traversal exclusions, including mountpoints containing glob characters.
+- [x] Complete the full post-preload regression run on September 30, 2026:
+  214 tests passed (128 library, 86 binary), with no failures or ignored tests.
+  Formatting and all-target/all-feature Clippy with warnings denied also pass.
+- [x] User compiled and installed the updated applet and reported that the SFTP
+  preload settings are visible. Saved configuration confirms enabled preload,
+  30 seconds, depth 2, and global-policy inheritance for the VPS connection.
+- [x] Visually verify the SFTP row below SMB and the saved per-connection
+  preload override in native and Flatpak Modify. The VPS connection loaded
+  global off, preload off, 30 seconds, and depth 2 in both builds.
+- [x] User observed the VPS preload running and then stopping after 36 seconds
+  with a saved 30-second limit. This confirms the live start/timeout workflow,
+  not completion of the directory scan or strict deadline compliance.
+- [x] User repeated VPS preload with 60 seconds and depth 3 and reported a stop
+  after 62 seconds. Read-only configuration inspection confirms these settings.
+- [x] Clarify acceptance: elapsed time may exceed the requested time limit while
+  work stops. A strict wall-clock cutoff is not required (user, September 30).
+- [x] Use shared completion/timeout reporting for all preload mechanisms:
+  Google Drive recursive refresh and OneDrive, Box, SMB, and SFTP directory walks.
+  Initially reported depth, configured limit, and elapsed time; shortened after
+  installed testing feedback below. Excluded SFTP targets report skipped.
+- [x] Validate shared reporting and lifecycle behavior: 218 tests passed
+  (132 library, 86 binary), formatting, and all-target/all-feature Clippy with
+  warnings denied. The private D-Bus test passed with approved host access.
+- [x] User installed and tested the shared notices; reported that timing details
+  made them too long to read before dismissal.
+- [x] Shorten notices across all preload mechanisms to completion (with depth),
+  time limit reached/incomplete, or skipped; remove both times and routine prose.
+- [x] User confirmed the shortened notices are checked in the installed applet.
+  This accepts their readability; individual completion/timeout scenarios were
+  not separately reported and browsing-speed improvement remains unverified.
+- [x] Compare first-time directory browsing on four fresh, temporary, read-only
+  VPS SFTP mounts in disabled/enabled/enabled/disabled order. With the current
+  20-second, depth-2 preload, both enabled walks timed out; first listings
+  nonetheless improved for `/`, `/etc`, and `/home`, while `/var` stayed about
+  the same. Two runs per condition were consistent. This supports useful partial
+  cache warming for reached directories, not completion of all requested levels.
+  The active applet mount and saved settings were left unchanged.
+- [x] Superseded optional benchmark: a longer limit to finish all depth-2
+  directories is not needed for the approved partial-warming goal. The fresh
+  mount comparison above showed benefit even when the preload timed out.
+- [x] User live-tested unmount during SFTP preload and observed a busy FUSE
+  failure requiring Repair. The test does not pass; journal confirmed rclone's
+  clean unmount failed with `Device or resource busy` at 01:14:28 on September 30.
+- [x] Implement a shared strict cancellation path for OneDrive, Box, SMB, and
+  SFTP directory walks: wait for the child to exit before manual unmount, and
+  leave the mount service running if cancellation does not finish. Show
+  "Unmounting… stopping background preload first" while applicable; suppress
+  a late preload notice from replacing that progress message. Google Drive's
+  separate RC refresh still receives `job/stop` before clean detach.
+- [x] Attempt clean FUSE detach before stopping generated Online services so a
+  busy mount stays usable for retry instead of becoming a stale endpoint. A
+  disposable local FUSE test confirmed busy refusal, retained mount, and clean
+  retry after its holder exited. Automated tests and Clippy passed.
+- [x] Investigate the user's subsequent installed-test failure: progress notice
+  appeared, followed by a `fusermount3` failure. The latest service log showed
+  a clean stop and the mount was absent on inspection. The exact exit detail
+  was not retained, so whether the mount was busy or already detached at the
+  instant of failure remains unproven.
+- [x] Reconcile `fusermount3` failure with the mount table and retry transient
+  busy clean detach for up to two seconds after preload cancellation, keeping
+  the service running if the mount remains busy. The user build was installed
+  September 30; the later 60-second cancellation build received live validation.
+- [x] Final source validation passed: 220 tests (133 library, 87 binary),
+  formatting, all-target/all-feature Clippy with warnings denied, and diff
+  whitespace checks. `just install-user` completed and the installed binary
+  matches the tested release artifact.
+- [x] Fix and live-retest SFTP unmount during an active directory traversal.
+  A read-only VPS probe reproduced the exact strict-cancellation error after
+  ten seconds; the native `find` child can take longer to release FUSE. Raise
+  the bounded unmount cancellation wait to 60 seconds. A second live test
+  confirmed `find` was running, then exercised the production applet unmount
+  path: preload canceled, clean unmount succeeded after 17.6 seconds, mount
+  disappeared, and service became inactive/successful. The temporary live-test
+  code was removed; 220 regression tests, Clippy, formatting, and diff checks
+  pass. The separate VPS browsing comparison above tested partial cache warming.
+- [x] Install the tested 60-second cancellation build with `just install-user`;
+  the installed binary matches the release artifact.
+- [x] User confirmed the installed SFTP mount-cancellation sequence worked as
+  expected after the 60-second guard update. This closes the live SFTP unmount
+  acceptance item; exact notice wording and timing were not separately recorded.
+Other-provider shared cancellation and Google Drive RC refresh live checks are
+tracked under Deferred validation. The release gate retains a focused
+existing-provider regression after any shared-code fix.
+
+### Verification and delivery
+
+- [x] Visually verify the Create/Update action styling and all three
+  authentication-choice tooltips in the installed native app and Flatpak GUI
+  build. The user confirmed all three help bubbles were readable and distinct.
+- [x] User reopened the existing SFTP connection in Modify, checked it, and
+  reported that it worked. This confirms the basic Modify workflow; credential
+  rotation and failure handling are not separately verified.
+- [x] User tested an invalid SFTP entry: missing local mountpoint was reported
+  correctly, and incorrect username/password produced an error. Exact wording
+  and the action producing the authentication/setup error remain unrecorded.
+- [x] Retain Save Connection's blue suggested style for SFTP and allow saving
+  after configuration/plan validation without requiring a successful access
+  test, as requested by the user. Save does not apply server credentials.
+- [x] Highlight Update SFTP Remote when server/authentication fields change,
+  including a newly entered password. Clear after successful application;
+  preserve pending changes after failure or edits made during an update.
+- [x] Visually verify blue Save and Create/Update in Add, and blue Update after
+  an unsaved host edit in Flatpak Modify. No remote settings were applied.
+- [x] Preserve the highlighted Update action after failed SFTP setup, require
+  re-entry after a failed secret change, and distinguish config-read, save, and
+  access timeouts without exposing rclone diagnostics. Focused tests passed;
+  a disposable rclone remote accepted a correct password, rejected an updated
+  wrong password, and worked again after correction. Installed-app notice
+  presentation is in the next-release gate.
+- [x] User-confirmed SFTP setup and Online mount workflow on the VPS after the
+  Create/Update, Test Connection, Save, and mount instructions. Authentication
+  method and package type were not recorded; individual write/delete/unmount
+  results were not separately reported. See the live follow-up in completion
+  notes. Broader acceptance is in the next-release gate.
+- [x] Run focused automated checks for configuration compatibility, discovery,
+  validation, setup/update commands, secret handling, authentication changes,
+  remote-path preservation, and generated mount/mirror targets. The narrow
+  remaining release checks are listed at the end of this document.
+- [x] Verify native and Flatpak UI placement beside SMB, similar form layout,
+  conditional fields, Add/Modify actions, keyboard navigation, and no clipping
+  in the reviewed editor sections. The locally built Flatpak prototype was also
+  installed temporarily and launched in Add and Modify, then uninstalled.
+  User-guided keyboard checks passed after focusing an editor field; neither
+  test draft was saved.
+- [x] Superseded duplicate: generated-service key and agent access is covered
+  by the completed host-service probe above; startup-at-login behavior belongs
+  to the ordinary service policy, not another SFTP-only test.
+
+The focused installed failed-update, Online safety/wake, and Offline control
+checks are consolidated in the next-release gate at the end of this list.
+Direct password, key, agent, host-key, timeout, and SFTP-only protocol probes
+already passed; exhaustive installed error variants are deferred.
+- [x] Run all-target compilation, formatting, all-target/all-feature Clippy
+  with warnings denied, all-target tests, and diff validation. All 208 tests
+  pass, including 14 new SFTP checks and the existing-provider regressions.
+- [x] Check installed rclone 1.75.0 setup/update behavior using only a disposable
+  configuration and dummy credentials; verify obscuring and empty-secret
+  handling without contacting a server.
+- [x] Record source/test evidence separately from pending installed-service
+  and live-server acceptance in `Task List Completion Notes.md`.
+- [x] Add SFTP to the README's supported providers, engine table, authentication,
+  and preload defaults with minimal wording.
+- [ ] Update dependency/setup guidance and release metadata to describe
+  delivered SFTP support and any verified limitations before release.
+
+Editor implementation evidence is recorded under “SFTP Provider and Connection
+Editor — September 29, 2026” in `Task List Completion Notes.md`.
+
+### SFTP checklist audit — September 30, 2026
+
+Historical September 30 audit: legacy import and directory semantics were
+source-complete; the longer preload benchmark and duplicate host-service
+authentication item were superseded. Subsequent host-service, mirror, and
+visual checks are recorded above. The current release test gate and deferred
+validation lists are at the end of this document; this audit does not add
+separate acceptance requirements. Release documentation remains open until
+the supported SFTP scope and verified limitations are stated accurately.
+
+
+## Provider editor localization — September 30, 2026
+
+- [x] Move OneDrive, Google Drive, Box, and SMB provider names, setup actions,
+  input placeholders, and field help into the English Fluent catalog. Include
+  OneDrive mirror auth handoff, provider preload help, and shared rclone remote
+  controls. SFTP editor strings were already cataloged above.
+- [x] Compile the catalog, run the complete automated test suite, and check
+  formatting and Clippy. Other-language catalogs and installed visual checks
+  remain separate from this source change.
+
+## Remaining tests before the next SFTP release — October 1, 2026
+
+This is the remaining test gate for the next native SFTP-enabled release. The
+installed Add/Modify UI, authentication methods, successful VPS mount, preload
+and unmount sequence, and disposable Online/Offline data paths have already
+been checked above and in Completion Notes. Do not repeat those tests unless
+a later fix changes them. Use disposable credentials and data for the focused
+checks below. Public COSMIC Flatpak publication and its installed-app tests are
+deferred until that distribution is available.
+
+- [x] **Failed credential update in the installed native editor:** make one
+  disposable rclone configuration temporarily unwritable, attempt a password
+  update, and confirm the Update action stays highlighted with a redacted
+  failure notice. Restore write access, re-enter the correct password, confirm
+  Update clears after saving, and use Test Connection to verify authentication.
+  A wrong password by itself is a successful config update followed by an
+  access failure; it is not the save-failure trigger for this check.
+- [x] **Online safety and wake edge cases:** on a disposable SFTP mount, verify
+  a pending upload prevents unsafe cleanup, then complete one normal
+  sleep-cleanup/wake-restore cycle if that option is enabled. Existing mount,
+  unmount, Repair, cache-health, and localhost server-recovery probes need no
+  repeat. Record the known cached-read I/O error during an outage as a release
+  limitation or fix it before release. Real VPN transitions remain deferred.
+- [x] **Installed native Offline controls:** use disposable data to verify the
+  Preview → confirmed initial Sync Now → Start/Stop path and visible status in
+  the installed applet. Command-level conflict, deletion, interrupted-transfer,
+  SFTP-only, generated-timer, metered, and retention checks already passed and
+  need no repeat through the UI.
+- [x] **Final release-candidate check:** after the last code change, run the
+  automated suite, formatting, Clippy, metadata validators, and native package
+  installation check. Perform only a brief SFTP smoke test plus focused tests
+  for any changed shared code; record the exact tested build/version.
+
+## Deferred validation after the SFTP native release — October 1, 2026
+
+These are follow-ups, not additional gates for the native SFTP release above.
+Move one here into the release gate only if its supported behavior changes or
+the final tests expose a related defect.
+
+- [ ] After the public COSMIC Flatpak repository/package is available, test
+  installed Flatpak SFTP editor notices, Online and Offline controls, generated
+  host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
+  test. The local Flatpak prototype and host bridge have separate evidence.
+- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
+  unreadable-file, permission, agent, and timeout variants, and live-check a
+  VPN-bound SFTP connection. Direct protocol and automated classifier tests
+  already cover these errors; they are not repeat gates for the native release.
+- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
+  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
+  preload trials without reading or changing file contents.
+- [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
+  cancellation on OneDrive, Box, SMB, and Google Drive's RC refresh when
+  suitable active-preload shares are available.
+- [ ] Complete broader installed native/Flatpak Settings title, focus,
+  keyboard, scaling, long-list, editor-save, and background-poll visual checks.
+- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
+  and rejected-credential path with a real VPN profile; add the separately
+  planned waiting/Cancel/Retry UI before accepting that extended workflow.
+  Include a VPN-bound SFTP connection when that combination is available.
+- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
+  fault cases, then investigate the separately reported OneDrive sleep hang
+  with journal evidence. The native SFTP release gate above includes one
+  normal sleep/wake cycle only.
+
+## SharePoint (Teams Files) Provider — Planning, September 30, 2026
+
+SharePoint library connections are a future provider. Keep Online mount and
+Offline mirror as separate modes; implement and validate Online mount first.
+No SharePoint applet integration or live acceptance is claimed yet.
+
+- [x] Add the planned **SharePoint (Teams files)** provider and two-mode strategy
+  to `Applet Description.md`.
+- [x] Add a requirements placeholder in Section 18 of
+  `Requirements and Specifications.md`.
+- [x] Record implementation and acceptance placeholders here.
+- [ ] Define exact site/library URL parsing, persisted library identity,
+  preconfigured rclone remote selection, OAuth/tenant-consent errors, preload
+  policy, and native/Flatpak acceptance before implementation.
+- [ ] Implement SharePoint Online mount with rclone's `onedrive` backend for a
+  verified document library. Preserve existing OneDrive behavior and reuse
+  bounded access testing, managed services, cache/write safety, VPN/network
+  recovery, unmount, repair, and provider-specific diagnostics.
+- [ ] Validate Online mount against a disposable SharePoint library, including
+  read/write, pending uploads, disconnect/reconnect, unmount, and repair.
+- [ ] Implement SharePoint Offline mirror with a separate
+  `abraunegg/onedrive` configuration and library `drive_id`; retain preview,
+  explicit initial confirmation, scheduling, and recovery safeguards.
+- [ ] Validate Offline mirror with disposable data, including conflicts,
+  deletions, interruption recovery, and overlap prevention, before enabling
+  that mode in the applet.
+
+Site:
+https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment
+Mountpoint:
+Shared%20Documents
+
+## OneDrive Mount Failure — Deferred Investigation
+
+User report: OneDrive shares had mounting problems. The end-of-list reminder
+suggested clearing the generated systemd user service's failed state before
+starting it again. Keep this as an investigation note for a later discussion;
+the cause and appropriate applet behavior have not yet been established.
+
+Commands retained from the note for reference (the abbreviated service ID is a
+placeholder, not a runnable connection identifier):
+
+```sh
+systemctl --user reset-failed cosmic-mounter-990cc48f-...-c545ad3d3f9d.service
+systemctl --user start cosmic-mounter-990cc48f-...-c545ad3d3f9d.service
+```
+
+- [ ] Identify the affected OneDrive connection, access mode, engine, and exact
+  generated service; capture its status and journal around a failed mount.
+- [ ] Determine whether the failed state, a start-rate limit, authentication,
+  connectivity, or a lingering mount prevented recovery. Treat the original
+  claim that every failed service requires `reset-failed` as a hypothesis to
+  check, not a confirmed rule.
+- [ ] Discuss the expected Mount/Retry/Repair behavior and whether targeted
+  failed-state recovery is needed; then define any implementation and regression
+  tests based on the observed failure.
+
+No runtime fix or successful recovery is claimed by this note.

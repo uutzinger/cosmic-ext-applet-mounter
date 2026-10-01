@@ -182,6 +182,7 @@ async fn inspect_rclone(
         ("mount:rc", "--rc"),
         ("bisync:resilient", "--resilient"),
         ("bisync:recover", "--recover"),
+        ("bisync:max-lock", "--max-lock"),
         ("bisync:conflict-resolve", "--conflict-resolve"),
         ("bisync:backup-dir", "--backup-dir"),
     ];

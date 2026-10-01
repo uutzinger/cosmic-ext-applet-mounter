@@ -16,7 +16,7 @@
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Online mounts and offline mirrors for OneDrive, Google Drive, Box, and SMB.</li>
+      <li>Online mounts and offline mirrors for OneDrive, Google Drive, Box, SMB, and SFTP.</li>
       <li>Applet-managed systemd user services and timers.</li>
       <li>Optional NetworkManager and Cisco Secure Client readiness checks.</li>
       <li>Dependency checks without storing provider or VPN credentials.</li>
@@ -78,6 +78,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.4.7" date="2026-10-01">
+      <description>
+        <p>Version 0.4.7.</p>
+        <ul>
+          <li>Add SFTP Online mounts and Offline mirrors with password, SSH key, and SSH agent authentication.</li>
+          <li>Add SFTP directory preload settings and protect pending uploads during cleanup.</li>
+          <li>Improve SFTP setup feedback and Offline preview counts.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.6" date="2026-09-17">
       <description>
         <p>Version 0.4.6.</p>

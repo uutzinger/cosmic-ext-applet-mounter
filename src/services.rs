@@ -75,6 +75,7 @@ pub struct ServiceSpec {
     pub executable: PathBuf,
     pub arguments: Vec<String>,
     pub restart_on_failure: bool,
+    pub skip_on_metered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,8 +112,19 @@ impl UnitDocument {
         } else {
             ""
         };
+        let metered_condition = if spec.skip_on_metered {
+            // systemd expands $$ to a literal $ before passing the expression to sh.
+            let expression =
+                "! nmcli -t -f GENERAL.METERED device show 2>/dev/null | grep -Eq ':(yes|2)$$'";
+            format!(
+                "ExecCondition=\"/usr/bin/sh\" \"-c\" {}\n",
+                escape_systemd_argument(expression)?
+            )
+        } else {
+            String::new()
+        };
         let content = format!(
-            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Service]\nType=simple\nRuntimeDirectory=cosmic-ext-applet-mounter\nSuccessExitStatus=130 143\nExecStart={exec}\n{restart}\n[Install]\nWantedBy=default.target\n",
+            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Service]\nType=simple\nRuntimeDirectory=cosmic-ext-applet-mounter\nSuccessExitStatus=130 143\n{metered_condition}ExecStart={exec}\n{restart}\n[Install]\nWantedBy=default.target\n",
             spec.connection_id, spec.description
         );
         Ok(Self {
@@ -685,8 +697,32 @@ mod tests {
             executable: PathBuf::from("/usr/bin/example"),
             arguments: vec!["--path".into(), "/home/example/Cloud Drive".into()],
             restart_on_failure: true,
+            skip_on_metered: false,
         })
         .expect("service")
+    }
+
+    #[test]
+    fn scheduled_mirror_condition_is_rendered_only_when_metered_sync_is_disabled() {
+        let mut spec = ServiceSpec {
+            connection_id: id(),
+            description: "Metered mirror".into(),
+            executable: PathBuf::from("/usr/bin/rclone"),
+            arguments: vec!["bisync".into()],
+            restart_on_failure: false,
+            skip_on_metered: true,
+        };
+        let guarded = UnitDocument::service(&spec).unwrap();
+        assert!(guarded.content.contains("ExecCondition="));
+        assert!(guarded.content.contains("GENERAL.METERED"));
+        assert!(guarded.content.contains("(yes|2)$$"));
+        spec.skip_on_metered = false;
+        assert!(
+            !UnitDocument::service(&spec)
+                .unwrap()
+                .content
+                .contains("ExecCondition=")
+        );
     }
 
     fn command_output(stdout: &str) -> CommandOutput {

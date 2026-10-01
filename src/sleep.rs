@@ -554,6 +554,7 @@ mod tests {
             disconnect_vpn_when_unused: false,
             tuning_profile: TuningProfile::default(),
             smb_preload_override: None,
+            sftp_preload_override: None,
         }
     }
     fn output(text: &str) -> Result<CommandOutput, crate::process::CommandError> {

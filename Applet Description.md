@@ -27,6 +27,11 @@ Each storage connection uses exactly one access mode.
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
+| SFTP | `rclone mount` | `rclone bisync` |
+
+SharePoint (Teams files) is a planned provider with separate Online mount and
+Offline mirror milestones, described below; it is not in the supported matrix
+until implementation and acceptance are complete.
 
 ### Tool selection
 
@@ -36,7 +41,7 @@ Each storage connection uses exactly one access mode.
   monitoring, bidirectional synchronization, conflict handling, and recovery
   safeguards.
 - A current stable release of `rclone` provides the common mount and
-  bidirectional synchronization engine for Google Drive, Box, and SMB.
+  bidirectional synchronization engine for Google Drive, Box, SMB, and SFTP.
 - The applet requires current supported releases of its external tools. It
   detects missing or outdated dependencies and provides installation or upgrade
   guidance, but does not install or update software.
@@ -86,76 +91,6 @@ the network, VPN, or provider is slow.
 An online mount's cache improves compatibility and reliability, but it is not a
 complete offline copy and shall not be described as one.
 
-### Google Drive custom OAuth client
-
-Google Drive remote setup accepts a user-provided OAuth client ID and its
-matching client secret. New remotes may leave both fields blank for
-compatibility with rclone's shared client, while the UI explains that a private
-client is required to avoid interruption during the shared-client retirement.
-An existing Drive remote changes only when the user presses
-**Update Google OAuth Client**, which runs rclone's update and browser OAuth
-flow. Active connections using an updated remote must be remounted.
-
-The two OAuth values remain transient applet input: the secret is masked, both
-values are redacted from displayed command and error text, and both fields are
-cleared after success or failure. The applet does not copy them into its own
-configuration. Rclone owns the persistent remote configuration and token.
-
-### Online directory-cache preload
-
-General Settings contains a **Preload** section with one provider row per
-Online mount engine. Provider defaults are:
-
-| Provider | Enabled | Maximum | Method |
-|---|---:|---:|---|
-| Google Drive | Yes | 60 seconds | Recursive asynchronous `vfs/refresh` with fast-list |
-| OneDrive | Yes | 60 seconds | Directory-only walk of the mounted tree |
-| Box | Yes | 60 seconds | Directory-only walk, maximum depth 2 |
-| SMB | Yes | 60 seconds | Directory-only walk, maximum depth 3 |
-
-Durations accept 5 to 600 seconds. Box and SMB depths accept a finite validated
-range from 1 to 10. Google Drive and OneDrive use their provider-specific full
-tree mechanisms and do not expose a depth value.
-
-Each provider toggle has provider-specific hover help and visible spacing
-between its label and switch. A provider's switch, seconds field, and optional
-levels field remain on one horizontal row. Duration and recursive-depth details
-and their accepted ranges appear only as delayed hover help. Duration help
-clarifies that browsing remains available throughout preload; depth help
-explains the additional server requests, rate-limit risk, and preload-time cost
-of deeper scans. No standalone preload-description or range line is shown.
-
-Each SMB Online connection defaults to **Use global preload settings**. The
-connection editor can instead override preload enablement, maximum duration,
-and depth for that connection. This supports independent home, LAN, corporate,
-and VPN shares without requiring one compromise setting. Google Drive,
-OneDrive, and Box use their provider-wide values.
-
-- Google Drive waits for the mount and private RC socket, then submits its
-  recursive refresh. Job completion must inspect both the top-level RC status
-  and every `output.result` entry; only `OK` result values are successful.
-- OneDrive, Box, and SMB use app-managed walks that list directories without
-  intentionally opening file contents, following symbolic links, or leaving
-  the mounted filesystem. Box and SMB retain cache progress if their deadline
-  expires.
-- Box and SMB wait for both the mountpoint and a usable root listing. They do
-  not use recursive `vfs/refresh` or fast-list. Live testing showed that Box
-  recursive refresh reached HTTP 429 rate limiting and that SMB refresh did not
-  stop promptly or retain partial cache work.
-- Active preloads are tracked per connection. Unmount, repair, removal, and
-  pre-sleep cleanup cancel and finish preload work before continuing their
-  bounded detach sequence.
-- Manual unmount verifies that the mount-table entry disappears after the
-  generated service stops. If a busy FUSE endpoint remains, the applet reports
-  Error and exposes the existing two-step Repair confirmation instead of
-  reporting completion or attempting to recreate the mountpoint. This applies
-  to rclone mounts for Google Drive, Box, and SMB and to online OneDrive.
-  Repair resets the generated service only when it is actually failed; an
-  inactive successful service needs no reset.
-- Completion, timeout, and sanitized failure results use the existing applet
-  notice path. There is no manual Cancel control because ordinary browsing can
-  continue after the bounded preload ends.
-
 ### Offline mirror
 
 Offline mirror maintains a complete local copy of a selected remote folder or
@@ -187,6 +122,87 @@ For Google Drive, cloud-native Google Docs, Sheets, and Slides are excluded from
 Offline mirror mode because exported representations cannot be safely edited
 and round-tripped. The applet lists skipped documents and directs the user to
 open them in Google Drive through a web browser.
+
+### Google Drive custom OAuth client
+
+Google Drive remote setup accepts a user-provided OAuth client ID and its
+matching client secret. New remotes may leave both fields blank for
+compatibility with rclone's shared client, while the UI explains that a private
+client is required to avoid interruption during the shared-client retirement.
+An existing Drive remote changes only when the user presses
+**Update Google OAuth Client**, which runs rclone's update and browser OAuth
+flow. Active connections using an updated remote must be remounted.
+
+The two OAuth values remain transient applet input: the secret is masked, both
+values are redacted from displayed command and error text, and both fields are
+cleared after success or failure. The applet does not copy them into its own
+configuration. Rclone owns the persistent remote configuration and token.
+
+### Online directory-cache preload
+
+General Settings contains a **Preload** section with one provider row per
+Online mount engine. Provider defaults are:
+
+| Provider | Enabled | Maximum | Method |
+|---|---:|---:|---|
+| Google Drive | Yes | 60 seconds | Recursive asynchronous `vfs/refresh` with fast-list |
+| OneDrive | Yes | 60 seconds | Directory-only walk of the mounted tree |
+| Box | Yes | 60 seconds | Directory-only walk, maximum depth 2 |
+| SMB | Yes | 60 seconds | Directory-only walk, maximum depth 3 |
+| SFTP | No | 30 seconds | Directory-only walk, maximum depth 2; excludes server `/proc`, `/sys`, `/dev` |
+
+Durations accept 5 to 600 seconds. Box, SMB, and SFTP depths accept a finite validated
+range from 1 to 10. Google Drive and OneDrive use their provider-specific full
+tree mechanisms and do not expose a depth value.
+
+Each provider toggle has provider-specific hover help and visible spacing
+between its label and switch. A provider's switch, seconds field, and optional
+levels field remain on one horizontal row. Duration and recursive-depth details
+and their accepted ranges appear only as delayed hover help. Duration help
+clarifies that browsing remains available throughout preload; depth help
+explains the additional server requests, rate-limit risk, and preload-time cost
+of deeper scans. No standalone preload-description or range line is shown.
+
+Each SMB or SFTP Online connection defaults to **Use global preload settings**. The
+connection editor can instead override preload enablement, maximum duration,
+and depth for that connection. This supports independent home, LAN, corporate,
+and VPN shares without requiring one compromise setting. Google Drive,
+OneDrive, and Box use their provider-wide values.
+
+- Google Drive waits for the mount and private RC socket, then submits its
+  recursive refresh. Job completion must inspect both the top-level RC status
+  and every `output.result` entry; only `OK` result values are successful.
+- OneDrive, Box, and SMB use app-managed walks that list directories without
+  intentionally opening file contents, following symbolic links, or leaving
+  the mounted filesystem. Box and SMB retain cache progress if their deadline
+  expires.
+- Box and SMB wait for both the mountpoint and a usable root listing. They do
+  not use recursive `vfs/refresh` or fast-list. Live testing showed that Box
+  recursive refresh reached HTTP 429 rate limiting and that SMB refresh did not
+  stop promptly or retain partial cache work.
+- Active preloads are tracked per connection. Unmount, repair, removal, and
+  pre-sleep cleanup cancel and finish preload work before continuing their
+  bounded detach sequence.
+- Manual unmount displays progress while a running preload stops. Directory
+  walkers must exit before clean detach. The applet attempts clean FUSE detach
+  while the generated service is still running; if another process holds the
+  mount busy, it reports failure and leaves the service and mount available for
+  retry. Brief retries cover a handle released just after preload cancellation;
+  the mount table decides whether detach succeeded even if the helper reports
+  failure. It then stops the service and verifies that the mount-table entry has
+  disappeared. A stopped service with a lingering endpoint uses the existing
+  confirmed Repair flow. This applies to rclone mounts and online OneDrive.
+  Repair resets the generated service only when it is actually failed; an
+  inactive successful service needs no reset.
+- All preload mechanisms share brief notices stating completed (with depth where
+  applicable), time limit reached with an incomplete scan, or skipped. Omit timing
+  figures and routine explanatory text so notices can be read before dismissal. Elapsed time may exceed the limit
+  while work stops. SFTP targets inside excluded system directories are reported
+  as skipped. Completion demonstrates traversal of the requested scope, not a
+  measured browsing-speed improvement.
+- Completion, timeout, and sanitized failure results use the existing applet
+  notice path. There is no manual Cancel control because ordinary browsing can
+  continue after the bounded preload ends.
 
 ## Supported VPN Connections
 
@@ -294,7 +310,8 @@ vertical scrollbar reaches the window's right edge. It offers:
 - **Refresh**, reloading the running applet's configuration and refreshing its
   runtime status, with completion/failure feedback in General Settings.
 - **Preload**, with enabled and maximum-duration settings for Google Drive,
-  OneDrive, Box, and SMB plus directory-depth defaults for Box and SMB.
+  OneDrive, Box, SMB, and SFTP plus directory-depth defaults for Box, SMB, and
+  SFTP. The SFTP row appears immediately below SMB.
 - Sleep-listener status and the latest cleanup details.
 
 Settings changes and Refresh must reach the running applet through an explicit
@@ -353,7 +370,7 @@ Remote action, a detected existing remote, or the exact name of a remote
 configured with `rclone config`. Its tooltip explains both paths. SMB uses
 Create/Update SMB Remote to create a remote or update an existing one.
 
-For Google Drive, Box, and SMB, the applet can detect existing rclone remotes
+For Google Drive, Box, SMB, and SFTP, the applet can detect existing rclone remotes
 and can start applet-driven remote creation. Google Drive and Box setup delegate
 browser OAuth to rclone. SMB credentials remain in rclone's credential
 mechanism, not in applet configuration.
@@ -374,6 +391,95 @@ cleanly.
 
 Credentials remain in the selected provider tool or operating-system secret
 store and are not copied into the applet's configuration.
+
+### SFTP connections — September 29, 2026
+
+SFTP extends the supported provider scope using rclone's `sftp` backend for
+Online mount and Offline mirror. The Add/Modify editor and provider wiring are
+implemented; installed-service and live-server acceptance remain pending in
+`Task List.md`.
+
+In Add Connection, place the **SFTP** provider button immediately to the right
+of **SMB**, with matching styling, spacing, and selection behavior. Keep the
+buttons adjacent at the default window width. The SFTP editor follows the SMB
+layout, section order, top action row, field help, and Test Connection / Save
+Connection workflow. Use SFTP-specific inputs rather than SMB domain or
+workgroup fields:
+
+- Remote name, detected existing SFTP remotes, and **Create/Update SFTP Remote**.
+  For a new remote in Add mode, emphasize this action with the blue/theme-accent
+  suggested-button style. Server/authentication edits also highlight Update in
+  Add and Modify until successfully applied; failures and newer edits retain
+  the highlight. Save Connection stays blue and can save the applet's settings
+  without a successful access test; it does not apply remote credentials.
+  Password, SSH Key, and SSH Agent choices each provide
+  delayed hover help explaining when and how to use that method.
+- Server host, port (default 22), and username.
+- Authentication choice: password, SSH private key, or SSH agent. Password and
+  optional key passphrase inputs are masked and transient; key authentication
+  uses a private-key file path, not pasted key contents.
+- A known-hosts file for server identity verification, defaulting to the host
+  user's `~/.ssh/known_hosts`. Unknown or changed host keys stop the operation
+  with actionable guidance; the applet does not silently trust them.
+- Remote directory, local mountpoint or mirror directory, access-mode options,
+  and optional VPN dependency, following the existing SMB layout.
+
+An empty remote directory selects the server's login directory. Relative paths
+are relative to that directory; a leading `/` selects an absolute server path
+within the account's permitted filesystem. Preserve that distinction when
+saving, testing, mounting, and synchronizing.
+
+As with SMB, Add provides **Create/Update SFTP Remote**, while Modify provides
+**Update SFTP Remote** for an existing remote. Modify retains the locked
+provider/mode policy and prefills non-secret server settings from rclone. Creating or updating a remote is explicit; Test and Save do
+not silently rewrite rclone credentials. Updating a shared remote identifies
+affected saved connections and explains that active connections need restarting.
+Secrets stay with rclone or the SSH agent, are redacted from diagnostics, and
+are cleared from the editor after setup succeeds or fails.
+
+SFTP reuses the existing bounded access test, mount/cache health, safe unmount,
+repair, sleep/wake, VPN, and Offline mirror safeguards. Generated host user
+services must access the same rclone configuration, key/known-hosts files, and
+agent socket used during setup, including from Flatpak. Missing agent access
+must produce actionable failure rather than an interactive service prompt.
+SFTP directory preload is optional and defaults to off, 30 seconds, and depth 2.
+General Settings places the SFTP preload row directly below SMB; each SFTP Online
+connection can inherit the global policy or override enabled state, duration,
+and depth. Preload uses a bounded directory-only walk, never follows symbolic
+links, and cancels before unmount, repair, removal, or sleep. A server-root mount
+prunes `/proc`, `/sys`, and `/dev` before descending; a mount of one of those
+directories or its descendants is not preloaded. These are remote absolute-path
+exclusions, not blanket exclusions of ordinary project folders named `sys`.
+Paths relative to the login directory cannot be mapped to server absolute paths
+without server information. Ordinary on-demand browsing remains available.
+
+### Planned SharePoint (Teams files) connections — September 30, 2026
+
+SharePoint document libraries, including files presented in Microsoft Teams,
+are a planned provider distinct from personal or business OneDrive connections.
+The editor should label it **SharePoint (Teams files)**. A connection selects a
+SharePoint site, one document library on that site, and optionally a folder
+within the library. For example,
+`https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment/Shared%20Documents`
+identifies the `ENGR-BME-Assessment` site and its `Shared Documents` library;
+the URL is not itself a remote folder path. The applet must verify the selected
+library rather than infer its identity solely from a URL or remote name.
+
+Keep **Online mount** and **Offline mirror** as distinct, mutually exclusive
+access modes for each SharePoint connection. Online mount is the first planned
+milestone: use rclone's Microsoft OneDrive backend configured for the selected
+SharePoint document library, with the applet's existing managed mount, access
+test, cache, unmount, and recovery controls. Initial setup may select a
+preconfigured rclone remote; in-app site/library discovery and OAuth setup can
+follow. The provider name in the applet is SharePoint even though rclone calls
+its backend `onedrive`.
+
+Offline mirror is a later milestone using a separate library-specific
+`abraunegg/onedrive` configuration and local directory. It shall become
+available only after library selection, preview, conflict handling, deletion
+recovery, and interrupted-sync behavior are verified with disposable data.
+SharePoint support is planned here; neither mode is implemented by this
+description.
 
 ## Legacy Import and Removal
 
