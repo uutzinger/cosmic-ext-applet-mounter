@@ -64,10 +64,15 @@ for `abraunegg/onedrive`.
 Example screenshots of the applet and its separate windows:
 <table>
   <tr>
-    <td valign="top"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="200"></td>
-    <td valign="top"><img src="./resources/Settings.png" alt="Cloud Mounter popup" width="200"></td>
-    <td valign="top"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></td>
-    <td valign="top"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
+    <td><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="275"></td>
+    <td>
+    <img src="./resources/Settings.png" alt="Settings window" width="200">
+    <img src="./resources/Reorder_Connections.png" alt="Reorder Connections window" width="140">
+    </td>
+  </tr>
+  <tr>
+    <td><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></td>
+    <td><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
   </tr>
 </table>
 
