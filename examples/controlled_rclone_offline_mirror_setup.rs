@@ -106,6 +106,7 @@ async fn run() -> Result<(), String> {
         tuning_profile: TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        teams_identity: None,
     };
 
     std::fs::create_dir_all(&connection.local_path).map_err(|error| {

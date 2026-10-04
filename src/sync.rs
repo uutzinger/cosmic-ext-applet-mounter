@@ -6,12 +6,14 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
+
 use crate::model::{
     Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OfflineMirrorStatus, Provider,
     RecoveryReason, RecoveryRecord,
 };
 use crate::process::{CommandError, CommandRequest, Executable, RetryPolicy};
-use crate::services::{ServiceSpec, TimerSpec};
+use crate::services::{ServiceCommand, ServiceSpec, TimerSpec};
 
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
 const DEFAULT_ONEDRIVE: &str = "/usr/bin/onedrive";
@@ -24,6 +26,7 @@ pub enum SyncError {
     UnsupportedProvider(Provider),
     InvalidRemoteReference,
     InvalidRemoteSubpath,
+    InvalidTeamsIdentity,
     InvalidWorkDirectory,
     InvalidRecoveryDirectory,
     InitialPreviewRequired,
@@ -44,6 +47,7 @@ impl fmt::Display for SyncError {
             }
             Self::InvalidRemoteReference => write!(formatter, "invalid remote reference"),
             Self::InvalidRemoteSubpath => write!(formatter, "invalid remote subpath"),
+            Self::InvalidTeamsIdentity => write!(formatter, "invalid SharePoint library identity"),
             Self::InvalidWorkDirectory => write!(formatter, "invalid work directory"),
             Self::InvalidRecoveryDirectory => write!(formatter, "invalid recovery directory"),
             Self::InitialPreviewRequired => {
@@ -158,6 +162,9 @@ pub struct RcloneBisyncPlan {
     pub recovery_directory: PathBuf,
     pub remote_recovery_path: String,
     pub filters_file: PathBuf,
+    pub preflight_command: Option<ServiceCommand>,
+    pub verify_after_sync: bool,
+    pub access_marker_name: Option<String>,
     pub service: ServiceSpec,
     pub timer: TimerSpec,
 }
@@ -200,10 +207,29 @@ pub fn rclone_bisync_plan(
     work_root: &Path,
 ) -> Result<RcloneBisyncPlan, SyncError> {
     match connection.provider {
-        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {}
+        Provider::Teams
+        | Provider::GoogleDrive
+        | Provider::Box
+        | Provider::Smb
+        | Provider::Sftp => {}
         provider => return Err(SyncError::UnsupportedProvider(provider)),
     }
     let options = offline_options(connection)?;
+    if connection.provider == Provider::Teams {
+        let identity = connection
+            .teams_identity
+            .as_ref()
+            .ok_or(SyncError::InvalidTeamsIdentity)?;
+        if identity.drive_id.trim().is_empty()
+            || crate::teams::parse_library_url(&identity.library_url)
+                .map_or(true, |parsed| parsed.site_url != identity.site_url)
+        {
+            return Err(SyncError::InvalidTeamsIdentity);
+        }
+        if connection.remote_subpath.is_none() {
+            return Err(SyncError::InvalidRemoteSubpath);
+        }
+    }
     validate_directory_roots(
         &connection.local_path,
         work_root,
@@ -221,9 +247,15 @@ pub fn rclone_bisync_plan(
             connection.remote_subpath.as_deref(),
         )?
     };
-    let work_directory = work_root
+    let mut work_directory = work_root
         .join("rclone-bisync")
         .join(connection.id.to_string());
+    if connection.provider == Provider::Teams {
+        let binding = crate::teams::MirrorGuardBinding::from_connection(connection)
+            .map_err(|_| SyncError::InvalidTeamsIdentity)?;
+        let encoded = serde_json::to_vec(&binding).map_err(|_| SyncError::InvalidTeamsIdentity)?;
+        work_directory = work_directory.join(format!("target-{:x}", Sha256::digest(encoded)));
+    }
     let remote_recovery_path = rclone_remote_recovery_path(
         connection.provider,
         &connection.remote_reference,
@@ -231,7 +263,7 @@ pub fn rclone_bisync_plan(
         connection.id,
     )?;
     let filters_file = work_directory.join("filters.txt");
-    let arguments = vec![
+    let mut arguments = vec![
         "bisync".to_owned(),
         remote.clone(),
         connection.local_path.display().to_string(),
@@ -253,14 +285,46 @@ pub fn rclone_bisync_plan(
         "conflict".to_owned(),
         "--create-empty-src-dirs".to_owned(),
         "--compare".to_owned(),
-        "size,modtime".to_owned(),
+        if connection.provider == Provider::Teams {
+            "modtime,checksum".to_owned()
+        } else {
+            "size,modtime".to_owned()
+        },
         "--max-delete".to_owned(),
         "1000".to_owned(),
+    ];
+    if connection.provider == Provider::Teams {
+        // SharePoint may rewrite Office files after upload. Bisync still tracks
+        // each side's changes by checksum; copy-time size/hash checks must not
+        // reject the rewritten upload. A one-second window covers SharePoint's
+        // timestamp precision. The final equal-listing check cannot compare
+        // the original upload with SharePoint's rewritten bytes.
+        arguments.extend(
+            [
+                "--modify-window",
+                "1s",
+                "--ignore-size",
+                "--ignore-checksum",
+                "--check-sync",
+                "false",
+            ]
+            .map(str::to_owned),
+        );
+    }
+    arguments.extend([
         "--filters-file".to_owned(),
         filters_file.display().to_string(),
         "--log-level".to_owned(),
         "INFO".to_owned(),
-    ];
+    ]);
+    let preflight_command = if connection.provider == Provider::Teams {
+        Some(
+            crate::teams::mirror_guard_command(connection)
+                .map_err(|_| SyncError::InvalidTeamsIdentity)?,
+        )
+    } else {
+        None
+    };
     Ok(RcloneBisyncPlan {
         connection_id: connection.id,
         path1_remote: remote,
@@ -269,11 +333,16 @@ pub fn rclone_bisync_plan(
         recovery_directory: options.recovery_directory.clone(),
         remote_recovery_path,
         filters_file,
+        preflight_command,
+        verify_after_sync: connection.provider == Provider::Teams,
+        access_marker_name: (connection.provider == Provider::Teams)
+            .then(|| format!(".cloud-mounter-sharepoint-anchor-{}", connection.id)),
         service: ServiceSpec {
             connection_id: connection.id,
             description: format!("Cloud Mounter sync: {}", connection.name),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
+            pre_start_condition: None,
             restart_on_failure: false,
             skip_on_metered: !options.sync_on_metered,
         },
@@ -414,6 +483,7 @@ pub fn one_drive_mirror_plan(
             description: format!("Cloud Mounter OneDrive mirror: {}", connection.name),
             executable: PathBuf::from(DEFAULT_ONEDRIVE),
             arguments,
+            pre_start_condition: None,
             restart_on_failure: true,
             skip_on_metered: false,
         },
@@ -613,11 +683,57 @@ pub fn google_native_filter_file() -> String {
 }
 
 #[must_use]
+pub fn rclone_bisync_filter_file(provider: Provider) -> String {
+    match provider {
+        Provider::GoogleDrive => google_native_filter_file(),
+        Provider::Teams => "# Keep SharePoint recovery outside the synchronized set.\n- /.cosmic-mounter-recovery/\n+ **\n".into(),
+        _ => "+ **\n".into(),
+    }
+}
+
+#[must_use]
 pub fn parse_preview(output: &str) -> PreviewSummary {
     let mut summary = PreviewSummary::default();
     let mut rclone_copy_direction = None;
+    let mut queued_copies = 0_u64;
+    let mut queued_deletes = 0_u64;
     for line in output.lines() {
         let lower = line.to_ascii_lowercase();
+        if lower.contains(" changes:")
+            || lower.contains("skipped move to")
+            || lower.contains("file was deleted")
+            || lower.contains("deleted:")
+        {
+            // Bisync's change totals include zero-valued "deleted" fields.
+            // Detection and totals repeat the queued action. A dry-run backup
+            // move is part of an overwrite, not a skipped file.
+            continue;
+        }
+        if lower.contains("queue delete") {
+            summary.deletes += 1;
+            summary.destructive = true;
+            queued_deletes += 1;
+            continue;
+        }
+        if lower.contains("skipped delete as --dry-run is set") {
+            if queued_deletes > 0 {
+                queued_deletes -= 1;
+            } else {
+                summary.deletes += 1;
+                summary.destructive = true;
+            }
+            continue;
+        }
+        if lower.contains("queue copy to") && lower.contains("path1") {
+            summary.uploads += 1;
+            queued_copies += 1;
+            continue;
+        }
+        if lower.contains("queue copy to") && lower.contains("path2") {
+            summary.downloads += 1;
+            queued_copies += 1;
+            continue;
+        }
         if (lower.contains("copying files to") || lower.contains("copying path"))
             && let (Some(path1), Some(path2)) = (lower.find("path1"), lower.find("path2"))
         {
@@ -625,10 +741,14 @@ pub fn parse_preview(output: &str) -> PreviewSummary {
             continue;
         }
         if lower.contains("skipped copy as --dry-run is set") {
-            match rclone_copy_direction {
-                Some(true) => summary.uploads += 1,
-                Some(false) => summary.downloads += 1,
-                None => {}
+            if queued_copies > 0 {
+                queued_copies -= 1;
+            } else {
+                match rclone_copy_direction {
+                    Some(true) => summary.uploads += 1,
+                    Some(false) => summary.downloads += 1,
+                    None => {}
+                }
             }
             continue;
         }
@@ -646,7 +766,13 @@ pub fn parse_preview(output: &str) -> PreviewSummary {
         if lower.contains("skip") || lower.contains("excluded") || lower.contains("filtered") {
             summary.skipped += 1;
         }
-        if lower.contains("delete") || lower.contains("remove") {
+        if lower.contains("would delete")
+            || lower.contains("would remove")
+            || lower.contains(": deleting ")
+            || lower.contains(": removing ")
+            || lower.trim_start().starts_with("delete ")
+            || lower.trim_start().starts_with("remove ")
+        {
             summary.deletes += 1;
             summary.destructive = true;
         }
@@ -733,6 +859,11 @@ fn rclone_remote_recovery_path(
 ) -> Result<String, SyncError> {
     validate_remote_name(reference)?;
     let recovery_name = format!(".cosmic-mounter-recovery/{connection_id}");
+    if provider == Provider::Teams {
+        let subpath = subpath.ok_or(SyncError::InvalidRemoteSubpath)?;
+        validate_remote_subpath(subpath)?;
+        return rclone_remote_path(reference, Some(&format!("{subpath}/{recovery_name}")));
+    }
     if provider != Provider::Smb {
         return rclone_remote_path(reference, Some(&recovery_name));
     }
@@ -756,7 +887,7 @@ fn rclone_remote_recovery_path(
     rclone_remote_path(reference, Some(&recovery_subpath))
 }
 
-fn validate_remote_name(value: &str) -> Result<(), SyncError> {
+pub(crate) fn validate_remote_name(value: &str) -> Result<(), SyncError> {
     let valid = !value.is_empty()
         && value.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ' ')
@@ -768,7 +899,7 @@ fn validate_remote_name(value: &str) -> Result<(), SyncError> {
     }
 }
 
-fn validate_remote_subpath(value: &str) -> Result<(), SyncError> {
+pub(crate) fn validate_remote_subpath(value: &str) -> Result<(), SyncError> {
     let path = Path::new(value);
     let valid = !value.trim().is_empty()
         && !path.is_absolute()
@@ -826,7 +957,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::model::{ConnectionMode, OfflineMirrorConfig, TuningProfile};
+    use crate::model::{ConnectionMode, OfflineMirrorConfig, TeamsLibraryIdentity, TuningProfile};
     use crate::services::UnitDocument;
 
     fn id() -> ConnectionId {
@@ -853,6 +984,7 @@ mod tests {
                 Provider::Box => "ua_box",
                 Provider::Smb => "ua_engr",
                 Provider::Sftp => "test_sftp",
+                Provider::Teams => "test_teams",
             }
             .into(),
             remote_subpath: Some("Projects".into()),
@@ -863,6 +995,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -1005,6 +1138,115 @@ mod tests {
                     id()
                 )
             ]));
+    }
+
+    #[test]
+    fn teams_bisync_recovery_stays_inside_selected_folder_and_is_excluded() {
+        let mut connection = offline(Provider::Teams);
+        connection.remote_subpath = Some("CloudMounter-TeamsMirror-Test-20261002".into());
+        connection.teams_identity = Some(TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/assessment".into(),
+            library_url: "https://example.sharepoint.com/sites/assessment/Documents".into(),
+            drive_id: "b!verified-drive".into(),
+        });
+        let plan = rclone_bisync_plan(&connection, Path::new("/state")).unwrap();
+        let arguments = &plan.service.arguments;
+        for expected in [
+            ["--compare", "modtime,checksum"],
+            ["--modify-window", "1s"],
+            ["--check-sync", "false"],
+        ] {
+            assert!(arguments.windows(2).any(|pair| pair == expected));
+        }
+        assert!(arguments.contains(&"--ignore-size".to_owned()));
+        assert!(arguments.contains(&"--ignore-checksum".to_owned()));
+        assert!(plan.verify_after_sync);
+        let script = crate::mirror_script::render(&plan).unwrap();
+        assert!(script.find("--verify-teams-mirror").unwrap() < script.find("rclone=").unwrap());
+        assert!(
+            script
+                .contains("\"$rclone\" check 'test_teams:CloudMounter-TeamsMirror-Test-20261002'")
+        );
+        assert!(script.contains("'--checksum' '--filter-from'"));
+        assert_eq!(script.matches("\"$rclone\" \"$@\"").count(), 3);
+        let temporary = tempfile::tempdir().unwrap();
+        let script_path = temporary.path().join("sharepoint-bisync.sh");
+        std::fs::write(&script_path, script).unwrap();
+        assert!(
+            std::process::Command::new("/usr/bin/sh")
+                .arg("-n")
+                .arg(script_path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(
+            plan.remote_recovery_path,
+            format!(
+                "test_teams:CloudMounter-TeamsMirror-Test-20261002/.cosmic-mounter-recovery/{}",
+                id()
+            )
+        );
+        assert!(
+            rclone_bisync_filter_file(Provider::Teams).contains("- /.cosmic-mounter-recovery/\n")
+        );
+        connection.remote_subpath = None;
+        assert!(matches!(
+            rclone_bisync_plan(&connection, Path::new("/state")),
+            Err(SyncError::InvalidRemoteSubpath)
+        ));
+    }
+
+    #[test]
+    fn sharepoint_bisync_state_is_bound_to_the_verified_target() {
+        let mut connection = offline(Provider::Teams);
+        connection.remote_subpath = Some("Disposable".into());
+        connection.teams_identity = Some(TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/assessment".into(),
+            library_url: "https://example.sharepoint.com/sites/assessment/Documents".into(),
+            drive_id: "b!verified-drive".into(),
+        });
+        let root = Path::new("/state");
+        let original = rclone_bisync_plan(&connection, root).unwrap();
+        assert!(
+            original
+                .work_directory
+                .starts_with(root.join("rclone-bisync"))
+        );
+        assert_eq!(
+            rclone_bisync_plan(&connection, root)
+                .unwrap()
+                .work_directory,
+            original.work_directory
+        );
+
+        for changed in ["remote", "drive", "library", "folder", "local", "recovery"] {
+            let mut edited = connection.clone();
+            match changed {
+                "remote" => edited.remote_reference = "another_remote".into(),
+                "drive" => edited.teams_identity.as_mut().unwrap().drive_id = "b!other".into(),
+                "library" => {
+                    edited.teams_identity.as_mut().unwrap().library_url =
+                        "https://example.sharepoint.com/sites/assessment/Other".into();
+                }
+                "folder" => edited.remote_subpath = Some("AnotherDisposable".into()),
+                "local" => edited.local_path = PathBuf::from("/home/example/Cloud/Other"),
+                "recovery" => {
+                    let ConnectionMode::OfflineMirror(options) = &mut edited.mode else {
+                        unreachable!()
+                    };
+                    options.recovery_directory = PathBuf::from("/home/example/Recovery/Other");
+                }
+                _ => unreachable!(),
+            }
+            let next = rclone_bisync_plan(&edited, root).unwrap();
+            assert_ne!(next.work_directory, original.work_directory, "{changed}");
+            assert_ne!(
+                crate::mirror_script::script_path(&next),
+                crate::mirror_script::script_path(&original),
+                "{changed} reused the old service script"
+            );
+        }
     }
 
     #[test]
@@ -1235,6 +1477,37 @@ Transferred: 1 / 1, 100%\n",
         );
         assert_eq!(upload.uploads, 1);
         assert_eq!(upload.downloads, 0);
+    }
+
+    #[test]
+    fn parse_preview_does_not_report_backup_moves_or_zero_deletions() {
+        let preview = parse_preview(
+            "Path2: 1 changes: 0 new, 1 modified, 0 deleted\n\
+\x1b[32mQueue copy to\x1b[0m Path1 - remote/probe.txt\n\
+probe.txt: Skipped move to probe.txt-backup as --dry-run is set (size 48)\n\
+probe.txt: Skipped copy as --dry-run is set (size 103)\n\
+Transferred: 151 B / 151 B, 100%\n",
+        );
+        assert_eq!(preview.uploads, 1);
+        assert_eq!(preview.downloads, 0);
+        assert_eq!(preview.deletes, 0);
+        assert_eq!(preview.skipped, 0);
+        assert!(!preview.destructive);
+        assert_eq!(preview.transfer_bytes, Some(151));
+    }
+
+    #[test]
+    fn parse_preview_counts_queued_deletion_once() {
+        let preview = parse_preview(
+            "File was deleted - delete-probe.txt\n\
+Path1: 1 changes: 0 new, 0 modified, 1 deleted\n\
+\x1b[31mQueue delete\x1b[0m - right/delete-probe.txt\n\
+delete-probe.txt: Skipped delete as --dry-run is set (size 13)\n\
+Deleted: 1 (files), 0 (dirs), 13 B (freed)\n",
+        );
+        assert_eq!(preview.deletes, 1);
+        assert_eq!(preview.skipped, 0);
+        assert!(preview.destructive);
     }
 
     #[test]

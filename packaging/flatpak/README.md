@@ -131,6 +131,8 @@ Current final-manifest `finish-args`:
 - `--socket=wayland`: required for COSMIC/Wayland UI.
 - `--socket=fallback-x11`: retained as the tested fallback display path.
 - `--share=ipc`: paired with fallback X11 and common GUI toolkit behavior.
+- `--share=network`: lets the SharePoint editor verify a document-library
+  drive with Microsoft Graph. Host rclone still handles file access.
 - `--device=dri`: retained from the GUI prototype so libcosmic rendering and
   acceleration match the tested settings-window behavior.
 - `--talk-name=org.freedesktop.Flatpak`: required for

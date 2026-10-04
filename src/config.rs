@@ -14,6 +14,7 @@ use crate::model::{
     Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OnlineMountConfig,
     PreloadPolicy, PreloadSettings, Provider, VpnProfile, VpnProfileId,
 };
+use crate::teams;
 
 pub const APP_ID: &str = "io.github.uutzinger.cosmic-ext-applet-mounter";
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
@@ -157,6 +158,7 @@ pub enum ValidationError {
     InvalidPreloadPolicy(&'static str),
     InvalidSmbPreloadOverride(ConnectionId),
     InvalidSftpPreloadOverride(ConnectionId),
+    InvalidTeamsIdentity(ConnectionId),
 }
 
 impl fmt::Display for ValidationError {
@@ -515,6 +517,12 @@ impl Config {
             &mut errors,
         );
         validate_preload_policy("box", self.document.preload.box_provider, true, &mut errors);
+        validate_preload_policy(
+            "sharepoint",
+            self.document.preload.sharepoint,
+            true,
+            &mut errors,
+        );
         validate_preload_policy("smb", self.document.preload.smb, true, &mut errors);
         validate_preload_policy("sftp", self.document.preload.sftp, true, &mut errors);
 
@@ -565,6 +573,23 @@ impl Config {
                     || is_unsafe_remote_subpath(path, connection.provider == Provider::Sftp)
             }) {
                 errors.push(ValidationError::InvalidRemoteSubpath(connection.id));
+            }
+            if connection.provider == Provider::Teams {
+                let valid = connection.teams_identity.as_ref().is_some_and(|identity| {
+                    !identity.drive_id.trim().is_empty()
+                        && teams::parse_library_url(&identity.library_url)
+                            .is_ok_and(|parsed| parsed.site_url == identity.site_url)
+                }) && match connection.mode {
+                    ConnectionMode::OnlineMount(_) => true,
+                    ConnectionMode::OfflineMirror(_) => {
+                        teams::MirrorGuardBinding::from_connection(connection).is_ok()
+                    }
+                };
+                if !valid {
+                    errors.push(ValidationError::InvalidTeamsIdentity(connection.id));
+                }
+            } else if connection.teams_identity.is_some() {
+                errors.push(ValidationError::InvalidTeamsIdentity(connection.id));
             }
             if let Some(overrides) = connection.smb_preload_override {
                 if connection.provider != Provider::Smb
@@ -661,6 +686,7 @@ impl ConfigDocument {
         match connection.provider {
             Provider::GoogleDrive => self.preload.google_drive,
             Provider::OneDrive => self.preload.onedrive,
+            Provider::Teams => self.preload.sharepoint,
             Provider::Box => self.preload.box_provider,
             Provider::Sftp => connection
                 .sftp_preload_override
@@ -847,6 +873,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -857,6 +884,7 @@ mod tests {
         assert!(is_unsafe_remote_subpath("/srv/../files", true));
         for provider in [
             Provider::OneDrive,
+            Provider::Teams,
             Provider::GoogleDrive,
             Provider::Box,
             Provider::Smb,
@@ -980,6 +1008,93 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, ValidationError::InvalidPreloadPolicy("sftp")))
         );
+    }
+
+    #[test]
+    fn sharepoint_preload_migrates_off_and_uses_its_own_policy() {
+        let mut document = ConfigDocument::default();
+        let mut connection = online_connection("/home/example/Cloud/SharePoint");
+        connection.provider = Provider::Teams;
+        let mut legacy = serde_json::to_value(&document).unwrap();
+        legacy["preload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sharepoint");
+        let migrated: ConfigDocument = serde_json::from_value(legacy).unwrap();
+        assert_eq!(migrated.preload.sharepoint, PreloadPolicy::sftp_default());
+        assert!(!migrated.preload_policy_for(&connection).enabled);
+
+        document.preload.sharepoint.enabled = true;
+        assert_eq!(
+            document.preload_policy_for(&connection),
+            document.preload.sharepoint
+        );
+        assert_eq!(document.preload.sftp, PreloadPolicy::sftp_default());
+    }
+
+    #[test]
+    fn teams_identity_is_required_and_old_connections_still_load() {
+        let old = online_connection("/home/example/Cloud/Existing");
+        let mut old_json = serde_json::to_value(&old).unwrap();
+        old_json.as_object_mut().unwrap().remove("teams_identity");
+        let restored: Connection = serde_json::from_value(old_json).unwrap();
+        assert_eq!(restored.teams_identity, None);
+
+        let mut teams = online_connection("/home/example/Cloud/Teams");
+        teams.provider = Provider::Teams;
+        teams.remote_reference = "work_library".into();
+        let mut config = Config {
+            document: ConfigDocument {
+                connections: vec![teams.clone()],
+                ..ConfigDocument::default()
+            },
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|error| matches!(error, ValidationError::InvalidTeamsIdentity(_)))
+        );
+        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/Work".into(),
+            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+            drive_id: "b!verified".into(),
+        });
+        config.document.connections = vec![teams.clone()];
+        assert!(config.validate().is_ok());
+        if let ConnectionMode::OnlineMount(options) = &mut teams.mode {
+            options.start_at_login = true;
+        }
+        config.document.connections = vec![teams];
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn teams_offline_storage_requires_a_scoped_verified_folder() {
+        let mut teams = offline_connection("/home/example/Cloud/TeamsMirror");
+        teams.provider = Provider::Teams;
+        teams.remote_reference = "assessment".into();
+        teams.remote_subpath = Some("Disposable".into());
+        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/Work".into(),
+            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+            drive_id: "b!verified".into(),
+        });
+        let mut config = Config {
+            document: ConfigDocument {
+                connections: vec![teams.clone()],
+                ..ConfigDocument::default()
+            },
+        };
+        assert!(config.validate().is_ok());
+
+        teams.remote_subpath = None;
+        config.document.connections = vec![teams.clone()];
+        assert!(config.validate().is_err());
+        teams.remote_subpath = Some(".".into());
+        config.document.connections = vec![teams];
+        assert!(config.validate().is_err());
     }
 
     #[test]

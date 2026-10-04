@@ -12,8 +12,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::model::{Connection, ConnectionId, ConnectionMode, OnlineMountConfig, Provider};
+use crate::mount_guard;
 use crate::process::{CommandError, CommandRequest, CommandRunner, Executable, RetryPolicy};
 use crate::services::{ActiveState, ServiceSpec, UnitStatus};
+use crate::teams;
 
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
 const DEFAULT_ONEDRIVER: &str = "/usr/bin/onedriver";
@@ -30,6 +32,8 @@ pub enum ProviderError {
     MissingExecutable(Executable),
     Command(CommandError),
     InvalidResponse(String),
+    InvalidTeamsIdentity(String),
+    InvalidMountpointGuard(String),
     Unauthenticated,
 }
 
@@ -49,6 +53,8 @@ impl fmt::Display for ProviderError {
             Self::InvalidResponse(message) => {
                 write!(formatter, "invalid provider response: {message}")
             }
+            Self::InvalidTeamsIdentity(message) => formatter.write_str(message),
+            Self::InvalidMountpointGuard(message) => formatter.write_str(message),
             Self::Unauthenticated => write!(formatter, "provider is not authenticated"),
         }
     }
@@ -64,6 +70,7 @@ impl From<CommandError> for ProviderError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RcloneBackend {
+    Teams,
     GoogleDrive,
     Box,
     Smb,
@@ -73,6 +80,7 @@ pub enum RcloneBackend {
 impl RcloneBackend {
     const fn expected_type(self) -> &'static str {
         match self {
+            Self::Teams => "onedrive",
             Self::GoogleDrive => "drive",
             Self::Box => "box",
             Self::Smb => "smb",
@@ -86,6 +94,7 @@ impl TryFrom<Provider> for RcloneBackend {
 
     fn try_from(provider: Provider) -> Result<Self, Self::Error> {
         match provider {
+            Provider::Teams => Ok(Self::Teams),
             Provider::GoogleDrive => Ok(Self::GoogleDrive),
             Provider::Box => Ok(Self::Box),
             Provider::Smb => Ok(Self::Smb),
@@ -368,6 +377,22 @@ pub fn rclone_mount_plan(
         format!("unix://{}", rc_socket.display()),
     ];
     arguments.push("--no-modtime".to_owned());
+    if connection.provider == Provider::Teams {
+        // SharePoint may rewrite Office files during upload, changing their size
+        // before rclone checks the destination. Keep this scoped to Teams.
+        arguments.push("--ignore-checksum".to_owned());
+        arguments.push("--ignore-size".to_owned());
+        // A single VFS upload limits retry pressure on throttled libraries.
+        arguments.push("--transfers".to_owned());
+        arguments.push("1".to_owned());
+    }
+
+    let pre_start_condition = Some(if connection.provider == Provider::Teams {
+        teams::service_guard_command(connection).map_err(ProviderError::InvalidTeamsIdentity)?
+    } else {
+        mount_guard::service_guard_command(connection)
+            .map_err(ProviderError::InvalidMountpointGuard)?
+    });
 
     Ok(RcloneMountPlan {
         connection_id: connection.id,
@@ -380,6 +405,7 @@ pub fn rclone_mount_plan(
             description: format!("Cloud Mounter: {}", connection.name),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
+            pre_start_condition,
             restart_on_failure: true,
             skip_on_metered: false,
         },
@@ -389,9 +415,11 @@ pub fn rclone_mount_plan(
 fn rclone_mount_timeouts(provider: Provider) -> (&'static str, &'static str) {
     match provider {
         Provider::Smb => ("90s", "15s"),
-        Provider::GoogleDrive | Provider::Box | Provider::OneDrive | Provider::Sftp => {
-            ("10s", "5s")
-        }
+        Provider::GoogleDrive
+        | Provider::Box
+        | Provider::OneDrive
+        | Provider::Teams
+        | Provider::Sftp => ("10s", "5s"),
     }
 }
 
@@ -430,6 +458,10 @@ pub fn onedriver_mount_plan(
             description: format!("Cloud Mounter: {}", connection.name),
             executable: PathBuf::from(DEFAULT_ONEDRIVER),
             arguments,
+            pre_start_condition: Some(
+                mount_guard::service_guard_command(connection)
+                    .map_err(ProviderError::InvalidMountpointGuard)?,
+            ),
             restart_on_failure: true,
             skip_on_metered: false,
         },
@@ -825,6 +857,7 @@ mod tests {
                 Provider::Smb => "ua_engr",
                 Provider::Sftp => "test_sftp",
                 Provider::OneDrive => "unused",
+                Provider::Teams => "test_teams",
             }
             .into(),
             remote_subpath: Some("Projects/2026".into()),
@@ -835,6 +868,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -899,6 +933,85 @@ mod tests {
         assert!(plan.service.arguments.contains(&"--rc".to_owned()));
         assert!(plan.service.arguments.contains(&"--rc-no-auth".to_owned()));
         assert!(!plan.service.arguments.contains(&"--fast-list".to_owned()));
+    }
+
+    #[test]
+    fn teams_uses_rclone_onedrive_library_remote_without_touching_onedriver() {
+        assert_eq!(
+            RcloneBackend::try_from(Provider::Teams)
+                .unwrap()
+                .expected_type(),
+            "onedrive"
+        );
+        assert!(RcloneBackend::try_from(Provider::OneDrive).is_err());
+        let mut teams = connection(Provider::Teams);
+        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/engineering".into(),
+            library_url: "https://example.sharepoint.com/sites/engineering/Documents".into(),
+            drive_id: "drive-123".into(),
+        });
+        let plan = rclone_mount_plan(
+            &teams,
+            Path::new("/run/user/1000/cosmic-mounter"),
+            Path::new("/home/example/.cache/cosmic-mounter"),
+        )
+        .unwrap();
+        assert_eq!(plan.remote, "test_teams:Projects/2026");
+        assert_eq!(plan.service.executable, PathBuf::from(DEFAULT_RCLONE));
+        let guard = plan
+            .service
+            .pre_start_condition
+            .as_ref()
+            .expect("Teams guard");
+        assert!(guard.arguments.contains(&"--verify-teams-mount".to_owned()));
+        assert!(guard.arguments.contains(&"drive-123".to_owned()));
+        assert!(
+            plan.service
+                .arguments
+                .contains(&"--ignore-checksum".to_owned())
+        );
+        assert!(plan.service.arguments.contains(&"--ignore-size".to_owned()));
+        assert!(
+            plan.service
+                .arguments
+                .windows(2)
+                .any(|pair| pair == ["--transfers", "1"])
+        );
+        for provider in [
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let other = rclone_mount_plan(
+                &connection(provider),
+                Path::new("/run/user/1000/cosmic-mounter"),
+                Path::new("/home/example/.cache/cosmic-mounter"),
+            )
+            .unwrap();
+            assert!(
+                other
+                    .service
+                    .pre_start_condition
+                    .as_ref()
+                    .is_some_and(|guard| guard
+                        .arguments
+                        .contains(&"--verify-online-mountpoint".to_owned()))
+            );
+            assert!(
+                !other
+                    .service
+                    .arguments
+                    .contains(&"--ignore-checksum".to_owned())
+            );
+            assert!(
+                !other
+                    .service
+                    .arguments
+                    .contains(&"--ignore-size".to_owned())
+            );
+            assert!(!other.service.arguments.contains(&"--transfers".to_owned()));
+        }
     }
 
     #[test]
@@ -1077,6 +1190,7 @@ mod tests {
             active: ActiveState::Active,
             enabled: true,
             detail: "running".into(),
+            result: "success".into(),
         };
         let mut snapshot = OnlineRuntimeSnapshot {
             readiness: ReadinessSnapshot {
@@ -1133,6 +1247,14 @@ mod tests {
         assert_eq!(plan.service.executable, PathBuf::from(DEFAULT_ONEDRIVER));
         assert!(plan.service.arguments.contains(&"--config-file".to_owned()));
         assert!(plan.service.arguments.contains(&"--cache-dir".to_owned()));
+        assert!(
+            plan.service
+                .pre_start_condition
+                .as_ref()
+                .is_some_and(|guard| guard
+                    .arguments
+                    .contains(&"--verify-online-mountpoint".to_owned()))
+        );
         assert!(
             plan.config_file
                 .starts_with("/home/example/.config/cosmic-mounter/onedriver")
@@ -1196,6 +1318,7 @@ mod tests {
                 active: ActiveState::Active,
                 enabled: true,
                 detail: "running".into(),
+                result: "success".into(),
             }),
             mount_present: true,
             cache_state: OnedriverCacheState::CachedReadOnlyCandidate,
@@ -1210,6 +1333,7 @@ mod tests {
                     active: ActiveState::Inactive,
                     enabled: false,
                     detail: "stopped with lingering mount".into(),
+                    result: "success".into(),
                 }),
                 ..snapshot.clone()
             }),

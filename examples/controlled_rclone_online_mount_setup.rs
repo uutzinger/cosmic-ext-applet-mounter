@@ -100,6 +100,7 @@ async fn run() -> Result<(), String> {
         tuning_profile: TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        teams_identity: None,
     };
 
     std::fs::create_dir_all(&connection.local_path).map_err(|error| {
@@ -180,6 +181,7 @@ async fn run() -> Result<(), String> {
             active: cosmic_ext_applet_mounter::services::ActiveState::Unknown,
             enabled: false,
             detail: "unknown".into(),
+            result: String::new(),
         })
     );
     println!("Installed managed unit without starting it.");

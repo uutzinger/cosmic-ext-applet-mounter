@@ -78,6 +78,17 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.0" date="2026-10-03">
+      <description>
+        <p>SharePoint document libraries and safer connection management.</p>
+        <ul>
+          <li>Add SharePoint Online mounts and Microsoft sign-in setup through rclone.</li>
+          <li>Add scoped SharePoint Offline Preview and manual Sync Now; background scheduling remains disabled pending unattended checks.</li>
+          <li>Add optional SharePoint directory preload and pending-work indicators.</li>
+          <li>Improve mount, sync, configuration recovery, and connection reordering.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.7" date="2026-10-01">
       <description>
         <p>Version 0.4.7.</p>

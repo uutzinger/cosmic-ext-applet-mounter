@@ -511,6 +511,7 @@ mod tests {
             tuning_profile: Default::default(),
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 

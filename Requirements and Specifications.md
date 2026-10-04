@@ -1639,36 +1639,216 @@ does not establish SFTP acceptance.
 Technical reference: [rclone SFTP documentation](https://rclone.org/sftp/)
 (authentication, host verification, path semantics, and shell-access limitations).
 
-## 18. SharePoint (Teams Files) Provider — Planning Placeholder, September 30, 2026
+## 18. SharePoint Engine (including Teams Files) — Implementation Plan, October 1, 2026
 
-This is a future provider, not a claim of implemented support. SharePoint
-document libraries used by Teams are separate from the applet's current
-OneDrive account workflow. The proposed provider label is **SharePoint (Teams
-files)**. Each connection shall identify one site, one document library, and an
-optional folder within that library; setup must verify the library identity and
-the signed-in account's access. The site/library URL must not be treated as an
-ordinary OneDrive folder path.
+SharePoint is a distinct applet engine labelled **SharePoint**, with Online mount implemented
+and separate Offline mirror acceptance pending. Its storage is a
+SharePoint document library; it does not use the personal OneDrive workflow.
+It is not yet a release-supported connection. A Teams standard-channel Files tab points
+to a folder within the parent site's document library; private and shared
+channels can have their own sites. A connection addresses exactly one verified
+site, one document library, and optionally one folder within that library. The
+user chooses a separate local mountpoint or mirror directory. For example,
+`https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment/Shared%20Documents`
+is a proposed library URL, not a local mountpoint or a rclone folder path. The
+applet must confirm which library it denotes using authenticated metadata.
 
-Retain the existing mutually exclusive **Online mount** and **Offline mirror**
-access modes. The first implementation milestone is Online mount using rclone's
-`onedrive` backend for a selected SharePoint document library, initially by
-detecting a preconfigured remote. Reuse managed rclone mount lifecycle, bounded
-access checks, host-service configuration, cache/write protection, VPN/network
-handling, safe unmount, and repair. In-app site/library discovery and OAuth
-setup are separate follow-up design work.
+### 18.1 Identity, URL input, and account isolation
 
-Offline mirror is a later milestone using a distinct `abraunegg/onedrive`
-configuration, SharePoint library `drive_id`, and local sync directory. Do not
-expose it as supported until preview, initial confirmation, scheduling,
-conflict preservation, deletion recovery, and interrupted-sync behavior pass
-isolated and live tests with disposable SharePoint data.
+- Accept HTTPS SharePoint site or library URLs as **locators**, not proof of
+  identity. Normalize hostname and supported `/sites/` or `/teams/` paths,
+  decode path segments once without treating encoded separators as path
+  boundaries, remove query and fragment data, and reject
+  malformed, unsupported, or ambiguous sharing/view links. Never infer a drive
+  ID solely from `Shared Documents`, a Teams channel name, or a remote name.
+- Persist a separate SharePoint identity record with canonical site URL,
+  canonical library URL/name, verified document-library drive ID, selected
+  rclone remote, and optional folder path. Store no access or refresh token in
+  the applet connection. Migrate older configurations without changing existing
+  OneDrive, Google Drive, Box, SMB, or SFTP records.
+- Resolve the selected drive ID against an authenticated Microsoft drive
+  metadata response, checking its library `webUrl` and site association against
+  the entered URL. A read-only Graph drive lookup using the selected remote's
+  delegated token is the initial candidate; prove that it works with the
+  installed rclone version and tenant permissions before implementing the
+  editor. Keep the token transient and redacted. If no authenticated identity
+  lookup is available, block setup with a useful explanation instead of
+  accepting an unverified library. Recheck identity on Add/Modify test and
+  before Start when a remote's drive ID or account changes.
+- Distinguish missing tenant consent, expired/revoked authorization, wrong
+  account or drive, inaccessible site, read-only access, missing subfolder, and
+  rate limiting. Access tests may list but shall not write or delete. Only an
+  explicit disposable-data test may determine write capability.
 
-Before implementation, specify URL-to-site/library parsing, the verified
-library identifier persisted per connection, authentication and tenant-consent
-failure handling, provider-specific dependency checks, legacy import behavior,
-preload defaults, and native/Flatpak acceptance. Existing OneDrive connections
-and credentials must retain their current behavior.
+### 18.2 First deliverable: Online mount with rclone
 
-References: [Microsoft Teams and SharePoint integration](https://learn.microsoft.com/en-us/sharepoint/teams-connected-sites),
+- Show a **SharePoint** button beside OneDrive in Add/Modify, with Online mount
+  available first. The manual setup path selects an existing rclone remote with `type=onedrive`,
+  `drive_type=documentLibrary`, and a drive ID that passes Section 18.1. The
+  user selects an optional folder beneath the library root. A separate guided
+  Microsoft browser-OAuth path creates a new SharePoint-specific rclone remote from
+  the entered library URL, discovers the site's document libraries, and selects
+  only an authenticated drive whose type and URL exactly match. A duplicate
+  remote name must be rejected; an incomplete new remote must be cleaned up.
+  Never rewrite an existing SharePoint or personal OneDrive remote. The preconfigured
+  remote path remains usable. Tenant-wide browsing and in-app account/consent
+  administration remain separate work.
+- Use the verified rclone remote and optional folder with the existing Online
+  mount lifecycle: generated user service, bounded access test, cache/status,
+  pending-write protection, connectivity and optional VPN readiness, sleep/wake,
+  clean unmount, Repair, and removal. Validate target overlap and avoid
+  modifying an existing personal OneDrive remote. Changing the selected remote,
+  drive ID, or folder requires a new identity and access test before mount.
+- Default SharePoint directory preload to **off** because library enumeration
+  can be expensive or throttled. If enabled, keep traversal bounded to the
+  chosen library/folder, cancellable before unmount, and report partial work
+  honestly. SharePoint uses its own policy; Google Drive fast-list and OneDrive
+  `onedriver` preload assumptions do not apply automatically.
+- Detect rclone, FUSE, a usable document-library remote, and host-service access
+  to that remote's credentials. Give actionable errors for missing dependencies,
+  token refresh/consent failures, and throttling. Do not import legacy
+  `onedriver` or ordinary rclone `onedrive` units as SharePoint merely because
+  their URLs or names contain a site; an explicit verified migration is needed.
+
+### 18.3 Second deliverable: Offline mirror with rclone bisync
+
+- Reuse the verified SharePoint rclone `onedrive` document-library remote. The
+  separate `abraunegg/onedrive` Microsoft app requires tenant administrator
+  approval for the University work account, so it is not a usable default
+  engine here. Keep SharePoint bisync listings, lock, local directory, and recovery
+  data separate from every Online mount and other mirror. Never copy or expose
+  rclone tokens in applet configuration.
+- Bind every Preview, Sync Now, and eventual scheduled run to the saved site,
+  library URL, document-library type, drive ID, and selected remote/folder.
+  Recheck identity before writable operations; a retargeted remote or changed
+  folder requires a new preview and explicit state rebuild. Validate local
+  target overlap and available space.
+- Require a scoped `--resync --dry-run` Preview and explicit confirmation before
+  the first Sync Now. The first release of SharePoint Offline shall expose
+  manual Preview and Sync Now only; keep its background timer **off** until
+  separate unattended network/VPN, metered, sleep/wake, and failure checks pass.
+  Preview must
+  report uploads, downloads, deletions, conflicts, and recovery location.
+  When testing inside an existing work library, limit both remote and local
+  paths to a disposable folder; prove that no proposed operation or recovery
+  write escapes the approved scope before any test sync.
+- Preserve overwritten/deleted files in applet-owned recovery areas. If remote
+  recovery cannot be kept within an approved scope without bisync reading its
+  own backups, do not run a writable mirror until an explicit safe location is
+  chosen and verified. Never create a recovery folder elsewhere in the work
+  library as a side effect of Preview.
+- On disposable data, demonstrate conflict preservation, deletion and
+  overwrite recovery, Office-file post-upload behavior, interrupted sync,
+  resync after identity/filter changes, and repeated scheduled runs. If these
+  checks cannot establish safe unattended operation, keep scheduling disabled
+  and do not claim supported bidirectional Offline mirror behavior.
+- For SharePoint's Office-file rewrites, track changes with checksums as well
+  as modification times. A writable sync may require one bounded follow-up
+  pass to download SharePoint's normalized copy. Report success only after an
+  independent checksum comparison finds no differences; preserve prior file
+  versions in recovery and report a failed or incomplete comparison honestly.
+- Include one stable, hidden, app-owned access marker in the selected local and
+  remote folder so a one-file mirror can change without disabling bisync's
+  all-files-changed safety stop. Create it locally before initial Preview, show
+  its upload in that Preview, and make no remote marker write until confirmed
+  initial Sync Now. Reject missing or altered markers on subsequent runs.
+- Once the safety gate passes, apply existing network/VPN, metered, sleep/wake,
+  status, Stop/Start, and generated-service safeguards. Deleting an applet
+  connection removes only applet-owned units; preserve library data and
+  credentials unless separately confirmed.
+
+### 18.4 Acceptance boundaries
+
+- Unit and isolated tests cover URL parsing, identity drift, serialization,
+  service targeting, error classification, token redaction, and old-provider
+  regression. Installed native Online acceptance uses a disposable SharePoint
+  library/folder for read, write, pending upload, unmount, repair, and network
+  recovery. Verify standard-channel folders and a private/shared channel site
+  when access to such a site is available. Record tenant restrictions explicitly.
+- Offline acceptance separately covers initial preview and sync, repeated
+  bidirectional sync, conflicts, deletion recovery, interrupted transfers,
+  selective-folder scope, and the unattended safety gate above. Native and
+  Flatpak host-service access must each be tested when their distribution path
+  exists; a prototype Flatpak result is not public-package acceptance. In-app
+  OAuth/discovery is optional follow-up, not a prerequisite for the first
+  preconfigured-remote Online milestone.
+
+References: [Microsoft Teams/SharePoint site relationships](https://learn.microsoft.com/en-us/sharepoint/teams-connected-sites),
+[Microsoft Graph site lookup](https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0),
+[Graph drive lookup](https://learn.microsoft.com/en-us/graph/api/drive-get?view=graph-rest-1.0),
 [rclone Microsoft OneDrive backend](https://rclone.org/onedrive/), and
-[abraunegg/onedrive SharePoint library setup](https://github.com/abraunegg/onedrive/blob/master/docs/sharepoint-libraries.md).
+[rclone bisync safety guidance](https://rclone.org/bisync/).
+
+### SharePoint Online service identity gate — October 2, 2026
+
+Every generated SharePoint Online service shall check the saved connection and
+authenticated SharePoint document-library identity before starting rclone. The
+check shall compare connection ID, enabled state, remote, optional folder,
+mountpoint, verified drive ID, and library URL with the unit's bound values,
+then verify the remote's current drive ID, type, and URL through authenticated
+drive metadata. Failure shall prevent the mount for direct systemd starts,
+restarts, and start at login as well as applet-initiated starts. The applet shall
+report a skipped start as blocked rather than successful. Other providers are
+unaffected by the SharePoint identity gate. Installed validation shall use a saved unit and a deliberately
+mismatched binding without writing to SharePoint.
+
+### Online mountpoint preflight for all engines — October 2, 2026
+
+Before starting any Online mount, including direct service starts and start at
+login, check the host mount table and local target. OneDrive, SharePoint, Google
+Drive, Box, SMB, and SFTP shall start only when the target is an ordinary empty
+directory and is not already mounted. A missing, unreadable, non-directory,
+mounted, or non-empty target shall block startup with a useful reason. Preserve
+all local entries; never delete, move, or hide them as automatic recovery.
+Offline mirrors are ordinary populated local directories and are outside this
+mountpoint rule. Refresh existing managed Online service definitions after an
+applet update without restarting active mounts.
+
+### Per-connection pending-change count — October 2, 2026
+
+- Each connection row in the main applet popup shall reserve one compact count
+  between the clickable name and the Mount/Unmount or Start/Stop switch. The
+  count shall not shift or hide the switch when names are long or text scaling
+  changes. It shall be plain text with a hover and accessible description,
+  using the Fluent catalog for labels and explanations.
+- When a reliable count is unavailable, show `+` for an active connection and
+  `-` for an inactive connection. These markers are not numeric counts; the
+  hover/accessibility explanation shall say why the number is unavailable.
+- The number means **pending file changes**, not cache occupancy or bytes. For
+  rclone Online mounts (SharePoint, Google Drive, Box, SMB, SFTP), obtain the number
+  from that connection's existing private RC socket: count the entries in
+  `vfs/queue`, including queued and currently uploading files. Poll at a
+  bounded interval while the mount is active, without reading file contents
+  or traversing the remote. Cross-check VFS error state. Show `0` only after a
+  successful current query with no unresolved upload/cache error; a stopped
+  service, unavailable socket, unsupported response, or query failure is
+  unknown, not zero. Never sum `diskCache.files` or `bytesUsed` as pending work.
+- For Offline mirrors, count pending file operations in the configured sync
+  scope: uploads, downloads, deletions, and unresolved conflicts. Derive an
+  idle baseline from a bounded read-only preview/status operation, with its
+  check time; do not launch a second bisync preview while sync or recovery is
+  running. During a run, update the count only from that run's confirmed
+  progress, then perform a fresh scoped check after completion. Scheduled and
+  manual runs shall use the same reporting path. A new local or remote change
+  can increase the count; a failed or interrupted run must not imply zero.
+- Use rclone bisync's existing preview path for Google Drive, Box, SMB, and
+  SFTP mirrors. Use the configured abraunegg/onedrive client's read-only
+  `--display-sync-status` for OneDrive mirrors when supported, interpreting its
+  textual status and pending directions rather than its exit code alone.
+  SharePoint mirror counting begins only if that engine passes its
+  separate Offline mirror safety gate and becomes supported.
+- onedriver Online mounts expose no supported pending-upload count. Display
+  `+` while mounted or `-` while inactive, with an explanation until a reliable
+  engine-supported source exists;
+  do not inspect its private cache database or infer pending uploads from
+  cached bytes. Use the same active/inactive marker when a mirror count is not yet
+  checked, becomes stale, or cannot be determined safely. A previously shown
+  number shall not silently persist as current after unmount, sleep, restart,
+  disconnection, or a configuration change.
+- Keep count collection asynchronous and bounded so popup opening, toggles,
+  unmount, and sync are never delayed. An error in counting shall affect only
+  the count and its explanation, not the underlying mount or mirror operation.
+  Test zero, growing/shrinking queues, upload errors, stale/unavailable
+  sockets, active and interrupted mirror runs, scheduled runs, new changes
+  after a check, small popup widths, accessibility, and native/Flatpak host
+  command paths.

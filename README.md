@@ -3,9 +3,8 @@
 <img src="./resources/icon.svg" alt="Cloud Mounter" style="float: left; margin-right: 15px; width: 100px;">
 
 Cloud Mounter is an applet for the COSMIC™ desktop for managing storage
-connections to **OneDrive**, **Google Drive**, **Box**, **SMB**, and **SFTP**. It supports
-direct **Online mount** and **Offline mirror** modes with background
-synchronization.
+connections to **OneDrive**, **SharePoint**, **Google Drive**, **Box**, **SMB**, and **SFTP**. It supports
+direct **Online mount** and **Offline mirror** modes.
 
 The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
@@ -13,7 +12,6 @@ unavailable. The applet attempts to pre-cache directory metadata when available.
 
 ## Table of Contents
 
-- [Applet and Settings](#applet-and-settings)
 - [Modes and Providers](#modes-and-providers)
 - [Installation and Removal](#installation-and-removal)
   - [Installation from Source](#installation-from-source)
@@ -54,6 +52,18 @@ The following connection engines are used to connect to the providers ([external
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
+| SharePoint | `rclone mount` | `rclone bisync` manual sync only |
+
+**Connection Engine Choices:**
+
+- The applet uses rclone as its general-purpose mount engine.
+- **OneDrive Online:** We use `jstaf/onedriver` for its OneDrive-specific
+  on-demand filesystem: it downloads files when accessed and caches metadata
+  and file contents. We do not use `abraunegg/onedrive` as it creates a local mirror instead.
+- **OneDrive Offline:** `abraunegg/onedrive` keeps a local synchronized copy
+  of selected files and monitors local and Microsoft changes. We do not use `jstaf/onedriver` as it
+  downloads files as they are accessed or `rclone bisync` as a compare on both sides
+  requires scheduled a sync run. `abraunegg/onedrive` disadvantage is that Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent).
 
 Example screenshots of the applet and its separate windows:
 <table>
@@ -67,9 +77,18 @@ Example screenshots of the applet and its separate windows:
 
 ## Installation and Removal
 
-Before installing, verify dependencies in
-[Dependency Installation.md](Dependency%20Installation.md). Follow instructions to install the
-external storage engines you plan to use. The applet does not install them for you.
+### Dependencies
+
+For simple installation of dependencies run the automated installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
+```
+
+You can also verify dependencies in
+[Dependency Installation.md](Dependency%20Installation.md).
+
+The applet itself does not install the dependencies for you.
 
 ### Installation from Source
 
@@ -81,8 +100,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.4.7/cosmic-ext-applet-mounter_0.4.7_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.4.7_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.0/cosmic-ext-applet-mounter_0.5.0_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.5.0_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -159,21 +178,25 @@ network stalls.
 
 ## Applet Workflow
 
-The panel popup shows the active connection count, notification state, VPN
-summary, and a scrollable list of connections.
+The panel popup shows a scrollable list of connections and a brief status line
+when attention is needed.
 
 Each connection row has the connection name and one primary state control:
 
 - Online mount toggle button uses Mount or Unmount.
 - Offline mirror toggle button uses Start or Stop for background synchronization.
 
+A small count beside the name shows pending work when an engine can estimate it;
+`+` means active without a count and `-` means unknown or unavailable. SharePoint
+Offline mirrors provide manual Preview and Sync Now rather than a Start/Stop timer.
+
 Clicking the connection name opens `Modify`.
 
 ## Settings
 
-Open the Settings window by clicking the gear icon. `Add Connection` and
-`Refresh` are available at the top. Add and Modify connections share the same
-editor.
+Open the Settings window by clicking the gear icon. `Add Connection`, `Refresh`,
+and `Reorder` are available under **Connections**. Add and Modify connections
+share the same editor.
 
 Add mode exposes `Test Connection`, `Save Connection`, `Import`, and the
 provider-specific setup and rclone remote-management actions needed to create
@@ -201,6 +224,8 @@ before detaching the filesystem.
 The traversal does not follow symbolic links, stops at the configured deadline,
 and is cancelled before unmount, repair, removal, or sleep.
 
+**SharePoint** starts .....
+
 **Box** waits for both the mountpoint and a usable root listing, then starts a
 bounded directory-only metadata walk. It does not use recursive rclone RC
 refresh or fast-list, which helps limit Box API requests and rate-limit risk.
@@ -208,13 +233,13 @@ refresh or fast-list, which helps limit Box API requests and rate-limit risk.
 **SMB** also waits for the mountpoint and root listing before starting its
 bounded directory-only metadata walk. Each SMB connection can inherit the
 global preload policy or override its enabled state, duration, and depth.
-SFTP uses the same bounded directory walk, but defaults to disabled with a
+
+**SFTP** uses the same bounded directory walk, but defaults to disabled with a
 30-second maximum and depth 2.
-Other provider preloads default to enabled with a 60-second maximum. Box uses a
-bounded directory-only walk with depth 2 to avoid API rate limits; SMB uses
-depth 3.
-SMB connections may override enablement, duration, and depth
-individually so local and VPN shares can use different policies.
+
+**SharePoint** Online also defaults to disabled with a 30-second maximum and depth
+2, scoped to the selected library or folder.
+
 
 ## Authentication
 
@@ -225,6 +250,8 @@ For Google Drive and Box, applet-driven setup delegates browser OAuth to
 `rclone`. For SMB, the password remains in rclone's credential mechanism, not
 in applet configuration.
 SFTP supports a password, SSH key, or SSH agent and requires a known-hosts file.
+SharePoint can use a verified existing rclone document-library remote or the
+editor's Microsoft sign-in setup; the applet does not store its token.
 
 Google Drive setup accepts the client ID and matching client secret from a
 Google Cloud Desktop OAuth application. Supplying both values creates the
@@ -257,6 +284,9 @@ Known limitations:
   type.
 - Google Drive Online mount testing can hit Google Drive API quota/rate
   limiting.
+- SharePoint Offline mirror scheduling remains disabled while unattended
+  network, metered, sleep/wake, and failure-recovery checks are pending. Manual
+  Preview and Sync Now are available for a scoped, verified folder.
 - NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
   integration remains future work.
 
@@ -300,17 +330,19 @@ execution history is documented in
 [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author
 supervises and approves each task and its verification.
 
+OpenAI Codex was used primarily to implement the applet.
+
 ## Contributing & Feature Requests
 
 ### Feature Requests
 
-You can implement additional features using agent-assisted programming. OpenAI Codex was used for the current version:
+You can implement additional features using agent-assisted programming:
 
 - Clone the GitHub repository.
 - Ask your AI agent to read "Applet Description.md", "Requirements and Specifications.md".
 - Ask the AI agent to update the Description and Requirements with the feature you want.
 - Verify the modifications to the two files.
-- Have your AI agent add Tasks to the Task list based on the updated Specifications.
+- Have your AI agent add Tasks to the end of the Task list based on the updated Specifications.
 - Have your AI agent execute the additions to the Task list.
 - Make sure your AI agent updates Task List Completion Notes.
 - Complete the verifications and test your implementation as instructed by your AI agent. Do not skip the testing.

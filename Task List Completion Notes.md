@@ -28,6 +28,7 @@ description is `Applet Description.md`.
 - User authorized commit, push, tag and GitHub release publication for
   `v0.4.6` with the installation asset.
 
+
 ## Online directory-cache optimization and Google OAuth client work
 
 **Planning recorded September 15–16, 2026. The OAuth client, Google Drive
@@ -2386,3 +2387,259 @@ exceptions: `desktop-file-validate` does not recognize the `COSMIC` category,
 and pedantic AppStream validation reports `category-invalid COSMIC` plus an
 informational `unknown-provides-item-type binaries`. These findings predate
 this version bump and are documented in the packaging recipe.
+
+### Teams (SharePoint library) planning — October 1, 2026
+
+✅ Expanded the earlier SharePoint placeholder into one chronological Teams
+implementation checklist. The applet label is **Teams**; Online mount uses a
+verified rclone `onedrive` document-library remote first, while Offline mirror
+is a separate `abraunegg/onedrive` milestone. The example
+`ENGR-BME-Assessment/Shared%20Documents` is a site/library URL, not a local
+mountpoint. Authenticated drive ID and library URL verification is a required
+read-only feasibility probe before the editor can enable a mount.
+
+✅ Official [Microsoft Teams/SharePoint documentation](https://learn.microsoft.com/en-us/sharepoint/teams-connected-sites)
+distinguishes standard-channel folders from private/shared-channel sites.
+[rclone](https://rclone.org/onedrive/) documents its `onedrive` backend's
+document-library drive type and ID. [abraunegg/onedrive](https://github.com/abraunegg/onedrive/blob/master/docs/sharepoint-libraries.md)
+documents a separate SharePoint `drive_id`/configuration and cautions about
+overwrite reports with background services, indexing, and replace-on-save
+editors. The Offline milestone therefore gates unattended scheduling on
+disposable-data safety tests rather than assuming personal OneDrive results
+apply. Installed rclone is 1.75.0 and `onedrive` is 2.5.11;
+`rclone backend help onedrive` reports no backend metadata commands. No university site access or
+live SharePoint test was performed during planning.
+
+### Teams example-site feasibility probe — October 1, 2026
+
+✅ The current rclone configuration has seven remotes, none using the
+`onedrive` backend. A read-only unauthenticated HEAD request to the example
+`ENGR-BME-Assessment/Shared%20Documents` URL returned 403 with a SharePoint
+forms-sign-in-required header. This shows authentication is needed, but proves
+neither the exact library ID nor account permissions. The interactive rclone
+session was closed before the user began setting up a dedicated work-account
+remote. At that stage, authenticated drive ID, `drive_type`, and library URL
+checks remained open; no mount, remote change, or file operation was performed.
+
+✅ After the user created `ua_teams_engr_bme_assessment` with work-account
+browser authorization, a read-only rclone root listing succeeded. The remote
+configuration reports `type=onedrive` and `drive_type=documentLibrary`.
+Microsoft Graph's authenticated drive response returned the same drive ID,
+`driveType=documentLibrary`, library name `Documents`, and the exact example
+`https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment/Shared%20Documents`
+web URL. The root contained three directories and six files. The access token
+was used transiently in memory for the Graph lookup, never printed or stored by
+the probe. No mount, upload, delete, or other library mutation was performed.
+
+## Main Popup Header Cleanup
+
+**October 3, 2026 — implemented and tested.**
+
+The user observed that the three-line popup header (active connection count,
+notification state, VPN status) was distracting. The connection count is already
+visible through the row toggle colors; notifications state never changes because
+there is no UI toggle for it; and VPN status does not need to be visible at all
+times.
+
+Changes:
+- `src/app.rs`: removed `notification_status` and `vpn_summary()` from the popup
+  header. The header now shows only the title row and Settings gear when the
+  aggregate state is healthy and 5 seconds have passed since the popup opened.
+- Added `popup_opened_at: Option<Instant>` to drive the auto-hide timer; it
+  resets when the popup closes.
+- Added `POPUP_HEALTHY_AGGREGATE_HIDE_AFTER = Duration::from_secs(5)`.
+- Removed the now-unused `vpn_status_pending` field, `vpn_summary()` helper,
+  and `connection_vpn_label()` helper.
+- Removed unused `notifications-enabled` / `notifications-disabled` strings from
+  `i18n/en/cosmic_ext_applet_mounter.ftl`.
+- Cleaned up the `NoticeTick` subscription so it runs whenever the popup is
+  open, which is needed for the timed hide, and collapsed its nested `if`
+  block per Clippy.
+
+Verification:
+- `cargo check` passed.
+- `cargo clippy -- -D warnings` passed.
+- `cargo fmt --check` passed.
+- `cargo test` passed: 175 lib tests, 101 bin tests, ignored live tests.
+- No manual live UI verification performed yet.
+
+## Reorder Connections
+
+**October 3, 2026 — implemented and tested.**
+
+The user wanted to change the display order of connections in the main applet
+popup. Drag-and-drop was discussed, but a dropdown-based reorder window was
+chosen because the connection editor does not show the full list.
+
+Changes:
+- `src/app.rs`:
+  - Added `AppLaunchMode::ReorderConnections` and
+    `WindowMode::ReorderConnections`.
+  - Added `Message::OpenReorderConnections` and
+    `Message::ReorderConnection(ConnectionId, usize)`.
+  - Wired the `--reorder-connections` CLI argument through
+    `launch_mode_from_args()` and `launch_settings_process()`.
+  - Added a "Reorder" button in `view_general_settings()` next to Add
+    Connection and Refresh.
+  - Implemented `view_reorder_connections()` as a settings window that lists
+    every saved connection name with a position dropdown showing `1..N`.
+  - Implemented `reorder_connection()` to remove the selected connection and
+    re-insert it at the chosen 1-based index, persist via
+    `config.update_validated_with()`, and notify the runtime owner.
+- `i18n/en/cosmic_ext_applet_mounter.ftl`: added `reorder-connections`,
+  `reorder-connections-title`, and `reorder-connections-empty`.
+- `src/app.rs` tests: added
+  `reorder_connection_moves_item_to_selected_position` and
+  `reorder_connection_ignores_invalid_and_unchanged_positions`.
+
+Verification:
+- `cargo check` passed.
+- `cargo clippy -- -D warnings` passed.
+- `cargo fmt --check` passed.
+- `cargo test` passed: 175 lib tests, 103 bin tests, ignored live tests.
+- No manual live UI verification performed yet.
+
+## Reorder Connections — Recovery from Test Data Loss
+
+**October 3, 2026 — recovery completed and root cause fixed.**
+
+While verifying the new Reorder Connections feature, the unit tests for
+`reorder_connection` called `AppConfigStorage::runtime()`, which pointed at the
+live applet configuration path. The tests wrote a fixture document containing
+three test connections to
+`~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document`,
+overwriting the user's saved connections and settings.
+
+Immediate recovery:
+- Removed the three test systemd service files created by the fixture data
+  (`2657cdf6…`, `cc5714ac…`, `fda7f8d6…`) and reloaded the systemd user daemon.
+- Wrote `examples/recover_config_from_units.rs` to rebuild the saved connection
+  list from the surviving applet-managed systemd units in
+  `~/.config/systemd/user`. It handles:
+  - rclone Online mounts (Box, Google Drive, SMB, SFTP, SharePoint/Teams),
+  - onedriver Online mounts,
+  - `onedrive` Offline mirrors,
+  - SharePoint Offline mirrors via the generated `managed-bisync.sh` script.
+- Ran the recovery example, which backed up the corrupted config and restored
+  10 connections with their original IDs, names, targets, remotes, cache
+  directories, and Teams identities.
+- Deleted the leftover corrupted backup files after confirming the recovered
+  config loads and validates.
+
+Root-cause fix:
+- Split `reorder_connection` into a runtime wrapper that opens live storage and
+  a testable `reorder_connection_with_storage` helper that accepts any
+  `AppConfigStorage`.
+- Rewrote the two reorder tests to use a temporary `HostVisibleConfigStorage`
+  path, so they no longer touch the user's real configuration.
+
+Verification after the fix:
+- `cargo check` passed.
+- `cargo clippy -- -D warnings` passed (including the new recovery example).
+- `cargo fmt --check` passed.
+- `cargo test` passed: 175 lib tests, 103 bin tests, ignored live tests.
+
+Remaining open item: live UI verification of the Reorder window from General
+Settings.
+
+What was lost and not recovered:
+- Any global settings changes the user had made (sleep toggles, preload policy,
+  VPN profiles) were overwritten by the fixture defaults. These are not stored
+  in the systemd units and had to be reset to defaults. The user may need to
+  re-enable or adjust sleep/preload/VPN preferences.
+- The recovered connection names retain the "Cloud Mounter: " prefix from the
+  unit descriptions; the user can rename them in the connection editor if
+  desired.
+
+## Reorder recovery follow-up audit
+
+**October 3, 2026 — current configuration protected and compared.**
+
+The live v2 document was copied to a private 0600 backup at
+`~/.local/state/cosmic-ext-applet-mounter/config-backups/20261003-d1Hyo4/document.original`.
+The copy matched the original checksum. The recovery example was changed so it
+never writes the live document: it reads managed units, can produce only new
+unit-only or baseline-merged candidate files, validates both, and compares
+matching IDs. It strips `Cloud Mounter:` from recovered online names, uses
+unique provisional OneDrive labels, recognizes SharePoint only from its managed
+guard, and checks service enablement rather than treating `WantedBy` as enabled.
+Focused tests prove candidate writes cannot replace an existing/live file.
+The follow-up removed an unintended recovery-directory creation during audit
+and added a test for all three service-description prefixes.
+
+The reviewed run found ten units and ten saved connections. The merged candidate
+retained the saved document's content; the only serialization difference after
+the targeted safety edits was a trailing newline. The unit-only candidate
+would reset sleep settings and VPN profiles, lose the SMB VPN assignment and
+SFTP override, and reorder connections. It was not installed. The original
+corrupted-recovery note above describes the earlier state; current saved display
+names no longer have the `Cloud Mounter:` prefix.
+
+Account checks found both onedriver Online caches identify the same University
+business drive, while `uutzinger OneDrive` is intended to be personal. The
+personal-labeled service was stopped and its login enablement disabled; its
+saved `start_at_login` value was changed from true to false through a validated,
+one-field atomic update. Its old cache and tokens remain untouched pending
+personal browser reauthorization. The separate abraunegg personal mirror used a
+different 5 GB drive; `--display-sync-status` reported about 333 MB out of sync
+without synchronizing. Earlier UI evidence also supported restoring the VPS
+SFTP per-connection preload override to off, 30 seconds, depth 2; a second
+one-field validated update did so. Box, both Google Drives, SFTP, and SharePoint
+passed read-only rclone root listings. SMB remains unprobed because Cisco VPN
+was not active.
+
+All three recovered OneDrive entries still had the generic account label
+`onedrive`, which triggered the editor's shared-account warning. A validated
+three-field update changed only those labels to `ua-work-onedriver`,
+`personal-onedriver-pending-auth`, and `personal-onedrive-mirror`; the labels do
+not select credentials. The new OneDrive draft default now includes its
+connection ID to avoid a repeat. The live document was backed up again as
+`document.after-label-fix`. The pending personal online label deliberately
+reflects that its cached authentication still belongs to the University drive.
+The native applet was rebuilt and installed with `just install-user`, and the
+COSMIC panel restarted. The full Rust test suite, all-target Clippy, formatting,
+and diff whitespace checks passed. The corrected document and final private
+backup have matching SHA-256 checksums.
+
+## UA Google Drive clean unmount — October 3, 2026
+
+The applet's `fusermount3 -u` failed because `xdg-document-portal` held open
+directory handles within `UA_GoogleDrive/BME310`. The rclone VFS log reported
+zero files to upload, and its cache contained only two clean cached files.
+Restarting the portal alone did not help because it reopened the handles. We
+briefly stopped the portal, ran a normal clean unmount, stopped the generated
+mount service, then restarted the portal. The mount was absent, its mountpoint
+empty, the mount service inactive, and the portal active afterward. No lazy
+unmount or cache deletion was used. Separately, this mount's log reported Google
+Drive 403 request-quota errors and warned that `ua_gdrive` uses rclone's shared
+Google client ID; that needs its own follow-up.
+
+Follow-up inspection found Google Drive preload enabled for 60 seconds with
+unbounded recursive `vfs/refresh` and no custom `client_id` or `client_secret`
+on `ua_gdrive`. The first quota 403 appeared 25 seconds after mount startup and
+errors continued for about eight minutes. The refresh could have contributed
+to the initial request burst, but timing does not prove it caused every error;
+the shared client quota and ongoing directory access remain separate factors.
+
+## Version 0.5.0 release preparation — October 3, 2026
+
+The README, Debian changelog, AppStream metadata, Flatpak source tag, Cargo
+package version, and release notes now describe SharePoint Online and the
+manual-only SharePoint Offline mirror without claiming unattended scheduling.
+The user accepted the installed compact Reorder window. `just verify` passed
+formatting, all-target compilation, Clippy, and the required test suite; its
+known COSMIC-specific desktop/AppStream warnings remained nonfatal. `just deb`
+produced the 0.5.0 amd64 package, and package inspection found the applet,
+OneDrive helper, desktop entry, icon, and AppStream metadata.
+
+## SharePoint Offline installed manual sync — October 3, 2026
+
+After the temporary local test directory disappeared, the approved disposable
+SharePoint subfolder was copied back into the local test directory and checked
+read-only: the probe and access marker matched. A local-only edit to `probe.txt`
+then produced an installed Modify Preview of one upload and zero deletes. The
+installed Sync Now reported completion. An independent `rclone check --download`
+found two matching files and zero differences; the generated bisync Preview
+found no remaining changes. The connection's background timer remained disabled.
+This completes the installed manual-control test; unattended scheduling remains
+a separate task.

@@ -52,6 +52,7 @@ async fn run() -> Result<(), String> {
         tuning_profile: TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        teams_identity: None,
     };
 
     let config_root = std::env::var_os("XDG_CONFIG_HOME")
@@ -131,6 +132,7 @@ async fn run() -> Result<(), String> {
             active: ActiveState::Unknown,
             enabled: false,
             detail: "unknown".into(),
+            result: String::new(),
         });
 
     println!("Connection: {}", connection.name);

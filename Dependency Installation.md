@@ -1,6 +1,27 @@
 # Dependencies
 
-The applet detects dependencies and provides guidance, but does not install or upgrade them. You likely will need to update rclone. If you want to connect to OneDrive storage, you need to install onedriver and/or onedrive. All other components should be preinstalled by the operating system.
+The applet detects dependencies and provides guidance, but does not install or upgrade them. You likely will need to **update rclone**. If you want to connect to OneDrive storage, you need to install onedriver and/or onedrive. All other components should be preinstalled by the operating system.
+
+For Debian, Ubuntu, and Pop!_OS, you can use the automated installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
+```
+
+Or run it locally after cloning the repository:
+
+```sh
+bash scripts/install-dependencies.sh --all
+```
+
+The script installs rclone using the official installer by default. If you prefer
+to try rclone's package-aware selfupdate first, add `--rclone-selfupdate`:
+
+```sh
+bash scripts/install-dependencies.sh --all --rclone-selfupdate
+```
+
+Manual instructions are retained below for reference and for other distributions.
 
 ## Required Versions
 

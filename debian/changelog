@@ -1,3 +1,15 @@
+cosmic-ext-applet-mounter (0.5.0) unstable; urgency=medium
+
+  * Add verified SharePoint document-library Online mounts and Microsoft sign-in
+    setup through rclone.
+  * Add scoped SharePoint Offline mirror Preview and manual Sync Now; leave
+    background scheduling disabled pending unattended safety checks.
+  * Add optional SharePoint directory preload and pending-work indicators.
+  * Harden mountpoint, service repair, sync recovery, and connection-config
+    handling; add a compact Reorder Connections window.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Sat, 03 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.4.7) unstable; urgency=medium
 
   * Add SFTP Online mounts and Offline mirrors through rclone, including

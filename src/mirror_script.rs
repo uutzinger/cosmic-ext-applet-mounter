@@ -36,6 +36,19 @@ pub fn render(plan: &RcloneBisyncPlan) -> Result<String, CommandError> {
     let remote_root = shell_quote(&plan.remote_recovery_path)?;
     let local_root = shell_quote(&plan.recovery_directory.display().to_string())?;
     let owner = shell_quote(&owner)?;
+    let preflight = if let Some(command) = &plan.preflight_command {
+        let mut parts = vec![shell_quote(&command.executable.display().to_string())?];
+        parts.extend(
+            command
+                .arguments
+                .iter()
+                .map(|argument| shell_quote(argument))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        format!("{}\n", parts.join(" "))
+    } else {
+        String::new()
+    };
     let mut arguments = Vec::new();
     let mut index = 0;
     while index < plan.service.arguments.len() {
@@ -70,10 +83,48 @@ pub fn render(plan: &RcloneBisyncPlan) -> Result<String, CommandError> {
     {
         return Err(CommandError::InvalidArgument);
     }
+    let arguments = arguments.join(" ");
+    let access_check = if let Some(name) = &plan.access_marker_name {
+        let local = shell_quote(&plan.path2_local.join(name).display().to_string())?;
+        let remote = shell_quote(&format!(
+            "{}/{}",
+            plan.path1_remote.trim_end_matches('/'),
+            name
+        ))?;
+        format!(
+            "local_access={local}\n\
+remote_access={remote}\n\
+[ -f \"$local_access\" ] && [ ! -L \"$local_access\" ] || {{ echo 'SharePoint mirror access marker is missing or unsafe' >&2; exit 1; }}\n\
+[ \"$(cat \"$local_access\")\" = \"$owner\" ] || {{ echo 'SharePoint mirror access marker changed' >&2; exit 1; }}\n\
+case \"$mode\" in\n\
+  initial-preview|initial-sync) ;;\n\
+  *) remote_access_owner=$(\"$rclone\" cat \"$remote_access\") || {{ echo 'SharePoint remote access marker is missing' >&2; exit 1; }}\n\
+     [ \"$remote_access_owner\" = \"$owner\" ] || {{ echo 'SharePoint remote access marker changed' >&2; exit 1; }} ;;\n\
+esac\n"
+        )
+    } else {
+        String::new()
+    };
+    let verification = if plan.verify_after_sync {
+        let remote = shell_quote(&plan.path1_remote)?;
+        let local = shell_quote(&plan.path2_local.display().to_string())?;
+        let filters = shell_quote(&plan.filters_file.display().to_string())?;
+        format!(
+            "# SharePoint may rewrite Office bytes after the first upload.\n\
+case \"$mode\" in\n\
+  initial-sync) set -- {arguments} '--suffix' \"-$stamp\" ;;\n\
+esac\n\
+\"$rclone\" \"$@\"\n\
+\"$rclone\" check {remote} {local} '--checksum' '--filter-from' {filters}\n"
+        )
+    } else {
+        String::new()
+    };
 
     Ok(format!(
         "#!/bin/sh\n# Cloud Mounter managed bisync script: {owner}\n\
 set -eu\n\
+{preflight}\
 rclone={executable}\n\
 remote_root={remote_root}\n\
 local_root={local_root}\n\
@@ -91,6 +142,7 @@ case \"$mode\" in\n\
   sync|scheduled) ;;\n\
   *) echo 'invalid managed bisync mode' >&2; exit 2 ;;\n\
 esac\n\
+{access_check}\
 case \"$mode\" in\n\
   *preview) exec \"$rclone\" \"$@\" ;;\n\
 esac\n\
@@ -112,6 +164,7 @@ elif [ -n \"$(\"$rclone\" lsf \"$remote_backup\")\" ]; then\n\
 fi\n\
 printf '%s\\n' \"$owner\" | \"$rclone\" rcat \"$remote_marker\"\n\
 \"$rclone\" \"$@\"\n\
+{verification}\
 cutoff=$(date -u -d '32 days ago' +%F)\n\
 for candidate in \"$local_root\"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do\n\
   [ -d \"$candidate\" ] || continue\n\
@@ -129,7 +182,7 @@ done\n\
   [ \"$(\"$rclone\" cat \"$target/{OWNER_MARKER}\" 2>/dev/null || true)\" = \"$owner\" ] || continue\n\
   \"$rclone\" purge \"$target\" || echo 'remote recovery cleanup deferred' >&2\n\
 done\n",
-        arguments.join(" ")
+        arguments
     ))
 }
 
@@ -191,6 +244,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         };
         let plan = rclone_bisync_plan(&connection, Path::new(&work)).unwrap();
         std::fs::create_dir_all(&plan.work_directory).unwrap();

@@ -29,7 +29,7 @@ Each storage connection uses exactly one access mode.
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
 
-SharePoint (Teams files) is a planned provider with separate Online mount and
+SharePoint is a provider for document libraries, including Teams files, with separate Online mount and
 Offline mirror milestones, described below; it is not in the supported matrix
 until implementation and acceptance are complete.
 
@@ -148,10 +148,11 @@ Online mount engine. Provider defaults are:
 | Google Drive | Yes | 60 seconds | Recursive asynchronous `vfs/refresh` with fast-list |
 | OneDrive | Yes | 60 seconds | Directory-only walk of the mounted tree |
 | Box | Yes | 60 seconds | Directory-only walk, maximum depth 2 |
+| SharePoint | No | 30 seconds | Directory-only walk within the selected library or folder, maximum depth 2 |
 | SMB | Yes | 60 seconds | Directory-only walk, maximum depth 3 |
 | SFTP | No | 30 seconds | Directory-only walk, maximum depth 2; excludes server `/proc`, `/sys`, `/dev` |
 
-Durations accept 5 to 600 seconds. Box, SMB, and SFTP depths accept a finite validated
+Durations accept 5 to 600 seconds. Box, SharePoint, SMB, and SFTP depths accept a finite validated
 range from 1 to 10. Google Drive and OneDrive use their provider-specific full
 tree mechanisms and do not expose a depth value.
 
@@ -167,7 +168,7 @@ Each SMB or SFTP Online connection defaults to **Use global preload settings**. 
 connection editor can instead override preload enablement, maximum duration,
 and depth for that connection. This supports independent home, LAN, corporate,
 and VPN shares without requiring one compromise setting. Google Drive,
-OneDrive, and Box use their provider-wide values.
+OneDrive, Box, and SharePoint use their provider-wide values.
 
 - Google Drive waits for the mount and private RC socket, then submits its
   recursive refresh. Job completion must inspect both the top-level RC status
@@ -310,8 +311,8 @@ vertical scrollbar reaches the window's right edge. It offers:
 - **Refresh**, reloading the running applet's configuration and refreshing its
   runtime status, with completion/failure feedback in General Settings.
 - **Preload**, with enabled and maximum-duration settings for Google Drive,
-  OneDrive, Box, SMB, and SFTP plus directory-depth defaults for Box, SMB, and
-  SFTP. The SFTP row appears immediately below SMB.
+  OneDrive, Box, SharePoint, SMB, and SFTP plus directory-depth defaults for
+  Box, SharePoint, SMB, and SFTP. The SFTP row appears immediately below SMB.
 - Sleep-listener status and the latest cleanup details.
 
 Settings changes and Refresh must reach the running applet through an explicit
@@ -453,11 +454,11 @@ exclusions, not blanket exclusions of ordinary project folders named `sys`.
 Paths relative to the login directory cannot be mapped to server absolute paths
 without server information. Ordinary on-demand browsing remains available.
 
-### Planned SharePoint (Teams files) connections — September 30, 2026
+### SharePoint connections — September 30, 2026
 
 SharePoint document libraries, including files presented in Microsoft Teams,
 are a planned provider distinct from personal or business OneDrive connections.
-The editor should label it **SharePoint (Teams files)**. A connection selects a
+The editor and provider button label it **SharePoint**, beside OneDrive. A connection selects a
 SharePoint site, one document library on that site, and optionally a folder
 within the library. For example,
 `https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment/Shared%20Documents`
@@ -469,17 +470,40 @@ Keep **Online mount** and **Offline mirror** as distinct, mutually exclusive
 access modes for each SharePoint connection. Online mount is the first planned
 milestone: use rclone's Microsoft OneDrive backend configured for the selected
 SharePoint document library, with the applet's existing managed mount, access
-test, cache, unmount, and recovery controls. Initial setup may select a
-preconfigured rclone remote; in-app site/library discovery and OAuth setup can
-follow. The provider name in the applet is SharePoint even though rclone calls
-its backend `onedrive`.
+test, cache, unmount, and recovery controls. Setup may select a preconfigured
+rclone remote or use **Connect Microsoft Account** to create a separate remote
+through rclone's browser OAuth. The applet resolves the site's document libraries
+and accepts only the one whose verified URL matches the entered library URL.
+The applet shows **SharePoint** for document-library storage, including
+Microsoft Teams files; rclone calls its backend `onedrive`.
 
-Offline mirror is a later milestone using a separate library-specific
-`abraunegg/onedrive` configuration and local directory. It shall become
-available only after library selection, preview, conflict handling, deletion
-recovery, and interrupted-sync behavior are verified with disposable data.
-SharePoint support is planned here; neither mode is implemented by this
-description.
+Offline mirror uses the verified library's rclone remote with a separate local
+directory and bisync state. The University's tenant requires administrator
+approval for the separate `abraunegg/onedrive` app, so that client cannot
+currently authenticate to this work library. SharePoint Offline provides
+manual Preview and Sync Now after scoped disposable tests of conflicts,
+deletion recovery, Office-file rewrites, and interrupted sync. Background
+scheduling remains disabled pending unattended safety checks.
+
+The Add/Modify workflow accepts the library URL as a locator, then lets the
+user choose a preconfigured rclone `onedrive` remote or create a new one with
+browser sign-in. A new remote name must be unused; switching accounts creates
+a separate remote rather than changing an existing OneDrive remote. The applet
+checks authenticated document-library identity and access before Save or Mount.
+It stores the verified library ID,
+site/library URLs, selected remote, and optional folder separately; it does not
+turn `Shared%20Documents` into a local mountpoint or assume a Teams channel is
+a library. Standard Teams channels are folders in a site's library, while
+private or shared channels may use another SharePoint site. Browsing all sites
+without a known URL remains a later option; manual remote selection remains
+available.
+
+Offline mirror reuses the selected rclone library remote but has its own bisync
+state, local directory, preview, and recovery data. It starts with manual, confirmed
+sync on disposable data. Background scheduling becomes available only after
+SharePoint-specific overwrite, conflict, deletion, and interruption checks
+pass; indexing or applications that replace files during save can otherwise
+trigger unwanted uploads. Credentials stay with the external engines.
 
 ## Legacy Import and Removal
 

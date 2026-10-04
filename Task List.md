@@ -2057,55 +2057,777 @@ SharePoint library connections are a future provider. Keep Online mount and
 Offline mirror as separate modes; implement and validate Online mount first.
 No SharePoint applet integration or live acceptance is claimed yet.
 
-- [x] Add the planned **SharePoint (Teams files)** provider and two-mode strategy
+- [x] Add the planned **Teams** engine for SharePoint libraries and two-mode strategy
   to `Applet Description.md`.
 - [x] Add a requirements placeholder in Section 18 of
   `Requirements and Specifications.md`.
 - [x] Record implementation and acceptance placeholders here.
-- [ ] Define exact site/library URL parsing, persisted library identity,
+- [x] Define exact site/library URL parsing, persisted library identity,
   preconfigured rclone remote selection, OAuth/tenant-consent errors, preload
-  policy, and native/Flatpak acceptance before implementation.
-- [ ] Implement SharePoint Online mount with rclone's `onedrive` backend for a
-  verified document library. Preserve existing OneDrive behavior and reuse
-  bounded access testing, managed services, cache/write safety, VPN/network
-  recovery, unmount, repair, and provider-specific diagnostics.
-- [ ] Validate Online mount against a disposable SharePoint library, including
-  read/write, pending uploads, disconnect/reconnect, unmount, and repair.
-- [ ] Implement SharePoint Offline mirror with a separate
-  `abraunegg/onedrive` configuration and library `drive_id`; retain preview,
-  explicit initial confirmation, scheduling, and recovery safeguards.
-- [ ] Validate Offline mirror with disposable data, including conflicts,
-  deletions, interruption recovery, and overlap prevention, before enabling
-  that mode in the applet.
+  policy, and native/Flatpak acceptance before implementation. The detailed
+  plan and unresolved authenticated-metadata probe are recorded in the new
+  October 1 planning section below.
 
-Site:
+The unfinished Online and Offline implementation and acceptance items from
+this placeholder are expanded in the October 1 implementation plan below.
+
+Example site:
 https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment
-Mountpoint:
+Example library URL path segment (not a local mountpoint):
 Shared%20Documents
 
-## OneDrive Mount Failure — Deferred Investigation
+## Teams (SharePoint library) implementation plan — October 1, 2026
 
-User report: OneDrive shares had mounting problems. The end-of-list reminder
-suggested clearing the generated systemd user service's failed state before
-starting it again. Keep this as an investigation note for a later discussion;
-the cause and appropriate applet behavior have not yet been established.
+This expands the September 30 placeholder above. Online mount is the first
+deliverable; Offline mirror is a separate later milestone. The Online implementation
+is in progress; its authenticated library identity check and an installed native
+read-only mount passed against the university site. Use only a disposable library/folder
+and files for write, delete, conflict, or sync tests. Section 18 of
+`Requirements and Specifications.md` defines the behavior and release gates.
 
-Commands retained from the note for reference (the abbreviated service ID is a
-placeholder, not a runnable connection identifier):
+- [x] Check the upstream engine design and installed tools: rclone 1.75.0
+  supports SharePoint document libraries through its `onedrive` backend, but
+  `rclone backend help onedrive` exposes no metadata command here; installed
+  `abraunegg/onedrive` is 2.5.11. At this planning stage, authenticated Graph
+  identity lookup and tenant consent still needed a read-only feasibility probe.
+- [x] Start the example-site feasibility probe: the configured rclone remotes
+  have no `onedrive` backend, and an unauthenticated HEAD request for the example
+  library returns a sign-in-required 403. Neither result establishes the
+  library's identity or the work account's access. The user subsequently
+  created a dedicated remote; authenticated verification is recorded below.
 
-```sh
-systemctl --user reset-failed cosmic-mounter-990cc48f-...-c545ad3d3f9d.service
-systemctl --user start cosmic-mounter-990cc48f-...-c545ad3d3f9d.service
-```
+### Identity and first usable Online mount
 
-- [ ] Identify the affected OneDrive connection, access mode, engine, and exact
-  generated service; capture its status and journal around a failed mount.
-- [ ] Determine whether the failed state, a start-rate limit, authentication,
-  connectivity, or a lingering mount prevented recovery. Treat the original
-  claim that every failed service requires `reset-failed` as a hypothesis to
-  check, not a confirmed rule.
-- [ ] Discuss the expected Mount/Retry/Repair behavior and whether targeted
-  failed-state recovery is needed; then define any implementation and regression
-  tests based on the observed failure.
+- [x] Run a read-only feasibility probe with a preconfigured rclone `onedrive`
+  document-library remote and delegated Microsoft access: obtain its `drive_id`,
+  `drive_type`, and authenticated library `webUrl` (Graph drive metadata or an
+  equivalent authenticated engine response). Prove that the example URL maps
+  to the expected site and library without displaying or persisting tokens. If
+  tenant policy blocks identity verification, retain a clear blocked state;
+  do not silently accept a remote name or URL as proof. Completed with
+  `ua_teams_engr_bme_assessment`: configured and Graph drive types were
+  `documentLibrary`, drive IDs matched, authenticated `webUrl` exactly matched
+  the example library, and a read-only root listing succeeded.
+- [x] Add a distinct SharePoint provider and version-tolerant connection
+  identity fields: canonical site URL, library URL/name, verified drive ID,
+  selected rclone remote, and optional folder. Preserve old configurations and
+  existing OneDrive engine selection. Reject stale IDs or remote retargeting
+  before mount; avoid credential storage in applet configuration.
+- [x] Implement a conservative URL parser for HTTPS SharePoint site/library
+  links, including percent-decoding once, path boundaries, case/encoding
+  normalization, query/fragment stripping, and `/sites/` or `/teams/` site
+  paths. Reject ambiguous sharing/view links and require an explicit library
+  choice when the URL cannot identify one. Test the example URL; `Shared%20Documents`
+  is the library URL segment, while the local mountpoint is chosen separately.
+- [x] Add a **Teams** button beside OneDrive in Add/Modify and collect the
+  preconfigured document-library remote, library URL, optional folder, and
+  local path. Verify the site, library, drive, and signed-in account when
+  available before Save; show `account unavailable` when Microsoft Graph does
+  not supply an account. Keep Test Connection read-only. The installed native
+  Add editor saved the assessment connection, and an unsaved draft passed Test
+  Connection; a nonexistent folder produced a clear error without raw rclone
+  output. The saved Modify editor displayed the remote, URL, optional folder,
+  target, and verified identity correctly without clipped controls. Focused
+  tests pass for consent, expired authorization, denied access, wrong remote
+  type, and secret redaction. Additional installed authentication/permission
+  variants remain conditional in the Online acceptance item below. In-app
+  OAuth and library discovery are separate optional work.
+- [x] Make Test Connection usable for an unsaved Teams connection: verify the
+  selected document-library drive first, build the managed plan with that
+  verified ID, then check the chosen folder. Show the verified site, library,
+  drive, and available signed-in account in the result. Discard an asynchronous
+  test result if the draft's remote, URL, or other settings changed meanwhile.
+  This path remains read-only and does not save the connection.
+- [x] Route SharePoint Online through the rclone `onedrive` backend only when
+  `drive_type=documentLibrary` and the verified drive ID still match. Reuse
+  service, mount, cache, VPN/network, sleep/wake, clean unmount, pending-write,
+  Repair, and removal safeguards. Keep SharePoint-specific diagnostics and
+  throttle-aware retries; default directory preload to off and bound it to the
+  selected library/folder if later enabled.
+  Teams uses the shared rclone Online lifecycle and a generated service guard
+  that independently rechecks the saved SharePoint identity for manual,
+  direct-systemd, and login starts. Start at login is opt-in and the saved
+  setting enables or disables the guarded unit; the previous note saying it
+  must stay disabled is obsolete. Directory preload is off and unavailable for
+  Teams at this stage. Teams mounts limit uploads to one transfer, use bounded
+  retries, and rely on rclone's OneDrive backend for server-directed throttling.
+  A focused code test covers routing, guarded service generation, the login
+  unit target, and preload exclusion. Installed lifecycle behavior remains in
+  the separate acceptance task below.
+- [x] Classify Teams read-only rclone failures without displaying raw output:
+  tenant consent, expired authorization, denied access, missing library/folder,
+  throttling, and network failure. Treat Graph 503 as a transient limit.
+  Isolated tests cover these messages, token/path redaction, drive retargeting,
+  and the verified-ID requirement in a new draft.
+- [x] Add focused tests for URL and identity matching, old-config loading,
+  remote retargeting, authentication/permission errors, service generation,
+  secret redaction, and no regression to existing OneDrive connections.
+  URL/identity, old-config, remote filtering, and service-plan tests are in
+  place. Isolated permission, retargeting, secret-redaction, Graph status,
+  remote-config, and service-routing checks are also complete. Installed
+  service behavior remains in the acceptance task below.
+- [x] Review the updated Test Connection in the installed native Add editor.
+  An unsaved Teams draft passed with the verified site, library, drive, and
+  available account detail. An intentionally absent optional folder produced a
+  clear missing-folder notice without raw rclone output; the draft was not saved.
+- [x] Validate basic installed native Online writes with one disposable folder
+  in the assessment library. The installed identity guard passed read-only;
+  the saved mount started with zero queued uploads and cache errors. A small
+  file was created and edited twice through the mount, and each version was
+  read independently from SharePoint. With the file held open, VFS reported a
+  queued upload after close, then one upload in progress, then zero queued,
+  active, or errored files. Only the disposable file and folder were removed;
+  SharePoint confirmed the folder absent. Clean FUSE detach and service stop
+  succeeded. The service is inactive, the mountpoint empty, and no cache entry
+  is dirty. Earlier installed read and applet-toggle unmount checks also passed.
+- [x] Check installed native Repair and applet status transitions. The saved
+  assessment connection mounted with an active switch, then cleanly unmounted
+  with a grey switch. A temporary Teams-only systemd override made the stopped
+  service fail before rclone could start; the override was removed immediately.
+  The popup then reported `Current status: Error`, and its two-click switch
+  action reported `Repair completed`. The service is now inactive with a
+  successful result, the Teams target is unmounted and empty, and the generated
+  unit has no test override. Repair is on the popup switch in Error state; it
+  is not a button in Modify.
+- [x] Check the installed Teams identity guard's network-failure and recovery
+  messages without interrupting other mounts. A proxy limited to one read-only
+  guard invocation caused the clear `Could not reach SharePoint` notice; the
+  same guard passed again with normal network settings. The configured remote's
+  `General/` standard-channel folder was also listed successfully. This does
+  not claim a live applet mount recovered from a host-wide network outage.
+- [ ] Check a full installed mount through a Teams-only lost/recovered network
+  event if it can be isolated from other active connections. Check a separate
+  private/shared-channel site if one is available and record tenant permission
+  limits. Test additional installed authentication/consent diagnostics only
+  with disposable credentials or a safe simulated failure. Run packaged-host
+  checks in Flatpak when its public distribution path exists; do not repeat
+  passed assessment-library checks unless a failure or code change warrants it.
 
-No runtime fix or successful recovery is claimed by this note.
+### Optional usability follow-up
+
+- [x] Plan and implement URL-guided Microsoft OAuth before Offline mirror.
+  Add **Connect Microsoft Account** in Teams Add/Modify. Require an unused
+  rclone remote name and exact library URL, run rclone's browser authorization,
+  discover the site's drives, and select only a `documentLibrary` whose
+  authenticated Graph URL matches the entered URL. Verify the completed remote
+  before offering Test Connection/Save, clean up a partial new remote on failure,
+  and keep manual remote selection. Account switching creates a separate remote;
+  existing Teams and OneDrive remotes are never updated. Focused library and
+  binary tests pass; live browser sign-in is tracked below. OAuth editor labels,
+  notices, and setup errors use the Fluent catalog.
+- [x] Live-check native Teams browser OAuth with a new disposable remote name
+  and the assessment library URL. The first attempt exposed a non-JSON rclone
+  completion response; the applet now accepts it only after the new remote
+  passes the same read-only identity gate as a manual remote. Browser sign-in
+  then created `ua_teams_oauth_probe` with `type=onedrive`,
+  `drive_type=documentLibrary`, and the same verified drive ID as the working
+  assessment remote. The editor reported the verified library and `account
+  unavailable` because Graph did not return `/me`; its unsaved Test Connection
+  passed. An independent root listing and a transient user-service listing
+  both succeeded. The unsaved editor was closed and only the disposable probe
+  remote was removed; the working assessment remote remains. No SharePoint file
+  or saved connection was changed.
+- [ ] Check Teams OAuth tenant-consent/authorization failure feedback with a
+  disposable account or safely simulated provider response. Check Flatpak
+  host-browser and credential access when the public package path exists.
+- [ ] Optionally add tenant-wide site/library browsing without a pasted library
+  URL. Keep URL-guided discovery and manual remote selection as fallbacks.
+
+
+### Installed Teams write-test interruption — October 1, 2026
+
+- [x] Stop the installed assessment mount after the disposable write-test
+  preparation exposed repeated uploads of existing files. The service logged
+  SharePoint throttling and file-size mismatch errors; its VFS cache was about
+  1.2 GB. The user authorized stopping the service. The service is inactive,
+  the mount detached, and the cache was preserved. The empty disposable
+  `CloudMounter-Test-20261001-a3d674dd9b09` folder was removed.
+  The user confirmed the Box source was mounted during the copy. Of 652 VFS
+  metadata entries, 386 Office files (about 697 MB) remain marked dirty;
+  266 are clean. A separate local cache snapshot was made at
+  `~/.local/state/cosmic-ext-applet-mounter/teams-cache-snapshot-20261001-1750`
+  with matching file count and byte total. Do not restart the Teams mount
+  until the queued copies are reconciled.
+- [x] Determine which cached uploads were intentional and reconcile each
+  affected file with SharePoint. The user confirmed the Box-to-Teams copy was
+  intentional. The read-only audit identified 375 absent remote paths and 11
+  already-present files; the user verified those 11 in Teams Client before the
+  controlled retry. The original VFS cache snapshot was preserved.
+- [x] Reproduce the SharePoint Office-file size-change behavior with isolated
+  disposable data. A 4,997-byte DOCX failed a plain `rclone copyto` after
+  SharePoint expanded it; `--ignore-checksum --ignore-size` completed the copy,
+  and the downloaded DOCX remained a valid archive with matching document text.
+  An isolated rclone VFS mount using the same flags also uploaded the DOCX and
+  cleared its dirty state. The disposable SharePoint folder and isolated mount
+  were removed. Those flags were added only to generated Teams online mounts;
+  focused provider tests and Clippy pass. The installed assessment mount remains
+  stopped, and its queued uploads have not been retried. These flags relax
+  transfer verification, so recovery still requires independent review.
+- [x] Build a read-only recovery inventory from the stopped VFS cache and
+  compare the 386 dirty files with the assessment SharePoint library and the
+  specified Box source folder. SharePoint reports 375 paths absent and 11
+  present with different sizes; no dirty file matched by size. Box provides
+  43 exact-path-and-size matches and 300 unique filename-and-size matches in
+  another folder. Thirty-one Box matches are ambiguous and 12 need manual
+  source review. Three absent SharePoint paths were independently spot-checked.
+  The private 386-row audit is saved at
+  `~/.local/state/cosmic-ext-applet-mounter/teams-upload-audit-20261001.csv`;
+  Teams remains stopped and the cache snapshot remains intact.
+- [x] Review the 11 SharePoint files with different sizes before considering
+  deletion. The user opened all 11 through the independent Teams client and
+  confirmed they are present, open correctly, and contain the expected content.
+  Treat these as usable SharePoint copies; a size difference alone is not
+  evidence of an incomplete file. All 11 were also downloaded read-only to
+  `~/.local/state/cosmic-ext-applet-mounter/teams-present-11-20261001` before
+  retry; each is a readable Office archive. One downloaded file differs in size
+  from SharePoint's own reported size. No deletion is proposed.
+- [x] Build and install the Teams-only rclone flag change with `just install-user`.
+  The installed binary matches the release build; the Teams service remained
+  inactive and its 1.2 GB VFS cache was not retried by installation. A second
+  build added `--transfers 1` for Teams to limit SharePoint retry pressure;
+  focused provider tests and Clippy passed, and the panel was reloaded.
+- [x] With the preserved cache and SharePoint copies available, reload the
+  installed applet and make one monitored Teams mount to retry the 386 queued
+  uploads. Confirm the generated service contains `--ignore-checksum` and
+  `--ignore-size`, watch upload errors and dirty-file count, then verify remote
+  content before allowing normal cache cleanup. Systemd loaded both flags and
+  `--transfers 1`. All 375 previously absent paths uploaded and were present
+  in a subsequent read-only SharePoint inventory. The 11 already-present files
+  alone remained dirty after SharePoint returned 404 upload-session errors on
+  replacement attempts. The service was stopped rather than retrying them
+  indefinitely; no SharePoint file was deleted.
+- [x] Resolve the 31 ambiguous and 12 unmatched Box sources as a conditional
+  recovery fallback. No Box source reconstruction was needed: all 375 missing
+  SharePoint paths uploaded from the preserved cache. The Box path ambiguity
+  does not block this recovery; retain the audit if source mapping is needed
+  later.
+- [x] Preserve and retire the stale dirty cache safely. Downloaded all 11
+  remote files again after retry; all were readable Office archives. Seven
+  were byte-identical to the pre-retry downloads; the other four changed only
+  `docProps/custom.xml`. With the service stopped, moved the whole post-retry
+  cache to `~/.local/state/cosmic-ext-applet-mounter/teams-cache-after-retry-20261001`
+  rather than editing rclone metadata or deleting files. Restarted the Teams
+  service with a fresh cache: mount active, zero dirty entries, and no new
+  warning logs. A newly uploaded DOCX and an existing PPTX opened through the
+  mount as valid archives. Four larger recovered Office files also opened as
+  valid archives with no missing original entries; their main document, slide,
+  or workbook content entries matched the cached originals. Keep the original
+  and post-retry cache archives and the pre/post-retry copies of the 11 files
+  until the user is satisfied with the mounted library.
+
+### Teams Online mount safety follow-up — October 2, 2026
+
+- [x] Add a service-level Teams library identity guard. Generated Teams Online
+  units now verify the saved connection binding and authenticated SharePoint
+  drive ID, type, and library URL before rclone starts, including direct systemd
+  starts and starts at login. A skipped guard is reported as a blocked mount in
+  the applet. Other mount engines retain their existing units.
+- [x] Cover changed or disabled connections, unit rendering, absent subfolders,
+  and SharePoint URL escaping with focused tests. The library suite passes.
+- [x] Install the updated binary and refresh the saved assessment unit while
+  stopped. Systemd verified and loaded the guarded unit. The installed guard
+  passed with the saved SharePoint identity and rejected a deliberately wrong
+  drive ID. A direct `systemctl --user start` ran the guard successfully before
+  mounting; the service was then stopped, and the mountpoint is unmounted.
+  Preserve the cache archives until the user is satisfied with the library.
+
+### UA OneDrive reset and sleep incidents — October 2, 2026
+
+These are separate incidents. Empty local directories were seen beneath the UA OneDrive
+mountpoint after a hard reset several days earlier. The sleep/wake failure and
+three-toggle Repair sequence occurred this morning.
+
+- [x] Identify the affected connection: **UA OneDrive**, `onedriver` Online
+  mount, service `cosmic-mounter-990cc48f-4e4e-4ed7-a07b-c545ad3d3f9d.service`.
+  It is currently active and mounted; its service reports success and no restart
+  limit. The current mounted view hides any underlying local files.
+- [x] Inventory the earlier obstruction from the user's September 29 repair
+  record: while unmounted, the mountpoint held only an empty
+  `BME/BME497G/2026` directory chain. onedriver repeatedly reported
+  `Mountpoint must be empty`; the record then reports that mounting resumed.
+  The omitted portion does not confirm the exact recovery command or which
+  process created the directories.
+- [ ] Determine how local directories appeared while the share was unmounted.
+  Preserve any moved-aside copy if it still exists; do not unmount the currently
+  working share merely to recreate this older incident.
+- [x] Establish this morning's sleep failure from the journal: at 05:55 on
+  October 2, `fusermount3` returned `Device or resource busy`; onedriver exited
+  with status 128 while stopping, leaving cleanup incomplete. No current
+  process holder proves which process held it open at that earlier moment.
+- [x] Change onedriver sleep cleanup to attempt a bounded clean detach before
+  stopping its service. If the FUSE mount remains busy, leave the service
+  running and report the incomplete cleanup; never force or lazily detach it
+  automatically. Focused busy and successful-detach tests pass.
+- [ ] Install/reload the updated applet and perform one controlled sleep/wake
+  check when the active OneDrive mount can be interrupted safely. Verify that
+  a busy mount remains usable after wake, and that a clean mount stops and
+  restores according to the saved setting without repeated Repair clicks.
+
+### UA OneDrive earlier repair record reviewed — October 2, 2026
+
+- [x] Separate the September 29 non-empty mountpoint from the later failed
+  service state and the October 2 sleep failure. The earlier repair record
+  reports an onedriver `Mountpoint must be empty` restart loop, then successful
+  mounting after a proposed move of an empty `BME/BME497G/2026` hierarchy; the
+  exact command is omitted from the supplied excerpt. A later
+  empty-mountpoint attempt recovered with `systemctl --user reset-failed` and
+  `start`; that sequence does not prove reset is required after every failure.
+- [x] Check the current applet path: a manual OneDrive Mount already issues
+  `reset-failed` before `start`, but it ignores errors from that reset. Setup
+  validation checks that the mountpoint is a directory; it does not check that
+  an unmounted onedriver target is empty. The applet creates only the target
+  directory in this path, not the nested `BME/...` hierarchy.
+- [x] Add a read-only empty-mountpoint preflight before onedriver starts,
+  including generated-service starts, to prevent a non-empty target from
+  entering a restart loop. Explain the obstruction and preserve all local
+  entries; offer inspection or a separate backup location, never automatic
+  deletion. Cover manual Mount, login/direct starts, and a mount that is
+  already active. Implemented for all Online engines in the later section.
+- [x] Make failed-state handling explicit for all Online engines: read service
+  state before starting, reset only failed units, and report a failed reset or
+  status read. Classify a systemd start-rate limit separately from a service
+  preflight block; the shared mountpoint guard already distinguishes local
+  entries from an existing mount before applet starts. Focused fake-service
+  tests cover inactive starts, failed resets, start limits, and preflight
+  blocks. No live connection was started for this check.
+  Native user binary installed; the running panel has not been restarted.
+
+### All Online engines: empty mountpoint preflight — October 2, 2026
+
+- [x] Add a shared read-only host preflight for OneDrive, Teams, Google Drive,
+  Box, SMB, and SFTP Online mounts. It blocks an already mounted target, a
+  non-directory or symlink target, and any local entry in an unmounted target;
+  it never removes or moves user data. Offline mirrors remain unaffected.
+- [x] Run the preflight before applet Mount and in each generated user service,
+  including login/direct starts. Teams retains its SharePoint identity check.
+  An applet startup refreshes saved managed Online units without restarting
+  active mounts; OneDrive also refreshes its unit on manual Mount.
+- [x] Test empty, non-empty, symlink, and already mounted targets; assert each
+  engine generates a guard. Library tests, applet tests excluding the unrelated
+  sandbox-only private-DBus test, and Clippy pass. A read-only CLI check rejected
+  the currently mounted UA OneDrive target without changing it.
+- [x] Install and restart the native applet. All eight saved Online units now
+  contain their guards; the one Offline mirror unit has none. Systemd loaded
+  UA OneDrive's `ExecCondition`, and the installed guard accepted its currently
+  empty, unmounted target. No mount service was started for this check.
+- [ ] Verify a disposable non-empty target is blocked by a direct systemd
+  start. Repeat the host-command check for the packaged Flatpak when that
+  installation is available.
+
+### Per-connection pending-change count — October 2, 2026
+
+- [x] Define the compact row count and its evidence limits in Requirements:
+  one number between name and switch, `0` only when currently verified,
+  `+` when active with an unknown count, `-` when inactive with an unknown
+  count, and no cache-size estimate masquerading as pending files.
+- [x] Implement the shared count state: connection ID, access mode, observed
+  count, checked time, source, and unknown/error reason. Keep observations
+  transient and invalidate them on service stop, sleep, restart, network loss,
+  connection edit, or failed status query. Add localized count help text.
+- [x] Implement rclone Online counts for Teams, Google Drive, Box, SMB, and
+  SFTP from each active mount's existing private RC socket. Read `vfs/queue`
+  for queued plus uploading entries and VFS error state for confidence. Poll
+  asynchronously at a bounded interval, and never block an operation or scan
+  the cache/remote for this badge. Parser tests pass; installed live validation
+  remains in the verification item below.
+- [ ] Implement Offline mirror counts for supported engines. Use a bounded
+  read-only preview/status check while idle, avoid concurrent bisync preview
+  during a run, report confirmed per-run progress for manual and scheduled
+  sync, and refresh the scoped count after completion. Include uploads,
+  downloads, deletions, and conflicts; show age/unknown when the result is
+  stale or incomplete. Use `--display-sync-status` for abraunegg/onedrive
+  where available; defer Teams mirrors until their release gate passes.
+  - [x] Add read-only OneDrive mirror status parsing and bounded idle bisync
+    change checks for rclone mirrors. A disposable initial bisync dry run
+    confirmed its output shape; status parsers have focused tests.
+  - [x] Read the current scheduled bisync invocation's journal without taking
+    its lock. Show a decreasing estimate only after both change summaries and
+    completed file operations are reported; never infer zero before bisync
+    reports success. Unknown or truncated logs use the active/inactive marker.
+  - [ ] Add a reliable count during active manual and scheduled mirror runs,
+    then verify that it falls to zero only after a fresh completed check.
+    Manual Sync Now still has no streaming progress source. A running timer
+    suppresses automatic bisync preview to avoid lock interference, so its
+    idle baseline remains unknown until a safe check is available.
+- [x] Put the count in each main-popup connection row between name and switch.
+  Preserve switch reachability, compact layout, hover help, keyboard and
+  screen-reader text, and Fluent localization. Show `+` or `-` for onedriver Online
+  mounts until a supported count exists; never treat unavailable as synced.
+  Source layout is implemented; installed visual/accessibility validation is
+  tracked below.
+- [ ] Verify with disposable data that rclone Online queue counts decrease to
+  zero after upload; mirror counts update through Preview, Sync Now, scheduled
+  sync, new changes, interruption, and recovery. Cover errors/stale values,
+  slow providers, native and available Flatpak builds, and a user-guided
+  installed-popup visual check. Update the displayed-count wording if live
+  evidence shows an engine exposes only an estimate. The native build was
+  installed with `just install-user`; the panel has not been reloaded for a
+  visual check, and no work connection was mounted for this feature test.
+
+### Teams Offline mirror feasibility — October 2, 2026
+
+- [x] Confirm the installed `abraunegg/onedrive` v2.5.11 accepts a separate
+  `--confdir`, `drive_id`, and `sync_dir` in an isolated local
+  `--display-config` probe. The probe used a disposable ID and directory;
+  it did not authenticate or contact SharePoint.
+- [x] Attempt separate abraunegg authorization: the University tenant showed
+  **Need admin approval** for OneDrive Client for Linux. The existing OneDrive
+  mirror is a personal-account connection; it does not authorize this client
+  for UA SharePoint. Do not require the user to sign in as an administrator.
+- [x] Add a probe-only Teams mirror plan with a separate `teams-sync/<id>`
+  configuration path, verified drive ID, path-overlap validation, and bounded
+  `--display-config`/`--dry-run` requests. Generate only the isolated
+  `drive_id` setting and reject unsafe ID bytes. This probe-only code was
+  removed after tenant consent blocked the engine. No Teams mirror Sync Now
+  or service was exposed.
+- [x] With the user's approval, create the empty
+  `CloudMounter-TeamsMirror-Test-20261002` folder at the verified assessment
+  library root. An independent `lsjson` returned an empty list. Prepare a
+  mode-0700 profile under `/tmp/cosmic-teams-mirror-probe-20261002` with only
+  the verified `drive_id`; `--display-config` resolved its isolated sync path.
+  No successful abraunegg authentication or dry run occurred; this profile is
+  now unused.
+
+### Teams Offline mirror rclone path — October 2, 2026
+
+- [x] Use the already authorized `ua_teams_engr_bme_assessment` rclone remote
+  as the candidate Teams Offline engine. A scoped initial `rclone bisync
+  --resync --dry-run` against the empty disposable folder and empty local
+  directory completed successfully, reporting no transfers. This proves
+  access and command compatibility only, not safe bidirectional behavior.
+- [x] Scope Teams remote recovery to the selected folder and exclude the
+  recovery directory from bisync. A disposable local-to-local initial sync
+  and overwrite test verified that the old file lands in the scoped recovery
+  directory and that the recovery directory is not copied back into the
+  mirror. Teams Offline controls remain disabled.
+- [x] Live-verify the saved Teams remote against the assessment site, library,
+  and drive. Confirm the approved `CloudMounter-TeamsMirror-Test-20261002`
+  folder was empty before writing. A scoped SharePoint bisync dry run proposed
+  only four generated text files and no deletions.
+- [x] Run scoped SharePoint safety tests: initial sync and read-back,
+  local-to-remote overwrite with the old version in folder-local recovery,
+  remote-to-local edit, deletion with recovery, and a two-sided conflict with
+  both versions preserved. A repeat sync found no changes and did not copy
+  recovery into the local mirror. Generated files and recovery remain in the
+  disposable test folder for inspection; no work-library files were used.
+- [x] Add an automatic check of the saved site/library/drive identity and
+  selected folder at the start of the shared Preview, writable sync, and
+  scheduled-run script. It also binds the local mirror and recovery targets,
+  checks that the remote folder is accessible, and runs before any recovery
+  write. Unit tests reject changed targets and library roots. Teams Offline
+  Add/Modify and Sync Now remain disabled pending installed checks.
+- [x] Test Office-file changes, interruption and resumption only with
+  disposable files. The later SharePoint Offline safety sections record the
+  Office comparison blocker and the interruption recovery result.
+- [x] Expose manual SharePoint Offline controls after the Office comparison
+  and generated-runner safety gates passed. Scheduling remains disabled pending
+  separate unattended network/VPN, metered, sleep/wake, and failure checks.
+
+### Teams Offline mirror guard follow-up — October 3, 2026
+
+- [x] Verify the source build after adding the guard: 171 library tests passed,
+  3 ignored; all-target Clippy and `git diff --check` passed.
+- [x] Live-test the read-only guard against the approved assessment folder:
+  the saved drive/library/folder passed, while a wrong drive ID and a missing
+  folder were rejected. The compiled guard command also rejected the saved
+  Teams Online connection as an Offline mirror before remote access. No
+  SharePoint files were changed. Use a Teams-specific localized failure notice.
+- [x] In an isolated native configuration, the compiled guard accepted the
+  unchanged disposable SharePoint folder. Changes to the saved remote,
+  library, drive, selected folder, local target, recovery target, or enabled
+  state blocked Preview, Sync Now, and scheduled service starts before rclone
+  or recovery writes. The real connection and SharePoint files were untouched.
+  Teams Offline editor and sync controls remain disabled.
+- [x] Require a new preview and bisync state rebuild when the saved remote,
+  library, drive, folder, local, or recovery target changes. Target-specific
+  state directories isolate the changed target; saving a retarget now removes
+  the old Preview and initial-sync markers, so changing away and back cannot
+  reuse an earlier confirmation. Installed Add/Modify acceptance remains below.
+
+### SharePoint display name — October 3, 2026
+
+- [x] Label the document-library provider **SharePoint** in the applet,
+  current descriptions, requirements, README, and user-facing notices. Keep
+  Microsoft Teams files as a use case. Retain the serialized `Teams` provider,
+  internal keys, saved connection IDs, rclone remote names, and historical task
+  entries so existing configurations continue to load.
+
+### Settings layout — October 3, 2026
+
+- [x] Add a **Connections** heading above Add Connection and Refresh in General
+  Settings, matching the existing Sleep and wake heading style and reusing the
+  localized Connections label.
+
+### SharePoint Offline safety tests — October 3, 2026
+
+- [x] In a new subfolder of the approved disposable SharePoint test folder,
+  reproduce Office-file growth: a 921-byte DOCX became 9,263 bytes after
+  upload, causing the current bisync plan to fail initial sync. Transfer
+  tolerance alone let the upload finish but bisync still rejected the unequal
+  final listing. The remote DOCX remained a valid archive with the intended text.
+- [x] Test a disposable interruption after about 60% of a 2 MiB transfer.
+  After the two-minute lock expired, `--recover` completed the transfer; the
+  downloaded file matched the original SHA-256, and a repeat run had no changes.
+  A separate failed DOCX overwrite was preserved as conflict copies during
+  recovery. Keep those test files for inspection.
+- [x] Resolve the Office-file comparison safety gate for manual sync. Earlier
+  modtime-only and size-plus-time workarounds missed or skipped disposable
+  changes, while checksum plus `--ignore-times` caused extra transfers. The
+  later checksum prototype uses `--compare modtime,checksum` with a one-second
+  timestamp window, two bounded passes, and independent `rclone check
+  --checksum`; it detected same-time edits and settled SharePoint's rewritten
+  DOCX without repeated work on a clean Preview. Installed manual controls and
+  separate unattended scheduling checks remain below.
+- [x] Isolate SharePoint bisync work directories by a digest of the verified
+  remote, library, drive, selected folder, local target, and recovery target.
+  A focused test confirms changed targets cannot reuse the prior workdir,
+  Preview marker, initial-sync marker, listings, or managed script path.
+
+### SharePoint Offline checksum prototype — October 3, 2026
+
+- [x] In another subfolder of the approved disposable folder, test
+  `--compare modtime,checksum --modify-window 1s --ignore-size
+  --ignore-checksum --check-sync false`. A same-size, same-timestamp local edit
+  was detected by hash, uploaded, read back correctly, and followed by a clean
+  Preview. The one-second window removed a false Office-file time change.
+- [x] Upload a 929-byte DOCX that SharePoint rewrote to 9,273 bytes. The next
+  bisync pass downloaded the valid rewritten archive and preserved the 929-byte
+  original in recovery. A later local Office edit with its timestamp preserved
+  also uploaded correctly; SharePoint's rewritten revision retained the edit,
+  downloaded on the next pass, and left a clean Preview.
+- [x] Verify a bounded two-pass strategy: after the first disposable Office
+  upload, independent `rclone check --checksum` failed on the size difference;
+  after the second pass it found zero differences across all four test files.
+  Add SharePoint-only comparison flags and a two-pass checksum postcheck to the
+  generated mirror plan. Keep Add/Modify and Sync Now disabled pending the
+  generated-runner and remaining safety checks.
+- [x] Live-test the generated runner in fresh disposable subfolders. Initial
+  Preview/Sync, a one-file edit, dated recovery suffixes, and the independent
+  checksum check passed. The generated runner also handled a rewritten DOCX
+  in its two passes, retained the original in local recovery, and left a valid
+  local archive. A live test caught and fixed the `rclone check` filter flag.
+- [x] Keep rclone's all-files-changed safety stop active. A one-file edited
+  mirror triggered that stop, so add a stable, hidden, app-owned access marker
+  to the scoped local/remote mirror. The generated runner now checks the marker
+  before normal runs; the one-file edit and recovery passed without `--force`.
+  The applet creates the local marker before initial Preview and rejects a
+  missing or altered marker after initial sync.
+- [x] With the checksum comparison strategy in the disposable folder, a
+  remote-only text edit downloaded and preserved the previous local copy;
+  simultaneous local and remote edits became readable `.conflict1` and
+  `.conflict2` copies on both sides; deleting one local conflict copy moved its
+  remote counterpart into scoped, dated recovery. Independent `rclone check
+  --checksum` found zero differences after the conflict and deletion runs.
+- [x] Invalidate the prior target's initial Preview and initial-sync markers
+  before saving a changed SharePoint Offline remote, drive, folder, local, or
+  recovery target. A focused test changes targets and changes back: neither
+  target can reuse its old confirmation, while bisync listings stay preserved.
+- [x] Expose the installed SharePoint Offline Add form with a manual-only notice,
+  recovery target, and no background interval or metered controls. The native
+  Add layout was visually checked; a disposable installed connection is next.
+- [x] Fix the installed Add test's false "details changed during testing" notice
+  when recovery is automatic: assign a stable SharePoint draft ID before the
+  test so its derived recovery path remains unchanged. A focused regression
+  test covers provider selection, Offline mode, and automatic recovery.
+- [x] The installed initial Preview and Sync Now synchronized only the scoped
+  probe and access marker; independent checksum verification found two matching
+  files and zero differences, and the generated timer stayed disabled.
+- [x] Fix misleading follow-up Preview counts: bisync's "0 deleted" summary was
+  counted as a deletion, while its dry-run backup move counted as a skipped
+  file. Parse queued copies/deletions as actions and ignore repeated detection
+  and progress lines. Focused tests cover both overwrite and genuine deletion
+  output; an installed notice retest remains below.
+- [x] Test installed SharePoint Offline Add/Modify, Preview, and manual Sync Now
+  in an isolated disposable connection. The follow-up Preview showed one upload
+  and zero deletes; Sync Now completed, two files matched the scoped remote with
+  zero differences, and a fresh Preview found no changes. The timer stayed
+  disabled; unattended scheduling remains a separate check.
+
+### Clean up Main Applet. - October 3, 2026
+
+- [x] Main applet has 3 line display at the top: x of y conenctions active, notifications enabled, VPN  usage. It appears this information is distracting and not necessary. When information needs to be displayed it usually is in a text line just below that section. That mechanism can remain but I prefer the other 3 lines to be removed, or convince me of its utility.
+  - [x] Remove the static "notifications enabled" line from the main popup header.
+  - [x] Remove the VPN summary line from the main popup header.
+  - [x] Keep the aggregate status line, but auto-hide it after 5 seconds when the
+    overall state is `Healthy`.
+  - [x] Continue showing the aggregate line immediately for `Empty`, `Attention`,
+    `Busy`, and `Error` states.
+  - [x] Remove unused `vpn_status_pending` state, `vpn_summary()` helper,
+    `connection_vpn_label()` helper, and notification i18n strings.
+  - [x] Pass `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt --check`,
+    and `cargo test`.
+  - [x] Live-verify the installed applet popup shows only the title/gear row after
+    the brief healthy-state summary.
+
+### Reorder Connections. - October 3, 2026
+
+- [x] Add dedicated `ReorderConnections` application launch mode and settings
+  window mode.
+- [x] Add `OpenReorderConnections` message and `--reorder-connections` CLI
+  argument wiring so the reorder window can be opened from General Settings.
+- [x] Add a "Reorder" button in General Settings next to Add Connection and
+  Refresh.
+- [x] Build `view_reorder_connections()` showing each saved connection name
+  with a dropdown for positions `1..N`.
+- [x] Implement `ReorderConnection(connection_id, new_position)` to remove the
+  connection and re-insert it at the selected 1-based index, persist through
+  validated configuration writeback, and notify the runtime owner.
+- [x] Refresh the reorder window immediately because the model is updated in
+  place.
+- [x] Ignore invalid or unchanged positions and connections that are no longer
+  present.
+- [x] Add i18n strings `reorder-connections`, `reorder-connections-title`, and
+  `reorder-connections-empty`.
+- [x] Add unit tests covering a move to a selected position and invalid/
+  unchanged position handling.
+- [x] Pass `cargo check`, `cargo clippy -- -D warnings`, `cargo fmt --check`,
+  and `cargo test`.
+- [x] Fix the reorder tests to use isolated temporary storage instead of the
+  live runtime configuration path, preventing future test runs from overwriting
+  the user's saved connections.
+- [x] Add `examples/recover_config_from_units.rs` to rebuild the saved
+  connection list from the managed systemd units left in
+  `~/.config/systemd/user`.
+- [x] Recover the user's connections after the initial reorder test run
+  overwrote `~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document`
+  with test fixture data.
+- [ ] Live-verify the Reorder window opens from General Settings, dropdown
+  changes reorder the main applet popup list, and changes persist across applet
+  restarts.
+
+- [x] Dependency installation. Converted `Dependency Installation.md` into `scripts/install-dependencies.sh`, which supports `--all`, `--rclone`, `--onedriver`, `--onedrive`, `--base`, and `--cisco-check`. It can be run via curl:
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
+  ```
+
+### Reorder recovery audit and account verification — October 3, 2026
+
+- [x] Back up the live v2 document privately before further changes and verify
+  its checksum. Preserve the original under the applet's local state in
+  `config-backups/20261003-d1Hyo4/document.original`.
+- [x] Make `examples/recover_config_from_units.rs` read-only by default. It now
+  writes only explicitly named, new candidate files, refuses the live document,
+  validates recovered entries, preserves a valid baseline's order/global/VPN/
+  per-connection settings, checks actual unit enablement, and strips the
+  `Cloud Mounter:` service-description prefix. Unit-only OneDrive labels are
+  unique placeholders rather than reused `onedrive` account labels. The audit
+  also avoids creating OneDrive recovery directories as a side effect.
+- [x] Compare the reviewed recovery output with the saved configuration:
+  ten managed units and ten saved connections match by ID. The merged candidate
+  preserves every saved value; a unit-only rebuild would lose sleep settings,
+  VPN profiles/assignment, SFTP preload override, and connection order. Do not
+  install the unit-only candidate over the live config.
+- [x] Confirm the `UA OneDrive` online cache is the University business drive.
+  The personal-labeled `uutzinger OneDrive` online cache contains the same
+  Microsoft user, tenant, and drive, contrary to the intended personal account.
+  Disable its stopped service at login and set only that saved startup flag to
+  false; preserve the cache and tokens for inspection.
+- [x] Confirm the separate `uutzinger OneDrive mirror` reaches a 5 GB OneDrive
+  drive using its own client. Its no-sync status check reports about 333 MB of
+  remote changes pending; no synchronization was run.
+- [x] Restore the VPS SFTP per-connection preload override recorded in the
+  earlier installed acceptance check: use global off, preload off, 30 seconds,
+  depth 2. Preserve the global SFTP policy and all other settings.
+- [x] Confirm saved Box, both Google Drive, SFTP, and SharePoint rclone remotes
+  have the expected backend/credential fields and pass bounded read-only root
+  listings. The saved SMB remote has the expected backend and credentials, but
+  Cisco VPN was not active for a live access test.
+- [x] Replace the three reused `onedrive` labels in the saved OneDrive entries
+  with distinct work online, pending personal online, and personal mirror
+  labels. Keep their connection IDs and separate credential locations. New
+  OneDrive drafts now receive a unique provisional label. Preserve a private
+  backup of the final corrected document in `document.after-label-fix`. The
+  updated native applet was installed and the COSMIC panel reloaded; full tests,
+  all-target lint, formatting, and whitespace checks passed.
+- [ ] Reauthenticate the personal `uutzinger OneDrive` online connection in an
+  isolated fresh cache, verify its drive differs from the University drive,
+  then restore startup only if the user wants it. Preserve the old work-account
+  cache until the corrected mount is accepted.
+- [ ] With Cisco VPN connected, run a read-only access check for the saved
+  `ua_engr` SMB remote and confirm the VPN assignment in the installed editor.
+
+### UA Google Drive unmount incident — October 3, 2026
+
+- [x] Diagnose and complete the failed clean unmount. The desktop document
+  portal held directory handles under `UA_GoogleDrive/BME310`; rclone reported
+  zero pending uploads. Temporarily stop the portal, cleanly unmount, stop the
+  generated mount service, and restart the portal. Confirm the mountpoint is
+  empty, the mount service inactive, and the portal active.
+- [ ] Resolve separate Google Drive 403 request-quota errors. `ua_gdrive` has
+  no custom OAuth client ID, so it uses rclone's shared client. Google Drive
+  preload is enabled for 60 seconds with an unbounded recursive directory
+  refresh, which may add a burst of requests. Temporarily disable Google Drive
+  preload and configure a private client ID for the remote; then check whether
+  listing errors recur. These errors did not cause the busy unmount.
+
+### Add preload to SharePoint Online. - October 3, 2026
+
+- [x] Add a SharePoint Online row to Directory preload settings, with a separate
+  default-off policy (30 seconds, depth 2). Use the bounded, cancellable
+  directory-only walk for the selected mounted library or folder; keep Offline
+  mirrors unaffected. Existing documents migrate to the default-off policy.
+- [ ] After installing the new build, enable SharePoint preload briefly on the
+  disposable Online mount and verify bounded completion or timeout, readable
+  notice, and clean cancellation on unmount. Restore the policy to off afterward.
+
+### SharePoint Offline unattended release gate — October 3, 2026
+
+The installed manual Preview and Sync Now test above is complete. Keep scheduled
+sync disabled until this fixed checklist passes with disposable data scoped to
+the approved SharePoint test folder. A failed test may require a focused fix and
+retest; completed tests do not need to be repeated otherwise.
+
+- [ ] Move the disposable mirror to a persistent local directory and confirm
+  its scoped remote, recovery area, access marker, and existing files match
+  before enabling any unattended run. Do not schedule the `/tmp` test target.
+- [ ] Run repeated scheduled syncs with a local edit and a remote edit between
+  runs. Verify the intended changes arrive, a clean repeat makes no changes,
+  and recovery stays inside the approved scope.
+- [ ] Test a scheduled run across network or required-VPN loss and return, and
+  check metered-network policy. Verify a failed or deferred run reports its
+  state, preserves both sides, and resumes only when its policy allows.
+- [ ] Test sleep/wake and interruption or failure during a scheduled run.
+  Confirm Stop/Start, stale-lock handling, subsequent retry, and independent
+  file comparison without lost or unreviewed changes.
+- [ ] Change the saved remote, folder, or local target in an isolated disposable
+  connection. Verify the old scheduled unit is blocked by the identity guard,
+  and the new target requires fresh Preview and sync state before writing.
+- [ ] Verify installed native notices and status for those unattended runs,
+  then enable scheduling only if every gate passes. Test Flatpak host-service
+  access when the public Flatpak distribution path exists; that package check
+  is tracked separately under Flatpak installation.
+
+### Flatpak installation. - October 3, 2026
+
+Remaining work to make the applet installable from COSMIC Store:
+
+- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance if the applet's host-integration requirements need broader access than accepted applets such as `dev.cappsy.CosmicExtAppletDrives`.
+- [ ] Open a focused pull request to `pop-os/cosmic-flatpak` containing:
+  - `app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
+  - Generated `cargo-sources.json`
+  - Links to source repository, MIT license, tagged release, build instructions, AppStream metadata, and screenshots.
+- [ ] In the pull request, explicitly call out the host-integration architecture and justify every non-default Flatpak permission, especially host-command execution, systemd unit creation, sleep signals, and shared state.
+- [ ] Complete the repository pull-request checklist: disclose AI-generated or AI-assisted code in commit messages, understand and be able to explain every submitted change, accurately describe and test the change, and certify it under the Developer Certificate of Origin.
+- [ ] Address repository CI and maintainer review, updating the source tag/hash when a packaging fix requires a new application release.
+- [ ] After merge and publication to a configured public remote, install from the COSMIC Flatpak remote on a clean profile and run a final mount/mirror/VPN/uninstall smoke test.
+
+Completed preparation work: local Flatpak manifest, cargo-sources generation, desktop/AppStream metadata, local `just build`/`just build-changed`, Store listing verification, panel add/remove, and permission rationale in `packaging/flatpak/README.md`.
+
+### Reorder window layout — October 3, 2026
+
+- [x] Make Reorder Connections a compact 480 × 600 window instead of using the
+  full 880 × 720 connection-editor size. Present padded rows in the Settings
+  list style, keep names flexible, and correct the guidance to say choose a
+  position rather than drag. An intermediate 600-pixel width was reduced after
+  the user's installed review.
+- [x] Fix the installed Reorder layout reported by the user: remove the forced
+  96-pixel dropdown width so its arrow stays over the choices menu, and tighten
+  number/name spacing. Let the list fill the narrower window's content area so
+  its right edge aligns with the content boundary. Focused tests and lint pass.
+- [x] Visually check the installed Reorder window with saved connection names.
+  The user confirmed the compact layout looks right after the dropdown and
+  alignment changes. The functional reorder/persistence check remains in the
+  earlier Reorder Connections section.
+
+### Google OAuth client ID for Google Drive — October 3, 2026
+- [] I create and Auth client Id and secret but authentication fails. It saus something like parsing error and unexpected field.

@@ -449,6 +449,41 @@ async fn clean_owned(
     if !stop_policy_applied(&policy) {
         return Err("nonforcing sleep stop policy was not applied; mount left active".into());
     }
+    if mounted.is_some() && connection.provider == Provider::OneDrive {
+        // onedriver exits if SIGTERM cannot cleanly detach a busy FUSE mount.
+        // Detach first so a busy mount keeps its service alive across sleep.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining < Duration::from_millis(2500) {
+            return Err(
+                "insufficient sleep delay for a clean OneDrive unmount; mount left active".into(),
+            );
+        }
+        let request = clean_unmount_request(&connection.local_path)
+            .map_err(|error| error.to_string())?
+            .with_timeout(
+                remaining
+                    .saturating_sub(Duration::from_secs(2))
+                    .min(Duration::from_secs(2)),
+            );
+        let detach = runner.run(request, CancellationToken::new()).await;
+        let still_mounted = host_mounts(runner)
+            .await?
+            .iter()
+            .any(|mount| mount.target == connection.local_path);
+        if still_mounted {
+            return Err(match detach {
+                Err(error) => {
+                    format!("OneDrive mount is busy ({error}); service left running for wake")
+                }
+                Ok(_) => "OneDrive mount did not detach; service left running for wake".into(),
+            });
+        }
+    }
+    if deadline.saturating_duration_since(Instant::now()) < Duration::from_millis(500) {
+        return Err(
+            "sleep cleanup deadline reached after detaching; inspect service after wake".into(),
+        );
+    }
     systemctl(runner, &["stop".into(), "--no-block".into(), unit.into()]).await?;
     loop {
         let still_active = active(runner, unit).await?;
@@ -555,6 +590,7 @@ mod tests {
             tuning_profile: TuningProfile::default(),
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
     fn output(text: &str) -> Result<CommandOutput, crate::process::CommandError> {
@@ -676,7 +712,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_is_nonblocking_and_nonforcing_before_mount_disappearance() {
+    async fn onedriver_detaches_before_nonblocking_nonforcing_stop() {
         let runner = FakeCommandRunner::default();
         runner.push(output(
             "1 2 0:1 / /tmp/test-mount rw - fuse.onedriver onedriver rw\n",
@@ -684,6 +720,8 @@ mod tests {
         runner.push(output(
             "SendSIGKILL=no\nTimeoutStopUSec=2s\nTimeoutStopFailureMode=terminate\nKillSignal=15\n",
         )); // effective stop safeguards
+        runner.push(output("")); // clean fusermount
+        runner.push(output("")); // mount disappeared
         runner.push(output("")); // enqueue stop
         runner.push(output("inactive"));
         runner.push(output("")); // mount disappeared
@@ -710,7 +748,60 @@ mod tests {
                 "--property=SendSIGKILL,TimeoutStopUSec,TimeoutStopFailureMode,KillSignal"
             )
         );
-        assert!(commands[2].contains("stop --no-block"));
+        assert!(commands[2].contains("fusermount3 -u"));
+        assert!(commands[4].contains("stop --no-block"));
+        assert!(!commands.iter().any(|command| command.contains("-uz")));
+    }
+
+    #[tokio::test]
+    async fn busy_onedriver_mount_keeps_service_running_for_wake() {
+        let runner = FakeCommandRunner::default();
+        runner.push(output(
+            "1 2 0:1 / /tmp/test-mount rw - fuse.onedriver onedriver rw\n",
+        ));
+        runner.push(output(
+            "SendSIGKILL=no\nTimeoutStopUSec=2s\nTimeoutStopFailureMode=terminate\nKillSignal=15\n",
+        ));
+        runner.push(Err(crate::process::CommandError::NonZero {
+            command: "fusermount3 -u".into(),
+            code: Some(1),
+            stdout: CapturedOutput {
+                text: String::new(),
+                truncated: false,
+                invalid_utf8: false,
+            },
+            stderr: CapturedOutput {
+                text: String::new(),
+                truncated: false,
+                invalid_utf8: false,
+            },
+            attempts: 1,
+        }));
+        runner.push(output(
+            "1 2 0:1 / /tmp/test-mount rw - fuse.onedriver onedriver rw\n",
+        ));
+        let mut was_active = false;
+        let error = clean_owned(
+            &runner,
+            &connection(true),
+            "cosmic-mounter-test.service",
+            Instant::now() + Duration::from_secs(4),
+            &mut was_active,
+        )
+        .await
+        .unwrap_err();
+        assert!(was_active);
+        assert!(error.contains("service left running for wake"));
+        let commands = runner
+            .requests()
+            .iter()
+            .map(CommandRequest::sanitized_command)
+            .collect::<Vec<_>>();
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("stop --no-block"))
+        );
         assert!(!commands.iter().any(|command| command.contains("-uz")));
     }
 

@@ -13,6 +13,7 @@
     "--socket=wayland",
     "--socket=fallback-x11",
     "--share=ipc",
+    "--share=network",
     "--device=dri",
     "--talk-name=com.system76.CosmicSettingsDaemon",
     "--talk-name=org.freedesktop.Flatpak",
@@ -55,7 +56,7 @@
         {
           "type": "git",
           "url": "https://github.com/uutzinger/cosmic-ext-applet-mounter.git",
-          "tag": "v0.4.7"
+          "tag": "v0.5.0"
         },
         "./cargo-sources.json"
       ]

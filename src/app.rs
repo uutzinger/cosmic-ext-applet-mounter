@@ -29,8 +29,8 @@ use cosmic_ext_applet_mounter::config::{
     MIN_PRELOAD_DEPTH, MIN_PRELOAD_SECONDS,
 };
 use cosmic_ext_applet_mounter::controller::{
-    ConnectionRowState, ControllerSnapshot, aggregate_label, decide_operation, operation_label,
-    provider_label, restore, status_label,
+    AggregateKind, ConnectionRowState, ControllerSnapshot, aggregate_label, decide_operation,
+    operation_label, provider_label, restore, status_label,
 };
 use cosmic_ext_applet_mounter::directory_preload::{
     self, DirectoryPreloadJob, DirectoryPreloadOutcome,
@@ -46,9 +46,11 @@ use cosmic_ext_applet_mounter::model::{
     PreloadSettings, Provider, SmbPreloadOverride, TuningProfile, VpnKind, VpnProfile,
     VpnProfileId,
 };
+use cosmic_ext_applet_mounter::mount_guard;
 use cosmic_ext_applet_mounter::mounts::{
     MountEntry, MountTable, MountTableError, ProcMountTable, SyncRuntimeState,
 };
+use cosmic_ext_applet_mounter::pending_count;
 use cosmic_ext_applet_mounter::process::{
     CommandError, CommandExecutionMode, CommandOutput, CommandRequest, CommandRunner, Executable,
     RuntimeCommandRunner, redact_text,
@@ -61,15 +63,18 @@ use cosmic_ext_applet_mounter::rclone_refresh::{self, RcloneRefreshJob, RcloneRe
 use cosmic_ext_applet_mounter::services::{
     ActiveState, CommandSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction,
     SystemdManager, UnitController, UnitDocument, UnitKind, UnitName, UnitStatus,
+    start_managed_online_service,
 };
 use cosmic_ext_applet_mounter::sync::{
     OneDriveIsolationReport, SyncDecision, SyncDecisionRejection, SyncReadiness, SyncRequest,
-    SyncTrigger, google_native_filter_file, one_drive_auth_files_request, one_drive_auth_request,
+    SyncTrigger, one_drive_auth_files_request, one_drive_auth_request,
     one_drive_initial_sync_request, one_drive_mirror_plan, one_drive_preview_request,
-    one_drive_sync_request, parse_preview, rclone_bisync_initial_preview_request,
-    rclone_bisync_initial_sync_request, rclone_bisync_plan, rclone_bisync_preview_request,
-    rclone_bisync_sync_request, sync_now_request,
+    one_drive_sync_request, parse_preview, rclone_bisync_filter_file,
+    rclone_bisync_initial_preview_request, rclone_bisync_initial_sync_request, rclone_bisync_plan,
+    rclone_bisync_preview_request, rclone_bisync_sync_request, sync_now_request,
 };
+use cosmic_ext_applet_mounter::teams;
+use cosmic_ext_applet_mounter::teams_oauth::{self, TeamsOAuthOutcome, TeamsOAuthSetup};
 use cosmic_ext_applet_mounter::vpn::{
     CiscoTunnelState, CiscoVpn, CommandCiscoVpn, CommandNetworkManagerVpn, CommandReadinessProbe,
     NetworkManagerVpn, VpnShutdownDecision, readiness_report, shutdown_decision,
@@ -79,6 +84,7 @@ use uuid::Uuid;
 
 const GENERAL_SETTINGS_TITLE: &str = "Cloud Mounter Settings";
 const CONNECTION_SETTINGS_TITLE: &str = "Cloud Mounter Connection Settings";
+const REORDER_CONNECTIONS_TITLE: &str = "Reorder Connections";
 const APP_DISPLAY_NAME: &str = "Cloud Mounter";
 const POPUP_CONNECTION_LIST_MAX_HEIGHT: f32 = 640.0;
 const POPUP_CONNECTION_NAME_MAX_CHARS: usize = 36;
@@ -88,6 +94,8 @@ const POPUP_EMPTY_ROW_HEIGHT: f32 = 40.0;
 const POPUP_ACTION_HORIZONTAL_PADDING: u16 = 24;
 const POPUP_CONNECTION_ROW_HORIZONTAL_PADDING: u16 = 0;
 const POPUP_NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+const POPUP_HEALTHY_AGGREGATE_HIDE_AFTER: Duration = Duration::from_secs(5);
+const PENDING_COUNT_STALE_AFTER: Duration = Duration::from_secs(15);
 const CLEAN_UNMOUNT_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEAN_UNMOUNT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SETTINGS_SECTION_TITLE_WIDTH: f32 = 150.0;
@@ -105,6 +113,7 @@ pub enum AppLaunchMode {
     AddConnection,
     ModifyConnection(ConnectionId),
     ImportLegacy,
+    ReorderConnections,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +123,7 @@ enum WindowMode {
     AddConnection,
     ModifyConnection(ConnectionId),
     ImportLegacy,
+    ReorderConnections,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +131,7 @@ pub enum PreloadProvider {
     GoogleDrive,
     OneDrive,
     Box,
+    SharePoint,
     Smb,
     Sftp,
 }
@@ -137,6 +148,7 @@ struct PreloadSettingsDraft {
     google_drive: PreloadPolicyDraft,
     onedrive: PreloadPolicyDraft,
     box_provider: PreloadPolicyDraft,
+    sharepoint: PreloadPolicyDraft,
     smb: PreloadPolicyDraft,
     sftp: PreloadPolicyDraft,
 }
@@ -163,6 +175,7 @@ impl From<PreloadSettings> for PreloadSettingsDraft {
             google_drive: settings.google_drive.into(),
             onedrive: settings.onedrive.into(),
             box_provider: settings.box_provider.into(),
+            sharepoint: settings.sharepoint.into(),
             smb: settings.smb.into(),
             sftp: settings.sftp.into(),
         }
@@ -175,6 +188,7 @@ impl PreloadSettingsDraft {
             PreloadProvider::GoogleDrive => &mut self.google_drive,
             PreloadProvider::OneDrive => &mut self.onedrive,
             PreloadProvider::Box => &mut self.box_provider,
+            PreloadProvider::SharePoint => &mut self.sharepoint,
             PreloadProvider::Smb => &mut self.smb,
             PreloadProvider::Sftp => &mut self.sftp,
         }
@@ -207,6 +221,7 @@ impl PreloadSettingsDraft {
             google_drive: policy(&self.google_drive)?,
             onedrive: policy(&self.onedrive)?,
             box_provider: policy(&self.box_provider)?,
+            sharepoint: policy(&self.sharepoint)?,
             smb: policy(&self.smb)?,
             sftp: policy(&self.sftp)?,
         })
@@ -221,6 +236,8 @@ struct ConnectionDraft {
     access_mode: AccessMode,
     remote_reference: String,
     remote_subpath: String,
+    teams_library_url: String,
+    teams_drive_id: String,
     google_client_id: String,
     google_client_secret: String,
     smb_host: String,
@@ -271,6 +288,8 @@ impl Default for ConnectionDraft {
             access_mode: AccessMode::OnlineMount,
             remote_reference: String::new(),
             remote_subpath: String::new(),
+            teams_library_url: String::new(),
+            teams_drive_id: String::new(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
             smb_host: String::new(),
@@ -312,6 +331,7 @@ pub struct AppModel {
     removing_connection: Option<ConnectionId>,
     removing_rclone_remote: Option<String>,
     sftp_setup_pending: bool,
+    teams_oauth_pending: bool,
     sftp_settings_dirty: bool,
     sftp_settings_revision: u64,
     sftp_update_ack: Option<(String, SftpDraft)>,
@@ -321,9 +341,9 @@ pub struct AppModel {
     validated_draft: Option<ValidatedDraft>,
     last_notice: Option<String>,
     last_notice_at: Option<Instant>,
+    popup_opened_at: Option<Instant>,
     vpn_ready: BTreeMap<VpnProfileId, bool>,
     network_ready: Option<bool>,
-    vpn_status_pending: bool,
     sleep_status: Option<String>,
     sleep_notice: Option<String>,
     sleep_settings_pending: bool,
@@ -341,6 +361,26 @@ pub struct AppModel {
     preload_input_dirty: bool,
     directory_preload_jobs: BTreeMap<ConnectionId, u64>,
     unmount_pending: BTreeSet<ConnectionId>,
+    pending_counts: BTreeMap<ConnectionId, PendingObservation>,
+    pending_poll_inflight: BTreeSet<ConnectionId>,
+    pending_poll_generation: u64,
+    mirror_operations_pending: BTreeSet<ConnectionId>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingObservation {
+    files: Option<u64>,
+    checked_at: Instant,
+    reason: Option<String>,
+    source: PendingSource,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PendingSource {
+    RcloneOnline,
+    RcloneMirror,
+    RcloneMirrorLive,
+    OneDriveMirror,
 }
 
 #[derive(Debug, Clone)]
@@ -351,6 +391,7 @@ pub enum Message {
     RuntimePoll,
     RuntimeResult(RuntimeCommand, Result<runtime_ipc::Status, String>),
     RuntimeRefreshCompleted(runtime_ipc::Reply, BTreeMap<VpnProfileId, bool>),
+    OnlineGuardsRefreshed(Vec<String>),
     EditorNotified(Result<runtime_ipc::Status, String>),
     UnmountBeforeSleep(bool),
     RestoreAfterWake(bool),
@@ -361,9 +402,12 @@ pub enum Message {
     SleepEvent(cosmic_ext_applet_mounter::sleep::Event),
     OpenAddConnection,
     OpenModifyConnection(ConnectionId),
+    OpenReorderConnections,
+    ReorderConnection(ConnectionId, usize),
     PopupClosed(Id),
     OperationRequested(ConnectionId, Operation),
     OperationCompleted(String),
+    MirrorOperationCompleted(ConnectionId, String),
     ManagedOnlineOperationCompleted(Connection, Operation, Result<(), String>),
     RcloneRefreshStarted(String, ConnectionId, Result<RcloneRefreshJob, String>),
     RcloneRefreshCompleted(
@@ -383,6 +427,7 @@ pub enum Message {
     DraftName(String),
     DraftRemote(String),
     DraftSubpath(String),
+    DraftTeamsLibraryUrl(String),
     DraftGoogleClientId(String),
     DraftGoogleClientSecret(String),
     DraftSftp(SftpField, String),
@@ -415,6 +460,8 @@ pub enum Message {
     GoogleDriveRcloneRemoteApplied(Result<GoogleDriveRemoteApplyResult, String>),
     CreateBoxRcloneRemote,
     BoxRcloneRemoteCreated(Result<String, String>),
+    CreateTeamsRcloneRemote,
+    TeamsRcloneRemoteCreated(Result<TeamsOAuthOutcome, String>),
     CreateSmbRcloneRemote,
     SmbRcloneRemoteCreated(Result<SmbRemoteApplyResult, String>),
     RequestRemoveRcloneRemote(String),
@@ -436,6 +483,8 @@ pub enum Message {
     RemoveCompleted(String),
     Refresh,
     NoticeTick(Instant),
+    PendingCountTick,
+    PendingCountPolled(u64, Connection, PendingSource, Result<u64, String>),
     VpnStatusChecked(BTreeMap<VpnProfileId, bool>),
     NetworkStatusChecked(bool),
 }
@@ -465,6 +514,7 @@ impl cosmic::Application for AppModel {
             AppLaunchMode::ModifyConnection(id) => WindowMode::ModifyConnection(id),
             AppLaunchMode::ImportLegacy => WindowMode::ImportLegacy,
             AppLaunchMode::GeneralSettings => WindowMode::GeneralSettings,
+            AppLaunchMode::ReorderConnections => WindowMode::ReorderConnections,
         };
 
         let mut app = Self {
@@ -483,6 +533,7 @@ impl cosmic::Application for AppModel {
             removing_connection: None,
             removing_rclone_remote: None,
             sftp_setup_pending: false,
+            teams_oauth_pending: false,
             sftp_settings_dirty: false,
             sftp_settings_revision: 0,
             sftp_update_ack: None,
@@ -492,9 +543,9 @@ impl cosmic::Application for AppModel {
             validated_draft: None,
             last_notice: None,
             last_notice_at: None,
+            popup_opened_at: None,
             vpn_ready: BTreeMap::new(),
             network_ready: None,
-            vpn_status_pending: false,
             sleep_status: None,
             sleep_notice: None,
             sleep_settings_pending: false,
@@ -512,18 +563,23 @@ impl cosmic::Application for AppModel {
             preload_input_dirty: false,
             directory_preload_jobs: BTreeMap::new(),
             unmount_pending: BTreeSet::new(),
+            pending_counts: BTreeMap::new(),
+            pending_poll_inflight: BTreeSet::new(),
+            pending_poll_generation: 0,
+            mirror_operations_pending: BTreeSet::new(),
         };
         match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
             AppLaunchMode::ImportLegacy => app.scan_imports(),
             AppLaunchMode::Applet
             | AppLaunchMode::AddConnection
-            | AppLaunchMode::GeneralSettings => {}
+            | AppLaunchMode::GeneralSettings
+            | AppLaunchMode::ReorderConnections => {}
         }
-        let window_title = if window_mode == WindowMode::GeneralSettings {
-            GENERAL_SETTINGS_TITLE
-        } else {
-            CONNECTION_SETTINGS_TITLE
+        let window_title = match window_mode {
+            WindowMode::GeneralSettings => GENERAL_SETTINGS_TITLE,
+            WindowMode::ReorderConnections => REORDER_CONNECTIONS_TITLE,
+            _ => CONNECTION_SETTINGS_TITLE,
         };
         let title = if standalone {
             app.set_header_title(window_title.into());
@@ -555,10 +611,11 @@ impl cosmic::Application for AppModel {
 
     fn view(&self) -> Element<'_, Self::Message> {
         if self.standalone {
-            if self.window_mode == WindowMode::GeneralSettings {
-                return self.view_general_settings();
+            match self.window_mode {
+                WindowMode::GeneralSettings => return self.view_general_settings(),
+                WindowMode::ReorderConnections => return self.view_reorder_connections(),
+                _ => return self.view_settings_window(),
             }
-            return self.view_settings_window();
         }
         self.core
             .applet
@@ -581,9 +638,15 @@ impl cosmic::Application for AppModel {
                 cosmic::iced::time::every(Duration::from_secs(2)).map(|_| Message::RuntimePoll),
             );
         }
-        if !self.standalone && self.popup.is_some() && self.last_notice.is_some() {
+        if !self.standalone && self.popup.is_some() {
             subscriptions
                 .push(cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick));
+        }
+        if !self.standalone && self.popup.is_some() {
+            subscriptions.push(
+                cosmic::iced::time::every(Duration::from_secs(5))
+                    .map(|_| Message::PendingCountTick),
+            );
         }
         if !self.standalone && self.runtime_owner && self.config.document.unmount_before_sleep {
             subscriptions
@@ -597,14 +660,32 @@ impl cosmic::Application for AppModel {
             Message::OpenGeneralSettings => {
                 self.launch_settings_process(AppLaunchMode::GeneralSettings);
             }
+            Message::OpenReorderConnections => {
+                self.launch_settings_process(AppLaunchMode::ReorderConnections);
+            }
             Message::RuntimeEvent(runtime_ipc::Event::Ready) => {
                 self.runtime_owner = !self.standalone;
                 self.runtime_error = None;
                 if self.runtime_owner {
+                    let connections = self.config.document.connections.clone();
                     return Task::batch([
                         self.start_refresh_for_active_google_mounts(),
                         self.start_preload_for_active_directory_mounts(),
+                        Task::perform(
+                            async move { refresh_online_mount_guards(connections).await },
+                            |failures| {
+                                cosmic::Action::App(Message::OnlineGuardsRefreshed(failures))
+                            },
+                        ),
                     ]);
+                }
+            }
+            Message::OnlineGuardsRefreshed(failures) => {
+                if !failures.is_empty() {
+                    self.last_notice = Some(format!(
+                        "Could not refresh some Online mount safety checks: {}",
+                        failures.join("; ")
+                    ));
                 }
             }
             Message::RuntimeEvent(runtime_ipc::Event::ClientReady) => {
@@ -633,13 +714,17 @@ impl cosmic::Application for AppModel {
                     RuntimeCommand::Refresh | RuntimeCommand::ConfigurationChanged
                 ) {
                     match load_runtime_config() {
-                        Ok(config) => self.config = config,
+                        Ok(config) => {
+                            self.config = config;
+                            self.pending_counts.clear();
+                            self.pending_poll_generation =
+                                self.pending_poll_generation.wrapping_add(1);
+                        }
                         Err(error) => {
                             reply.complete(Err(error));
                             return Task::none();
                         }
                     }
-                    self.vpn_status_pending = true;
                     let config = self.config.document.clone();
                     return Task::perform(
                         async move { current_vpn_ready_states(config).await },
@@ -657,7 +742,6 @@ impl cosmic::Application for AppModel {
             }
             Message::RuntimeRefreshCompleted(reply, ready) => {
                 self.vpn_ready = ready;
-                self.vpn_status_pending = false;
                 reply.complete(Ok(self.runtime_status()));
             }
             Message::RuntimePoll => {
@@ -787,9 +871,13 @@ impl cosmic::Application for AppModel {
             }
             Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status(status)) => {
                 self.sleep_status = Some(status);
+                self.pending_counts.clear();
+                self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
             }
             Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Wake(ids)) => {
                 self.config = Config::load_runtime().config;
+                self.pending_counts.clear();
+                self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
                 if self.config.document.unmount_before_sleep
                     && self.config.document.restore_after_wake
                 {
@@ -827,12 +915,15 @@ impl cosmic::Application for AppModel {
                     destroy_popup(id)
                 } else {
                     self.config = Config::load_runtime().config;
+                    self.pending_counts.clear();
+                    self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
+                    self.pending_poll_inflight.clear();
                     self.pending_remove = None;
                     self.pending_repair = None;
                     self.pending_shared_remote_ack = None;
                     self.pending_rclone_remote_remove = None;
                     self.vpn_ready = BTreeMap::new();
-                    self.vpn_status_pending = true;
+                    self.popup_opened_at = Some(Instant::now());
                     let id = Id::unique();
                     self.popup = Some(id);
                     let mut settings = self.core.applet.get_popup_settings(
@@ -860,6 +951,7 @@ impl cosmic::Application for AppModel {
                         Task::perform(current_network_ready(), |ready| {
                             cosmic::Action::App(Message::NetworkStatusChecked(ready))
                         }),
+                        Task::perform(async {}, |_| cosmic::Action::App(Message::PendingCountTick)),
                     ])
                 };
             }
@@ -881,11 +973,17 @@ impl cosmic::Application for AppModel {
                 self.removing_rclone_remote = None;
                 self.launch_settings_process(AppLaunchMode::ModifyConnection(connection_id));
             }
+            Message::ReorderConnection(connection_id, new_position) => {
+                return self.reorder_connection(connection_id, new_position);
+            }
             Message::PopupClosed(id) if self.popup == Some(id) => {
                 self.popup = None;
+                self.popup_opened_at = None;
             }
             Message::PopupClosed(_) => {}
             Message::OperationRequested(connection_id, operation) => {
+                self.pending_counts.remove(&connection_id);
+                self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
                 return self.record_operation_request(connection_id, operation);
             }
             Message::OperationCompleted(notice) => {
@@ -895,6 +993,14 @@ impl cosmic::Application for AppModel {
                 self.pending_rclone_remote_remove = None;
                 self.last_notice = Some(notice);
                 self.last_notice_at = Some(Instant::now());
+            }
+            Message::MirrorOperationCompleted(id, notice) => {
+                self.mirror_operations_pending.remove(&id);
+                self.pending_counts.remove(&id);
+                self.config = Config::load_runtime().config;
+                self.last_notice = Some(notice);
+                self.last_notice_at = Some(Instant::now());
+                return Task::perform(async {}, |_| cosmic::Action::App(Message::PendingCountTick));
             }
             Message::ManagedOnlineOperationCompleted(connection, operation, result) => {
                 if operation == Operation::Unmount {
@@ -958,7 +1064,11 @@ impl cosmic::Application for AppModel {
                         if operation == Operation::Mount
                             && matches!(
                                 connection.provider,
-                                Provider::OneDrive | Provider::Box | Provider::Smb | Provider::Sftp
+                                Provider::OneDrive
+                                    | Provider::Teams
+                                    | Provider::Box
+                                    | Provider::Smb
+                                    | Provider::Sftp
                             )
                             && matches!(connection.mode, ConnectionMode::OnlineMount(_))
                             && preload_policy.enabled
@@ -1099,6 +1209,13 @@ impl cosmic::Application for AppModel {
                 self.draft.sftp.clear_secrets();
                 self.reset_sftp_settings_tracking();
                 self.draft.provider = provider;
+                if provider == Provider::Teams {
+                    if self.draft.id.is_none() {
+                        self.draft.id = Some(ConnectionId::new());
+                    }
+                    self.draft.access_mode = AccessMode::OnlineMount;
+                    self.draft.start_at_login = false;
+                }
                 self.draft.connection_preload_use_global = true;
                 let policy = if provider == Provider::Sftp {
                     self.config.document.preload.sftp
@@ -1116,7 +1233,8 @@ impl cosmic::Application for AppModel {
                     self.draft.google_client_secret.clear();
                 }
                 if provider == Provider::OneDrive {
-                    self.draft.remote_reference = "onedrive".into();
+                    let id = *self.draft.id.get_or_insert_with(ConnectionId::new);
+                    self.draft.remote_reference = default_onedrive_account_label(id);
                 }
             }
             Message::DraftAccessMode(mode) => {
@@ -1130,6 +1248,11 @@ impl cosmic::Application for AppModel {
                 self.validated_draft = None;
                 self.draft.access_mode = mode;
             }
+            Message::DraftTeamsLibraryUrl(value) => {
+                self.validated_draft = None;
+                self.draft.teams_library_url = value;
+                self.draft.teams_drive_id.clear();
+            }
             Message::DraftName(value) => {
                 self.pending_shared_remote_ack = None;
                 self.pending_rclone_remote_remove = None;
@@ -1141,6 +1264,9 @@ impl cosmic::Application for AppModel {
                 self.pending_rclone_remote_remove = None;
                 self.validated_draft = None;
                 self.draft.remote_reference = value;
+                if self.draft.provider == Provider::Teams {
+                    self.draft.teams_drive_id.clear();
+                }
                 self.sftp_update_ack = None;
                 if self.draft.provider == Provider::Sftp {
                     self.load_sftp_details();
@@ -1358,6 +1484,44 @@ impl cosmic::Application for AppModel {
                     self.last_notice = Some(format!("Could not create Box rclone remote: {error}"));
                 }
             },
+            Message::CreateTeamsRcloneRemote => {
+                return self.create_teams_rclone_remote();
+            }
+            Message::TeamsRcloneRemoteCreated(result) => {
+                self.teams_oauth_pending = false;
+                match result {
+                    Ok(outcome) => {
+                        self.detect_rclone_remotes();
+                        if self.draft.provider == Provider::Teams
+                            && self.draft.remote_reference.trim() == outcome.remote_name
+                            && teams::same_library_url(
+                                &self.draft.teams_library_url,
+                                &outcome.library_url,
+                            )
+                        {
+                            self.validated_draft = None;
+                            self.draft.teams_drive_id = outcome.verified.identity.drive_id;
+                            let account = outcome
+                                .verified
+                                .account
+                                .unwrap_or_else(|| fl!("teams-oauth-account-unavailable"));
+                            self.last_notice = Some(fl!(
+                                "teams-oauth-created",
+                                name = outcome.remote_name,
+                                account = account
+                            ));
+                        } else {
+                            self.last_notice = Some(fl!(
+                                "teams-oauth-editor-changed",
+                                name = outcome.remote_name
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        self.last_notice = Some(fl!("teams-oauth-create-failed", error = error));
+                    }
+                }
+            }
             Message::CreateSmbRcloneRemote => {
                 return self.create_smb_rclone_remote();
             }
@@ -1454,15 +1618,31 @@ impl cosmic::Application for AppModel {
                 self.last_notice =
                     Some("Wait for SFTP remote setup to finish before testing.".into());
             }
+            Message::TestDraft if self.teams_oauth_pending => {
+                self.last_notice = Some(fl!("teams-oauth-wait-test"));
+            }
             Message::SaveDraft if self.sftp_setup_pending => {
                 self.last_notice =
                     Some("Wait for SFTP remote setup to finish before saving.".into());
+            }
+            Message::SaveDraft if self.teams_oauth_pending => {
+                self.last_notice = Some(fl!("teams-oauth-wait-save"));
             }
             Message::TestDraft => {
                 return self.test_draft_plan();
             }
             Message::DraftTested(connection, result) => match result {
                 Ok(summary) => {
+                    if connection.provider == Provider::Teams {
+                        if !teams_verification_matches_draft(&self.draft, &connection) {
+                            self.last_notice = Some("SharePoint details changed during testing. Test the current draft again.".into());
+                            return Task::none();
+                        }
+                        self.draft.teams_drive_id = connection
+                            .teams_identity
+                            .as_ref()
+                            .map_or_else(String::new, |identity| identity.drive_id.clone());
+                    }
                     self.validated_draft = Some(ValidatedDraft {
                         connection: connection.clone(),
                         summary: summary.clone(),
@@ -1484,6 +1664,12 @@ impl cosmic::Application for AppModel {
                 return self.save_draft();
             }
             Message::SaveDraftValidated(connection, validation) => {
+                if connection.provider == Provider::Teams
+                    && !teams_verification_matches_draft(&self.draft, &connection)
+                {
+                    self.last_notice = Some("SharePoint details changed during verification. Save again to check the current draft.".into());
+                    return Task::none();
+                }
                 return match validation {
                     Ok(summary) => self.save_validated_draft(connection, Some(summary)),
                     Err(error) => {
@@ -1516,21 +1702,198 @@ impl cosmic::Application for AppModel {
                 return runtime_request_task(RuntimeCommand::Refresh);
             }
             Message::NoticeTick(now) => {
-                if let Some(started_at) = self.last_notice_at {
-                    if now.duration_since(started_at) >= POPUP_NOTICE_TIMEOUT {
-                        self.last_notice = None;
-                        self.last_notice_at = None;
-                    }
-                } else {
-                    self.last_notice_at = Some(now);
+                if let Some(started_at) = self.last_notice_at
+                    && now.duration_since(started_at) >= POPUP_NOTICE_TIMEOUT
+                {
+                    self.last_notice = None;
+                    self.last_notice_at = None;
                 }
+            }
+            Message::PendingCountTick => {
+                if self.popup.is_none() || self.standalone || self.network_ready == Some(false) {
+                    return Task::none();
+                }
+                let mounts = HostVisibleMountTable.entries().unwrap_or_default();
+                let active = self
+                    .config
+                    .document
+                    .connections
+                    .iter()
+                    .filter(|connection| connection.enabled && is_rclone_online_mount(connection))
+                    .filter(|connection| {
+                        mounts
+                            .iter()
+                            .any(|entry| entry.target == connection.local_path)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mirrors = self
+                    .config
+                    .document
+                    .connections
+                    .iter()
+                    .filter(|connection| {
+                        connection.enabled
+                            && (is_onedrive_offline_mirror(connection)
+                                || is_rclone_offline_mirror(connection))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let active_ids = active
+                    .iter()
+                    .chain(mirrors.iter())
+                    .map(|connection| connection.id)
+                    .collect::<BTreeSet<_>>();
+                self.pending_counts.retain(|id, _| active_ids.contains(id));
+                let generation = self.pending_poll_generation;
+                let mut tasks = active
+                    .into_iter()
+                    .filter_map(|connection| {
+                        if !self.pending_poll_inflight.insert(connection.id) {
+                            return None;
+                        }
+                        let rc_socket = match rclone_mount_plan(
+                            &connection,
+                            &default_runtime_root(),
+                            &default_cache_root(),
+                        ) {
+                            Ok(plan) => plan.rc_socket,
+                            Err(_) => {
+                                self.pending_poll_inflight.remove(&connection.id);
+                                return None;
+                            }
+                        };
+                        Some(Task::perform(
+                            async move {
+                                let result = pending_count::rclone_online_pending(
+                                    &app_command_runner(),
+                                    &rc_socket,
+                                )
+                                .await
+                                .map(|count| count.files);
+                                (connection, result)
+                            },
+                            move |(connection, result)| {
+                                cosmic::Action::App(Message::PendingCountPolled(
+                                    generation,
+                                    connection,
+                                    PendingSource::RcloneOnline,
+                                    result,
+                                ))
+                            },
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                for connection in mirrors {
+                    let live_rclone = is_rclone_offline_mirror(&connection)
+                        && runtime_offline_mirror_state(&connection) == SyncRuntimeState::Running;
+                    if !live_rclone
+                        && self
+                            .pending_counts
+                            .get(&connection.id)
+                            .is_some_and(|observation| {
+                                matches!(observation.source, PendingSource::RcloneMirrorLive)
+                            })
+                    {
+                        self.pending_counts.remove(&connection.id);
+                    }
+                    if is_rclone_offline_mirror(&connection)
+                        && !live_rclone
+                        && runtime_unit_status(connection.id, UnitKind::Timer).is_some_and(
+                            |status| {
+                                matches!(
+                                    status.active,
+                                    ActiveState::Active | ActiveState::Activating
+                                )
+                            },
+                        )
+                    {
+                        continue;
+                    }
+                    if self.mirror_operations_pending.contains(&connection.id)
+                        || self.pending_poll_inflight.contains(&connection.id)
+                        || self
+                            .pending_counts
+                            .get(&connection.id)
+                            .is_some_and(|observation| {
+                                observation.checked_at.elapsed()
+                                    < if live_rclone {
+                                        Duration::from_secs(5)
+                                    } else {
+                                        Duration::from_secs(60)
+                                    }
+                            })
+                    {
+                        continue;
+                    }
+                    self.pending_poll_inflight.insert(connection.id);
+                    let source = if live_rclone {
+                        PendingSource::RcloneMirrorLive
+                    } else if is_onedrive_offline_mirror(&connection) {
+                        PendingSource::OneDriveMirror
+                    } else {
+                        PendingSource::RcloneMirror
+                    };
+                    tasks.push(Task::perform(
+                        async move {
+                            let result = if live_rclone {
+                                rclone_mirror_live_pending_count(&connection).await
+                            } else if is_onedrive_offline_mirror(&connection) {
+                                onedrive_mirror_pending_count(&connection).await
+                            } else {
+                                rclone_mirror_pending_count(&connection).await
+                            };
+                            (connection, source, result)
+                        },
+                        move |(connection, source, result)| {
+                            cosmic::Action::App(Message::PendingCountPolled(
+                                generation, connection, source, result,
+                            ))
+                        },
+                    ));
+                }
+                return Task::batch(tasks);
+            }
+            Message::PendingCountPolled(generation, connection, source, result) => {
+                self.pending_poll_inflight.remove(&connection.id);
+                if generation != self.pending_poll_generation
+                    || self.network_ready == Some(false)
+                    || !self
+                        .config
+                        .document
+                        .connections
+                        .iter()
+                        .any(|saved| saved == &connection)
+                    || (is_rclone_online_mount(&connection)
+                        && !HostVisibleMountTable
+                            .entries()
+                            .unwrap_or_default()
+                            .iter()
+                            .any(|entry| entry.target == connection.local_path))
+                    || (matches!(source, PendingSource::RcloneMirrorLive)
+                        && runtime_offline_mirror_state(&connection) != SyncRuntimeState::Running)
+                {
+                    return Task::none();
+                }
+                self.pending_counts.insert(
+                    connection.id,
+                    PendingObservation {
+                        files: result.as_ref().ok().copied(),
+                        checked_at: Instant::now(),
+                        reason: result.err(),
+                        source,
+                    },
+                );
             }
             Message::VpnStatusChecked(ready) => {
                 self.vpn_ready = ready;
-                self.vpn_status_pending = false;
             }
             Message::NetworkStatusChecked(ready) => {
                 self.network_ready = Some(ready);
+                if !ready {
+                    self.pending_counts.clear();
+                    self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
+                }
             }
         }
 
@@ -1583,8 +1946,16 @@ impl AppModel {
                 widget::button::standard(fl!("refresh"))
                     .on_press_maybe((!self.runtime_pending).then_some(Message::Refresh)),
                 "Reload saved connections and refresh VPN status in the running applet. Existing operations continue.",
+            ))
+            .push(field_with_help(
+                widget::button::standard(fl!("reorder-connections"))
+                    .on_press(Message::OpenReorderConnections),
+                "Change the display order of connections in the main applet popup.",
             ));
-        let mut action_section = widget::Column::new().spacing(8).push(actions);
+        let mut action_section = widget::Column::new()
+            .spacing(8)
+            .push(widget::text::title4(fl!("settings-connections")))
+            .push(actions);
         if self.runtime_pending && !self.sleep_settings_pending {
             action_section =
                 action_section.push(widget::text::body("Waiting for the running applet…"));
@@ -1646,6 +2017,11 @@ impl AppModel {
                 &self.preload_draft.box_provider,
             ))
             .push(preload_policy_row(
+                fl!("provider-teams"),
+                PreloadProvider::SharePoint,
+                &self.preload_draft.sharepoint,
+            ))
+            .push(preload_policy_row(
                 fl!("provider-smb"),
                 PreloadProvider::Smb,
                 &self.preload_draft.smb,
@@ -1677,15 +2053,60 @@ impl AppModel {
         .into()
     }
 
-    fn view_popup(&self) -> Element<'_, Message> {
-        let notification_status = if self.config.notifications_enabled() {
-            fl!("notifications-enabled")
+    fn view_reorder_connections(&self) -> Element<'_, Message> {
+        let mut content = widget::Column::new().spacing(16);
+        content = content.push(widget::text::title2(fl!("reorder-connections-title")));
+        if let Some(notice) = &self.last_notice {
+            content = content.push(widget::text::body(notice.clone()));
+        }
+
+        let count = self.config.document.connections.len();
+        if count == 0 {
+            content = content.push(widget::text::body(fl!("reorder-connections-empty")));
         } else {
-            fl!("notifications-disabled")
-        };
+            let position_labels: Vec<String> = (1..=count).map(|n| n.to_string()).collect();
+            let mut rows = widget::list_column().list_item_padding([8, 0]);
+            for (index, connection) in self.config.document.connections.iter().enumerate() {
+                let connection_id = connection.id;
+                let connection_name = connection.name.clone();
+                let row = widget::Row::new()
+                    .spacing(6)
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center)
+                    .push(
+                        widget::container(widget::text::body(format!("{}.", index + 1)))
+                            .width(Length::Fixed(24.0)),
+                    )
+                    .push(
+                        widget::container(widget::text::body(connection_name))
+                            .width(Length::Fill)
+                            .align_x(Alignment::Start),
+                    )
+                    .push(widget::dropdown(
+                        position_labels.clone(),
+                        Some(index),
+                        move |selected_index| {
+                            Message::ReorderConnection(connection_id, selected_index + 1)
+                        },
+                    ));
+                rows = rows.add(row);
+            }
+            content = content.push(widget::container(rows).width(Length::Fill));
+        }
+
+        widget::container(widget::scrollable(
+            widget::container(content).padding(24).width(Length::Fill),
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .class(cosmic::style::Container::List)
+        .into()
+    }
+
+    fn view_popup(&self) -> Element<'_, Message> {
         let snapshot = self.controller_snapshot();
         let state = restore(&snapshot);
-        let header = widget::list_column()
+        let mut header = widget::list_column()
             .style(cosmic::style::Container::Transparent)
             .add(
                 widget::Row::new()
@@ -1702,13 +2123,14 @@ impl AppModel {
                         "Open Settings to add connections, refresh the applet, and configure sleep and directory preload behavior.",
                         widget::tooltip::Position::Bottom,
                     )),
-            )
-            .add(widget::text::body(format!(
-                "{}\n{}\n{}",
-                aggregate_label(&state.aggregate),
-                notification_status,
-                self.vpn_summary(&snapshot.vpn_ready, self.vpn_status_pending)
-            )));
+            );
+        let show_aggregate = state.aggregate.kind != AggregateKind::Healthy
+            || self
+                .popup_opened_at
+                .is_none_or(|opened_at| opened_at.elapsed() < POPUP_HEALTHY_AGGREGATE_HIDE_AFTER);
+        if show_aggregate {
+            header = header.add(widget::text::body(aggregate_label(&state.aggregate)));
+        }
 
         let mut rows = widget::list_column().style(cosmic::style::Container::Transparent);
         if state.rows.is_empty() {
@@ -1790,14 +2212,77 @@ impl AppModel {
             },
         );
         let row_id = row.id;
-        let primary_control: Element<'static, Message> = if let Some(operation) = primary {
-            widget::toggler(primary_enabled)
-                .on_toggle(move |_| Message::OperationRequested(row_id, operation))
-                .into()
-        } else {
-            widget::toggler(primary_enabled).into()
-        };
+        let primary_control: Element<'static, Message> =
+            if row.provider == Provider::Teams && row.mode == AccessMode::OfflineMirror {
+                widget::button::standard(fl!("sharepoint-sync-now"))
+                    .on_press_maybe(
+                        decision
+                            .as_ref()
+                            .is_some_and(|decision| decision.allowed)
+                            .then_some(Message::OperationRequested(row_id, Operation::SyncNow)),
+                    )
+                    .into()
+            } else if let Some(operation) = primary {
+                widget::toggler(primary_enabled)
+                    .on_toggle(move |_| Message::OperationRequested(row_id, operation))
+                    .into()
+            } else {
+                widget::toggler(primary_enabled).into()
+            };
         let display_name = popup_connection_display_name(&row.name);
+        let stale_after = if row.mode == AccessMode::OfflineMirror {
+            Duration::from_secs(180)
+        } else {
+            PENDING_COUNT_STALE_AFTER
+        };
+        let unknown_label = if primary_enabled { "+" } else { "-" };
+        let unknown_help = |reason: String| {
+            if primary_enabled {
+                fl!("pending-count-active-unknown", reason = reason)
+            } else {
+                fl!("pending-count-inactive-unknown", reason = reason)
+            }
+        };
+        let (pending_label, pending_help) = match self.pending_counts.get(&row.id) {
+            Some(observation) if observation.checked_at.elapsed() < stale_after => {
+                match observation.files {
+                    Some(files) => (
+                        files.to_string(),
+                        if matches!(observation.source, PendingSource::RcloneMirrorLive) {
+                            fl!("pending-count-mirror-live-help", count = files)
+                        } else if matches!(
+                            observation.source,
+                            PendingSource::RcloneMirror | PendingSource::OneDriveMirror
+                        ) {
+                            fl!(
+                                "pending-count-mirror-help",
+                                count = files,
+                                age = observation.checked_at.elapsed().as_secs()
+                            )
+                        } else {
+                            fl!("pending-count-online-help", count = files)
+                        },
+                    ),
+                    None => (
+                        unknown_label.to_owned(),
+                        unknown_help(
+                            observation
+                                .reason
+                                .clone()
+                                .unwrap_or_else(|| fl!("pending-count-unknown")),
+                        ),
+                    ),
+                }
+            }
+            _ if row.provider == Provider::OneDrive && row.mode == AccessMode::OnlineMount => (
+                unknown_label.to_owned(),
+                unknown_help(fl!("pending-count-onedriver-unavailable")),
+            ),
+            _ => (
+                unknown_label.to_owned(),
+                unknown_help(fl!("pending-count-unknown")),
+            ),
+        };
         let name_button = widget::button::custom(
             widget::container(widget::text::body(display_name))
                 .width(Length::Fill)
@@ -1819,6 +2304,14 @@ impl AppModel {
                 .align_x(Alignment::Start),
             )
             .push(
+                widget::container(field_with_help(
+                    widget::text::body(pending_label),
+                    pending_help,
+                ))
+                .width(Length::Fixed(48.0))
+                .align_x(Alignment::Center),
+            )
+            .push(
                 widget::container(field_with_help(primary_control, primary_help))
                     .align_x(Alignment::End),
             );
@@ -1838,6 +2331,7 @@ impl AppModel {
             WindowMode::ModifyConnection(_) => "Modify Connection".into(),
             WindowMode::ImportLegacy => fl!("settings-import-title"),
             WindowMode::GeneralSettings => GENERAL_SETTINGS_TITLE.into(),
+            WindowMode::ReorderConnections => REORDER_CONNECTIONS_TITLE.into(),
         }));
 
         if let Some(notice) = &self.last_notice {
@@ -1846,6 +2340,7 @@ impl AppModel {
 
         match self.window_mode {
             WindowMode::GeneralSettings => unreachable!("General Settings has its own view"),
+            WindowMode::ReorderConnections => unreachable!("Reorder Connections has its own view"),
             WindowMode::AddConnection | WindowMode::ModifyConnection(_) => {
                 content = content.add(self.view_editor_actions());
                 content = self.view_wizard(content);
@@ -1899,6 +2394,12 @@ impl AppModel {
             provider_choice(
                 fl!("provider-onedrive"),
                 Provider::OneDrive,
+                self.draft.provider,
+                modify_locked,
+            ),
+            provider_choice(
+                fl!("provider-teams"),
+                Provider::Teams,
                 self.draft.provider,
                 modify_locked,
             ),
@@ -2042,40 +2543,48 @@ impl AppModel {
                 }
                 content.add(section_row("Online mount settings", online_settings))
             }
-            AccessMode::OfflineMirror => content.add(section_row(
-                "Offline mirror settings",
-                widget::Column::new()
-                    .spacing(8)
-                    .push(field_with_help(
-                        widget::text_input::text_input(
-                            "Sync interval in minutes",
-                            &self.draft.sync_interval_minutes,
-                        )
-                        .on_input(Message::DraftSyncInterval),
-                        "How often to run background synchronization while connected. Manual Sync Now remains available.",
-                    ))
-                    .push(field_with_help(
-                        toggle_button(
-                            "Allow automatic sync on metered networks",
-                            self.draft.sync_on_metered,
-                            Message::DraftSyncOnMetered,
-                        ),
-                        "Disabled by default so automatic sync pauses on metered networks. Manual Sync Now can still be used.",
-                    ))
-                    .push(field_with_safety_help(
-                        widget::text_input::text_input(
-                            "leave blank for automatic recovery directory",
-                            &self.draft.recovery_directory,
-                        )
-                        .on_input(Message::DraftRecoveryDirectory),
-                        "Keep recovery data outside the mirror tree.",
-                        "Optional. Leave blank to auto-generate a sibling recovery directory based on the mirror directory.",
-                    ))
-                    .push(widget::text::body(format!(
-                        "Automatic recovery directory: {}",
-                        recovery_directory_placeholder(&self.draft)
-                    ))),
-            )),
+            AccessMode::OfflineMirror => {
+                let mut settings = widget::Column::new().spacing(8);
+                if self.draft.provider == Provider::Teams {
+                    settings =
+                        settings.push(widget::text::body(fl!("sharepoint-manual-only-help")));
+                } else {
+                    settings = settings
+                        .push(field_with_help(
+                            widget::text_input::text_input(
+                                "Sync interval in minutes",
+                                &self.draft.sync_interval_minutes,
+                            )
+                            .on_input(Message::DraftSyncInterval),
+                            "How often to run background synchronization while connected. Manual Sync Now remains available.",
+                        ))
+                        .push(field_with_help(
+                            toggle_button(
+                                "Allow automatic sync on metered networks",
+                                self.draft.sync_on_metered,
+                                Message::DraftSyncOnMetered,
+                            ),
+                            "Disabled by default so automatic sync pauses on metered networks. Manual Sync Now can still be used.",
+                        ));
+                }
+                content.add(section_row(
+                    "Offline mirror settings",
+                    settings
+                        .push(field_with_safety_help(
+                            widget::text_input::text_input(
+                                "leave blank for automatic recovery directory",
+                                &self.draft.recovery_directory,
+                            )
+                            .on_input(Message::DraftRecoveryDirectory),
+                            "Keep recovery data outside the mirror tree.",
+                            "Optional. Leave blank to auto-generate a sibling recovery directory based on the mirror directory.",
+                        ))
+                        .push(widget::text::body(format!(
+                            "Automatic recovery directory: {}",
+                            recovery_directory_placeholder(&self.draft)
+                        ))),
+                ))
+            }
         };
 
         let mut vpn_section = widget::Column::new()
@@ -2164,6 +2673,9 @@ impl AppModel {
                         fl!("google-drive-update-help"),
                     ));
                 }
+                if self.draft.provider == Provider::Teams {
+                    modify_row = modify_row.push(self.view_teams_oauth_action());
+                }
                 if self.saved_connection_is_offline_mirror(connection_id) {
                     modify_row = modify_row
                         .push(field_with_help(
@@ -2206,7 +2718,9 @@ impl AppModel {
 
                 return primary_row.push(modify_row).into();
             }
-            WindowMode::ImportLegacy | WindowMode::GeneralSettings => {}
+            WindowMode::ImportLegacy
+            | WindowMode::GeneralSettings
+            | WindowMode::ReorderConnections => {}
         }
 
         primary_row.into()
@@ -2295,19 +2809,33 @@ impl AppModel {
                 fl!("smb-create-update-help"),
             ),
             Provider::Sftp => self.view_sftp_action(true),
+            Provider::Teams => self.view_teams_oauth_action(),
             Provider::OneDrive => widget::Space::new().width(Length::Shrink).into(),
         }
+    }
+
+    fn view_teams_oauth_action(&self) -> Element<'static, Message> {
+        field_with_help(
+            widget::button::suggested(fl!("teams-oauth-connect")).on_press_maybe(
+                (!self.teams_oauth_pending).then_some(Message::CreateTeamsRcloneRemote),
+            ),
+            fl!("teams-oauth-connect-help"),
+        )
     }
 
     fn draft_uses_rclone(&self) -> bool {
         matches!(
             self.draft.provider,
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp
+            Provider::Teams
+                | Provider::GoogleDrive
+                | Provider::Box
+                | Provider::Smb
+                | Provider::Sftp
         )
     }
 
     fn draft_primary_actions_ready(&self) -> bool {
-        if self.sftp_setup_pending {
+        if self.sftp_setup_pending || self.teams_oauth_pending {
             return false;
         }
         if self.draft.provider == Provider::OneDrive {
@@ -2364,9 +2892,11 @@ impl AppModel {
     fn view_remote_account_fields(&self) -> Element<'_, Message> {
         match self.draft.provider {
             Provider::OneDrive => self.view_onedrive_account_fields(),
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
-                self.view_rclone_remote_fields()
-            }
+            Provider::Teams
+            | Provider::GoogleDrive
+            | Provider::Box
+            | Provider::Smb
+            | Provider::Sftp => self.view_rclone_remote_fields(),
         }
     }
 
@@ -2474,6 +3004,15 @@ impl AppModel {
             column = column.push(self.view_sftp_fields());
         } else if provider == Provider::GoogleDrive {
             column = column.push(self.view_google_drive_remote_setup_fields());
+        } else if provider == Provider::Teams {
+            column = column.push(field_with_help(
+                widget::text_input::text_input(
+                    "https://tenant.sharepoint.com/sites/site/Shared%20Documents",
+                    &self.draft.teams_library_url,
+                )
+                .on_input(Message::DraftTeamsLibraryUrl),
+                "Paste the document library URL, not a Teams channel or local mountpoint. The library identity is checked with Microsoft before saving and mounting.",
+            ));
         }
 
         column
@@ -2481,6 +3020,8 @@ impl AppModel {
                 widget::text_input::text_input(
                     if provider == Provider::Sftp {
                         sftp_remote_directory_placeholder()
+                    } else if provider == Provider::Teams {
+                        "optional folder within the library"
                     } else {
                         rclone_remote_directory_placeholder()
                     },
@@ -2804,9 +3345,15 @@ impl AppModel {
                 | Operation::ResumeSync,
             ) if is_rclone_offline_mirror(&connection) => {
                 self.last_notice = Some(format!("{label} requested for {}...", connection.name));
+                self.mirror_operations_pending.insert(connection_id);
                 Task::perform(
                     async move { run_managed_offline_mirror_operation(connection, operation).await },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    move |notice| {
+                        cosmic::Action::App(Message::MirrorOperationCompleted(
+                            connection_id,
+                            notice,
+                        ))
+                    },
                 )
             }
             (
@@ -2817,11 +3364,17 @@ impl AppModel {
                 | Operation::ResumeSync,
             ) if is_onedrive_offline_mirror(&connection) => {
                 self.last_notice = Some(format!("{label} requested for {}...", connection.name));
+                self.mirror_operations_pending.insert(connection_id);
                 Task::perform(
                     async move {
                         run_managed_onedrive_offline_mirror_operation(connection, operation).await
                     },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    move |notice| {
+                        cosmic::Action::App(Message::MirrorOperationCompleted(
+                            connection_id,
+                            notice,
+                        ))
+                    },
                 )
             }
             _ => {
@@ -2940,7 +3493,11 @@ impl AppModel {
                 connection.enabled
                     && matches!(
                         connection.provider,
-                        Provider::OneDrive | Provider::Box | Provider::Smb | Provider::Sftp
+                        Provider::OneDrive
+                            | Provider::Teams
+                            | Provider::Box
+                            | Provider::Smb
+                            | Provider::Sftp
                     )
                     && matches!(connection.mode, ConnectionMode::OnlineMount(_))
                     && self.config.document.preload_policy_for(connection).enabled
@@ -3020,6 +3577,9 @@ impl AppModel {
     }
 
     fn save_draft(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.draft.provider == Provider::Teams && self.draft.id.is_none() {
+            self.draft.id = Some(ConnectionId::new());
+        }
         let connection = match connection_from_draft(&self.draft) {
             Ok(connection) => connection,
             Err(error) => {
@@ -3068,6 +3628,47 @@ impl AppModel {
                 },
             );
         }
+        if connection.provider == Provider::Teams {
+            self.last_notice = Some(format!(
+                "Verifying the SharePoint library for {} before saving...",
+                connection.name
+            ));
+            return Task::perform(
+                async move {
+                    let mut connection = connection;
+                    let validation = match teams::verify_remote(
+                        &app_command_runner(),
+                        &connection.remote_reference,
+                        connection
+                            .teams_identity
+                            .as_ref()
+                            .expect("SharePoint draft has identity"),
+                    )
+                    .await
+                    {
+                        Ok(verified) => {
+                            let account = verified.account.clone().unwrap_or_else(|| {
+                                "account unavailable from Microsoft Graph".into()
+                            });
+                            let identity = verified.identity.clone();
+                            let summary = format!(
+                                "Verified account {account}, site {}, library {}, drive {}.",
+                                identity.site_url, identity.library_url, identity.drive_id
+                            );
+                            connection.teams_identity = Some(identity);
+                            verify_rclone_access_with_verified(&connection, Some(&verified))
+                                .await
+                                .map(|access| format!("{summary} {access}"))
+                        }
+                        Err(error) => Err(error),
+                    };
+                    (connection, validation)
+                },
+                |(connection, validation)| {
+                    cosmic::Action::App(Message::SaveDraftValidated(connection, validation))
+                },
+            );
+        }
         self.save_validated_draft(connection, None)
     }
 
@@ -3096,6 +3697,21 @@ impl AppModel {
                 self.last_notice = Some(error);
                 return Task::none();
             }
+        }
+        if let Some(existing) = self
+            .config
+            .document
+            .connections
+            .iter()
+            .find(|existing| existing.id == id)
+            && let Err(error) = invalidate_sharepoint_mirror_confirmation_on_retarget(
+                existing,
+                &connection,
+                &default_work_root(),
+            )
+        {
+            self.last_notice = Some(error);
+            return Task::none();
         }
         let result = self.config.update_validated_with(&storage, |document| {
             if let Some(existing) = document
@@ -3415,6 +4031,31 @@ impl AppModel {
         )
     }
 
+    fn create_teams_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.draft.provider != Provider::Teams {
+            self.last_notice = Some(fl!("teams-oauth-teams-only"));
+            return Task::none();
+        }
+        if self.teams_oauth_pending {
+            return Task::none();
+        }
+        let setup =
+            match TeamsOAuthSetup::new(&self.draft.remote_reference, &self.draft.teams_library_url)
+            {
+                Ok(setup) => setup,
+                Err(error) => {
+                    self.last_notice = Some(error);
+                    return Task::none();
+                }
+            };
+        self.teams_oauth_pending = true;
+        self.last_notice = Some(fl!("teams-oauth-opening", name = setup.remote_name.clone()));
+        Task::perform(
+            async move { teams_oauth::create_teams_remote(&app_command_runner(), setup).await },
+            |result| cosmic::Action::App(Message::TeamsRcloneRemoteCreated(result)),
+        )
+    }
+
     fn apply_google_drive_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
         if self.draft.provider != Provider::GoogleDrive {
             self.last_notice = Some(
@@ -3672,6 +4313,9 @@ impl AppModel {
     }
 
     fn test_draft_plan(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.draft.provider == Provider::Teams && self.draft.id.is_none() {
+            self.draft.id = Some(ConnectionId::new());
+        }
         let connection = match connection_from_draft(&self.draft) {
             Ok(connection) => connection,
             Err(error) => {
@@ -3679,13 +4323,25 @@ impl AppModel {
                 return Task::none();
             }
         };
-        self.last_notice = Some(format!(
-            "Testing {}. OneDrive mirror validation runs a dry-run preview and can take several minutes for a large drive or slow Microsoft response...",
-            connection.name
-        ));
+        self.last_notice = Some(if connection.provider == Provider::Teams {
+            format!(
+                "Checking the SharePoint library and selected folder for {}...",
+                connection.name
+            )
+        } else {
+            format!(
+                "Testing {}. OneDrive mirror validation runs a dry-run preview and can take several minutes for a large drive or slow Microsoft response...",
+                connection.name
+            )
+        });
         Task::perform(
             async move {
-                let result = test_connection_plan_and_access(&connection).await;
+                let mut connection = connection;
+                let result = if connection.provider == Provider::Teams {
+                    test_teams_draft_connection(&mut connection).await
+                } else {
+                    test_connection_plan_and_access(&connection, None).await
+                };
                 (connection, result)
             },
             |(connection, result)| cosmic::Action::App(Message::DraftTested(connection, result)),
@@ -3822,57 +4478,6 @@ impl AppModel {
         })
     }
 
-    fn connection_vpn_label(&self, vpn_profile_id: Option<VpnProfileId>) -> String {
-        let Some(profile_id) = vpn_profile_id else {
-            return "None".into();
-        };
-        self.config
-            .document
-            .vpn_profiles
-            .iter()
-            .find(|profile| profile.id == profile_id)
-            .map(|profile| profile.name.clone())
-            .unwrap_or_else(|| profile_id.to_string())
-    }
-
-    fn vpn_summary(&self, vpn_ready: &BTreeMap<VpnProfileId, bool>, pending: bool) -> String {
-        let configured = vpn_ready.keys().copied().collect::<BTreeSet<_>>();
-        if configured.is_empty() {
-            return "No active connection uses VPN".into();
-        }
-        if pending {
-            return "VPN status: checking".into();
-        }
-        let (active, inactive): (Vec<_>, Vec<_>) = configured
-            .iter()
-            .map(|profile_id| {
-                (
-                    self.connection_vpn_label(Some(*profile_id)),
-                    vpn_ready.get(profile_id).copied().unwrap_or(false),
-                )
-            })
-            .partition(|(_, ready)| *ready);
-        match (active.is_empty(), inactive.is_empty()) {
-            (false, true) => format!(
-                "VPN active: {}",
-                active
-                    .into_iter()
-                    .map(|(name, _)| name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            (true, false) => format!(
-                "VPN inactive: {}",
-                inactive
-                    .into_iter()
-                    .map(|(name, _)| name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            _ => format!("VPN active: {}; inactive: {}", active.len(), inactive.len()),
-        }
-    }
-
     fn view_state(&self) -> cosmic_ext_applet_mounter::controller::ControllerViewState {
         restore(&self.controller_snapshot())
     }
@@ -3999,7 +4604,11 @@ fn runtime_offline_mirror_state(connection: &Connection) -> SyncRuntimeState {
                 SyncRuntimeState::Paused
             }
         }
-        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
+        Provider::Teams
+        | Provider::GoogleDrive
+        | Provider::Box
+        | Provider::Smb
+        | Provider::Sftp => {
             if service_status.as_ref().is_some_and(|status| {
                 matches!(status.active, ActiveState::Active | ActiveState::Activating)
             }) {
@@ -4043,6 +4652,7 @@ fn runtime_unit_status(connection_id: ConnectionId, unit_kind: UnitKind) -> Opti
             "--property=ActiveState",
             "--property=UnitFileState",
             "--property=SubState",
+            "--property=Result",
             unit.file_name().as_str(),
         ],
     )
@@ -4079,6 +4689,7 @@ fn parse_runtime_systemd_status(output: &str) -> UnitStatus {
         active,
         enabled,
         detail,
+        result: property(output, "Result").to_owned(),
     }
 }
 
@@ -4097,6 +4708,7 @@ impl AppModel {
                 .map(ConnectionId::from_uuid)
                 .map(AppLaunchMode::ModifyConnection)
                 .unwrap_or(AppLaunchMode::AddConnection),
+            Some("--reorder-connections") => AppLaunchMode::ReorderConnections,
             _ => AppLaunchMode::Applet,
         }
     }
@@ -4127,11 +4739,71 @@ impl AppModel {
             AppLaunchMode::ImportLegacy => {
                 command.arg("--import");
             }
+            AppLaunchMode::ReorderConnections => {
+                command.arg("--reorder-connections");
+            }
         }
 
         if let Err(error) = command.spawn() {
             self.last_notice = Some(format!("Could not open settings: {error}"));
             self.last_notice_at = Some(Instant::now());
+        }
+    }
+
+    fn reorder_connection(
+        &mut self,
+        connection_id: ConnectionId,
+        new_position: usize,
+    ) -> Task<cosmic::Action<Message>> {
+        let storage = match AppConfigStorage::runtime() {
+            Ok(storage) => storage,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        };
+        self.reorder_connection_with_storage(connection_id, new_position, &storage)
+    }
+
+    fn reorder_connection_with_storage(
+        &mut self,
+        connection_id: ConnectionId,
+        new_position: usize,
+        storage: &AppConfigStorage,
+    ) -> Task<cosmic::Action<Message>> {
+        let current_index = self
+            .config
+            .document
+            .connections
+            .iter()
+            .position(|connection| connection.id == connection_id);
+        let Some(current_index) = current_index else {
+            self.last_notice = Some("Connection is no longer available.".into());
+            return Task::none();
+        };
+        let count = self.config.document.connections.len();
+        if count == 0 || new_position == 0 || new_position > count {
+            return Task::none();
+        }
+        let target_index = new_position - 1;
+        if current_index == target_index {
+            return Task::none();
+        }
+
+        let result = self.config.update_validated_with(storage, |document| {
+            let connection = document.connections.remove(current_index);
+            let insert_index = target_index.min(document.connections.len());
+            document.connections.insert(insert_index, connection);
+        });
+        match result {
+            Ok(_) => {
+                self.last_notice = Some("Connection order saved.".into());
+                notify_runtime_task()
+            }
+            Err(error) => {
+                self.last_notice = Some(format!("Could not save connection order: {error}"));
+                Task::none()
+            }
         }
     }
 }
@@ -4186,6 +4858,9 @@ fn notify_runtime_task() -> Task<cosmic::Action<Message>> {
 }
 
 fn primary_operation(row: &ConnectionRowState) -> Option<Operation> {
+    if row.provider == Provider::Teams && row.mode == AccessMode::OfflineMirror {
+        return Some(Operation::SyncNow);
+    }
     let preferred = match row.status {
         ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted | OnlineMountStatus::Mounting) => {
             Operation::Unmount
@@ -4320,6 +4995,9 @@ fn window_mode_notice(mode: WindowMode) -> String {
         WindowMode::ImportLegacy => {
             "Import selected. Scan ~/.config/systemd/user, preview compatible services, and confirm replacements before any changes.".into()
         }
+        WindowMode::ReorderConnections => {
+            "Choose a new position from a connection's dropdown.".into()
+        }
     }
 }
 
@@ -4381,6 +5059,14 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         access_mode,
         remote_reference: connection.remote_reference.clone(),
         remote_subpath: connection.remote_subpath.clone().unwrap_or_default(),
+        teams_library_url: connection
+            .teams_identity
+            .as_ref()
+            .map_or_else(String::new, |identity| identity.library_url.clone()),
+        teams_drive_id: connection
+            .teams_identity
+            .as_ref()
+            .map_or_else(String::new, |identity| identity.drive_id.clone()),
         google_client_id: String::new(),
         google_client_secret: String::new(),
         smb_host: String::new(),
@@ -4429,6 +5115,13 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
     let local_path = expand_user_path(draft.local_path.trim());
     let remote_subpath =
         (!draft.remote_subpath.trim().is_empty()).then(|| draft.remote_subpath.trim().to_owned());
+    let teams_identity = if draft.provider == Provider::Teams {
+        let mut identity = teams::parse_library_url(&draft.teams_library_url)?;
+        identity.drive_id = draft.teams_drive_id.clone();
+        Some(identity)
+    } else {
+        None
+    };
     let mode = match draft.access_mode {
         AccessMode::OnlineMount => {
             let gib = draft
@@ -4516,6 +5209,19 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
         } else {
             None
         },
+        teams_identity,
+    })
+}
+
+fn teams_verification_matches_draft(draft: &ConnectionDraft, verified: &Connection) -> bool {
+    connection_from_draft(draft).is_ok_and(|mut current| {
+        current.id = verified.id;
+        if let (Some(current_identity), Some(verified_identity)) =
+            (&mut current.teams_identity, &verified.teams_identity)
+        {
+            current_identity.drive_id = verified_identity.drive_id.clone();
+        }
+        current == *verified
     })
 }
 
@@ -4574,7 +5280,11 @@ fn draft_summary_text(draft: &ConnectionDraft) -> String {
             "Safety: Test Connection validates dependency, remote/subtree access, mountpoint, and generated unit before Save.".into()
         }
         AccessMode::OfflineMirror => {
-            "Safety: Preview is dry-run; initial synchronization requires Preview plus confirmed Sync Now before background Start.".into()
+            if draft.provider == Provider::Teams {
+                fl!("sharepoint-manual-only-help")
+            } else {
+                "Safety: Preview is dry-run; initial synchronization requires Preview plus confirmed Sync Now before background Start.".into()
+            }
         }
     });
     parts.join(" ")
@@ -5115,6 +5825,7 @@ fn preload_provider_help(provider: PreloadProvider) -> Cow<'static, str> {
         PreloadProvider::GoogleDrive => fl!("preload-google-drive-help").into(),
         PreloadProvider::OneDrive => fl!("preload-onedrive-help").into(),
         PreloadProvider::Box => fl!("preload-box-help").into(),
+        PreloadProvider::SharePoint => fl!("preload-sharepoint-help").into(),
         PreloadProvider::Sftp => fl!("sftp-preload-help").into(),
         PreloadProvider::Smb => fl!("preload-smb-help").into(),
     }
@@ -5434,6 +6145,7 @@ fn rclone_backend_name(provider: Provider) -> Option<&'static str> {
         Provider::Box => Some("box"),
         Provider::Smb => Some("smb"),
         Provider::Sftp => Some("sftp"),
+        Provider::Teams => Some("onedrive"),
         Provider::OneDrive => None,
     }
 }
@@ -5501,6 +6213,7 @@ fn smb_password_placeholder() -> &'static str {
 fn provider_editor_label(provider: Provider) -> String {
     match provider {
         Provider::OneDrive => fl!("provider-onedrive"),
+        Provider::Teams => fl!("provider-teams"),
         Provider::GoogleDrive => fl!("provider-google-drive"),
         Provider::Box => fl!("provider-box"),
         Provider::Smb => fl!("provider-smb"),
@@ -5523,6 +6236,10 @@ fn rclone_remote_placeholder(provider: Provider) -> &'static str {
         Provider::Box => &BOX_LABEL,
         Provider::Smb => &SMB_LABEL,
         Provider::Sftp => &SFTP_LABEL,
+        Provider::Teams => {
+            static TEAMS_LABEL: LazyLock<String> = LazyLock::new(|| fl!("teams-remote-name"));
+            &TEAMS_LABEL
+        }
         Provider::OneDrive => "remote name",
     }
 }
@@ -5534,6 +6251,7 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> String {
             Provider::Box => fl!("box-remote-help-modify"),
             Provider::Smb => fl!("smb-remote-help-modify"),
             Provider::Sftp => fl!("sftp-remote-help-modify"),
+            Provider::Teams => fl!("teams-remote-help-modify"),
             Provider::OneDrive => "OneDrive uses its own authentication workflow.".into(),
         };
     }
@@ -5543,6 +6261,7 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> String {
         Provider::Box => fl!("box-remote-help-add"),
         Provider::Smb => fl!("smb-remote-help-add"),
         Provider::Sftp => fl!("sftp-remote-help-add"),
+        Provider::Teams => fl!("teams-remote-help-add"),
         Provider::OneDrive => {
             "OneDrive does not use rclone in the approved provider matrix.".into()
         }
@@ -5556,6 +6275,13 @@ fn onedrive_account_placeholder(mode: AccessMode) -> &'static str {
         AccessMode::OnlineMount => &ONLINE,
         AccessMode::OfflineMirror => &OFFLINE,
     }
+}
+
+fn default_onedrive_account_label(id: ConnectionId) -> String {
+    format!(
+        "onedrive-{}",
+        id.to_string().split('-').next().unwrap_or_default()
+    )
 }
 
 fn onedrive_account_help(mode: AccessMode) -> String {
@@ -5593,7 +6319,13 @@ fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, 
         let Some(backend) = remote_config.get("type").and_then(|value| value.as_str()) else {
             continue;
         };
-        if matches!(backend, "drive" | "box" | "smb" | "sftp") {
+        if matches!(backend, "drive" | "box" | "smb" | "sftp")
+            || (backend == "onedrive"
+                && remote_config
+                    .get("drive_type")
+                    .and_then(|value| value.as_str())
+                    == Some("documentLibrary"))
+        {
             remotes.push(RcloneDraftRemote {
                 name: name.clone(),
                 backend: backend.to_owned(),
@@ -6607,7 +7339,11 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     .map_err(|error| error.to_string())?;
                     UnitDocument::service(&plan.service).map_err(|error| error.to_string())?
                 }
-                Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
+                Provider::Teams
+                | Provider::GoogleDrive
+                | Provider::Box
+                | Provider::Smb
+                | Provider::Sftp => {
                     let plan = rclone_mount_plan(
                         connection,
                         &default_runtime_root(),
@@ -6639,12 +7375,22 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     document.name.file_name()
                 ))
             }
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
+            Provider::Teams
+            | Provider::GoogleDrive
+            | Provider::Box
+            | Provider::Smb
+            | Provider::Sftp => {
                 let plan = rclone_bisync_plan(connection, &default_work_root())
                     .map_err(|error| error.to_string())?;
                 let service = UnitDocument::service(&mirror_script::service_spec(&plan))
                     .map_err(|error| error.to_string())?;
                 let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
+                if connection.provider == Provider::Teams {
+                    return Ok(fl!(
+                        "sharepoint-mirror-plan-ready",
+                        name = service.name.file_name()
+                    ));
+                }
                 Ok(format!(
                     "Managed bisync service {} and timer {} validate structurally.",
                     service.name.file_name(),
@@ -6659,7 +7405,11 @@ const fn is_rclone_online_mount(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
         (
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp,
+            Provider::Teams
+                | Provider::GoogleDrive
+                | Provider::Box
+                | Provider::Smb
+                | Provider::Sftp,
             ConnectionMode::OnlineMount(_)
         )
     )
@@ -6669,7 +7419,11 @@ const fn is_rclone_offline_mirror(connection: &Connection) -> bool {
     matches!(
         (&connection.provider, &connection.mode),
         (
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp,
+            Provider::Teams
+                | Provider::GoogleDrive
+                | Provider::Box
+                | Provider::Smb
+                | Provider::Sftp,
             ConnectionMode::OfflineMirror(_)
         )
     )
@@ -6751,10 +7505,31 @@ async fn install_rclone_online_mount_unit_result(connection: &Connection) -> Res
     Ok(start_at_login)
 }
 
+async fn refresh_online_mount_guards(connections: Vec<Connection>) -> Vec<String> {
+    let mut failures = Vec::new();
+    for connection in connections {
+        if !matches!(connection.mode, ConnectionMode::OnlineMount(_)) {
+            continue;
+        }
+        let result = if connection.provider == Provider::OneDrive {
+            install_onedriver_online_mount_unit_result(&connection).await
+        } else {
+            install_rclone_online_mount_unit_result(&connection).await
+        };
+        if let Err(error) = result {
+            failures.push(format!("{}: {error}", connection.name));
+        }
+    }
+    failures
+}
+
 async fn install_rclone_offline_mirror_units(connection: Connection) -> String {
     let name = connection.name.clone();
     match install_rclone_offline_mirror_units_result(&connection).await {
         Ok(()) => {
+            if connection.provider == Provider::Teams {
+                return fl!("sharepoint-mirror-saved", name = name);
+            }
             format!(
                 "{name} saved and managed mirror service/timer installed. Automatic sync remains disabled until preview and initial sync are confirmed."
             )
@@ -6926,7 +7701,11 @@ async fn install_import_replacement_unit_result(
     let connection = &plan.preview.connection;
     match connection.provider {
         Provider::OneDrive => prepare_onedriver_online_mount_runtime(connection)?,
-        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
+        Provider::Teams
+        | Provider::GoogleDrive
+        | Provider::Box
+        | Provider::Smb
+        | Provider::Sftp => {
             prepare_online_mount_runtime(connection)?;
         }
     }
@@ -7021,6 +7800,7 @@ fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
     match &connection.mode {
         ConnectionMode::OnlineMount(_) => vec![UnitName::new(connection.id, UnitKind::Service)],
         ConnectionMode::OfflineMirror(_) => match connection.provider {
+            Provider::Teams => vec![UnitName::new(connection.id, UnitKind::Service)],
             Provider::OneDrive => vec![UnitName::new(connection.id, UnitKind::Service)],
             Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => vec![
                 UnitName::new(connection.id, UnitKind::Timer),
@@ -7102,6 +7882,7 @@ async fn run_managed_online_mount_operation_result_inner(
     let unit = UnitName::new(connection.id, UnitKind::Service);
     if action == SystemdAction::Start {
         prepare_online_mount_runtime(connection)?;
+        mount_guard::check_empty_mountpoint(&app_command_runner(), &connection.local_path).await?;
         ensure_vpn_ready_for_connection(connection).await?;
         verify_rclone_access(connection)
             .await
@@ -7119,18 +7900,12 @@ async fn run_managed_online_mount_operation_result_inner(
         // applies to saved connections without requiring an edit-and-save cycle.
         install_rclone_online_mount_unit_result(connection)
             .await
-            .map_err(|error| format!("Could not refresh managed mount service: {error}"))?;
+            .map_err(|error| fl!("online-service-refresh-failed", error = error))?;
     }
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
-        let _ = manager
-            .action(
-                SystemdAction::ResetFailed,
-                Some(&unit),
-                cancellation.child_token(),
-            )
-            .await;
+        return start_managed_online_service(&manager, &unit, cancellation).await;
     } else {
         if connection.provider == Provider::GoogleDrive {
             // Stop cache warm-up while its RC socket is still available. A failed
@@ -7182,6 +7957,7 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
     let unit = UnitName::new(connection.id, UnitKind::Service);
     if action == SystemdAction::Start {
         prepare_onedriver_online_mount_runtime(connection)?;
+        mount_guard::check_empty_mountpoint(&app_command_runner(), &connection.local_path).await?;
         ensure_vpn_ready_for_connection(connection).await?;
         let current = Config::load_runtime().config;
         if !current
@@ -7192,6 +7968,9 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
         {
             return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
         }
+        install_onedriver_online_mount_unit_result(connection)
+            .await
+            .map_err(|error| fl!("online-service-refresh-failed", error = error))?;
     }
     let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
@@ -7204,13 +7983,7 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
             )
             .await
             .map_err(|error| error.to_string())?;
-        let _ = manager
-            .action(
-                SystemdAction::ResetFailed,
-                Some(&unit),
-                cancellation.child_token(),
-            )
-            .await;
+        return start_managed_online_service(&manager, &unit, cancellation).await;
     } else {
         directory_preload::cancel_before_unmount(connection.id).await?;
         clean_detach_before_service_stop(connection, cancellation.child_token()).await?;
@@ -7358,13 +8131,23 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
             cancellation.child_token(),
         )
         .await
-        .ok()
-        .flatten();
-    if repair_requires_failed_reset(status.as_ref()) {
+        .map_err(|error| {
+            fl!(
+                "online-service-repair-read-failed",
+                error = error.to_string()
+            )
+        })?
+        .ok_or_else(|| fl!("online-service-repair-unknown-state"))?;
+    if repair_requires_failed_reset(Some(&status)) {
         manager
             .action(SystemdAction::ResetFailed, Some(&unit), cancellation)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                fl!(
+                    "online-service-repair-reset-failed",
+                    error = error.to_string()
+                )
+            })?;
     }
 
     Ok(())
@@ -7436,9 +8219,15 @@ async fn run_managed_offline_mirror_operation_result(
     connection: &Connection,
     operation: Operation,
 ) -> Result<String, String> {
+    if connection.provider == Provider::Teams
+        && matches!(operation, Operation::ResumeSync | Operation::PauseSync)
+    {
+        return Err(fl!("sharepoint-schedule-disabled"));
+    }
     prepare_offline_mirror_runtime(connection)?;
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
+    ensure_sharepoint_access_marker(connection, &plan)?;
     prepare_rclone_bisync_work_files(connection, &plan)?;
     match operation {
         Operation::PreviewInitialSync => preview_rclone_offline_mirror(&plan).await,
@@ -7485,6 +8274,9 @@ async fn start_rclone_offline_mirror_background(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
 ) -> Result<String, String> {
+    if connection.provider == Provider::Teams {
+        return Err(fl!("sharepoint-schedule-disabled"));
+    }
     if !initial_sync_marker(plan).exists() {
         return Err(
             "background sync requires a successful Preview and confirmed initial Sync Now first"
@@ -8248,6 +9040,42 @@ fn prepare_offline_mirror_runtime(connection: &Connection) -> Result<(), String>
     Ok(())
 }
 
+fn ensure_sharepoint_access_marker(
+    connection: &Connection,
+    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
+) -> Result<(), String> {
+    let Some(name) = &plan.access_marker_name else {
+        return Ok(());
+    };
+    let path = connection.local_path.join(name);
+    let expected = format!("{}\n", connection.id);
+    if !path.exists() && !initial_sync_marker(plan).exists() {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => file.write_all(expected.as_bytes()).map_err(|error| {
+                fl!("sharepoint-anchor-create-error", error = error.to_string())
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(fl!(
+                    "sharepoint-anchor-create-error",
+                    error = error.to_string()
+                ));
+            }
+        }
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|_| fl!("sharepoint-anchor-missing"))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(fl!("sharepoint-anchor-invalid"));
+    }
+    if fs::read_to_string(&path)
+        .map_err(|error| fl!("sharepoint-anchor-read-error", error = error.to_string()))?
+        != expected
+    {
+        return Err(fl!("sharepoint-anchor-changed"));
+    }
+    Ok(())
+}
+
 fn prepare_onedrive_offline_mirror_runtime(connection: &Connection) -> Result<(), String> {
     prepare_onedrive_offline_mirror_runtime_with(connection, &default_config_root())
 }
@@ -8449,6 +9277,77 @@ fn onedrive_mirror_plan_for_app(
     .map_err(|error| error.to_string())
 }
 
+async fn onedrive_mirror_pending_count(connection: &Connection) -> Result<u64, String> {
+    let confdir = default_config_root()
+        .join("onedrive-sync")
+        .join(connection.id.to_string());
+    let mut request = CommandRequest::new(Executable::OneDrive)
+        .arg("--confdir")
+        .and_then(|request| request.arg(confdir.as_os_str()))
+        .and_then(|request| request.arg("--syncdir"))
+        .and_then(|request| request.arg(connection.local_path.as_os_str()))
+        .and_then(|request| request.arg("--display-sync-status"))
+        .map_err(|_| fl!("pending-count-request-failed"))?;
+    if let Some(folder) = &connection.remote_subpath {
+        request = request
+            .arg("--single-directory")
+            .and_then(|request| request.arg(folder))
+            .map_err(|_| fl!("pending-count-request-failed"))?;
+    }
+    let output = app_command_runner()
+        .run(
+            request
+                .with_timeout(Duration::from_secs(90))
+                .with_output_limit(256 * 1024),
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|_| fl!("pending-count-mirror-unavailable"))?;
+    if output.stdout.truncated || output.stdout.invalid_utf8 {
+        return Err(fl!("pending-count-response-incomplete"));
+    }
+    pending_count::parse_onedrive_mirror_status(&output.stdout.text)
+}
+
+async fn rclone_mirror_pending_count(connection: &Connection) -> Result<u64, String> {
+    let plan = rclone_bisync_plan(connection, &default_work_root())
+        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+    if !plan.filters_file.is_file() {
+        return Err(fl!("pending-count-rclone-mirror-unavailable"));
+    }
+    let initialized = initial_sync_marker(&plan).exists();
+    let request = if initialized {
+        rclone_bisync_preview_request(&plan)
+    } else {
+        rclone_bisync_initial_preview_request(&plan)
+    }
+    .map_err(|_| fl!("pending-count-request-failed"))?;
+    let request = request
+        .arg("--color")
+        .and_then(|request| request.arg("NEVER"))
+        .map_err(|_| fl!("pending-count-request-failed"))?;
+    let output = app_command_runner()
+        .run(request, CancellationToken::new())
+        .await
+        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+    if output.stdout.truncated
+        || output.stderr.truncated
+        || output.stdout.invalid_utf8
+        || output.stderr.invalid_utf8
+    {
+        return Err(fl!("pending-count-response-incomplete"));
+    }
+    pending_count::parse_rclone_mirror_status(&format!(
+        "{}\n{}",
+        output.stdout.text, output.stderr.text
+    ))
+}
+
+async fn rclone_mirror_live_pending_count(connection: &Connection) -> Result<u64, String> {
+    let service = UnitName::new(connection.id, UnitKind::Service).file_name();
+    pending_count::rclone_mirror_live_pending(&app_command_runner(), &service).await
+}
+
 fn prepare_rclone_bisync_work_files(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
@@ -8459,11 +9358,7 @@ fn prepare_rclone_bisync_work_files(
             plan.work_directory.display()
         )
     })?;
-    let filter_content = if connection.provider == Provider::GoogleDrive {
-        google_native_filter_file()
-    } else {
-        "+ **\n".into()
-    };
+    let filter_content = rclone_bisync_filter_file(connection.provider);
     fs::write(&plan.filters_file, filter_content).map_err(|error| {
         format!(
             "failed to write rclone bisync filter file {}: {error}",
@@ -8504,6 +9399,41 @@ fn initial_preview_marker(plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPl
 
 fn initial_sync_marker(plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan) -> PathBuf {
     plan.work_directory.join("initial-sync-complete")
+}
+
+fn invalidate_sharepoint_mirror_confirmation_on_retarget(
+    existing: &Connection,
+    next: &Connection,
+    work_root: &Path,
+) -> Result<(), String> {
+    if existing.provider != Provider::Teams
+        || next.provider != Provider::Teams
+        || !matches!(existing.mode, ConnectionMode::OfflineMirror(_))
+        || !matches!(next.mode, ConnectionMode::OfflineMirror(_))
+    {
+        return Ok(());
+    }
+    let old_plan = rclone_bisync_plan(existing, work_root).map_err(|error| error.to_string())?;
+    let new_plan = rclone_bisync_plan(next, work_root).map_err(|error| error.to_string())?;
+    if old_plan.work_directory == new_plan.work_directory {
+        return Ok(());
+    }
+    for marker in [
+        initial_preview_marker(&old_plan),
+        initial_sync_marker(&old_plan),
+    ] {
+        match fs::remove_file(marker) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(fl!(
+                    "sharepoint-confirmation-invalidate-error",
+                    error = error.to_string()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn onedrive_initial_preview_marker(
@@ -8681,7 +9611,24 @@ fn onedrive_runtime_command_error(stage: &str, error: CommandError) -> String {
     onedrive_validation_command_error(stage, error)
 }
 
-async fn test_connection_plan_and_access(connection: &Connection) -> Result<String, String> {
+async fn test_teams_draft_connection(connection: &mut Connection) -> Result<String, String> {
+    let verified = teams::verify_remote(
+        &app_command_runner(),
+        &connection.remote_reference,
+        connection
+            .teams_identity
+            .as_ref()
+            .ok_or("SharePoint library URL is missing.")?,
+    )
+    .await?;
+    connection.teams_identity = Some(verified.identity.clone());
+    test_connection_plan_and_access(connection, Some(&verified)).await
+}
+
+async fn test_connection_plan_and_access(
+    connection: &Connection,
+    teams_verified: Option<&teams::VerifiedTeamsLibrary>,
+) -> Result<String, String> {
     let plan_summary = match managed_plan_summary(connection) {
         Ok(summary) => summary,
         Err(error) => return Err(error),
@@ -8690,8 +9637,12 @@ async fn test_connection_plan_and_access(connection: &Connection) -> Result<Stri
     ensure_vpn_ready_for_connection(connection).await?;
 
     match connection.provider {
-        Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => {
-            match verify_rclone_access(connection).await {
+        Provider::Teams
+        | Provider::GoogleDrive
+        | Provider::Box
+        | Provider::Smb
+        | Provider::Sftp => {
+            match verify_rclone_access_with_verified(connection, teams_verified).await {
                 Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
                 Err(error) => Err(error),
             }
@@ -9038,6 +9989,35 @@ fn onedrive_auth_files_completion_error(error: &CommandError) -> bool {
 }
 
 async fn verify_rclone_access(connection: &Connection) -> Result<String, String> {
+    verify_rclone_access_with_verified(connection, None).await
+}
+
+async fn verify_rclone_access_with_verified(
+    connection: &Connection,
+    teams_verified: Option<&teams::VerifiedTeamsLibrary>,
+) -> Result<String, String> {
+    let teams_summary = if connection.provider == Provider::Teams {
+        let verified = match teams_verified {
+            Some(verified) => verified.clone(),
+            None => teams::verify_remote(
+                &app_command_runner(),
+                &connection.remote_reference,
+                connection.teams_identity.as_ref().ok_or(
+                    "SharePoint library identity is missing; edit and save the connection again.",
+                )?,
+            )
+            .await?,
+        };
+        let account = verified
+            .account
+            .unwrap_or_else(|| "account unavailable from Microsoft Graph".into());
+        Some(format!(
+            "SharePoint library {} at site {} and drive {} matches the saved identity. Signed-in account: {account}.",
+            verified.identity.library_url, verified.identity.site_url, verified.identity.drive_id
+        ))
+    } else {
+        None
+    };
     if connection.provider == Provider::Sftp {
         sftp::verify_host_verification(&app_command_runner(), &connection.remote_reference).await?;
     }
@@ -9069,6 +10049,8 @@ async fn verify_rclone_access(connection: &Connection) -> Result<String, String>
         .map_err(|error| {
             if connection.provider == Provider::Sftp {
                 sftp_access_error(error)
+            } else if connection.provider == Provider::Teams {
+                teams::rclone_read_error(&error, connection.remote_subpath.is_some())
             } else {
                 rclone_access_error(&target, error)
             }
@@ -9078,7 +10060,7 @@ async fn verify_rclone_access(connection: &Connection) -> Result<String, String>
         "Rclone remote `{}` exists, backend `{expected_backend}` matches {}, and `{target}` is accessible with {visible_items} visible item(s) at depth 1.",
         connection.remote_reference,
         provider_label(connection.provider)
-    ))
+    ) + &teams_summary.unwrap_or_default())
 }
 
 fn rclone_access_target(connection: &Connection) -> String {
@@ -9113,6 +10095,8 @@ fn rclone_remote_validation_error(connection: &Connection, error: ProviderError)
         ProviderError::InvalidRemoteSubpath => {
             "remote subtree contains unsupported characters".into()
         }
+        ProviderError::InvalidTeamsIdentity(message) => message,
+        ProviderError::InvalidMountpointGuard(message) => message,
         ProviderError::Unauthenticated => {
             "rclone remote is not authenticated. Reauthorize it before testing.".into()
         }
@@ -9373,6 +10357,7 @@ fn provider_engine_summary(provider: Provider, mode: AccessMode) -> &'static str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic_ext_applet_mounter::config::HostVisibleConfigStorage;
     use cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile;
 
     #[tokio::test]
@@ -9918,6 +10903,7 @@ mod tests {
             active,
             enabled: false,
             detail: "test".into(),
+            result: "success".into(),
         };
         assert!(repair_requires_failed_reset(Some(&status(
             ActiveState::Failed
@@ -10560,12 +11546,13 @@ mod tests {
     #[test]
     fn runtime_systemd_status_parser_recognizes_active_disabled_units() {
         let status = parse_runtime_systemd_status(
-            "ActiveState=active\nSubState=running\nUnitFileState=disabled\n",
+            "ActiveState=active\nSubState=running\nUnitFileState=disabled\nResult=success\n",
         );
 
         assert_eq!(status.active, ActiveState::Active);
         assert!(!status.enabled);
         assert_eq!(status.detail, "running");
+        assert_eq!(status.result, "success");
     }
 
     #[test]
@@ -10648,6 +11635,8 @@ mod tests {
                 "ua_box": {"type": "box", "token": "secret"},
                 "ua_gdrive": {"type": "drive", "client_secret": "secret"},
                 "ua_engr": {"type": "smb", "pass": "secret"},
+                "work_teams": {"type": "onedrive", "drive_type": "documentLibrary", "drive_id": "b!verified", "token": "secret"},
+                "personal_onedrive": {"type": "onedrive", "drive_type": "personal"},
                 "scratch": {"type": "local"},
                 "malformed": "ignored"
             }"#,
@@ -10664,6 +11653,10 @@ mod tests {
                 RcloneDraftRemote {
                     name: "ua_gdrive".into(),
                     backend: "drive".into(),
+                },
+                RcloneDraftRemote {
+                    name: "work_teams".into(),
+                    backend: "onedrive".into(),
                 },
                 RcloneDraftRemote {
                     name: "ua_engr".into(),
@@ -10741,6 +11734,213 @@ mod tests {
             }]
         );
         assert!(app.matching_rclone_remotes(Provider::OneDrive).is_empty());
+    }
+
+    #[test]
+    fn teams_draft_keeps_library_identity_separate_from_local_target() {
+        let draft = ConnectionDraft {
+            name: "Work Teams".into(),
+            provider: Provider::Teams,
+            remote_reference: "work_teams".into(),
+            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+                .into(),
+            local_path: "/home/example/Cloud/Work Teams".into(),
+            ..ConnectionDraft::default()
+        };
+        let connection = connection_from_draft(&draft).unwrap();
+        assert_eq!(connection.remote_reference, "work_teams");
+        assert_eq!(
+            connection.local_path,
+            PathBuf::from("/home/example/Cloud/Work Teams")
+        );
+        assert_eq!(
+            connection.teams_identity.as_ref().unwrap().library_url,
+            draft.teams_library_url
+        );
+        let mut offline = draft;
+        offline.access_mode = AccessMode::OfflineMirror;
+        offline.remote_subpath = "Disposable".into();
+        offline.teams_drive_id = "b!verified".into();
+        let offline_connection = connection_from_draft(&offline).unwrap();
+        assert!(is_rclone_offline_mirror(&offline_connection));
+        assert!(managed_plan_summary(&offline_connection).is_ok());
+    }
+
+    #[tokio::test]
+    async fn sharepoint_manual_mirror_rejects_background_schedule() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut connection = test_connection(Provider::Teams);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            recovery_directory: temporary.path().join("recovery"),
+            sync_interval_minutes: 15,
+            sync_on_metered: false,
+        });
+        connection.local_path = temporary.path().join("local");
+        connection.remote_subpath = Some("Disposable".into());
+        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/Work".into(),
+            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+            drive_id: "b!verified".into(),
+        });
+        let plan = rclone_bisync_plan(&connection, &temporary.path().join("work")).unwrap();
+        assert!(
+            start_rclone_offline_mirror_background(&connection, &plan)
+                .await
+                .unwrap_err()
+                .contains("not available yet")
+        );
+    }
+
+    #[test]
+    fn teams_test_uses_verified_drive_and_discards_changed_drafts() {
+        let draft = ConnectionDraft {
+            name: "Work Teams".into(),
+            provider: Provider::Teams,
+            remote_reference: "work_teams".into(),
+            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+                .into(),
+            local_path: "/home/example/Cloud/Work Teams".into(),
+            ..ConnectionDraft::default()
+        };
+        let mut verified = connection_from_draft(&draft).unwrap();
+        assert!(managed_plan_summary(&verified).is_err());
+        verified.teams_identity.as_mut().unwrap().drive_id = "b!verified".into();
+        assert!(managed_plan_summary(&verified).is_ok());
+        assert!(teams_verification_matches_draft(&draft, &verified));
+
+        let mut changed = draft.clone();
+        changed.remote_reference = "other_remote".into();
+        assert!(!teams_verification_matches_draft(&changed, &verified));
+        changed = draft.clone();
+        changed.teams_library_url =
+            "https://example.sharepoint.com/sites/Other/Shared%20Documents".into();
+        assert!(!teams_verification_matches_draft(&changed, &verified));
+    }
+
+    #[test]
+    fn sharepoint_offline_test_retains_automatic_recovery_target() {
+        use cosmic::Application;
+        let mut app = AppModel::default();
+        let _ = app.update(Message::DraftProvider(Provider::Teams));
+        let stable_id = app.draft.id.expect("SharePoint draft needs a stable ID");
+        let _ = app.update(Message::DraftAccessMode(AccessMode::OfflineMirror));
+        assert_eq!(app.draft.id, Some(stable_id));
+
+        let draft = ConnectionDraft {
+            id: app.draft.id,
+            name: "SharePoint Offline UI Test".into(),
+            provider: Provider::Teams,
+            access_mode: AccessMode::OfflineMirror,
+            remote_reference: "work_teams".into(),
+            remote_subpath: "Disposable/test".into(),
+            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+                .into(),
+            local_path: "/tmp/sharepoint-offline-ui-test".into(),
+            ..ConnectionDraft::default()
+        };
+        let mut verified = connection_from_draft(&draft).unwrap();
+        verified.teams_identity.as_mut().unwrap().drive_id = "b!verified".into();
+        assert!(teams_verification_matches_draft(&draft, &verified));
+
+        let mut changed = draft.clone();
+        changed.recovery_directory = "/tmp/another-recovery".into();
+        assert!(!teams_verification_matches_draft(&changed, &verified));
+    }
+
+    #[test]
+    fn teams_online_service_routes_through_guarded_rclone_without_preload() {
+        let mut connection = test_connection(Provider::Teams);
+        connection.remote_subpath = Some("General".into());
+        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/Work".into(),
+            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+            drive_id: "b!verified".into(),
+        });
+        if let ConnectionMode::OnlineMount(options) = &mut connection.mode {
+            options.start_at_login = true;
+        }
+        assert!(is_rclone_online_mount(&connection));
+        assert!(!is_onedriver_online_mount(&connection));
+        assert!(!uses_directory_preload(&connection));
+        assert!(
+            !ConfigDocument::default()
+                .preload_policy_for(&connection)
+                .enabled
+        );
+        assert_eq!(
+            managed_unit_names_for_connection(&connection),
+            vec![UnitName::new(connection.id, UnitKind::Service)]
+        );
+
+        let plan = rclone_mount_plan(
+            &connection,
+            Path::new("/run/user/1000/cosmic-mounter"),
+            Path::new("/home/example/.cache/cosmic-mounter"),
+        )
+        .expect("Teams rclone plan");
+        assert_eq!(plan.remote, "remote:General");
+        let unit = UnitDocument::service(&plan.service).expect("Teams service");
+        assert!(unit.content.contains("--verify-teams-mount"));
+        assert!(unit.content.contains("b!verified"));
+        assert!(unit.content.contains("WantedBy=default.target"));
+        assert!(unit.content.find("ExecCondition=") < unit.content.find("ExecStart="));
+    }
+
+    #[test]
+    fn sharepoint_marker_and_retarget_confirmation_are_safeguarded() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut connection = test_connection(Provider::Teams);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            recovery_directory: temporary.path().join("recovery"),
+            sync_interval_minutes: 15,
+            sync_on_metered: false,
+        });
+        connection.local_path = temporary.path().join("local");
+        connection.remote_subpath = Some("Disposable".into());
+        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
+            site_url: "https://example.sharepoint.com/sites/Work".into(),
+            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+            drive_id: "b!verified".into(),
+        });
+        fs::create_dir_all(&connection.local_path).unwrap();
+        let plan = rclone_bisync_plan(&connection, &temporary.path().join("work")).unwrap();
+        let marker = connection
+            .local_path
+            .join(plan.access_marker_name.as_ref().unwrap());
+        ensure_sharepoint_access_marker(&connection, &plan).unwrap();
+        assert_eq!(
+            fs::read_to_string(&marker).unwrap(),
+            format!("{}\n", connection.id)
+        );
+        fs::write(&marker, "changed\n").unwrap();
+        assert!(ensure_sharepoint_access_marker(&connection, &plan).is_err());
+        fs::write(&marker, format!("{}\n", connection.id)).unwrap();
+        fs::create_dir_all(&plan.work_directory).unwrap();
+        fs::write(initial_sync_marker(&plan), "complete\n").unwrap();
+        fs::remove_file(&marker).unwrap();
+        assert!(ensure_sharepoint_access_marker(&connection, &plan).is_err());
+
+        let old_preview = initial_preview_marker(&plan);
+        let old_sync = initial_sync_marker(&plan);
+        let listing = plan.work_directory.join("path1.lst");
+        fs::write(&old_preview, "preview\n").unwrap();
+        fs::write(&listing, "listing\n").unwrap();
+        let mut changed = connection.clone();
+        changed.remote_subpath = Some("Other-Disposable".into());
+        let work_root = temporary.path().join("work");
+        let changed_plan = rclone_bisync_plan(&changed, &work_root).unwrap();
+        assert_ne!(plan.work_directory, changed_plan.work_directory);
+        invalidate_sharepoint_mirror_confirmation_on_retarget(&connection, &changed, &work_root)
+            .unwrap();
+        assert!(!old_preview.exists());
+        assert!(!old_sync.exists());
+        assert!(listing.exists());
+        fs::create_dir_all(&changed_plan.work_directory).unwrap();
+        fs::write(initial_preview_marker(&changed_plan), "other preview\n").unwrap();
+        invalidate_sharepoint_mirror_confirmation_on_retarget(&changed, &connection, &work_root)
+            .unwrap();
+        assert!(!initial_preview_marker(&changed_plan).exists());
+        assert!(!old_preview.exists());
     }
 
     #[test]
@@ -12140,6 +13340,20 @@ mod tests {
         assert!(warning.contains("Box One"));
     }
 
+    #[test]
+    fn new_onedrive_account_labels_are_distinct() {
+        let first = ConnectionId::from_uuid(
+            Uuid::parse_str("990cc48f-4e4e-4ed7-a07b-c545ad3d3f9d").expect("uuid"),
+        );
+        let second = ConnectionId::from_uuid(
+            Uuid::parse_str("5ffc5d9b-6721-49f6-81d2-5f39c15061b7").expect("uuid"),
+        );
+        assert_ne!(
+            default_onedrive_account_label(first),
+            default_onedrive_account_label(second)
+        );
+    }
+
     fn test_connection(provider: Provider) -> Connection {
         Connection {
             id: ConnectionId::default(),
@@ -12155,6 +13369,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -12218,6 +13433,73 @@ mod tests {
         assert!(message.contains("two minutes"));
         assert!(message.contains("older locks may need manual recovery"));
         assert!(!message.contains("/home/user/private"));
+    }
+
+    #[test]
+    fn reorder_connection_moves_item_to_selected_position() {
+        let mut first = test_connection(Provider::Box);
+        first.id = ConnectionId::new();
+        first.local_path = PathBuf::from("/tmp/cosmic-test/first");
+        let mut second = test_connection(Provider::GoogleDrive);
+        second.id = ConnectionId::new();
+        second.local_path = PathBuf::from("/tmp/cosmic-test/second");
+        let mut third = test_connection(Provider::Smb);
+        third.id = ConnectionId::new();
+        third.local_path = PathBuf::from("/tmp/cosmic-test/third");
+        let mut app = AppModel {
+            config: {
+                let mut config = Config::default();
+                config.document.connections = vec![first.clone(), second.clone(), third.clone()];
+                config
+            },
+            ..AppModel::default()
+        };
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let storage = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(
+            temp.path().join("document"),
+        ));
+
+        let _ = app.reorder_connection_with_storage(third.id, 1, &storage);
+        assert_eq!(app.config.document.connections[0].id, third.id);
+        assert_eq!(app.config.document.connections[1].id, first.id);
+        assert_eq!(app.config.document.connections[2].id, second.id);
+
+        let _ = app.reorder_connection_with_storage(first.id, 3, &storage);
+        assert_eq!(app.config.document.connections[0].id, third.id);
+        assert_eq!(app.config.document.connections[1].id, second.id);
+        assert_eq!(app.config.document.connections[2].id, first.id);
+    }
+
+    #[test]
+    fn reorder_connection_ignores_invalid_and_unchanged_positions() {
+        let mut first = test_connection(Provider::Box);
+        first.id = ConnectionId::new();
+        first.local_path = PathBuf::from("/tmp/cosmic-test/first");
+        let mut second = test_connection(Provider::GoogleDrive);
+        second.id = ConnectionId::new();
+        second.local_path = PathBuf::from("/tmp/cosmic-test/second");
+        let mut app = AppModel {
+            config: {
+                let mut config = Config::default();
+                config.document.connections = vec![first.clone(), second.clone()];
+                config
+            },
+            ..AppModel::default()
+        };
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let storage = AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(
+            temp.path().join("document"),
+        ));
+
+        let _ = app.reorder_connection_with_storage(first.id, 1, &storage);
+        assert_eq!(app.config.document.connections[0].id, first.id);
+        assert_eq!(app.config.document.connections[1].id, second.id);
+
+        let _ = app.reorder_connection_with_storage(first.id, 0, &storage);
+        assert_eq!(app.config.document.connections[0].id, first.id);
+
+        let _ = app.reorder_connection_with_storage(first.id, 99, &storage);
+        assert_eq!(app.config.document.connections[0].id, first.id);
     }
 
     fn command_output(stdout: &str) -> CommandOutput {

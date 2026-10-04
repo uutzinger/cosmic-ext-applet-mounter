@@ -15,6 +15,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use crate::fl;
 use crate::model::ConnectionId;
 use crate::process::{CommandError, CommandRequest, CommandRunner, Executable};
 
@@ -74,8 +75,15 @@ pub struct ServiceSpec {
     pub description: String,
     pub executable: PathBuf,
     pub arguments: Vec<String>,
+    pub pre_start_condition: Option<ServiceCommand>,
     pub restart_on_failure: bool,
     pub skip_on_metered: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceCommand {
+    pub executable: PathBuf,
+    pub arguments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +115,20 @@ impl UnitDocument {
             exec.push_str(&arguments.join(" "));
         }
 
+        let pre_start_condition = spec
+            .pre_start_condition
+            .as_ref()
+            .map(|command| {
+                let executable = validate_absolute_executable(&command.executable)?;
+                let mut rendered = escape_systemd_argument(executable)?;
+                for argument in &command.arguments {
+                    rendered.push(' ');
+                    rendered.push_str(&escape_systemd_argument(argument)?);
+                }
+                Ok::<_, ServiceError>(format!("ExecCondition={rendered}\n"))
+            })
+            .transpose()?
+            .unwrap_or_default();
         let restart = if spec.restart_on_failure {
             "Restart=on-failure\nRestartSec=5s\n"
         } else {
@@ -124,7 +146,7 @@ impl UnitDocument {
             String::new()
         };
         let content = format!(
-            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Service]\nType=simple\nRuntimeDirectory=cosmic-ext-applet-mounter\nSuccessExitStatus=130 143\n{metered_condition}ExecStart={exec}\n{restart}\n[Install]\nWantedBy=default.target\n",
+            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Service]\nType=simple\nRuntimeDirectory=cosmic-ext-applet-mounter\nSuccessExitStatus=130 143\n{metered_condition}{pre_start_condition}ExecStart={exec}\n{restart}\n[Install]\nWantedBy=default.target\n",
             spec.connection_id, spec.description
         );
         Ok(Self {
@@ -176,6 +198,7 @@ pub struct UnitStatus {
     pub active: ActiveState,
     pub enabled: bool,
     pub detail: String,
+    pub result: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -433,6 +456,7 @@ impl<R: CommandRunner> SystemdManager for CommandSystemdManager<R> {
                         .arg("--property=ActiveState")?
                         .arg("--property=UnitFileState")?
                         .arg("--property=SubState")?
+                        .arg("--property=Result")?
                         .arg(unit.file_name())?
                 }
                 _ => {
@@ -636,7 +660,10 @@ fn escape_systemd_argument(value: &str) -> Result<String, ServiceError> {
             "unit argument is empty or contains unsafe characters".into(),
         ));
     }
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = value
+        .replace('%', "%%")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     Ok(format!("\"{escaped}\""))
 }
 
@@ -673,6 +700,91 @@ fn parse_systemd_status(output: &str) -> UnitStatus {
         active,
         enabled,
         detail: property("SubState").to_owned(),
+        result: property("Result").to_owned(),
+    }
+}
+
+/// Start a managed Online mount, clearing only a genuinely failed service.
+/// A non-empty or already mounted target is rejected by the mountpoint guard
+/// before this function is called (and by ExecCondition for direct starts).
+pub async fn start_managed_online_service<M: SystemdManager>(
+    manager: &M,
+    unit: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    let status = manager
+        .action(
+            SystemdAction::Status,
+            Some(unit),
+            cancellation.child_token(),
+        )
+        .await
+        .map_err(|error| fl!("online-service-read-state", error = error.to_string()))?
+        .ok_or_else(|| fl!("online-service-unknown-state"))?;
+    if status.active == ActiveState::Unknown {
+        return Err(fl!("online-service-state-unavailable"));
+    }
+    if status.active == ActiveState::Failed {
+        manager
+            .action(
+                SystemdAction::ResetFailed,
+                Some(unit),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| fl!("online-service-reset-failed", error = error.to_string()))?;
+    }
+
+    let start_result = manager
+        .action(SystemdAction::Start, Some(unit), cancellation.child_token())
+        .await;
+    let after = manager
+        .action(SystemdAction::Status, Some(unit), cancellation)
+        .await;
+    match after {
+        Ok(Some(status))
+            if matches!(status.active, ActiveState::Active | ActiveState::Activating) =>
+        {
+            start_result
+                .map_err(|error| fl!("online-service-start-failed", error = error.to_string()))?;
+            Ok(())
+        }
+        Ok(Some(status)) => {
+            let cause = if status.result.contains("start-limit") {
+                fl!("online-service-rate-limit")
+            } else if status.result == "exec-condition" || status.detail == "condition" {
+                fl!("online-service-preflight-blocked")
+            } else {
+                fl!("online-service-not-active")
+            };
+            let detail = if status.result.is_empty() {
+                status.detail.as_str()
+            } else {
+                status.result.as_str()
+            };
+            match start_result {
+                Ok(_) => Err(format!("{cause} ({detail})")),
+                Err(_)
+                    if status.result.contains("start-limit")
+                        || status.result == "exec-condition" =>
+                {
+                    Err(format!("{cause} ({detail})"))
+                }
+                Err(error) => Err(format!("{cause} ({detail}; {error})")),
+            }
+        }
+        Ok(None) => Err(fl!("online-service-unknown-after-start")),
+        Err(error) => match start_result {
+            Err(start_error) => Err(fl!(
+                "online-service-start-and-read-failed",
+                start_error = start_error.to_string(),
+                error = error.to_string()
+            )),
+            Ok(_) => Err(fl!(
+                "online-service-read-after-start",
+                error = error.to_string()
+            )),
+        },
     }
 }
 
@@ -696,6 +808,7 @@ mod tests {
             description: "Example storage connection".into(),
             executable: PathBuf::from("/usr/bin/example"),
             arguments: vec!["--path".into(), "/home/example/Cloud Drive".into()],
+            pre_start_condition: None,
             restart_on_failure: true,
             skip_on_metered: false,
         })
@@ -709,6 +822,7 @@ mod tests {
             description: "Metered mirror".into(),
             executable: PathBuf::from("/usr/bin/rclone"),
             arguments: vec!["bisync".into()],
+            pre_start_condition: None,
             restart_on_failure: false,
             skip_on_metered: true,
         };
@@ -723,6 +837,34 @@ mod tests {
                 .content
                 .contains("ExecCondition=")
         );
+    }
+
+    #[test]
+    fn teams_guard_runs_before_mount_and_requires_safe_arguments() {
+        let mut spec = ServiceSpec {
+            connection_id: id(),
+            description: "Teams assessment".into(),
+            executable: PathBuf::from("/usr/bin/rclone"),
+            arguments: vec!["mount".into()],
+            pre_start_condition: Some(ServiceCommand {
+                executable: PathBuf::from("/usr/bin/cloud-mounter"),
+                arguments: vec![
+                    "--verify-teams-mount".into(),
+                    "Shared Documents".into(),
+                    "https://example.sharepoint.com/Shared%20Documents".into(),
+                ],
+            }),
+            restart_on_failure: true,
+            skip_on_metered: false,
+        };
+        let unit = UnitDocument::service(&spec).unwrap();
+        let condition = unit.content.find("ExecCondition=").unwrap();
+        let start = unit.content.find("ExecStart=").unwrap();
+        assert!(condition < start);
+        assert!(unit.content.contains("\"Shared Documents\""));
+        assert!(unit.content.contains("Shared%%20Documents"));
+        spec.pre_start_condition.as_mut().unwrap().arguments[1] = "bad\nargument".into();
+        assert!(UnitDocument::service(&spec).is_err());
     }
 
     fn command_output(stdout: &str) -> CommandOutput {
@@ -894,7 +1036,7 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
             runner.push(Ok(command_output("")));
         }
         runner.push(Ok(command_output(
-            "SubState=running\nUnitFileState=enabled\nActiveState=active\n",
+            "SubState=running\nUnitFileState=enabled\nActiveState=active\nResult=success\n",
         )));
         let manager = CommandSystemdManager::new(runner.clone());
         let unit = service().name;
@@ -931,6 +1073,7 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
                 active: ActiveState::Active,
                 enabled: true,
                 detail: "running".into(),
+                result: "success".into(),
             }
         );
         assert_eq!(
@@ -947,9 +1090,140 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
                 "systemctl --user start cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
                 "systemctl --user stop cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
                 "systemctl --user reset-failed cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user show --property=ActiveState --property=UnitFileState --property=SubState cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
+                "systemctl --user show --property=ActiveState --property=UnitFileState --property=SubState --property=Result cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
             ]
         );
+    }
+
+    fn online_status(active: ActiveState, detail: &str, result: &str) -> UnitStatus {
+        UnitStatus {
+            active,
+            enabled: false,
+            detail: detail.into(),
+            result: result.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn online_start_does_not_reset_an_inactive_service() {
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(Some(online_status(
+            ActiveState::Inactive,
+            "dead",
+            "success",
+        ))));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(online_status(
+            ActiveState::Active,
+            "running",
+            "success",
+        ))));
+        let unit = service().name;
+
+        start_managed_online_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect("online start");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Status,
+                SystemdAction::Start,
+                SystemdAction::Status
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn online_start_reports_failed_reset_and_does_not_start() {
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(Some(online_status(
+            ActiveState::Failed,
+            "failed",
+            "exit-code",
+        ))));
+        manager.push(Err(ServiceError::Runtime("reset rejected".into())));
+        let unit = service().name;
+
+        let error = start_managed_online_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect_err("reset failure");
+        assert!(error.contains("Could not reset failed Online mount service:"));
+        assert!(error.contains("reset rejected"));
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [SystemdAction::Status, SystemdAction::ResetFailed]
+        );
+    }
+
+    #[tokio::test]
+    async fn online_start_resets_failed_service_before_start() {
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(Some(online_status(
+            ActiveState::Failed,
+            "failed",
+            "exit-code",
+        ))));
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(online_status(
+            ActiveState::Active,
+            "running",
+            "success",
+        ))));
+        let unit = service().name;
+
+        start_managed_online_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect("recovered start");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Status,
+                SystemdAction::ResetFailed,
+                SystemdAction::Start,
+                SystemdAction::Status
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn online_start_distinguishes_rate_limit_and_mountpoint_guard() {
+        for (result, detail, expected) in [
+            ("start-limit-hit", "failed", "start rate limit"),
+            ("exec-condition", "dead", "blocked by its preflight"),
+        ] {
+            let manager = FakeSystemdManager::default();
+            manager.push(Ok(Some(online_status(
+                ActiveState::Inactive,
+                "dead",
+                "success",
+            ))));
+            manager.push(Ok(None));
+            manager.push(Ok(Some(online_status(ActiveState::Failed, detail, result))));
+            let unit = service().name;
+            let error = start_managed_online_service(&manager, &unit, CancellationToken::new())
+                .await
+                .expect_err("start blocked");
+            assert!(error.contains(expected), "{error}");
+            assert!(
+                !manager
+                    .actions()
+                    .iter()
+                    .any(|(action, _)| *action == SystemdAction::ResetFailed)
+            );
+        }
     }
 
     #[tokio::test]

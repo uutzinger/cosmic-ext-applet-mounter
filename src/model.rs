@@ -53,6 +53,7 @@ uuid_id!(VpnProfileId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Provider {
     OneDrive,
+    Teams,
     GoogleDrive,
     Box,
     Smb,
@@ -169,6 +170,8 @@ pub struct PreloadSettings {
     pub onedrive: PreloadPolicy,
     #[serde(rename = "box", alias = "box_provider")]
     pub box_provider: PreloadPolicy,
+    #[serde(default = "PreloadPolicy::sftp_default")]
+    pub sharepoint: PreloadPolicy,
     pub smb: PreloadPolicy,
     #[serde(default = "PreloadPolicy::sftp_default")]
     pub sftp: PreloadPolicy,
@@ -180,6 +183,7 @@ impl Default for PreloadSettings {
             google_drive: PreloadPolicy::without_depth(),
             onedrive: PreloadPolicy::without_depth(),
             box_provider: PreloadPolicy::with_depth(DEFAULT_BOX_PRELOAD_DEPTH),
+            sharepoint: PreloadPolicy::sftp_default(),
             smb: PreloadPolicy::with_depth(DEFAULT_SMB_PRELOAD_DEPTH),
             sftp: PreloadPolicy::sftp_default(),
         }
@@ -194,6 +198,13 @@ pub struct ConnectionPreloadOverride {
 }
 
 pub type SmbPreloadOverride = ConnectionPreloadOverride;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TeamsLibraryIdentity {
+    pub site_url: String,
+    pub library_url: String,
+    pub drive_id: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
@@ -212,6 +223,8 @@ pub struct Connection {
     pub smb_preload_override: Option<SmbPreloadOverride>,
     #[serde(default)]
     pub sftp_preload_override: Option<ConnectionPreloadOverride>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teams_identity: Option<TeamsLibraryIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

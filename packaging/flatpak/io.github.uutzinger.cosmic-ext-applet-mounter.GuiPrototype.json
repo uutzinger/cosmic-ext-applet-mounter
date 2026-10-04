@@ -8,6 +8,7 @@
     "--socket=wayland",
     "--socket=fallback-x11",
     "--share=ipc",
+    "--share=network",
     "--device=dri",
     "--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Mode:ro",
     "--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Light:ro",

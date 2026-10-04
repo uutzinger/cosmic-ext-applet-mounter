@@ -218,6 +218,7 @@ pub fn preview_import(
         tuning_profile: crate::model::TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        teams_identity: None,
     };
     Ok(ImportPreview {
         original_path: unit.path.clone(),
@@ -821,6 +822,7 @@ mod tests {
                 tuning_profile: crate::model::TuningProfile::Balanced,
                 smb_preload_override: None,
                 sftp_preload_override: None,
+                teams_identity: None,
             }],
             &["rclone-ua-gdrive.service".to_owned()]
                 .into_iter()

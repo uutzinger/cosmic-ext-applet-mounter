@@ -210,6 +210,7 @@ pub fn decide_operation(row: &ConnectionRowState, operation: Operation) -> Opera
 pub fn provider_label(provider: Provider) -> &'static str {
     match provider {
         Provider::OneDrive => "OneDrive",
+        Provider::Teams => "SharePoint",
         Provider::GoogleDrive => "Google Drive",
         Provider::Box => "Box",
         Provider::Smb => "SMB",
@@ -707,6 +708,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -729,6 +731,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            teams_identity: None,
         }
     }
 
@@ -771,6 +774,7 @@ mod tests {
                     active: ActiveState::Active,
                     enabled: true,
                     detail: "running".into(),
+                    result: "success".into(),
                 },
             )]
             .into_iter()
@@ -799,6 +803,7 @@ mod tests {
                     active: ActiveState::Failed,
                     enabled: false,
                     detail: "clean unmount failed".into(),
+                    result: "exit-code".into(),
                 },
             )]
             .into_iter()
@@ -928,6 +933,7 @@ mod tests {
     #[test]
     fn labels_are_stable_for_popup_rows() {
         assert_eq!(provider_label(Provider::Smb), "SMB");
+        assert_eq!(provider_label(Provider::Teams), "SharePoint");
         assert_eq!(
             status_label(&ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted)),
             "Mounted"
