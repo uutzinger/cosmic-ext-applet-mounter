@@ -115,8 +115,9 @@ manifest scaffold intended to be copied into the COSMIC Flatpak repository as:
 app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json
 ```
 
-It is not fully buildable until `REPLACE_WITH_FLATPAK_READY_COMMIT` is replaced
-with the tagged or pinned release commit and `cargo-sources.json` is generated.
+The current manifest pins `v0.5.0` and uses generated `cargo-sources.json`.
+Rebuild and retest after dependency or permission changes; public COSMIC
+repository submission remains pending.
 
 ## Permission Rationale
 

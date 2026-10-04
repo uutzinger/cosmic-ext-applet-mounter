@@ -14,6 +14,7 @@ unavailable. The applet attempts to pre-cache directory metadata when available.
 
 - [Modes and Providers](#modes-and-providers)
 - [Installation and Removal](#installation-and-removal)
+  - [Dependencies](#dependencies)
   - [Installation from Source](#installation-from-source)
   - [Installation from Debian Package](#installation-from-debian-package)
   - [Installation from Flatpak](#installation-from-flatpak)
@@ -54,16 +55,11 @@ The following connection engines are used to connect to the providers ([external
 | SFTP | `rclone mount` | `rclone bisync` |
 | SharePoint | `rclone mount` | `rclone bisync` manual sync only |
 
-**Connection Engine Choices:**
-
-- The applet uses rclone as its general-purpose mount engine.
-- **OneDrive Online:** We use `jstaf/onedriver` for its OneDrive-specific
-  on-demand filesystem: it downloads files when accessed and caches metadata
-  and file contents. We do not use `abraunegg/onedrive` as it creates a local mirror instead.
-- **OneDrive Offline:** `abraunegg/onedrive` keeps a local synchronized copy
-  of selected files and monitors local and Microsoft changes. We do not use `jstaf/onedriver` as it
-  downloads files as they are accessed or `rclone bisync` as a compare on both sides
-  requires scheduled a sync run. `abraunegg/onedrive` disadvantage is that Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent).
+Rclone handles most providers. OneDrive Online uses `jstaf/onedriver` for
+on-demand access, while OneDrive Offline uses `abraunegg/onedrive` to monitor a
+local synchronized copy instead of running periodic `rclone bisync` jobs.
+Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent)
+for `abraunegg/onedrive`.
 
 Example screenshots of the applet and its separate windows:
 <table>
@@ -208,38 +204,32 @@ mirrors, `Disable` or `Enable`, and `Remove`. The Information section
 summarizes the selected engine, generated unit validation, and confirmation
 policy.
 
-Settings can `unmount` Online connections before the computer `sleeps` and restore
-them after wake. A mounted share can block or delay the sleep process.
+Settings can unmount Online connections before sleep and restore them after
+wake. A busy mount may delay sleep.
 
-Settings can also enable `directory preloading`. Preload tasks do not open file
-contents.
+Directory preload is optional and reads directory metadata, not file contents.
+Enabled preloads run after mounting, stop at their configured time limit, and
+are cancelled before unmount, repair, removal, or sleep cleanup.
 
-**Google Drive**: After its private Unix RC/VFS endpoint is ready, Cloud Mounter
-starts a recursive directory-cache refresh as an asynchronous rclone job using
-fast-list mode. Cloud Mounter tracks the job through completion.
-Unmount, repair, connection removal, and sleep cleanup cancel an active refresh
-before detaching the filesystem.
+**OneDrive:** After onedriver is ready, a directory-only walk warms its cache
+without following symbolic links.
 
-**OneDrive** starts a directory-only metadata preload after onedriver is ready.
-The traversal does not follow symbolic links, stops at the configured deadline,
-and is cancelled before unmount, repair, removal, or sleep.
+**SharePoint:** A directory-only walk stays within the selected library or
+folder. It is off by default, with a 30-second limit and depth 2.
 
-**SharePoint** starts .....
+**Google Drive:** An asynchronous rclone VFS refresh warms the directory cache
+using fast-list mode.
 
-**Box** waits for both the mountpoint and a usable root listing, then starts a
-bounded directory-only metadata walk. It does not use recursive rclone RC
-refresh or fast-list, which helps limit Box API requests and rate-limit risk.
+**Box:** After the mount and root listing are ready, a depth-limited directory
+walk avoids a recursive rclone refresh and helps limit API requests.
 
-**SMB** also waits for the mountpoint and root listing before starting its
-bounded directory-only metadata walk. Each SMB connection can inherit the
-global preload policy or override its enabled state, duration, and depth.
+**SMB:** A depth-limited directory walk starts after the mount and root listing
+are ready. Each connection may override the global preload setting, duration,
+and depth.
 
-**SFTP** uses the same bounded directory walk, but defaults to disabled with a
-30-second maximum and depth 2.
-
-**SharePoint** Online also defaults to disabled with a 30-second maximum and depth
-2, scoped to the selected library or folder.
-
+**SFTP:** A depth-limited directory walk is off by default, with a 30-second
+limit and depth 2. It skips server `/proc`, `/sys`, and `/dev` trees and does not
+follow symbolic links. Each connection may override the global policy.
 
 ## Authentication
 
@@ -247,8 +237,11 @@ The applet does not store provider credentials. Credentials stay with `rclone`,
 `jstaf/onedriver`, `abraunegg/onedrive`, or the operating system.
 
 For Google Drive and Box, applet-driven setup delegates browser OAuth to
-`rclone`. For SMB, the password remains in rclone's credential mechanism, not
+`rclone`.
+
+For SMB, the password remains in rclone's credential mechanism, not
 in applet configuration.
+
 SFTP supports a password, SSH key, or SSH agent and requires a known-hosts file.
 SharePoint can use a verified existing rclone document-library remote or the
 editor's Microsoft sign-in setup; the applet does not store its token.
@@ -261,7 +254,9 @@ changes an existing Drive remote and opens browser authorization again.
 The form masks the secret and clears it when the operation finishes.
 
 For OneDrive Online mount, the applet uses `jstaf/onedriver` with applet-owned
-configuration and cache paths. For OneDrive Offline mirror, it uses
+configuration and cache paths.
+
+For OneDrive Offline mirror, it uses
 `abraunegg/onedrive` with applet-owned configuration, sync, and recovery paths.
 
 ## Conflict Recovery and Limitations
@@ -336,17 +331,13 @@ OpenAI Codex was used primarily to implement the applet.
 
 ### Feature Requests
 
-You can implement additional features using agent-assisted programming:
-
-- Clone the GitHub repository.
-- Ask your AI agent to read "Applet Description.md", "Requirements and Specifications.md".
-- Ask the AI agent to update the Description and Requirements with the feature you want.
-- Verify the modifications to the two files.
-- Have your AI agent add Tasks to the end of the Task list based on the updated Specifications.
-- Have your AI agent execute the additions to the Task list.
-- Make sure your AI agent updates Task List Completion Notes.
-- Complete the verifications and test your implementation as instructed by your AI agent. Do not skip the testing.
-- Submit a pull request to this repo.
+For a feature contribution, update the [description](Applet%20Description.md)
+and [requirements](Requirements%20and%20Specifications.md), then append its
+implementation and verification steps to the [task list](Task%20List.md).
+Implement and test the change, record the result in
+[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md), and submit
+a pull request. You can use an AI agent to assist, but review its changes and
+complete the tests yourself.
 
 ### Bug Reports
 
@@ -402,67 +393,17 @@ The panel should automatically restart and load the updated applet.
 `just stage` installs into `target/stage/usr` and does not modify the host
 system.
 
-`just metadata-check` validates the desktop entry and AppStream metadata without
-network access. Because the official COSMIC applet template currently uses
-COSMIC-specific metadata fields that strict freedesktop validators report as
-invalid or unknown, `just metadata-check` is non-fatal; use
-`just metadata-check-strict` to see the raw validator result. `just
-metadata-check-net` additionally checks published URLs and screenshots. `just
-deb` builds a local unsigned Debian binary package in the parent directory.
+`just metadata-check` reports known COSMIC-specific freedesktop validation
+warnings without failing. Use `just metadata-check-strict` for the raw result
+and `just metadata-check-net` to check published URLs. `just deb` builds an
+unsigned Debian package in the parent directory.
 
 ## Flatpak Packaging and Publication
 
-Flatpak packaging is intended for the COSMIC Flatpak repository because this is
-an applet for the COSMIC™ desktop, not a general desktop application. The local
-Flatpak has been built, installed, tested from a local repository, and verified
-for AppStream discovery and uninstall behavior. It is not yet published through
-a public Flatpak remote.
+The Flatpak has been tested locally but is not yet published through a public
+remote. The manifest, build steps, and permission rationale are in the
+[Flatpak packaging guide](packaging/flatpak/README.md). It runs storage tools on
+the host, so those dependencies must be installed there.
 
-The project-owned manifest is:
-
-```text
-packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json
-```
-
-The manifest builds from the tagged source release and generated Cargo source
-list. The COSMIC repository submission uses the `pop-os/cosmic-flatpak`
-workflow:
-
-```sh
-cd ../cosmic-flatpak
-just build io.github.uutzinger.cosmic-ext-applet-mounter
-just build-changed
-flatpak build-update-repo --generate-static-deltas --prune repo
-```
-
-The final manifest uses `flatpak-spawn --host` for approved host commands, so
-host dependencies still must be installed separately: `rclone`, `onedriver`,
-`onedrive`, `fusermount3`, `nmcli`, and any VPN clients used by configured
-connections.
-
-The tested Flatpak design does **not** require `--filesystem=host`. It uses
-narrow app-specific grants for:
-
-- native-visible applet configuration for the COSMIC™ desktop;
-- app-owned engine configuration/cache/state;
-- generated user systemd units;
-- host COSMIC™ theme files for standalone settings windows.
-
-Existing native/source/Debian applet configuration is shared with the Flatpak
-prototype through:
-
-```text
-~/.config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter/v2/document
-```
-
-**Do not** run native and Flatpak instances at the same time. Both can see the same
-connection configuration and manage the same generated user services, so
-concurrent instances can race on mount, sync, and service state. Switching
-package formats should be done by stopping the running applet first, then
-starting the other package format.
-
-To regenerate the reproducible Flatpak source list after dependency changes:
-
-```sh
-just flatpak-cargo-sources
-```
+Native and Flatpak installations share connection configuration and generated
+services. Stop one before starting the other to avoid competing operations.
