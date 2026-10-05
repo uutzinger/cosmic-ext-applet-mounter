@@ -2676,3 +2676,11 @@ metadata, icon, copyright, and changelog. Its SHA-256 is
 Install/remove/reinstall/remove testing preserved the existing custom applet and
 COSMIC configuration. The package was left uninstalled, and restarting the
 COSMIC panel successfully relaunched the user-local candidate.
+
+The reviewed release commit `8aeeb68` was pushed to `origin/master` before the
+annotated `v0.5.1` tag was created and pushed. GitHub Release **Cloud Mounter
+0.5.1** was published as a normal release with the amd64 Debian package and
+`SHA256SUMS`. A clean download of both published assets passed `sha256sum -c`.
+The public tag, README, Google Cloud OAuth guide, and all four tag-based
+AppStream screenshot URLs returned HTTP 200. The completed Tooltip Review was
+intentionally archived and removed from the repository as part of the release.

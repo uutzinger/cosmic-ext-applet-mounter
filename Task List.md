@@ -3049,14 +3049,19 @@ retest; completed tests do not need to be repeated otherwise.
     `cosmic-panel` successfully relaunched the custom applet. Its subsequent
     normal runtime-state write changed the configuration hash only after the
     package preservation checks had passed.
-- [ ] Release documentation and publication
+- [x] Release documentation and publication
   - [x] Create Release Notes 0.5.1.md.
   - [x] Update the completion notes with the final evidence.
   - [x] Generate the .deb (completed above) and SHA256SUMS.
   - [x] Review the complete dirty worktree before committing, including the
         intentional archival removal of the completed Tooltip Review.
-  - Commit and push before creating the v0.5.1 tag.
-  - Verify screenshot and documentation links against the published tag.
+  - [x] Commit and push before creating the v0.5.1 tag.
+  - [x] Verify screenshot and documentation links against the published tag.
+  - Published the annotated `v0.5.1` tag and public GitHub Release with the
+    amd64 Debian package and `SHA256SUMS`. The release is neither a draft nor a
+    prerelease. Freshly downloaded assets passed `sha256sum -c`, and the public
+    tag, README, Google OAuth guide, and four AppStream screenshot URLs each
+    returned HTTP 200.
 
 ## Flatpak installation. - Started on October 3, 2026
 
