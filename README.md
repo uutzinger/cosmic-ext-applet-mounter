@@ -38,13 +38,28 @@ unavailable. The applet attempts to pre-cache directory metadata when available.
 
 ## Modes and Providers
 
+Each connection can be configured for either **Online mount** or **Offline mirror** mode.
+
 **Online mount** uses a network-backed FUSE filesystem. It is useful for browsing
-large remote trees without keeping a full local copy.
+large remote trees without keeping a full local copy. **Offline mirror** uses an ordinary local directory plus bidirectional background sync.
 
-**Offline mirror** uses an ordinary local directory plus bidirectional sync.
-Automatic background sync pauses on metered networks by default.
+Example screenshots of the applet and its separate windows:
 
-The following connection engines are used to connect to the providers ([external dependencies](Dependency%20Installation.md)):
+<table>
+  <tr>
+    <td><a href="./resources/Popup.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="275"></a></td>
+    <td>
+    <a href="./resources/Settings.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Settings.png" alt="Settings window" width="200"></a>
+    <a href="./resources/Reorder_Connections.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Reorder_Connections.png" alt="Reorder Connections window" width="140"></a>
+    </td>
+  </tr>
+  <tr>
+    <td><a href="./resources/Add_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></a></td>
+    <td><a href="./resources/Change_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></a></td>
+  </tr>
+</table>
+
+The following connection engines are used to connect to the providers:
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
@@ -53,28 +68,37 @@ The following connection engines are used to connect to the providers ([external
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
-| SharePoint | `rclone mount` | `rclone bisync` manual sync only |
+| SharePoint | `rclone mount` | managed `rclone bisync` schedule, disabled until explicitly started |
 
-Rclone handles most providers. OneDrive Online uses `jstaf/onedriver` for
-on-demand access, while OneDrive Offline uses `abraunegg/onedrive` to monitor a
+Rclone handles most providers. OneDrive Online mount uses `jstaf/onedriver` for
+on-demand access, while OneDrive Offline mirror uses `abraunegg/onedrive` to monitor a
 local synchronized copy instead of running periodic `rclone bisync` jobs.
 Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent)
 for `abraunegg/onedrive`.
 
-Example screenshots of the applet and its separate windows:
-<table>
-  <tr>
-    <td><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="275"></td>
-    <td>
-    <img src="./resources/Settings.png" alt="Settings window" width="200">
-    <img src="./resources/Reorder_Connections.png" alt="Reorder Connections window" width="140">
-    </td>
-  </tr>
-  <tr>
-    <td><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></td>
-    <td><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></td>
-  </tr>
-</table>
+## Data Integrity Warning
+
+Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
+are configured incorrectly. **Before testing with important data, make an
+independent backup**.
+
+To reduce data integrity risks, **do not**:
+
+- configure Online mount and Offline mirror simultaneously for the same
+  provider account and overlapping remote subtree;
+- use an Online mount point as an Offline mirror directory;
+- use an Offline mirror directory as an Online mount point;
+- run OneDrive Online mount and OneDrive Offline mirror concurrently against the
+  same OneDrive account or overlapping subtree unless the applet has explicitly
+  isolated that setup;
+- run `rclone mount`, `rclone bisync`, `onedriver`, `onedrive --sync`, or
+  `onedrive --resync` directly against an applet-managed connection. Use the
+  applet's Mount, Unmount, Preview, Sync Now, Start, Stop, and repair controls so
+  its safety checks and synchronization state remain consistent.
+
+Offline **mirror** mode is the reliable option for uninterrupted local file
+access. Online mounts can block or fail when the provider, VPN, FUSE layer, or
+network stalls, resulting in file manager hangs.
 
 ## Installation and Removal
 
@@ -86,10 +110,7 @@ For simple installation of dependencies run the automated installer:
 curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
 ```
 
-You can also verify dependencies in
-[Dependency Installation.md](Dependency%20Installation.md).
-
-The applet itself does not install the dependencies for you.
+You can also verify dependencies in [Dependency Installation.md](Dependency%20Installation.md).  The applet itself does not install the dependencies for you.
 
 ### Installation from Source
 
@@ -101,8 +122,8 @@ The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mount
 provides an `amd64` Debian package:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.0/cosmic-ext-applet-mounter_0.5.0_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.5.0_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.1/cosmic-ext-applet-mounter_0.5.1_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.5.1_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
@@ -155,28 +176,6 @@ Package removal does not delete configuration and data in the user's home
 directory. Any connection records or generated user services not removed
 before uninstalling remain in place for a later reinstall or manual cleanup.
 
-## Data Integrity Warning
-
-Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
-are configured incorrectly. **Before testing with important data, make an
-independent backup**.
-
-To reduce data integrity risks, **do not**:
-
-- configure Online mount and Offline mirror simultaneously for the same
-  provider account and overlapping remote subtree;
-- use an Online mount point as an Offline mirror directory;
-- use an Offline mirror directory as an Online mount point;
-- run OneDrive Online mount and OneDrive Offline mirror concurrently against the
-  same OneDrive account or overlapping subtree unless the applet has explicitly
-  isolated that setup;
-- run `onedrive --resync` casually. State rebuilds require preview and
-  confirmation when managed by the applet.
-
-Offline **mirror** mode is the reliable option for uninterrupted local file
-access. Online mounts can block or fail when the provider, VPN, FUSE layer, or
-network stalls.
-
 ## Applet Workflow
 
 The panel popup shows a scrollable list of connections and a brief status line
@@ -187,11 +186,15 @@ Each connection row has the connection name and one primary state control:
 - Online mount toggle button uses Mount or Unmount.
 - Offline mirror toggle button uses Start or Stop for background synchronization.
 
-A small count beside the name shows pending work when an engine can estimate it;
-`+` means active without a count and `-` means unknown or unavailable. SharePoint
-Offline mirrors provide manual Preview and Sync Now rather than a Start/Stop timer.
+Clicking the connection name opens `Modify` window.
 
-Clicking the connection name opens `Modify`.
+The connection mounting state is persistent over login: An Online mount left
+on is remounted at the next login; switching it off unmounts it and keeps it off
+after reboot. Offline mirror Start and Stop likewise enable or disable the
+background schedule across logins.
+
+A small count beside the name shows pending work when an engine can estimate it;
+`+` means active without a count and `-` means unknown or unavailable.
 
 ## Settings
 
@@ -203,92 +206,51 @@ Add mode exposes `Test Connection`, `Save Connection`, `Import`, and the
 provider-specific setup and rclone remote-management actions needed to create
 or select a storage remote.
 
-Modify mode exposes
-`Test Connection`, `Save Connection`, `Preview` and `Sync Now` for Offline
-mirrors, `Disable` or `Enable`, and `Remove`. The Information section
-summarizes the selected engine, generated unit validation, and confirmation
-policy.
+Modify mode exposes `Test Connection`, `Save Connection`, `Disable` or `Enable`,
+and `Remove`. Offline mirrors also expose `Preview` and `Sync Now`. The
+Information section summarizes the selected engine, generated unit validation,
+and confirmation policy.
 
-Settings can unmount Online connections before sleep and restore them after
-wake. A busy mount may delay sleep.
+**Unmount for Sleep**: Because a busy mount may delay sleep, settings can
+unmount Online connections before sleep and restore them after wake.
 
-Directory preload is optional and reads directory metadata, not file contents.
+**Directory preload** is optional and reads directory metadata (not file contents).
 Enabled preloads run after mounting, stop at their configured time limit, and
 are cancelled before unmount, repair, removal, or sleep cleanup.
+The preload approach is optimized for each provider and connection type.
+Preload is disabled by default and should be tested before leaving it enabled.
+*Warning: Preloading can trigger provider rate limits or exhaust API quotas.*
 
-**OneDrive:** After onedriver is ready, a directory-only walk warms its cache
-without following symbolic links.
+**SMB:** connections may individually override the global preload setting.
 
-**SharePoint:** A directory-only walk stays within the selected library or
-folder. It is off by default, with a 30-second limit and depth 2.
-
-**Google Drive:** An asynchronous rclone VFS refresh warms the directory cache
-using fast-list mode.
-
-**Box:** After the mount and root listing are ready, a depth-limited directory
-walk avoids a recursive rclone refresh and helps limit API requests.
-
-**SMB:** A depth-limited directory walk starts after the mount and root listing
-are ready. Each connection may override the global preload setting, duration,
-and depth.
-
-**SFTP:** A depth-limited directory walk is off by default, with a 30-second
-limit and depth 2. It skips server `/proc`, `/sys`, and `/dev` trees and does not
-follow symbolic links. Each connection may override the global policy.
+**SFTP:** skips server `/proc`, `/sys`, and `/dev` trees and does not
+follow symbolic links. Each connection may individually override the global preload setting.
 
 ## Authentication
 
-The applet does not store provider credentials. Credentials stay with `rclone`,
+The applet does not store provider credentials. They stay with `rclone`,
 `jstaf/onedriver`, `abraunegg/onedrive`, or the operating system.
 
-For Google Drive and Box, applet-driven setup delegates browser OAuth to
-`rclone`.
-
-For SMB, the password remains in rclone's credential mechanism, not
-in applet configuration.
-
 SFTP supports a password, SSH key, or SSH agent and requires a known-hosts file.
+
 SharePoint can use a verified existing rclone document-library remote or the
-editor's Microsoft sign-in setup; the applet does not store its token.
+editor's Microsoft sign-in setup.
 
 Google Drive setup accepts the client ID and matching client secret from a
-Google Cloud Desktop OAuth application. Supplying both values creates the
-remote with that private client; leaving both blank retains rclone's shared
-client for compatibility. In Modify mode, **Update Google OAuth Client**
-changes an existing Drive remote and opens browser authorization again.
-The form masks the secret and clears it when the operation finishes.
+Google Cloud Desktop OAuth application managed through the
+[Google Auth Platform](https://console.cloud.google.com/auth/overview). Leaving
+both blank uses rclone's shared client for compatibility, but that shared client
+is scheduled for retirement during 2026; configure a private client before
+then.
 
-For OneDrive Online mount, the applet uses `jstaf/onedriver` with applet-owned
-configuration and cache paths.
+To configure a private Google Drive OAuth client, follow
+[Google Cloud Auth Setup.md](Google%20Cloud%20Auth%20Setup.md).
+This applet does not provide a Google Cloud project or client ID/secret for you.
 
-For OneDrive Offline mirror, it uses
-`abraunegg/onedrive` with applet-owned configuration, sync, and recovery paths.
-
-## Conflict Recovery and Limitations
-
-Offline mirrors preserve both versions of same-file conflicts. Deletions
-propagate bidirectionally after preview and confirmation policy has been
-satisfied. Deleted and overwritten files are moved into recovery locations and
-retained by applet policy for 30 days.
-
-Recovery retention is not a backup system.
-
-Google Docs, Sheets, Slides, and related browser-native Google document types
-are excluded from rclone Offline mirrors and remain browser-accessible.
-
-Known limitations:
-
-- OneDrive Offline mirror setup uses `abraunegg/onedrive` authentication. The
-  applet provides a helper flow for the Microsoft redirect and retains a manual
-  handoff fallback because redirect handling can vary by browser and account
-  type.
-- Google Drive Online mount testing can hit Google Drive API quota/rate
-  limiting.
-- SharePoint Offline mirror scheduling remains disabled while unattended
-  network, metered, sleep/wake, and failure-recovery checks are pending. Manual
-  Preview and Sync Now are available for a scoped, verified folder.
-- NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
-  integration remains future work.
+In Modify mode, **Update Google OAuth Client** changes an existing Drive remote
+and opens browser authorization to issue a new token for the selected Google
+account. The same private client can authorize personal and Google Workspace
+accounts when the Workspace policy permits it.
 
 ## VPN Integration
 
@@ -306,31 +268,45 @@ Press **Remove** once to request confirmation, then press **Confirm Remove**
 again to remove the connection.
 
 Removal deletes the applet-managed connection record and any matching
-applet-owned systemd user units. Units that do not carry this applet's ownership
-marker for the selected connection are treated as external and are left
-untouched. If `systemctl --user daemon-reload` fails, the unit file is restored
-to avoid an inconsistent service state.
-
-Connection removal does **not** delete provider credentials, cloud data, local
-mirror data, caches, recovery directories, or original imported legacy service
-files.
+applet-owned systemd user units. Connection removal does **not** delete
+provider credentials, cloud data, local mirror data, caches, recovery directories,
+or original imported legacy service files.
 
 Unused rclone remotes can be removed separately from the Add Connection rclone
 management area. That action requires confirmation and changes rclone
 configuration, not only applet configuration.
 
+## Conflict Recovery and Limitations
+
+Offline mirrors preserve both versions of same-file conflicts. Deletions
+propagate bidirectionally after preview and confirmation policy has been
+satisfied. Deleted and overwritten files are moved into recovery locations and
+retained by applet policy for 30 days.
+
+Keep an independent backup outside the mirror and recovery directories. Do not
+use the recovery directory as a backup: recovery copies are removed after the
+30-day retention period.
+
+Google Docs, Sheets, Slides, and related browser-native Google document types
+are excluded from rclone Offline mirrors and remain browser-accessible.
+
+Known limitations:
+
+- Google Drive Online mount testing can hit Google Drive API quota/rate
+  limiting.
+- NetworkManager support currently uses fixed `nmcli` commands; direct D-Bus
+  integration remains future work.
+
 ## Project Development
 
-This applet was developed with agent-assisted programming. The project starts
-from [Applet Description.md](Applet%20Description.md), which is translated into
-[Requirements and Specifications.md](Requirements%20and%20Specifications.md),
-including the Functional Requirements. The author reviews these documents before
-implementation. The requirements drive [Task List.md](Task%20List.md), and its
-execution history is documented in
-[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). The author
-supervises and approves each task and its verification.
+This applet was developed with agent-assisted programming.
 
-OpenAI Codex was used primarily to implement the applet.
+The developer describes applet functionality in [Applet Description.md](Applet%20Description.md).
+The description is translated into [Requirements and Specifications.md](Requirements%20and%20Specifications.md).
+The author reviews these documents before implementation.
+The requirements drive [Task List.md](Task%20List.md), and its execution history
+is documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md).
+The author supervises and approves each task and its verification.
 
 ## Contributing & Feature Requests
 
@@ -341,8 +317,7 @@ and [requirements](Requirements%20and%20Specifications.md), then append its
 implementation and verification steps to the [task list](Task%20List.md).
 Implement and test the change, record the result in
 [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md), and submit
-a pull request. You can use an AI agent to assist, but review its changes and
-complete the tests yourself.
+a pull request. You can use an AI agent to assist, but you must review the description and tasklist changes and complete the tests yourself.
 
 ### Bug Reports
 
@@ -382,9 +357,16 @@ just deb
 
 Useful read-only examples:
 
-`cargo run --example dependency_inventory` checks dependencies.
+```sh
+cargo run --example dependency_inventory
+```
+checks dependencies.
 
-`just install-user` installs the development build under `~/.local` and
+```sh
+just install-user
+```
+
+installs the development build under `~/.local` and
 updates desktop metadata and icons for the current user. After updating,
 close any Cloud Mounter settings/editor windows and restart the COSMIC panel
 without logging out:
@@ -392,13 +374,10 @@ without logging out:
 ```sh
 killall cosmic-panel
 ```
-
-The panel should automatically restart and load the updated applet.
+restarts the panel and loads the updated applet.
 
 `just stage` installs into `target/stage/usr` and does not modify the host
-system.
-
-`just metadata-check` reports known COSMIC-specific freedesktop validation
+system. `just metadata-check` reports known COSMIC-specific freedesktop validation
 warnings without failing. Use `just metadata-check-strict` for the raw result
 and `just metadata-check-net` to check published URLs. `just deb` builds an
 unsigned Debian package in the parent directory.

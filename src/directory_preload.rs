@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-//! Bounded, directory-only warm-up for Online OneDrive, Box, SMB, and SFTP mounts.
+//! Bounded, directory-only warm-up for Online OneDrive, SharePoint, Box, SMB,
+//! and SFTP mounts.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

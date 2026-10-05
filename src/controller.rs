@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use crate::config::ConfigDocument;
 use crate::diagnostics::{DependencyInventory, DependencyState};
+use crate::fl;
 use crate::import::{ImportPreview, LegacyEngine};
 use crate::model::{
     AccessMode, ConflictRecord, Connection, ConnectionId, ConnectionMode, ConnectionStatus,
@@ -75,6 +76,7 @@ pub struct ConnectionRowState {
     pub name: String,
     pub provider: Provider,
     pub mode: AccessMode,
+    pub persistent_active: bool,
     pub local_path: PathBuf,
     pub vpn_profile_id: Option<VpnProfileId>,
     pub status: ConnectionStatus,
@@ -174,30 +176,27 @@ pub fn decide_operation(row: &ConnectionRowState, operation: Operation) -> Opera
     let reason = if allowed {
         None
     } else {
-        Some(
-            match &row.status {
-                ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork)
-                | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Offline) => {
-                    "waiting for network readiness"
-                }
-                ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn)
-                | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::WaitingForVpn) => {
-                    "waiting for VPN readiness"
-                }
-                ConnectionStatus::OnlineMount(OnlineMountStatus::PendingWrites) => {
-                    "pending writes must finish first"
-                }
-                ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing) => {
-                    "synchronization is already running"
-                }
-                ConnectionStatus::OnlineMount(OnlineMountStatus::Unavailable)
-                | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable) => {
-                    "connection is disabled or unavailable"
-                }
-                _ => "operation is not available in the current state",
+        Some(match &row.status {
+            ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork)
+            | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Offline) => {
+                fl!("operation-unavailable-network")
             }
-            .to_owned(),
-        )
+            ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn)
+            | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::WaitingForVpn) => {
+                fl!("operation-unavailable-vpn")
+            }
+            ConnectionStatus::OnlineMount(OnlineMountStatus::PendingWrites) => {
+                fl!("operation-unavailable-pending-writes")
+            }
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing) => {
+                fl!("operation-unavailable-sync-running")
+            }
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Unavailable)
+            | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable) => {
+                fl!("operation-unavailable-connection")
+            }
+            _ => fl!("operation-unavailable-state"),
+        })
     };
     OperationDecision {
         operation,
@@ -207,81 +206,98 @@ pub fn decide_operation(row: &ConnectionRowState, operation: Operation) -> Opera
 }
 
 #[must_use]
-pub fn provider_label(provider: Provider) -> &'static str {
+pub fn provider_label(provider: Provider) -> String {
     match provider {
-        Provider::OneDrive => "OneDrive",
-        Provider::Teams => "SharePoint",
-        Provider::GoogleDrive => "Google Drive",
-        Provider::Box => "Box",
-        Provider::Smb => "SMB",
-        Provider::Sftp => "SFTP",
+        Provider::OneDrive => fl!("provider-onedrive"),
+        Provider::Teams => fl!("provider-teams"),
+        Provider::GoogleDrive => fl!("provider-google-drive"),
+        Provider::Box => fl!("provider-box"),
+        Provider::Smb => fl!("provider-smb"),
+        Provider::Sftp => fl!("sftp-provider"),
     }
 }
 
 #[must_use]
-pub fn status_label(status: &ConnectionStatus) -> &'static str {
+pub fn status_label(status: &ConnectionStatus) -> String {
     match status {
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Unmounted) => "Unmounted",
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Unmounted) => fl!("status-unmounted"),
         ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork) => {
-            "Waiting for network"
+            fl!("status-waiting-network")
         }
-        ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn) => "Waiting for VPN",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Mounting) => "Mounting",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted) => "Mounted",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::PendingWrites) => "Pending writes",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Detaching) => "Detaching",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Error) => "Error",
-        ConnectionStatus::OnlineMount(OnlineMountStatus::Unavailable) => "Unavailable",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Idle) => "Idle",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Offline) => "Offline",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::WaitingForVpn) => "Waiting for VPN",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Previewing) => "Previewing",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing) => "Syncing",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Paused) => "Paused",
+        ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn) => {
+            fl!("status-waiting-vpn")
+        }
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Mounting) => fl!("status-mounting"),
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted) => fl!("status-mounted"),
+        ConnectionStatus::OnlineMount(OnlineMountStatus::PendingWrites) => {
+            fl!("status-pending-writes")
+        }
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Detaching) => fl!("status-detaching"),
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Error) => fl!("status-error"),
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Unavailable) => fl!("status-unavailable"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Idle) => fl!("status-idle"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Offline) => fl!("status-offline"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::WaitingForVpn) => {
+            fl!("status-waiting-vpn")
+        }
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Previewing) => {
+            fl!("status-previewing")
+        }
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing) => fl!("status-syncing"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Paused) => fl!("status-paused"),
         ConnectionStatus::OfflineMirror(OfflineMirrorStatus::MeteredPaused) => {
-            "Paused on metered network"
+            fl!("status-metered-paused")
         }
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Conflict) => "Conflict",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Error) => "Error",
-        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable) => "Unavailable",
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Conflict) => fl!("status-conflict"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Error) => fl!("status-error"),
+        ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable) => {
+            fl!("status-unavailable")
+        }
     }
 }
 
 #[must_use]
 pub fn aggregate_label(aggregate: &AggregateStatus) -> String {
     match aggregate.kind {
-        AggregateKind::Empty => "No storage connections configured".into(),
-        AggregateKind::Healthy => {
-            format!(
-                "{} of {} connection(s) active",
-                aggregate.active_connections, aggregate.total_connections
-            )
-        }
-        AggregateKind::Attention => format!("{} warning(s)", aggregate.warning_count),
-        AggregateKind::Busy => "Storage operation in progress".into(),
-        AggregateKind::Error => "Storage connection needs attention".into(),
+        AggregateKind::Empty => fl!("no-connections"),
+        AggregateKind::Healthy => fl!(
+            "aggregate-active",
+            active = aggregate.active_connections,
+            total = aggregate.total_connections
+        ),
+        AggregateKind::Attention => fl!("aggregate-warnings", count = aggregate.warning_count),
+        AggregateKind::Busy => fl!("aggregate-busy"),
+        AggregateKind::Error => fl!("aggregate-error"),
     }
 }
 
 #[must_use]
-pub fn operation_label(operation: Operation) -> &'static str {
+pub fn operation_label(operation: Operation) -> String {
     match operation {
-        Operation::Mount => "Mount",
-        Operation::Unmount => "Unmount",
-        Operation::SyncNow => "Sync Now",
-        Operation::PauseSync => "Pause",
-        Operation::ResumeSync => "Resume",
-        Operation::PreviewInitialSync => "Preview",
-        Operation::Repair => "Repair",
+        Operation::Mount => fl!("operation-mount"),
+        Operation::Unmount => fl!("operation-unmount"),
+        Operation::SyncNow => fl!("operation-sync-now"),
+        Operation::PauseSync => fl!("operation-pause"),
+        Operation::ResumeSync => fl!("operation-resume"),
+        Operation::PreviewInitialSync => fl!("operation-preview"),
+        Operation::Repair => fl!("operation-repair"),
     }
 }
 
 #[must_use]
 pub fn keyboard_label(action: OperationAction) -> String {
     if action.enabled {
-        operation_label(action.operation).into()
+        operation_label(action.operation)
     } else {
-        format!("{} unavailable", operation_label(action.operation))
+        match action.operation {
+            Operation::Mount => fl!("operation-mount-unavailable"),
+            Operation::Unmount => fl!("operation-unmount-unavailable"),
+            Operation::SyncNow => fl!("operation-sync-now-unavailable"),
+            Operation::PauseSync => fl!("operation-pause-unavailable"),
+            Operation::ResumeSync => fl!("operation-resume-unavailable"),
+            Operation::PreviewInitialSync => fl!("operation-preview-unavailable"),
+            Operation::Repair => fl!("operation-repair-unavailable"),
+        }
     }
 }
 
@@ -294,18 +310,18 @@ pub fn row_accessible_text(row: &ConnectionRowState) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     let warnings = if row.warnings.is_empty() {
-        "No warnings".into()
+        fl!("no-warnings")
     } else {
-        format!("Warnings: {}", row.warnings.join("; "))
+        fl!("warnings-list", warnings = row.warnings.join("; "))
     };
-    format!(
-        "{}. {}. {}. Local path {}. Actions: {}. {}.",
-        row.name,
-        provider_label(row.provider),
-        status_label(&row.status),
-        row.local_path.display(),
-        actions,
-        warnings
+    fl!(
+        "connection-accessible",
+        name = row.name.as_str(),
+        provider = provider_label(row.provider),
+        status = status_label(&row.status),
+        path = row.local_path.display().to_string(),
+        actions = actions,
+        warnings = warnings
     )
 }
 
@@ -328,12 +344,17 @@ pub fn sanitize_log(entry: &OperationLogEntry) -> OperationLogEntry {
 
 #[must_use]
 pub fn import_preview_label(row: &ImportPreviewRow) -> String {
-    let state = if row.blocked { "Blocked" } else { "Ready" };
-    format!(
-        "{} import from {} to {} ({state})",
-        provider_label(row.provider),
-        row.remote,
-        row.local_target.display()
+    let state = if row.blocked {
+        fl!("import-state-blocked")
+    } else {
+        fl!("import-state-ready")
+    };
+    fl!(
+        "import-preview-label",
+        provider = provider_label(row.provider),
+        remote = row.remote.as_str(),
+        target = row.local_target.display().to_string(),
+        state = state
     )
 }
 
@@ -341,6 +362,10 @@ fn restore_connection(
     snapshot: &ControllerSnapshot,
     connection: &Connection,
 ) -> ConnectionRowState {
+    let persistent_active = match &connection.mode {
+        ConnectionMode::OnlineMount(options) => options.start_at_login,
+        ConnectionMode::OfflineMirror(_) => !snapshot.paused_syncs.contains(&connection.id),
+    };
     let status = match &connection.mode {
         ConnectionMode::OnlineMount(_) => {
             ConnectionStatus::OnlineMount(online_status(snapshot, connection))
@@ -355,6 +380,7 @@ fn restore_connection(
         name: connection.name.clone(),
         provider: connection.provider,
         mode: connection.mode.kind(),
+        persistent_active,
         local_path: connection.local_path.clone(),
         vpn_profile_id: connection.vpn_profile_id,
         actions: actions(&status),
@@ -536,21 +562,21 @@ fn warnings(
         ConnectionStatus::OnlineMount(OnlineMountStatus::Error)
             | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Error)
     ) {
-        warnings.push("service or runtime reported an error".into());
+        warnings.push(fl!("warning-runtime-error"));
     }
     if snapshot
         .recoveries
         .iter()
         .any(|record| record.connection_id == connection.id)
     {
-        warnings.push("recovery files are retained for this connection".into());
+        warnings.push(fl!("warning-recovery-files"));
     }
     if snapshot
         .conflicts
         .iter()
         .any(|conflict| conflict.connection_id == connection.id)
     {
-        warnings.push("conflicts require review".into());
+        warnings.push(fl!("warning-conflicts"));
     }
     warnings
 }
@@ -628,15 +654,15 @@ fn dependency_warnings(inventory: Option<&DependencyInventory>) -> Vec<String> {
 fn import_preview_row(preview: &ImportPreview) -> ImportPreviewRow {
     let mut warnings = Vec::new();
     if preview.active_conflict {
-        warnings.push("original service is active".into());
+        warnings.push(fl!("import-warning-active-service"));
     }
     if preview.local_target_conflict {
-        warnings.push("local target conflicts with an existing connection".into());
+        warnings.push(fl!("import-warning-target-conflict"));
     }
     if !preview.unsupported_options.is_empty() {
-        warnings.push(format!(
-            "unsupported options: {}",
-            preview.unsupported_options.join(", ")
+        warnings.push(fl!(
+            "import-warning-unsupported",
+            options = preview.unsupported_options.join(", ")
         ));
     }
     ImportPreviewRow {
@@ -853,6 +879,7 @@ mod tests {
             state.rows[0].status,
             ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing)
         );
+        assert!(state.rows[0].persistent_active);
         assert!(!decide_operation(&state.rows[0], Operation::SyncNow).allowed);
 
         snapshot.sync_state.clear();
@@ -862,7 +889,16 @@ mod tests {
             state.rows[0].status,
             ConnectionStatus::OfflineMirror(OfflineMirrorStatus::MeteredPaused)
         );
+        assert!(state.rows[0].persistent_active);
         assert!(decide_operation(&state.rows[0], Operation::SyncNow).allowed);
+
+        snapshot.paused_syncs.insert(connection.id);
+        let state = restore(&snapshot);
+        assert_eq!(
+            state.rows[0].status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Paused)
+        );
+        assert!(!state.rows[0].persistent_active);
     }
 
     #[test]

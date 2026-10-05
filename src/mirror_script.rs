@@ -98,7 +98,7 @@ remote_access={remote}\n\
 [ \"$(cat \"$local_access\")\" = \"$owner\" ] || {{ echo 'SharePoint mirror access marker changed' >&2; exit 1; }}\n\
 case \"$mode\" in\n\
   initial-preview|initial-sync) ;;\n\
-  *) remote_access_owner=$(\"$rclone\" cat \"$remote_access\") || {{ echo 'SharePoint remote access marker is missing' >&2; exit 1; }}\n\
+  *) remote_access_owner=$(rclone_remote cat \"$remote_access\") || {{ echo 'SharePoint remote access marker is missing' >&2; exit 1; }}\n\
      [ \"$remote_access_owner\" = \"$owner\" ] || {{ echo 'SharePoint remote access marker changed' >&2; exit 1; }} ;;\n\
 esac\n"
         )
@@ -114,8 +114,8 @@ esac\n"
 case \"$mode\" in\n\
   initial-sync) set -- {arguments} '--suffix' \"-$stamp\" ;;\n\
 esac\n\
-\"$rclone\" \"$@\"\n\
-\"$rclone\" check {remote} {local} '--checksum' '--filter-from' {filters}\n"
+rclone_remote \"$@\"\n\
+rclone_remote check {remote} {local} '--checksum' '--filter-from' {filters}\n"
         )
     } else {
         String::new()
@@ -126,6 +126,9 @@ esac\n\
 set -eu\n\
 {preflight}\
 rclone={executable}\n\
+rclone_remote() {{\n\
+  \"$rclone\" '--contimeout' '10s' '--timeout' '30s' \"$@\"\n\
+}}\n\
 remote_root={remote_root}\n\
 local_root={local_root}\n\
 owner={owner}\n\
@@ -144,7 +147,7 @@ case \"$mode\" in\n\
 esac\n\
 {access_check}\
 case \"$mode\" in\n\
-  *preview) exec \"$rclone\" \"$@\" ;;\n\
+  *preview) rclone_remote \"$@\"; exit $? ;;\n\
 esac\n\
 [ ! -L \"$local_backup\" ] || {{ echo 'recovery path is a symlink' >&2; exit 1; }}\n\
 mkdir -p -- \"$local_backup\"\n\
@@ -155,15 +158,15 @@ elif [ -n \"$(find \"$local_backup\" -mindepth 1 -print -quit)\" ]; then\n\
 fi\n\
 printf '%s\\n' \"$owner\" > \"$local_backup/{OWNER_MARKER}\"\n\
 remote_marker=$remote_backup/{OWNER_MARKER}\n\
-\"$rclone\" mkdir \"$remote_backup\"\n\
-remote_owner=$(\"$rclone\" cat \"$remote_marker\" 2>/dev/null || true)\n\
+rclone_remote mkdir \"$remote_backup\"\n\
+remote_owner=$(rclone_remote cat \"$remote_marker\" 2>/dev/null || true)\n\
 if [ -n \"$remote_owner\" ]; then\n\
   [ \"$remote_owner\" = \"$owner\" ] || exit 1\n\
-elif [ -n \"$(\"$rclone\" lsf \"$remote_backup\")\" ]; then\n\
+elif [ -n \"$(rclone_remote lsf \"$remote_backup\")\" ]; then\n\
   echo 'remote recovery directory is not applet-owned' >&2; exit 1\n\
 fi\n\
-printf '%s\\n' \"$owner\" | \"$rclone\" rcat \"$remote_marker\"\n\
-\"$rclone\" \"$@\"\n\
+printf '%s\\n' \"$owner\" | rclone_remote rcat \"$remote_marker\"\n\
+rclone_remote \"$@\"\n\
 {verification}\
 cutoff=$(date -u -d '32 days ago' +%F)\n\
 for candidate in \"$local_root\"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do\n\
@@ -174,13 +177,13 @@ for candidate in \"$local_root\"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do\
   [ \"$(cat \"$candidate/{OWNER_MARKER}\" 2>/dev/null || true)\" = \"$owner\" ] || continue\n\
   rm -r -- \"$candidate\" || echo 'local recovery cleanup deferred' >&2\n\
 done\n\
-\"$rclone\" lsf --dirs-only --max-depth 1 \"$remote_root\" | while IFS= read -r entry; do\n\
+rclone_remote lsf --dirs-only --max-depth 1 \"$remote_root\" | while IFS= read -r entry; do\n\
   name=${{entry%/}}\n\
   case \"$name\" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) continue ;; esac\n\
   [ \"$name\" \\< \"$cutoff\" ] || continue\n\
   target=$remote_root/$name\n\
-  [ \"$(\"$rclone\" cat \"$target/{OWNER_MARKER}\" 2>/dev/null || true)\" = \"$owner\" ] || continue\n\
-  \"$rclone\" purge \"$target\" || echo 'remote recovery cleanup deferred' >&2\n\
+  [ \"$(rclone_remote cat \"$target/{OWNER_MARKER}\" 2>/dev/null || true)\" = \"$owner\" ] || continue\n\
+  rclone_remote purge \"$target\" || echo 'remote recovery cleanup deferred' >&2\n\
 done\n",
         arguments
     ))

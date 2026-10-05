@@ -2643,3 +2643,36 @@ found two matching files and zero differences; the generated bisync Preview
 found no remaining changes. The connection's background timer remained disabled.
 This completes the installed manual-control test; unattended scheduling remains
 a separate task.
+
+## Version 0.5.1 release candidate — October 5, 2026
+
+Version 0.5.1 adds guarded unattended SharePoint Offline scheduling, makes the
+popup switch the persistent login/startup choice for Online mounts and Offline
+mirror timers, adds bounded SharePoint Online preload, and moves the audited
+user-facing UI boundary into the Fluent catalog. Preload defaults off for every
+provider. The README and the new Google Cloud OAuth guide also clarify that
+authentication belongs to the selected mount or mirror engine.
+
+The unattended SharePoint gate covered Preview and confirmed initial Sync Now,
+repeated scheduled operation, pause/resume, network-loss recovery, target-change
+protection, and installed status feedback. Persistent-startup testing after a
+real login restored only the saved UA Box Online mount and SharePoint Offline
+timer while keeping all saved-off connections inactive. Sleep/wake behavior was
+reviewed and tested to the available hardware limit under the documented
+best-effort gate.
+
+Final release-candidate validation passed formatting, locked all-target checks,
+Clippy with warnings denied, the localization audit, `git diff --check`, strict
+credential-pattern scans, and 290 automated tests; seven explicitly external or
+live tests remained ignored. `cargo vendor --locked` succeeded without the
+previous duplicate-libcosmic-source error. Desktop and AppStream validation
+reported only the documented COSMIC category and `binaries` extension
+compatibility notices.
+
+The final Debian package reports version 0.5.1 and architecture amd64 and
+contains the applet, OneDrive authentication helper, desktop entry, AppStream
+metadata, icon, copyright, and changelog. Its SHA-256 is
+`15ba6b3fb86bb32cab82a1c2bbae4d5106cc1d192a0a98f6528d4da9c4903ca8`.
+Install/remove/reinstall/remove testing preserved the existing custom applet and
+COSMIC configuration. The package was left uninstalled, and restarting the
+COSMIC panel successfully relaunched the user-local candidate.

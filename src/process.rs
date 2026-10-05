@@ -656,7 +656,7 @@ pub fn redact_text(value: &str) -> String {
             lower.trim_matches(|character| matches!(character, '"' | '\'' | ':' | ',' | '{' | '}'));
         if redact_remaining > 0 {
             redact_remaining -= 1;
-            result.push_str("[REDACTED]");
+            result.push_str(&redact_value_token(token));
         } else if lower == "authorization:" {
             redact_remaining = 2;
             result.push_str(token);
@@ -673,6 +673,16 @@ pub fn redact_text(value: &str) -> String {
         rest = &rest[end..];
     }
     result
+}
+
+fn redact_value_token(token: &str) -> String {
+    let Some(quote @ ('"' | '\'')) = token.chars().next() else {
+        return "[REDACTED]".into();
+    };
+    let Some(closing_quote) = token.rfind(quote).filter(|index| *index > 0) else {
+        return "[REDACTED]".into();
+    };
+    format!("{quote}[REDACTED]{quote}{}", &token[closing_quote + 1..])
 }
 
 fn redact_token(token: &str) -> String {
@@ -999,8 +1009,22 @@ mod tests {
         );
         assert_eq!(
             redact_text(r#"{"client_id": "private-id", "client_secret": "private-secret"}"#),
-            r#"{"client_id": [REDACTED] "client_secret": [REDACTED]"#
+            r#"{"client_id": "[REDACTED]", "client_secret": "[REDACTED]"}"#
         );
+        let redacted_dump = redact_text(
+            r#"{
+                "ua_gdrive": {"type": "drive"},
+                "uutzinger_gdrive": {
+                    "type": "drive",
+                    "client_id": "private-client.apps.googleusercontent.com",
+                    "client_secret": "GOCSPX-private-secret"
+                }
+            }"#,
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&redacted_dump).expect("redacted config dump stays valid JSON");
+        assert_eq!(parsed["uutzinger_gdrive"]["client_id"], "[REDACTED]");
+        assert_eq!(parsed["uutzinger_gdrive"]["client_secret"], "[REDACTED]");
     }
 
     #[test]

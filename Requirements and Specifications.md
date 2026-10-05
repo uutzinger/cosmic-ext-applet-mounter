@@ -34,6 +34,9 @@ mechanism.
   bounded timeouts, safe detachment, and automatic recovery.
 - Mount, unmount, synchronize, pause, resume, and inspect individual
   connections.
+- Treat the popup connection switch as the persistent desired state: Online
+  mounts that are on return at the next login, while stopped mounts and mirrors
+  remain stopped.
 - Configure optional NetworkManager or Cisco VPN dependencies.
 - Detect, create, select, and safely remove unused rclone remotes for Google
   Drive, Box, SMB, and SFTP workflows.
@@ -152,7 +155,8 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 
 ### 5.2 Use an Online mount
 
-1. The user enables the connection.
+1. The user turns on the connection in the popup. This records the persistent
+   intent to mount now and at future logins.
 2. The applet prepares and verifies any required VPN.
 3. The applet starts the mount service.
 4. The applet verifies the actual mount and provider health.
@@ -160,6 +164,8 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 6. On a safe connectivity failure, the applet detaches the mount.
 7. When readiness returns, the applet remounts the connection if it remains
    enabled.
+8. When the user turns the popup switch off, the applet unmounts the connection
+   and records that it shall remain off at future logins.
 
 ### 5.3 Use an Offline mirror
 
@@ -209,8 +215,11 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   edit entry point and one right-aligned compact state control. The primary
   control shall indicate and change the connection state: Online mounts use
   Mount/Unmount semantics and Offline mirrors use Start/Stop background-sync
-  semantics. A slider/toggle-style control is acceptable when it preserves
-  keyboard accessibility and non-color state indication.
+  semantics. The popup control is the persistent desired-state input: an
+  Online mount left on shall be remounted at the next login, while an Online
+  mount or Offline mirror turned off shall remain off. A slider/toggle-style
+  control is acceptable when it preserves keyboard accessibility and non-color
+  state indication.
 - **FR-003A:** The main popup shall not spend row space on a separate text
   status chip when the same state can be conveyed by the primary control label,
   color, non-color cue, tooltip, and disabled reason.
@@ -256,9 +265,10 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-011AB:** Modify mode shall not allow provider or access-mode changes
   unless a future explicit conversion workflow is implemented. Disabled provider
   and mode controls shall explain this restriction through field help.
-- **FR-011B:** The Add/Modify wizard shall expose Online mount options, including manual
-  startup by default, optional startup at login, cache size, bounded timeouts,
-  retries, bandwidth limits, and safe detach policy.
+- **FR-011B:** The Add/Modify wizard shall expose Online mount options including
+  cache size, bounded timeouts, retries, bandwidth limits, and safe detach
+  policy. It shall not expose a second Start at login switch that can conflict
+  with the persistent popup control.
 - **FR-011C:** The Add/Modify wizard shall expose Offline mirror options, including initial
   preview, sync interval, Sync Now, pause/resume policy, metered-network
   behavior, recovery location, recovery retention, conflict behavior, and
@@ -312,8 +322,14 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   Offline mirror directory, and vice versa.
 - **FR-015:** The applet shall reject duplicate, nested, unsafe, or unsupported
   local targets where overlap could cause recursion or data loss.
-- **FR-016:** New Online mounts shall start manually by default.
-- **FR-017:** The user may enable an Online mount at login.
+- **FR-016:** New Online mounts shall remain stopped by default until the user
+  turns them on from the popup.
+- **FR-017:** A successful popup Mount shall persist the Online mount as enabled
+  for future logins. A popup Unmount request shall persist it as disabled for
+  future logins and disable its user service, without requiring an editor save.
+  Offline mirror Start/Stop shall continue to enable or disable its schedule or
+  monitor across logins. Sleep-only cleanup shall not modify this persistent
+  state.
 - **FR-018:** Removing a connection shall remove the applet configuration record
   and matching applet-owned generated units only. It shall preserve provider
   credentials, cloud data, local mirror data, caches, recovery data, and
@@ -648,7 +664,7 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   disabled while Unmount when sleep is off, retain its saved value, and explain
   that only successfully cleaned Online connections are restored.
   Keep cleaned-up connections suspended until manual restart unless restoration
-  is enabled; do not alter their saved login policy. Restoration shall use the
+  is enabled; do not alter their saved popup desired state. Restoration shall use the
   pre-sleep snapshot of successfully cleaned connections, respect later user
   disables/removals, and wait for network and the full VPN readiness gate. Repeated sleep signals shall be idempotent.
 - **FR-102:** Implement the listener in the applet runtime for native and Flatpak
@@ -914,7 +930,7 @@ Connection
   local_path
   cache_directory?
   recovery_directory?
-  start_at_login
+  start_at_login  # compatibility storage for the Online popup desired state
   sync_interval_minutes
   sync_on_metered
   vpn_profile_id?
@@ -966,7 +982,8 @@ The generated service shall:
 - use FUSE 3 clean unmount;
 - restart unexpected failures with bounded backoff;
 - contain no credentials;
-- be disabled at login by default.
+- be disabled at login until the popup switch is turned on; successful Mount
+  enables it for later logins and Unmount disables it.
 
 Initial mount tuning:
 
@@ -1225,10 +1242,10 @@ Remote deletion shall:
   8. Review dependency status, generated units, sync/mount preview, and safety
      warnings.
   9. Confirm creation or update.
-- Online mount fields include display name, enabled state, manual startup by
-  default, optional startup at login, rclone VFS cache limit with 20 GiB default,
-  timeout and retry bounds, bandwidth limits, safe detach behavior, and
-  lazy-unmount confirmation policy.
+- Online mount fields include display name, enabled state, rclone VFS cache
+  limit with 20 GiB default, timeout and retry bounds, bandwidth limits, safe
+  detach behavior, and lazy-unmount confirmation policy. Persistent startup is
+  controlled only by the popup switch.
 - Offline mirror fields include display name, enabled state, whole-drive or
   subtree selection, disk-space estimate, initial-sync preview, sync interval,
   manual Sync Now availability, metered-network default pause, per-connection
@@ -1726,7 +1743,8 @@ applet must confirm which library it denotes using authenticated metadata.
 - Require a scoped `--resync --dry-run` Preview and explicit confirmation before
   the first Sync Now. The first release of SharePoint Offline shall expose
   manual Preview and Sync Now only; keep its background timer **off** until
-  separate unattended network/VPN, metered, sleep/wake, and failure checks pass.
+  separate unattended network/VPN, metered, sleep/wake, and failure checks meet
+  the acceptance boundaries below.
   Preview must
   report uploads, downloads, deletions, conflicts, and recovery location.
   When testing inside an existing work library, limit both remote and local
@@ -1756,6 +1774,17 @@ applet must confirm which library it denotes using authenticated metadata.
   status, Stop/Start, and generated-service safeguards. Deleting an applet
   connection removes only applet-owned units; preserve library data and
   credentials unless separately confirmed.
+- Review the SharePoint Offline timer, service, and managed runner for suspend
+  and resume safety. Automated or isolated tests shall prove that applet sleep
+  cleanup does not stop Offline mirrors, remote operations are bounded, and an
+  interrupted scheduled run can stop, clear or outlive its lock safely, retry,
+  and finish with an independent file comparison. Attempt a live sleep/wake
+  test when the development computer provides reliable suspend and resume.
+  Live hardware proof is preferred but is not an unconditional release gate:
+  if the available computer cannot suspend or resume reliably, document the
+  limitation and the substitute evidence. An observed failure attributable to
+  the applet remains release-blocking; inability to obtain reliable hardware
+  evidence by itself does not.
 
 ### 18.4 Acceptance boundaries
 
@@ -1772,6 +1801,11 @@ applet must confirm which library it denotes using authenticated metadata.
   exists; a prototype Flatpak result is not public-package acceptance. In-app
   OAuth/discovery is optional follow-up, not a prerequisite for the first
   preconfigured-remote Online milestone.
+- Record sleep/wake evidence by layer: code review, automated or isolated
+  tests, installed-service observations, and live suspend/resume hardware.
+  When reliable live suspend/resume is unavailable, the SharePoint Offline
+  gate may pass on the first three layers if they satisfy Section 18.3, with
+  live hardware behavior clearly marked unverified rather than passed.
 
 References: [Microsoft Teams/SharePoint site relationships](https://learn.microsoft.com/en-us/sharepoint/teams-connected-sites),
 [Microsoft Graph site lookup](https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0),

@@ -2760,16 +2760,6 @@ three-toggle Repair sequence occurred this morning.
   preload and configure a private client ID for the remote; then check whether
   listing errors recur. These errors did not cause the busy unmount.
 
-### Add preload to SharePoint Online. - October 3, 2026
-
-- [x] Add a SharePoint Online row to Directory preload settings, with a separate
-  default-off policy (30 seconds, depth 2). Use the bounded, cancellable
-  directory-only walk for the selected mounted library or folder; keep Offline
-  mirrors unaffected. Existing documents migrate to the default-off policy.
-- [ ] After installing the new build, enable SharePoint preload briefly on the
-  disposable Online mount and verify bounded completion or timeout, readable
-  notice, and clean cancellation on unmount. Restore the policy to off afterward.
-
 ### SharePoint Offline unattended release gate — October 3, 2026
 
 The installed manual Preview and Sync Now test above is complete. Keep scheduled
@@ -2777,41 +2767,81 @@ sync disabled until this fixed checklist passes with disposable data scoped to
 the approved SharePoint test folder. A failed test may require a focused fix and
 retest; completed tests do not need to be repeated otherwise.
 
-- [ ] Move the disposable mirror to a persistent local directory and confirm
+- [x] Expose the existing sync-interval and metered-network controls for
+  SharePoint Offline, and use the normal Start/Stop schedule toggle. Saving a
+  connection must still leave its timer disabled; Start must still require a
+  successful Preview and confirmed initial Sync Now. The editor and popup now
+  expose those controls without enabling a timer on Save.
+- [x] Remove the temporary SharePoint manual-only runtime block while retaining
+  the verified-target guard, access marker, network/VPN/metered checks,
+  target-bound state, and non-overlap protections. Add focused regression tests
+  for the initial-sync gate, Start/Stop selection, timer configuration, and
+  retarget invalidation. The full locked suite passed (283 tests, 7 ignored), as
+  did all-target/all-feature clippy, formatting, build, and whitespace checks.
+  Both explicit live SharePoint tests also passed against a new subfolder of
+  `CloudMounter-TeamsMirror-Test-20261002`: changed targets were blocked before
+  rclone, and Preview/initial sync/later sync/clean repeat preserved recovery
+  copies and ended with zero checksum differences.
+- [x] Move the disposable mirror to a persistent local directory and confirm
   its scoped remote, recovery area, access marker, and existing files match
-  before enabling any unattended run. Do not schedule the `/tmp` test target.
-- [ ] Run repeated scheduled syncs with a local edit and a remote edit between
+  before enabling any unattended run. The installed test uses
+  `~/Cloud/Sharepoint_Mirrors/UA_BME_Assessment_Test`, the approved disposable
+  SharePoint subfolder, and a connection-specific recovery directory; its
+  access marker and initial state were confirmed before scheduling.
+- [x] Run repeated scheduled syncs with a local edit and a remote edit between
   runs. Verify the intended changes arrive, a clean repeat makes no changes,
-  and recovery stays inside the approved scope.
-- [ ] Test a scheduled run across network or required-VPN loss and return, and
+  and recovery stays inside the approved scope. Opposite-direction edits
+  propagated, SharePoint's rewritten Office file was reconciled on the second
+  pass, the clean repeat transferred nothing, and an independent checksum
+  comparison reported zero differences.
+- [x] Test a scheduled run across network or required-VPN loss and return, and
   check metered-network policy. Verify a failed or deferred run reports its
-  state, preserves both sides, and resumes only when its policy allows.
-- [ ] Test sleep/wake and interruption or failure during a scheduled run.
+  state, preserves both sides, and resumes only when its policy allows. The
+  controlled metered-network test passed: scheduling deferred the local file
+  and later uploaded it after the policy allowed a run. This test connection
+  has no required VPN, so the October 5 installed test used Wi-Fi loss instead:
+  the read-only SharePoint access guard failed safely and boundedly, the timer
+  remained enabled, and its next run after Wi-Fi returned uploaded the 52-byte
+  disposable `network-recovery-test-2026-10-05.txt`. A clean follow-up and an
+  independent comparison reported zero differences, and a direct remote read
+  returned the expected content.
+- [x] Review and test sleep/wake and interruption or failure during a scheduled
+  run to the best ability of the available development computer. Per the
+  revised Section 18 acceptance boundary, reliable live suspend/resume hardware
+  proof is preferred but is not mandatory when the limitation and substitute
+  evidence are documented. An observed applet failure still blocks release.
   Confirm Stop/Start, stale-lock handling, subsequent retry, and independent
-  file comparison without lost or unreviewed changes.
-- [ ] Change the saved remote, folder, or local target in an isolated disposable
+  file comparison without lost or unreviewed changes. Stop/Start, a forced
+  interruption, lock-expiry handling, retry, and zero-difference comparison
+  passed. A sleep during the remote access probe exposed an unbounded wait;
+  all generated remote operations now use 10-second connect and 30-second I/O
+  idle timeouts. Code review confirms that applet sleep cleanup selects Online
+  connections only, and the mirror-only cleanup test confirms it issues no
+  commands. A reliable installed sleep/wake retry cannot be obtained on the
+  current development computer, so live hardware behavior remains explicitly
+  unverified; the documented code, automated, interruption, retry, and
+  independent-comparison evidence satisfies this SharePoint Offline gate.
+- [x] Change the saved remote, folder, or local target in an isolated disposable
   connection. Verify the old scheduled unit is blocked by the identity guard,
-  and the new target requires fresh Preview and sync state before writing.
-- [ ] Verify installed native notices and status for those unattended runs,
-  then enable scheduling only if every gate passes. Test Flatpak host-service
-  access when the public Flatpak distribution path exists; that package check
-  is tracked separately under Flatpak installation.
-
-### Flatpak installation. - October 3, 2026
-
-Remaining work to make the applet installable from COSMIC Store:
-
-- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance if the applet's host-integration requirements need broader access than accepted applets such as `dev.cappsy.CosmicExtAppletDrives`.
-- [ ] Open a focused pull request to `pop-os/cosmic-flatpak` containing:
-  - `app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
-  - Generated `cargo-sources.json`
-  - Links to source repository, MIT license, tagged release, build instructions, AppStream metadata, and screenshots.
-- [ ] In the pull request, explicitly call out the host-integration architecture and justify every non-default Flatpak permission, especially host-command execution, systemd unit creation, sleep signals, and shared state.
-- [ ] Complete the repository pull-request checklist: disclose AI-generated or AI-assisted code in commit messages, understand and be able to explain every submitted change, accurately describe and test the change, and certify it under the Developer Certificate of Origin.
-- [ ] Address repository CI and maintainer review, updating the source tag/hash when a packaging fix requires a new application release.
-- [ ] After merge and publication to a configured public remote, install from the COSMIC Flatpak remote on a clean profile and run a final mount/mirror/VPN/uninstall smoke test.
-
-Completed preparation work: local Flatpak manifest, cargo-sources generation, desktop/AppStream metadata, local `just build`/`just build-changed`, Store listing verification, panel add/remove, and permission rationale in `packaging/flatpak/README.md`.
+  and the new target requires fresh Preview and sync state before writing. The
+  live guard blocked a changed target before rclone, and retargeting invalidated
+  the saved Preview and initial-sync markers as intended.
+- [x] Verify installed native notices and status for those unattended runs,
+  then enable scheduling only if every gate passes. During the October 5 Wi-Fi
+  test, the native popup showed **Storage operation in progress**, then
+  **Storage connection needs attention** after the bounded access failure,
+  returned to the in-progress state during the automatic retry, and cleared the
+  notice after success. The service journal independently recorded the failed
+  access guard, successful retry, clean repeat, and zero-difference comparison.
+  Fix the runtime mapper discovered by this test so a failed scheduled service
+  remains an error while its timer is active; keep the popup switch tied to the
+  persistent timer intent rather than moving off for a transient failure.
+  Regression tests and the full locked suite pass (287 tests, 7 explicitly
+  ignored live/integration tests), as do all-target/all-feature clippy and
+  formatting. The native SharePoint Offline unattended release gate now
+  passes. Test Flatpak host-service access when the public Flatpak distribution
+  path exists; that package check remains tracked separately under Flatpak
+  installation and does not block this native gate.
 
 ### Reorder window layout — October 3, 2026
 
@@ -2830,4 +2860,227 @@ Completed preparation work: local Flatpak manifest, cargo-sources generation, de
   earlier Reorder Connections section.
 
 ### Google OAuth client ID for Google Drive — October 3, 2026
-- [] I create and Auth client Id and secret but authentication fails. It saus something like parsing error and unexpected field.
+- [ ] I created an OAuth client ID and secret, but authentication fails. It
+  reported something like a parsing error and an unexpected field.
+- [x] Reproduce the current `uutzinger_gdrive` failure with a bounded,
+  read-only listing. The saved custom client ID and secret have the expected
+  shapes and the remote has a refresh token, but Google rejects token refresh
+  with `unauthorized_client`.
+- [x] Run `ua_gdrive`, which still uses rclone's shared client, as a read-only
+  control. Authentication succeeds.
+- [x] Test recovery in a private copy of the rclone configuration. Removing the
+  custom client ID and secret while preserving the existing token restores
+  read-only access, proving the failed update left a token issued to rclone's
+  shared client paired with the new custom client credentials. The live rclone
+  configuration was not changed, and the temporary credential-bearing files
+  were deleted after the test.
+- [x] Restore the live `uutzinger_gdrive` remote to the shared client as a
+  temporary recovery step while preserving its existing token. Verify the
+  custom fields are empty and a read-only listing of the known `BME` directory
+  succeeds. The shared rclone client is being retired during 2026, so this is
+  recovery rather than the final configuration.
+- [ ] Create or verify a Google Desktop OAuth client with Drive API access and
+  the intended account allowed by the consent-screen audience, then complete a
+  fresh browser authorization that issues a new token for that client. Do not
+  pair new client credentials with the token issued to rclone's shared client.
+- [x] Diagnose the editor's `rclone config dump returned an unexpected
+  response: expected value` error. The command output redactor removed Google
+  client values by inserting an unquoted `[REDACTED]`, corrupting otherwise
+  valid JSON; one remote's custom fields could therefore break testing another
+  remote. Preserve the surrounding JSON quotes and punctuation while still
+  redacting both values, and add a regression test that parses a multi-remote
+  redacted dump successfully.
+- [x] Reauthorize `uutzinger_gdrive` through a private browser window using the
+  personal Google account, replace the prior token, and complete a bounded
+  read-only root listing. The user visually confirmed that `BME`, `Personal`,
+  and `Pictures` belong to the personal Drive shown in Google Drive; the earlier
+  inference that `BME` identified the University account was incorrect. The
+  remote currently works with rclone's shared client while private-client setup
+  remains pending.
+- [x] Fix **Update Google OAuth Client** for an existing remote. Remove
+  `--non-interactive` so rclone follows its default replace-token path and opens
+  browser authorization; reject a successful-process JSON response when it
+  still contains a pending state or option instead of falsely reporting OAuth
+  completion. Add a regression test for the unanswered `config_refresh_token`
+  prompt, install the corrected build, and restart the panel.
+- [x] Complete browser authorization for `uutzinger_gdrive` with its private
+  Desktop OAuth client and personal Google account. Verify the saved remote has
+  a client ID, client secret, and newly issued token, then complete a bounded
+  read-only listing of the personal `Personal` folder without the shared-client
+  retirement warning. Confirm the installed applet's **Test Connection** also
+  passes afterward.
+
+### Add preload to SharePoint Online. - October 3,4, 2026
+
+- [x] Add a SharePoint Online row to Directory preload settings, with a separate
+  default-off policy (30 seconds, depth 2). Existing documents migrate to the
+  default-off policy.
+- [x] Connect enabled SharePoint Online mounts to the existing bounded,
+  directory-only preload walk for the selected mounted library or folder. Wait
+  for the rclone mount and its root listing before walking, enforce the saved
+  time and depth limits, and keep Offline mirrors unaffected.
+- [x] Include SharePoint preload in the shared lifecycle classification so
+  unmount, repair, removal, sleep cleanup, and a replacement preload cancel and
+  reap the traversal child before the mount service is stopped.
+- [x] Add focused regression coverage proving that SharePoint defaults off,
+  enabling it selects the bounded directory preload with root readiness, and an
+  Offline mirror never enters the preload path. Run formatting, the focused
+  tests, the full locked test suite, and a locked build. The focused preload
+  tests passed; the full suite passed with 282 tests and seven explicitly
+  ignored live/integration tests, and the locked build and formatting checks
+  passed.
+- [x] After installing the new build, enable SharePoint preload briefly on the
+  disposable Online mount and verify bounded completion or timeout, readable
+  notice, and clean cancellation on unmount. Restore the policy to off afterward.
+  The installed UA Assessment mount used the enabled 30-second/depth-2 policy;
+  the user reported fast directory listing, and the bounded preload ended before
+  the first clean unmount. The user then remounted and unmounted after about
+  three seconds while preload was starting. The unit finished with a successful
+  result, with no FUSE mount or traversal child remaining. The saved SharePoint
+  policy was restored to disabled with its 30-second/depth-2 limits preserved.
+  A final disabled-policy control mounted normally without displaying a preload
+  notice or starting a traversal process, then unmounted with a successful unit
+  result and no remaining FUSE mount.
+
+### Persistent popup startup state — October 5, 2026
+
+- [x] Define one user-facing startup rule in Requirements: the popup switch is
+  the persistent desired-state input. Online mounts left on are remounted at
+  login; Online mounts and Offline mirrors switched off remain off. Sleep-only
+  cleanup and wake restoration do not change this state.
+- [x] Remove the separate **Start at login** control from the Online editor
+  while retaining the existing serialized field for backward-compatible
+  configuration loading and internal desired-state storage.
+- [x] After a successful popup Mount, persist the Online connection as enabled
+  at login and enable its managed service. On popup Unmount, persist the off
+  intent and disable the managed service so a later login cannot remount it.
+  Report partial failures without claiming the persistent state was saved. The
+  implementation rolls systemd enablement back if the configuration write
+  fails; an off request is persisted before clean detach so a busy mount cannot
+  unexpectedly return at login.
+- [x] Preserve the existing Offline mirror behavior: Start enables its managed
+  timer or monitor across login, Stop disables it, new mirrors remain stopped,
+  and Preview plus initial Sync Now remain mandatory before first Start. Sleep
+  cleanup still uses temporary stops and does not change persistent intent.
+- [ ] Add focused tests for rclone and onedriver Online persistence, Offline
+  schedule persistence, new-connection defaults, unit/config reconciliation,
+  and sleep/wake not changing the popup intent. Run formatting, locked tests,
+  build, clippy, then install and verify the three affected UA connections
+  across a controlled logout/login or reboot. Automated persistence/rollback
+  tests pass; the full locked suite passes with 285 tests and seven explicitly
+  ignored live/integration tests. Locked build, all-target/all-feature clippy,
+  formatting, and whitespace checks pass. Installed lifecycle and reboot
+  verification remain.
+
+### Release 0.5.1 Activity - October 5, 2026
+
+- [x] Localization audit and migration
+  - General Settings and connection editor labels/help
+  - Popup status and operation labels
+  - Success/error notices
+  - Validation messages
+  - SFTP setup notices
+  - Window titles
+  - Added `just localization-check` and included it in `just verify` so new
+    directly rendered English labels and hardcoded notice assignments fail the
+    release check. Internal logs, command/protocol values, and test fixtures
+    remain in Rust.
+  - Validation: localization check, locked all-target test suite (290 passed,
+    seven explicitly ignored live/integration tests), all-target/all-feature
+    Clippy with warnings denied, and formatting check pass.
+- [x] Complete the persistent-startup live test
+  - One Online mount left on.
+  - At least one Online mount left off.
+  - SharePoint Offline schedule either deliberately on or off.
+  - Confirm the popup switches retain those choices.
+  - Confirm only intended connections restart.
+  - Confirm temporary failures do not change switch positions.
+  - October 5 native reboot/login test passed. Before reboot, **UA Box** was
+    saved on, enabled, active, and mounted; **Test_SharePoint Offline UI** had
+    its timer enabled and active; **UA OneDrive** and all other managed
+    connections were saved off and disabled. After login, the popup retained
+    the two intended running switches. Systemd and the mount table independently
+    confirmed that UA Box alone restarted as an Online mount, the SharePoint
+    timer alone restarted as an Offline schedule, and every other managed
+    mount/mirror remained disabled and inactive. The earlier installed Wi-Fi
+    loss/recovery test confirms a temporary failure does not change the saved
+    SharePoint switch position and that operation resumes after connectivity
+    returns.
+- [x] Correct release metadata
+  - Cargo.toml and Cargo.lock
+  - Debian changelog and generated Debian metadata
+  - README download commands
+  - AppStream release entry
+  - Flatpak tag
+  - Aligned authoritative source metadata to `0.5.1`/`v0.5.1`, retained the
+    historical AppStream entries, added the October 5 release description, and
+    updated tag-based screenshot URLs. `cargo metadata --locked` and
+    `dpkg-parsechangelog` both report `0.5.1`.
+  - Rebuilt the Debian package so generated control and file metadata report
+    `0.5.1`; `dpkg-deb` confirms package
+    `cosmic-ext-applet-mounter_0.5.1_amd64.deb`, version `0.5.1`, architecture
+    `amd64`. The package build passed 290 tests with seven explicitly ignored
+    live/integration tests. COSMIC-specific AppStream/Desktop validator findings
+    remain the documented non-fatal `COSMIC` category and `binaries` provide
+    compatibility notices.
+- [x] Final release-candidate validation
+  - `cargo fmt --all -- --check`, `cargo check --locked --all-targets`, the
+    complete 290-test suite, and Clippy with warnings denied passed. Seven
+    explicitly external/live tests remained ignored.
+  - `cargo vendor --locked` completed into a disposable directory without the
+    earlier duplicate-libcosmic-source error.
+  - Desktop/AppStream validation found only the documented COSMIC template
+    compatibility notices for the `COSMIC` category and `binaries` provide;
+    the AppStream XML is well formed.
+  - The localization audit and `git diff --check` passed. A strict repository
+    scan found no Google API keys, OAuth client IDs, private-key blocks, or
+    assigned access, refresh, or client-secret values.
+  - Rebuilt and inspected `cosmic-ext-applet-mounter_0.5.1_amd64.deb`; SHA-256
+    is `15ba6b3fb86bb32cab82a1c2bbae4d5106cc1d192a0a98f6528d4da9c4903ca8`.
+    The package reports version `0.5.1`, architecture `amd64`, and contains
+    both executables plus the desktop entry, AppStream metadata, icon,
+    copyright, and changelog.
+  - Installed, removed without purge, reinstalled, and finally removed the
+    Debian package. The existing `~/.local` applet and COSMIC configuration
+    retained identical hashes throughout both package cycles; `/usr/bin` is
+    absent afterward and command resolution again selects the custom build.
+  - The packaged `/usr/bin` executable ran for the bounded native smoke period
+    with all shared libraries resolved. After final package removal, restarting
+    `cosmic-panel` successfully relaunched the custom applet. Its subsequent
+    normal runtime-state write changed the configuration hash only after the
+    package preservation checks had passed.
+- [ ] Release documentation and publication
+  - [x] Create Release Notes 0.5.1.md.
+  - [x] Update the completion notes with the final evidence.
+  - [x] Generate the .deb (completed above) and SHA256SUMS.
+  - [x] Review the complete dirty worktree before committing, including the
+        intentional archival removal of the completed Tooltip Review.
+  - Commit and push before creating the v0.5.1 tag.
+  - Verify screenshot and documentation links against the published tag.
+
+## Flatpak installation. - Started on October 3, 2026
+
+Remaining work to make the applet installable from COSMIC Store:
+
+- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance if the applet's
+      host-integration requirements need broader access than accepted applets such as
+       `dev.cappsy.CosmicExtAppletDrives`. Ask in COSMIC App Developer/Mattermost channel.
+- [ ] Open a focused pull request to `pop-os/cosmic-flatpak` containing:
+    - `app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
+    - Generated `cargo-sources.json`
+    - Links to source repository, MIT license, tagged release, build instructions,
+      AppStream metadata, and screenshots.
+- [ ] In the pull request, explicitly call out the host-integration architecture and
+      justify every non-default Flatpak permission, especially host-command execution,
+      systemd unit creation, sleep signals, and shared state.
+- [ ] Complete the repository pull-request checklist: disclose AI-generated or AI-assisted
+      code in commit messages, understand and be able to explain every submitted change,
+      accurately describe and test the change, and certify it under the Developer Certificate of Origin.
+- [ ] Address repository CI and maintainer review, updating the source tag/hash when
+      a packaging fix requires a new application release.
+- [ ] After merge and publication to a configured public remote, install from the
+      COSMIC Flatpak remote on a clean profile and run a final mount/mirror/VPN/uninstall smoke test.
+
+Completed preparation work: local Flatpak manifest, cargo-sources generation,
+desktop/AppStream metadata, local `just build`/`just build-changed`, Store listing
+verification, panel add/remove, and permission rationale in `packaging/flatpak/README.md`.

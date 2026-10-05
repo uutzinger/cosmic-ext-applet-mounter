@@ -165,9 +165,10 @@ impl UnitDocument {
         let service = UnitName::new(spec.connection_id, UnitKind::Service).file_name();
         let persistent = if spec.persistent { "true" } else { "false" };
         let content = format!(
-            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Timer]\nOnUnitInactiveSec={}s\nPersistent={persistent}\nUnit={service}\n\n[Install]\nWantedBy=timers.target\n",
+            "{MANAGED_MARKER}\n{UUID_MARKER}{}\n\n[Unit]\nDescription={}\n\n[Timer]\nOnActiveSec={}s\nOnUnitInactiveSec={}s\nPersistent={persistent}\nUnit={service}\n\n[Install]\nWantedBy=timers.target\n",
             spec.connection_id,
             spec.description,
+            spec.interval.as_secs(),
             spec.interval.as_secs()
         );
         Ok(Self {
@@ -916,7 +917,7 @@ Restart=on-failure\nRestartSec=5s\n\
             "# X-Cosmic-Mounter-Managed=true\n\
 # X-Cosmic-Mounter-Connection=2a3f5d45-e867-47e7-943f-66cf60e777ad\n\n\
 [Unit]\nDescription=Example storage schedule\n\n\
-[Timer]\nOnUnitInactiveSec=900s\nPersistent=true\n\
+[Timer]\nOnActiveSec=900s\nOnUnitInactiveSec=900s\nPersistent=true\n\
 Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
 [Install]\nWantedBy=timers.target\n"
         );

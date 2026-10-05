@@ -148,7 +148,7 @@ impl PreloadPolicy {
     #[must_use]
     pub const fn without_depth() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             maximum_seconds: DEFAULT_PRELOAD_SECONDS,
             maximum_depth: None,
         }
@@ -157,7 +157,7 @@ impl PreloadPolicy {
     #[must_use]
     pub const fn with_depth(maximum_depth: u8) -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             maximum_seconds: DEFAULT_PRELOAD_SECONDS,
             maximum_depth: Some(maximum_depth),
         }

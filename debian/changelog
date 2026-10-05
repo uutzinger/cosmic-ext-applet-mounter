@@ -1,3 +1,16 @@
+cosmic-ext-applet-mounter (0.5.1) unstable; urgency=medium
+
+  * Add guarded unattended SharePoint Offline mirror scheduling with bounded
+    network, metered-policy, interruption, retry, and target-identity safety.
+  * Make each popup switch the persistent startup intent for Online mounts and
+    Offline mirror schedules, including login restoration and transient errors.
+  * Add bounded SharePoint Online directory preload and improve operation-state
+    reporting, recovery, and connection safety.
+  * Move user-facing settings, popup, validation, notice, and SFTP text into the
+    Fluent localization catalog and enforce the boundary in release checks.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 05 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.5.0) unstable; urgency=medium
 
   * Add verified SharePoint document-library Online mounts and Microsoft sign-in

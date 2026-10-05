@@ -927,6 +927,17 @@ mod tests {
     }
 
     #[test]
+    fn preload_defaults_are_disabled_for_every_provider() {
+        let preload = PreloadSettings::default();
+        assert!(!preload.google_drive.enabled);
+        assert!(!preload.onedrive.enabled);
+        assert!(!preload.box_provider.enabled);
+        assert!(!preload.sharepoint.enabled);
+        assert!(!preload.smb.enabled);
+        assert!(!preload.sftp.enabled);
+    }
+
+    #[test]
     fn preload_policies_have_finite_validated_bounds_and_migrate_onedrive() {
         let mut config = Config::default();
         config.document.preload.onedrive.maximum_seconds = MIN_PRELOAD_SECONDS;

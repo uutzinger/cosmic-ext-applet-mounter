@@ -45,6 +45,9 @@ metadata-check-strict:
     desktop-file-validate resources/app.desktop
     appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
 
+localization-check:
+    bash scripts/check-ui-localization.sh
+
 flatpak-cargo-sources:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -73,7 +76,7 @@ build-release *args:
 run *args:
     env RUST_BACKTRACE=1 cargo run {{args}}
 
-verify: fmt-check check lint test metadata-check
+verify: fmt-check localization-check check lint test metadata-check
 
 deb:
     dpkg-buildpackage -us -uc -b

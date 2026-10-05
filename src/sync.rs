@@ -1164,11 +1164,13 @@ mod tests {
         let script = crate::mirror_script::render(&plan).unwrap();
         assert!(script.find("--verify-teams-mirror").unwrap() < script.find("rclone=").unwrap());
         assert!(
-            script
-                .contains("\"$rclone\" check 'test_teams:CloudMounter-TeamsMirror-Test-20261002'")
+            script.contains(
+                "rclone_remote check 'test_teams:CloudMounter-TeamsMirror-Test-20261002'"
+            )
         );
         assert!(script.contains("'--checksum' '--filter-from'"));
-        assert_eq!(script.matches("\"$rclone\" \"$@\"").count(), 3);
+        assert!(script.contains("'--contimeout' '10s' '--timeout' '30s'"));
+        assert_eq!(script.matches("rclone_remote \"$@\"").count(), 3);
         let temporary = tempfile::tempdir().unwrap();
         let script_path = temporary.path().join("sharepoint-bisync.sh");
         std::fs::write(&script_path, script).unwrap();

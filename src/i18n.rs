@@ -29,6 +29,9 @@ pub static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     loader
         .load_fallback_language(&Localizations)
         .expect("fallback language must load");
+    // Keep interpolated paths, command stages, and provider names selectable and
+    // byte-for-byte stable in status text and test assertions.
+    loader.set_use_isolating(false);
     loader
 });
 

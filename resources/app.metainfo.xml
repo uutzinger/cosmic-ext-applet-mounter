@@ -61,23 +61,34 @@
   </branding>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.6/resources/Popup.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.5.1/resources/Popup.png</image>
       <caption>Manage storage connections from the COSMIC panel popup.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.6/resources/Settings.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.5.1/resources/Settings.png</image>
       <caption>Configure connection actions, sleep cleanup, and directory preloading.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.6/resources/Add_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.5.1/resources/Add_Connection.png</image>
       <caption>Add a storage connection with provider, mode, remote, local target, and VPN options.</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.4.6/resources/Change_Connection.png</image>
+      <image>https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/v0.5.1/resources/Change_Connection.png</image>
       <caption>Modify, test, disable, remove, preview, or synchronize an existing connection.</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.1" date="2026-10-05">
+      <description>
+        <p>Persistent startup choices and guarded unattended SharePoint mirrors.</p>
+        <ul>
+          <li>Add guarded SharePoint Offline scheduling with bounded network recovery, metered-network policy, and target-identity checks.</li>
+          <li>Make popup switches persist Online mount and Offline mirror startup choices across login and temporary failures.</li>
+          <li>Add bounded SharePoint Online directory preload and improve operation, recovery, and connection status.</li>
+          <li>Move user-facing interface, validation, and notice text into the Fluent localization catalog.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-10-03">
       <description>
         <p>SharePoint document libraries and safer connection management.</p>

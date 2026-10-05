@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-ext-applet-mounter"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Urs Utzinger", "OpenAI Codex"]
@@ -29,8 +29,7 @@ version = "0.16"
 features = ["fluent-system", "desktop-requester"]
 
 [dependencies.libcosmic]
-git = "https://github.com/pop-os/libcosmic.git"
-rev = "a991d7bb433f67016c1473e8e4a03691ededd75a"
+git = "https://github.com/pop-os/libcosmic"
 features = [
     "applet",
     "applet-token",

@@ -96,15 +96,16 @@ impl SftpDraft {
     }
 
     fn validate(&self) -> Result<(), String> {
-        for (label, value) in [("host", &self.host), ("username", &self.user)] {
-            if optional_setup_value(label, value)?.is_none() {
-                return Err(format!("SFTP {label} is required."));
+        for (label, value) in [
+            (fl!("sftp-host-label"), &self.host),
+            (fl!("sftp-user-label"), &self.user),
+        ] {
+            if optional_setup_value(&label, value)?.is_none() {
+                return Err(fl!("sftp-required", field = label));
             }
         }
         if self.host.contains('/') || self.host.chars().any(char::is_whitespace) {
-            return Err(
-                "SFTP host must be a DNS name or IP address, without a URL or directory.".into(),
-            );
+            return Err(fl!("sftp-host-invalid"));
         }
         if self
             .port
@@ -114,11 +115,11 @@ impl SftpDraft {
             .filter(|p| *p > 0)
             .is_none()
         {
-            return Err("SFTP port must be between 1 and 65535.".into());
+            return Err(fl!("sftp-port-invalid"));
         }
         file_path("known-hosts file", &self.known_hosts)?;
         if self.auth == SftpAuth::Key {
-            file_path("private-key file", &self.key_file)?;
+            file_path(&fl!("sftp-private-key-label"), &self.key_file)?;
             optional_secret_value("key passphrase", &self.key_passphrase)?;
         }
         if self.auth == SftpAuth::Password {
@@ -178,28 +179,26 @@ fn bool_option(config: &serde_json::Value, key: &str) -> bool {
 
 fn file_path(label: &str, value: &str) -> Result<String, String> {
     let value =
-        optional_setup_value(label, value)?.ok_or_else(|| format!("SFTP {label} is required."))?;
+        optional_setup_value(label, value)?.ok_or_else(|| fl!("sftp-required", field = label))?;
     let path = expand_user_path(&value);
     if !path.is_absolute() {
-        return Err(format!(
-            "SFTP {label} must be an absolute host path or start with ~/."
-        ));
+        return Err(fl!("sftp-path-invalid", field = label));
     }
     Ok(path.to_string_lossy().into_owned())
 }
 
 fn config_section(output: &str, name: &str) -> Result<Option<serde_json::Value>, String> {
     // Never include config dump text or parser excerpts in an error.
-    let value: serde_json::Value = serde_json::from_str(output)
-        .map_err(|_| "Could not parse rclone configuration.".to_owned())?;
-    let object = value.as_object().ok_or("Invalid rclone configuration.")?;
+    let value: serde_json::Value =
+        serde_json::from_str(output).map_err(|_| fl!("sftp-config-parse"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| fl!("sftp-config-invalid"))?;
     let Some(section) = object.get(name) else {
         return Ok(None);
     };
     if section["type"].as_str() != Some("sftp") {
-        return Err(
-            "This remote belongs to another provider. Choose an SFTP remote or a new name.".into(),
-        );
+        return Err(fl!("sftp-wrong-provider"));
     }
     Ok(Some(section.clone()))
 }
@@ -255,10 +254,10 @@ impl AppModel {
             return;
         }
         let result = run_sync_host_command("rclone", &["config", "dump"])
-            .map_err(|_| "Could not read host rclone configuration.".to_owned())
+            .map_err(|_| fl!("sftp-config-read"))
             .and_then(|output| {
                 if !output.status.success() {
-                    return Err("Could not read host rclone configuration.".into());
+                    return Err(fl!("sftp-config-read"));
                 }
                 config_section(
                     &String::from_utf8_lossy(&output.stdout),
@@ -268,9 +267,9 @@ impl AppModel {
         match result {
             Ok(Some(config)) => {
                 self.draft.sftp = SftpDraft::from_config(&config);
-                self.last_notice = Some("SFTP server settings loaded. Secrets remain blank; Update SFTP Remote explicitly applies changes.".into());
+                self.last_notice = Some(fl!("sftp-settings-loaded"));
             }
-            Ok(None) => self.last_notice = Some("SFTP remote was not found. Select an existing remote or create one in Add Connection.".into()),
+            Ok(None) => self.last_notice = Some(fl!("sftp-remote-not-found-help")),
             Err(error) => self.last_notice = Some(error),
         }
     }
@@ -401,10 +400,7 @@ impl AppModel {
             SftpAuth::Agent => false,
         };
         if self.sftp_retry_secret_auth == Some(self.draft.sftp.auth) && retry_secret_empty {
-            self.last_notice = Some(
-                "The previous SFTP update failed. Re-enter the password or key passphrase before retrying."
-                    .into(),
-            );
+            self.last_notice = Some(fl!("sftp-reenter-secret"));
             return Task::none();
         }
         let name = self.draft.remote_reference.trim().to_owned();
@@ -429,9 +425,9 @@ impl AppModel {
         let current = (name.clone(), self.draft.sftp.clone());
         if !affected.is_empty() && self.sftp_update_ack.as_ref() != Some(&current) {
             self.sftp_update_ack = Some(current);
-            self.last_notice = Some(format!(
-                "Updating this remote affects: {}. Restart active connections afterward. Click Confirm SFTP Update to apply these settings.",
-                affected.join(", ")
+            self.last_notice = Some(fl!(
+                "sftp-update-affects",
+                connections = affected.join(", ")
             ));
             return Task::none();
         }
@@ -449,7 +445,7 @@ impl AppModel {
         self.sftp_setup_pending = true;
         self.validated_draft = None;
         let update_only = matches!(self.window_mode, WindowMode::ModifyConnection(_));
-        self.last_notice = Some(format!("Applying SFTP remote `{name}`…"));
+        self.last_notice = Some(fl!("sftp-applying", name = name.as_str()));
         Task::perform(
             async move {
                 let result = apply_remote(&app_command_runner(), &name, &draft, update_only).await;
@@ -478,21 +474,21 @@ async fn apply_remote(
     let request = CommandRequest::new(Executable::Rclone)
         .arg("config")
         .and_then(|r| r.arg("dump"))
-        .map_err(|_| "Invalid configuration request.")?
+        .map_err(|_| fl!("sftp-invalid-config-request"))?
         .with_timeout(Duration::from_secs(5));
     let dump = runner
         .run(request, CancellationToken::new())
         .await
-        .map_err(|error| sftp_setup_error("read configuration", error))?;
+        .map_err(|error| sftp_setup_error(&fl!("sftp-stage-read-config"), error))?;
     let existing = config_section(&dump.stdout.text, name)?;
     if update_only && existing.is_none() {
-        return Err("Remote no longer exists. Create it in Add Connection first.".into());
+        return Err(fl!("sftp-remote-gone"));
     }
     let request = setup_request(name, draft, existing.as_ref())?;
     let output = runner
         .run(request, CancellationToken::new())
         .await
-        .map_err(|error| sftp_setup_error("save remote", error))?;
+        .map_err(|error| sftp_setup_error(&fl!("sftp-stage-save-remote"), error))?;
     // rclone config update can print a save error but still exit successfully
     // with an empty JSON Error field. Do not report that as an applied update.
     if output
@@ -501,12 +497,11 @@ async fn apply_remote(
         .lines()
         .any(|line| line.contains("ERROR :") || line.contains("Failed to save config"))
     {
-        return Err("SFTP save remote failed. Check rclone configuration permissions and inspect the remote before retrying; settings may have changed.".into());
+        return Err(fl!("sftp-save-failed"));
     }
     if !output.stdout.text.trim().is_empty() {
-        let result: serde_json::Value = serde_json::from_str(&output.stdout.text).map_err(
-            |_| "Rclone returned an unexpected setup response; inspect the remote before retrying.",
-        )?;
+        let result: serde_json::Value = serde_json::from_str(&output.stdout.text)
+            .map_err(|_| fl!("sftp-unexpected-response"))?;
         if result
             .get("State")
             .and_then(|v| v.as_str())
@@ -516,7 +511,7 @@ async fn apply_remote(
                 .and_then(|v| v.as_str())
                 .is_some_and(|s| !s.is_empty())
         {
-            return Err("Rclone setup needs additional configuration. Complete it with rclone config and then select the remote.".into());
+            return Err(fl!("sftp-needs-configuration"));
         }
     }
     Ok(existing.is_some())
@@ -524,17 +519,16 @@ async fn apply_remote(
 
 fn sftp_setup_error(stage: &str, error: CommandError) -> String {
     match error {
-        CommandError::Timeout { timeout, .. } => format!(
-            "SFTP {stage} timed out after {} seconds. Inspect the remote before retrying; settings may have changed.",
-            timeout.as_secs()
+        CommandError::Timeout { timeout, .. } => fl!(
+            "sftp-stage-timeout",
+            stage = stage,
+            seconds = timeout.as_secs()
         ),
-        CommandError::MissingExecutable(_) => "rclone is missing on the host.".into(),
-        CommandError::Cancelled { .. } => format!("SFTP {stage} was cancelled."),
-        CommandError::InvalidArgument => "SFTP setup contains an invalid option.".into(),
-        CommandError::Spawn { .. } => "Could not start host rclone for SFTP setup.".into(),
-        CommandError::NonZero { .. } => format!(
-            "SFTP {stage} failed. Check rclone configuration permissions and inspect the remote before retrying; settings may have changed."
-        ),
+        CommandError::MissingExecutable(_) => fl!("sftp-rclone-missing"),
+        CommandError::Cancelled { .. } => fl!("sftp-stage-cancelled", stage = stage),
+        CommandError::InvalidArgument => fl!("sftp-invalid-option"),
+        CommandError::Spawn { .. } => fl!("sftp-start-failed"),
+        CommandError::NonZero { .. } => fl!("sftp-stage-failed", stage = stage),
     }
 }
 
@@ -547,11 +541,11 @@ fn setup_request(
     draft.validate()?;
     if let Some(config) = existing {
         if config["type"].as_str() != Some("sftp") {
-            return Err("Remote backend is not SFTP.".into());
+            return Err(fl!("sftp-backend-mismatch"));
         }
         if !string_option(config, "ssh").is_empty() || !string_option(config, "key_pem").is_empty()
         {
-            return Err("This remote uses custom SSH commands or an embedded key. Manage its authentication with rclone config. Applet access testing requires rclone's built-in SSH authentication.".into());
+            return Err(fl!("sftp-custom-ssh"));
         }
     }
     let previous = existing.map(SftpDraft::from_config);
@@ -562,7 +556,7 @@ fn setup_request(
         ("user", draft.user.trim().to_owned()),
         (
             "known_hosts_file",
-            file_path("known-hosts file", &draft.known_hosts)?,
+            file_path(&fl!("sftp-known-hosts-label"), &draft.known_hosts)?,
         ),
         ("ask_password", "false".into()),
         ("key_use_agent", (draft.auth == SftpAuth::Agent).to_string()),
@@ -570,7 +564,7 @@ fn setup_request(
     match draft.auth {
         SftpAuth::Password => {
             if draft.password.is_empty() && !(same_auth && existing.is_some_and(has_password)) {
-                return Err("Enter a password for a new password login.".into());
+                return Err(fl!("sftp-password-required"));
             }
             if !draft.password.is_empty() {
                 pairs.push(("pass", draft.password.clone()));
@@ -583,10 +577,13 @@ fn setup_request(
             ]);
         }
         SftpAuth::Key => {
-            let key = file_path("private-key file", &draft.key_file)?;
+            let key = file_path(&fl!("sftp-private-key-label"), &draft.key_file)?;
             let same_key = same_auth
                 && previous.as_ref().is_some_and(|d| {
-                    file_path("private-key file", &d.key_file).ok().as_ref() == Some(&key)
+                    file_path(&fl!("sftp-private-key-label"), &d.key_file)
+                        .ok()
+                        .as_ref()
+                        == Some(&key)
                 });
             pairs.extend([("pass", String::new()), ("key_file", key)]);
             if !same_key || !draft.key_passphrase.is_empty() {
@@ -620,22 +617,24 @@ fn setup_request(
             })
         })
         .and_then(|r| r.arg(name))
-        .map_err(|_| "Invalid remote name.")?;
+        .map_err(|_| fl!("sftp-invalid-remote-name"))?;
     if existing.is_none() {
-        request = request.arg("sftp").map_err(|_| "Invalid backend.")?;
+        request = request
+            .arg("sftp")
+            .map_err(|_| fl!("sftp-invalid-backend"))?;
     }
     for (key, value) in pairs {
         request = request
             .arg(key)
             .and_then(|r| r.sensitive_arg(value))
-            .map_err(|_| "Invalid SFTP option.")?;
+            .map_err(|_| fl!("sftp-invalid-option"))?;
     }
     // One config operation avoids partially switching authentication across commands.
     request
         .arg("--obscure")
         .and_then(|r| r.arg("--non-interactive"))
         .map(|r| r.with_timeout(Duration::from_secs(30)))
-        .map_err(|_| "Invalid SFTP request.".into())
+        .map_err(|_| fl!("sftp-invalid-request"))
 }
 
 pub(super) async fn verify_host_verification(
@@ -645,18 +644,22 @@ pub(super) async fn verify_host_verification(
     let request = CommandRequest::new(Executable::Rclone)
         .arg("config")
         .and_then(|r| r.arg("dump"))
-        .map_err(|_| "Invalid configuration request.")?
+        .map_err(|_| fl!("sftp-invalid-config-request"))?
         .with_timeout(Duration::from_secs(5));
     let dump = runner
         .run(request, CancellationToken::new())
         .await
-        .map_err(|_| "Could not read SFTP host-verification settings.".to_owned())?;
-    let config = config_section(&dump.stdout.text, name)?.ok_or("SFTP remote was not found.")?;
+        .map_err(|_| fl!("sftp-host-verification-read"))?;
+    let config =
+        config_section(&dump.stdout.text, name)?.ok_or_else(|| fl!("sftp-remote-not-found"))?;
     if !string_option(&config, "ssh").is_empty() {
-        return Err("This remote uses an external SSH command. Select a remote using rclone's built-in SFTP authentication so the applet can verify its host-key policy.".into());
+        return Err(fl!("sftp-external-ssh"));
     }
-    file_path("known-hosts file", &string_option(&config, "known_hosts_file"))
-        .map_err(|_| "SFTP requires a known-hosts file. Set a verified file with Create/Update SFTP Remote before testing or saving.".to_owned())?;
+    file_path(
+        &fl!("sftp-known-hosts-label"),
+        &string_option(&config, "known_hosts_file"),
+    )
+    .map_err(|_| fl!("sftp-known-hosts-required"))?;
     Ok(())
 }
 
