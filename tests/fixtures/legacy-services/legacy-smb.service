@@ -1,0 +1,19 @@
+[Unit]
+Description=Legacy SMB research mount
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=/bin/mkdir -p %h/Cloud/Research
+ExecStart=/usr/bin/rclone mount smb_remote:Research %h/Cloud/Research \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 20G \
+  --cache-dir %h/.cache/rclone-smb \
+  --poll-interval 0
+ExecStop=/bin/fusermount3 -uz %h/Cloud/Research
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

@@ -571,29 +571,29 @@ mod tests {
     const HOME: &str = "/home/example";
     const FIXTURES: &[(&str, &str)] = &[
         (
-            "rclone-ua-box.service",
-            include_str!("../archive/services/rclone-ua-box.service"),
+            "legacy-box.service",
+            include_str!("../tests/fixtures/legacy-services/legacy-box.service"),
         ),
         (
-            "rclone-ua-engr.service",
-            include_str!("../archive/services/rclone-ua-engr.service"),
+            "legacy-smb.service",
+            include_str!("../tests/fixtures/legacy-services/legacy-smb.service"),
         ),
         (
-            "rclone-ua-gdrive.service",
-            include_str!("../archive/services/rclone-ua-gdrive.service"),
+            "legacy-work-drive.service",
+            include_str!("../tests/fixtures/legacy-services/legacy-work-drive.service"),
         ),
         (
-            "rclone-uutzinger-gdrive.service",
-            include_str!("../archive/services/rclone-uutzinger-gdrive.service"),
+            "legacy-personal-drive.service",
+            include_str!("../tests/fixtures/legacy-services/legacy-personal-drive.service"),
         ),
     ];
 
     fn fixture_backends() -> BTreeMap<String, Provider> {
         [
-            ("ua_box", Provider::Box),
-            ("ua_engr", Provider::Smb),
-            ("ua_gdrive", Provider::GoogleDrive),
-            ("uutzinger_gdrive", Provider::GoogleDrive),
+            ("box_remote", Provider::Box),
+            ("smb_remote", Provider::Smb),
+            ("work_drive", Provider::GoogleDrive),
+            ("personal_drive", Provider::GoogleDrive),
             ("remote", Provider::Box),
         ]
         .into_iter()
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_all_archived_rclone_services_without_mutating_fixtures() {
+    fn parses_all_tracked_rclone_services_without_mutating_fixtures() {
         for (name, content) in FIXTURES {
             let before = *content;
             let unit = parse_unit(Path::new(name), content).expect("unit");
@@ -641,28 +641,28 @@ mod tests {
     #[test]
     fn rclone_fixture_preview_contains_provider_remote_target_and_cache() {
         let unit = parse_unit(
-            Path::new("rclone-ua-engr.service"),
-            include_str!("../archive/services/rclone-ua-engr.service"),
+            Path::new("legacy-smb.service"),
+            include_str!("../tests/fixtures/legacy-services/legacy-smb.service"),
         )
         .expect("unit");
         let preview = preview_import(
             &unit,
             &[],
             &BTreeSet::new(),
-            Path::new("/home/uutzinger"),
+            Path::new(HOME),
             &fixture_backends(),
         )
         .expect("preview");
         assert_eq!(preview.provider, Provider::Smb);
-        assert_eq!(preview.remote_reference, "ua_engr");
+        assert_eq!(preview.remote_reference, "smb_remote");
         assert_eq!(preview.remote_subpath, Some("Research".into()));
         assert_eq!(
             preview.local_target,
-            PathBuf::from("/home/uutzinger/Cloud/UA_ENGR")
+            PathBuf::from("/home/example/Cloud/Research")
         );
         assert_eq!(
             preview.cache_directory,
-            Some(PathBuf::from("/home/uutzinger/.cache/rclone-ua-engr"))
+            Some(PathBuf::from("/home/example/.cache/rclone-smb"))
         );
         assert!(preview.unsupported_options.is_empty());
     }
@@ -756,8 +756,8 @@ mod tests {
     #[test]
     fn import_replacement_requires_confirmation_and_preserves_original() {
         let unit = parse_unit(
-            Path::new("rclone-ua-box.service"),
-            include_str!("../archive/services/rclone-ua-box.service"),
+            Path::new("legacy-box.service"),
+            include_str!("../tests/fixtures/legacy-services/legacy-box.service"),
         )
         .expect("unit");
         let preview = preview_import(
@@ -802,8 +802,8 @@ mod tests {
     #[test]
     fn active_and_target_conflicts_are_reported_and_block_replacement() {
         let unit = parse_unit(
-            Path::new("rclone-ua-gdrive.service"),
-            include_str!("../archive/services/rclone-ua-gdrive.service"),
+            Path::new("legacy-work-drive.service"),
+            include_str!("../tests/fixtures/legacy-services/legacy-work-drive.service"),
         )
         .expect("unit");
         let preview = preview_import(
@@ -813,9 +813,9 @@ mod tests {
                 name: "Existing".into(),
                 provider: Provider::GoogleDrive,
                 mode: ConnectionMode::OnlineMount(OnlineMountConfig::default()),
-                remote_reference: "ua_gdrive".into(),
+                remote_reference: "work_drive".into(),
                 remote_subpath: None,
-                local_path: PathBuf::from("/home/example/Cloud/UA_GoogleDrive"),
+                local_path: PathBuf::from("/home/example/Cloud/WorkDrive"),
                 enabled: true,
                 vpn_profile_id: None,
                 disconnect_vpn_when_unused: false,
@@ -824,7 +824,7 @@ mod tests {
                 sftp_preload_override: None,
                 teams_identity: None,
             }],
-            &["rclone-ua-gdrive.service".to_owned()]
+            &["legacy-work-drive.service".to_owned()]
                 .into_iter()
                 .collect(),
             Path::new(HOME),
@@ -889,7 +889,7 @@ mod tests {
         let temp = TempDir::new().expect("temp");
         fs::write(
             temp.path().join("rclone.service"),
-            include_str!("../archive/services/rclone-ua-box.service"),
+            include_str!("../tests/fixtures/legacy-services/legacy-box.service"),
         )
         .expect("fixture");
         fs::write(temp.path().join("notes.txt"), "ignore").expect("notes");
