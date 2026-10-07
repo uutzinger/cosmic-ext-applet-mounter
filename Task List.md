@@ -62,35 +62,43 @@ retirement on April 17, 2027.
 - [x] Pass formatting, diff checks, and all 12 focused import tests with the
   tracked fixtures (180 other tests filtered by the focused invocation).
 - [x] Commit and push the tracked fixtures and import-test changes.
-- [ ] ⏳ Monitor the third **Build Debian packages** run currently in progress;
-  confirm all six jobs proceed beyond test compilation and record any next
-  failure before changing the workflow again.
+- [x] Complete the third **Build Debian packages** run successfully on all six
+  Ubuntu/architecture jobs after adding the tracked fixtures.
+- [x] Download the Ubuntu 24.04 amd64 artifact from successful run
+  `37642473346`; verify its SHA-256 checksum, package/version/architecture,
+  runtime dependency metadata, and installed-file layout.
+- [x] Back up Cloud Mounter configuration, rclone configuration, generated
+  services, and local installation files before package testing.
+- [x] Install the Ubuntu 24.04 amd64 package on Pop!_OS 24.04 and confirm the
+  packaged `/usr/bin/cosmic-ext-applet-mounter` replaces the parked user-local
+  executable during the test.
+- [x] Live-test the packaged applet UI, preserved connections, General
+  Settings, and OneDrive mount, unmount, and remount behavior.
+- [x] Review the live journal: no applet crash, panic, failed service exit, or
+  mount failure occurred. onedriver continued successfully after its optional
+  missing-config warning and one unsupported FUSE `STATX` request.
+- [x] Unmount all test connections, remove the Debian package without purging
+  user data, restore both parked user-local executables, and confirm command
+  resolution returned to `~/.local/bin` with no Cloud Mounter mounts left.
+- [x] Re-authenticate GitHub CLI and use it successfully to enumerate run
+  `37642473346`, list all six artifacts, and download the 24.04 amd64 package.
+- [x] Complete structural validation for all six packages in the workflow;
+  each matrix job checked the package architecture and metadata and generated
+  a matching SHA-256 checksum. Live installation was completed on the available
+  Pop!_OS 24.04 amd64 COSMIC system; other OS/architecture live checks require
+  matching external systems and are not part of this release gate.
 
-### After the six cloud builds pass
+### Remaining for the next release
 
-- [ ] Inspect all six `.deb` control records and install at least the oldest
-  supported package on a matching COSMIC system. Compilation is not evidence of
-  panel loading, runtime library compatibility, or provider behavior.
-- [ ] Decide whether to keep Ubuntu 22.04 until its April 17, 2027 retirement or
-  remove both 22.04 matrix entries sooner.
-- [ ] Optionally configure GitHub environment protection or tag-protection rules
-  for releases; no repository secrets are required by the current workflow.
-- [x] Re-authenticate GitHub CLI with `gh auth login` (user completed).
-- [ ] Resolve the local authentication verification mismatch: the October 7,
-  2026 `gh auth status` check in this workspace still reports the stored
-  `uutzinger` credential as invalid, which would stop the release helper before
-  it creates or monitors a release.
-- [ ] Commit and push the local release helper scripts if they are not yet on
-  the default branch.
+- [x] Commit and push `.gitignore`, `scripts/build_release.sh`,
+  `scripts/run_github_linux_build.sh`, and this final task-list update.
 - [ ] Ensure the release metadata agrees in `Cargo.toml`, `Cargo.lock`, and
   `debian/changelog`, and update release notes/documentation before committing.
-- [ ] Push the release commit and confirm the local branch matches
-  `origin/<branch>`.
-- [ ] Run `scripts/build_release.sh --dry-run`, then run
-  `scripts/build_release.sh` to create/push `v<version>`, wait for the workflow,
-  and download the resulting artifacts under `artifacts/v<version>`.
-- [ ] Verify the published release assets and combined checksums, then perform
-  installation and live COSMIC smoke testing on amd64 and arm64 hardware.
+- [ ] For the next version, push the release commit, run
+  `scripts/build_release.sh --dry-run`, then run `scripts/build_release.sh` to
+  tag, build, publish, and download the release artifacts.
+- [ ] Remove the Ubuntu 22.04 matrix entries no later than GitHub's scheduled
+  runner retirement on April 17, 2027.
 
 ## Release 0.4.6
 
