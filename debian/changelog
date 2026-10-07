@@ -1,3 +1,14 @@
+cosmic-ext-applet-mounter (0.5.2) unstable; urgency=medium
+
+  * Add native amd64 and arm64 Debian package builds for Ubuntu 22.04, 24.04,
+    and 26.04 through GitHub Actions.
+  * Add release orchestration, package inspection, checksums, and automated
+    tagged-release publication.
+  * Replace ignored local service fixtures with neutral tracked test fixtures
+    so clean source checkouts compile and test successfully.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Wed, 07 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.5.1) unstable; urgency=medium
 
   * Add guarded unattended SharePoint Offline mirror scheduling with bounded

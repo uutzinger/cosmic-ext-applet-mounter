@@ -96,9 +96,9 @@ retirement on April 17, 2027.
   `Cargo.toml`, the root package in `Cargo.lock`, `debian/changelog`, AppStream
   releases and screenshot URLs, README download commands, the Flatpak source
   tag and packaging guide, local tag `v0.5.1`, and the published GitHub release.
-- [ ] For the next version, update Cargo, Debian, AppStream, README, Flatpak,
-  and release-note metadata together before committing the release candidate.
-- [ ] For the next version, push the release commit, run
+- [x] Prepare version 0.5.2 and update Cargo, Debian, AppStream, README,
+  Flatpak, and release-note metadata together.
+- [ ] Push the version 0.5.2 release commit, run
   `scripts/build_release.sh --dry-run`, then run `scripts/build_release.sh` to
   tag, build, publish, and download the release artifacts.
 - [ ] Remove the Ubuntu 22.04 matrix entries no later than GitHub's scheduled

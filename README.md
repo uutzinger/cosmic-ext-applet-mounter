@@ -119,11 +119,12 @@ See [Build from Source](#build-from-source) below.
 ### Installation from Debian Package
 
 The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest)
-provides an `amd64` Debian package:
+provides native `amd64` and `arm64` Debian packages for Ubuntu 22.04, 24.04,
+and 26.04. For example, on Ubuntu or Pop!_OS 24.04 amd64:
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.1/cosmic-ext-applet-mounter_0.5.1_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.5.1_amd64.deb
+wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.2/cosmic-ext-applet-mounter_0.5.2_ubuntu24.04_amd64.deb
+sudo apt install ./cosmic-ext-applet-mounter_0.5.2_ubuntu24.04_amd64.deb
 ```
 
 The package installs the applet binary, OneDrive authentication helper, desktop
