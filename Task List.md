@@ -24,7 +24,7 @@ native development headers, and Debian packaging tools are sufficient. Ubuntu
 22.04 runners entered deprecation on September 17, 2026 and are scheduled for
 retirement on April 17, 2027.
 
-### Implemented in this repository
+### Chronological implementation and cloud validation
 
 - [x] Add a six-entry GitHub Actions matrix for Ubuntu 22.04, 24.04, and 26.04
   on native amd64 and arm64 GitHub-hosted runners.
@@ -39,9 +39,13 @@ retirement on April 17, 2027.
 - [x] Add a local workflow trigger/download helper and a release script that
   validates versions, a clean/pushed commit, and tag uniqueness before pushing
   the release tag.
-
-### GitHub repository setup and first cloud validation
-
+- [x] Commit and push the initial workflow to the default branch.
+- [x] In GitHub **Settings > Actions > General**, confirm GitHub Actions and
+  GitHub-maintained actions are allowed for the repository.
+- [x] Confirm the repository workflow-permission setting permits the tagged
+  release job's requested `contents: write` access.
+- [x] Start the first manual **Build Debian packages** run and confirm all six
+  Ubuntu/architecture jobs are admitted by the runner policy.
 - [x] Diagnose the first six-job cloud run: every job stopped at
   `dpkg-checkbuilddeps` because the runner did not install the declared
   `cargo`, `rustc`, `desktop-file-utils`, and `appstream` build dependencies.
@@ -57,18 +61,13 @@ retirement on April 17, 2027.
   names and paths while retaining Box, SMB, and Google Drive import coverage.
 - [x] Pass formatting, diff checks, and all 12 focused import tests with the
   tracked fixtures (180 other tests filtered by the focused invocation).
-- [ ] Rerun **Build Debian packages** after committing the tracked fixtures and
-  confirm all six jobs proceed beyond test compilation.
-- [ ] Commit and push `.github/workflows/build-deb.yml` and the release helper
-  scripts to the default branch.
-- [ ] In GitHub **Settings > Actions > General**, allow GitHub Actions and allow
-  the repository workflow to use GitHub-maintained actions.
-- [ ] Confirm **Workflow permissions** permit read/write access, or retain the
-  workflow's job-level `contents: write` permission so tagged runs can create a
-  release. If organization policy forces read-only tokens, create releases
-  manually from the downloaded artifacts instead.
-- [ ] Run **Build Debian packages** manually on the default branch and confirm
-  all six jobs are admitted by the repository's plan and runner policy.
+- [x] Commit and push the tracked fixtures and import-test changes.
+- [ ] ⏳ Monitor the third **Build Debian packages** run currently in progress;
+  confirm all six jobs proceed beyond test compilation and record any next
+  failure before changing the workflow again.
+
+### After the six cloud builds pass
+
 - [ ] Inspect all six `.deb` control records and install at least the oldest
   supported package on a matching COSMIC system. Compilation is not evidence of
   panel loading, runtime library compatibility, or provider behavior.
@@ -76,11 +75,13 @@ retirement on April 17, 2027.
   remove both 22.04 matrix entries sooner.
 - [ ] Optionally configure GitHub environment protection or tag-protection rules
   for releases; no repository secrets are required by the current workflow.
-
-### Local machine setup and release procedure
-
-- [ ] Re-authenticate GitHub CLI with `gh auth login`; the currently stored
-  credential is invalid.
+- [x] Re-authenticate GitHub CLI with `gh auth login` (user completed).
+- [ ] Resolve the local authentication verification mismatch: the October 7,
+  2026 `gh auth status` check in this workspace still reports the stored
+  `uutzinger` credential as invalid, which would stop the release helper before
+  it creates or monitors a release.
+- [ ] Commit and push the local release helper scripts if they are not yet on
+  the default branch.
 - [ ] Ensure the release metadata agrees in `Cargo.toml`, `Cargo.lock`, and
   `debian/changelog`, and update release notes/documentation before committing.
 - [ ] Push the release commit and confirm the local branch matches
