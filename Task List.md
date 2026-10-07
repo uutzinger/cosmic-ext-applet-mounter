@@ -15,6 +15,82 @@ release-candidate checks and user approval.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
+## GitHub Debian release automation
+
+**Feasibility verified October 7, 2026.** GitHub-hosted native amd64 and arm64
+runners are available for Ubuntu 22.04, 24.04, and 26.04. A COSMIC desktop
+session is not required to compile or package the applet; Rust, libcosmic's
+native development headers, and Debian packaging tools are sufficient. Ubuntu
+22.04 runners entered deprecation on September 17, 2026 and are scheduled for
+retirement on April 17, 2027.
+
+### Implemented in this repository
+
+- [x] Add a six-entry GitHub Actions matrix for Ubuntu 22.04, 24.04, and 26.04
+  on native amd64 and arm64 GitHub-hosted runners.
+- [x] Install the pinned Rust 1.95.0 toolchain, libcosmic build headers, and
+  Debian packaging tools on each runner.
+- [x] Run the package's existing Debian build and test path with
+  `dpkg-buildpackage -us -uc -b`.
+- [x] Inspect the resulting package architecture, add the Ubuntu version to
+  release filenames, generate SHA-256 checksums, and retain workflow artifacts.
+- [x] On `v*` tags, create a GitHub release only after every matrix build passes
+  and upload all packages plus a combined `SHA256SUMS` file.
+- [x] Add a local workflow trigger/download helper and a release script that
+  validates versions, a clean/pushed commit, and tag uniqueness before pushing
+  the release tag.
+
+### GitHub repository setup and first cloud validation
+
+- [x] Diagnose the first six-job cloud run: every job stopped at
+  `dpkg-checkbuilddeps` because the runner did not install the declared
+  `cargo`, `rustc`, `desktop-file-utils`, and `appstream` build dependencies.
+- [x] Add all four declared packages to the workflow installation step. The
+  apt Rust packages satisfy Debian dependency checking; the subsequent rustup
+  step still selects the project's pinned Rust 1.95.0 toolchain for the build.
+- [x] Rerun **Build Debian packages**; all six jobs passed dependency checking
+  and reached the same test-compilation failure described next.
+- [x] Diagnose the second six-job run: test compilation referenced ignored
+  local files under `archive/services`, which do not exist in a clean checkout.
+- [x] Replace the local archive dependency with neutral, tracked legacy-service
+  fixtures under `tests/fixtures/legacy-services`; remove account-specific
+  names and paths while retaining Box, SMB, and Google Drive import coverage.
+- [x] Pass formatting, diff checks, and all 12 focused import tests with the
+  tracked fixtures (180 other tests filtered by the focused invocation).
+- [ ] Rerun **Build Debian packages** after committing the tracked fixtures and
+  confirm all six jobs proceed beyond test compilation.
+- [ ] Commit and push `.github/workflows/build-deb.yml` and the release helper
+  scripts to the default branch.
+- [ ] In GitHub **Settings > Actions > General**, allow GitHub Actions and allow
+  the repository workflow to use GitHub-maintained actions.
+- [ ] Confirm **Workflow permissions** permit read/write access, or retain the
+  workflow's job-level `contents: write` permission so tagged runs can create a
+  release. If organization policy forces read-only tokens, create releases
+  manually from the downloaded artifacts instead.
+- [ ] Run **Build Debian packages** manually on the default branch and confirm
+  all six jobs are admitted by the repository's plan and runner policy.
+- [ ] Inspect all six `.deb` control records and install at least the oldest
+  supported package on a matching COSMIC system. Compilation is not evidence of
+  panel loading, runtime library compatibility, or provider behavior.
+- [ ] Decide whether to keep Ubuntu 22.04 until its April 17, 2027 retirement or
+  remove both 22.04 matrix entries sooner.
+- [ ] Optionally configure GitHub environment protection or tag-protection rules
+  for releases; no repository secrets are required by the current workflow.
+
+### Local machine setup and release procedure
+
+- [ ] Re-authenticate GitHub CLI with `gh auth login`; the currently stored
+  credential is invalid.
+- [ ] Ensure the release metadata agrees in `Cargo.toml`, `Cargo.lock`, and
+  `debian/changelog`, and update release notes/documentation before committing.
+- [ ] Push the release commit and confirm the local branch matches
+  `origin/<branch>`.
+- [ ] Run `scripts/build_release.sh --dry-run`, then run
+  `scripts/build_release.sh` to create/push `v<version>`, wait for the workflow,
+  and download the resulting artifacts under `artifacts/v<version>`.
+- [ ] Verify the published release assets and combined checksums, then perform
+  installation and live COSMIC smoke testing on amd64 and arm64 hardware.
+
 ## Release 0.4.6
 
 - [x] Align Cargo, Debian, AppStream, README installation examples,
