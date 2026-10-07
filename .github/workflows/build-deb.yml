@@ -1,0 +1,106 @@
+name: Build Debian packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Ubuntu ${{ matrix.ubuntu }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, ubuntu: "22.04", arch: amd64 }
+          - { runner: ubuntu-22.04-arm, ubuntu: "22.04", arch: arm64 }
+          - { runner: ubuntu-24.04, ubuntu: "24.04", arch: amd64 }
+          - { runner: ubuntu-24.04-arm, ubuntu: "24.04", arch: arm64 }
+          - { runner: ubuntu-26.04, ubuntu: "26.04", arch: amd64 }
+          - { runner: ubuntu-26.04-arm, ubuntu: "26.04", arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install native and Debian build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential cmake debhelper devscripts libexpat1-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev pkg-config
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup set profile minimal
+          rustup toolchain install 1.95.0 --component clippy --component rustfmt
+          rustup override set 1.95.0
+          rustc --version
+
+      - name: Build and test Debian package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Collect and inspect packages
+        env:
+          UBUNTU_VERSION: ${{ matrix.ubuntu }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          found=0
+          for package in ../cosmic-ext-applet-mounter_*.deb; do
+            [[ -f "$package" ]] || continue
+            [[ "$(dpkg-deb -f "$package" Package)" == "cosmic-ext-applet-mounter" ]] || continue
+            found=1
+            package_arch="$(dpkg-deb -f "$package" Architecture)"
+            package_version="$(dpkg-deb -f "$package" Version)"
+            [[ "$package_arch" == "$EXPECTED_ARCH" ]] || {
+              echo "Unexpected package architecture: $package_arch" >&2
+              exit 1
+            }
+            output="release/cosmic-ext-applet-mounter_${package_version}_ubuntu${UBUNTU_VERSION}_${package_arch}.deb"
+            cp "$package" "$output"
+            dpkg-deb --info "$output"
+          done
+          [[ "$found" -eq 1 ]] || { echo "No Debian package was produced" >&2; exit 1; }
+          (cd release && sha256sum *.deb > SHA256SUMS)
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-ubuntu-${{ matrix.ubuntu }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release/*
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: release
+          merge-multiple: true
+
+      - name: Create combined checksums
+        run: |
+          cd release
+          rm -f SHA256SUMS
+          sha256sum *.deb > SHA256SUMS
+
+      - name: Create GitHub release and upload packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --generate-notes --title "${GITHUB_REF_NAME}"
