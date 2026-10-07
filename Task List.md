@@ -92,8 +92,12 @@ retirement on April 17, 2027.
 
 - [x] Commit and push `.gitignore`, `scripts/build_release.sh`,
   `scripts/run_github_linux_build.sh`, and this final task-list update.
-- [ ] Ensure the release metadata agrees in `Cargo.toml`, `Cargo.lock`, and
-  `debian/changelog`, and update release notes/documentation before committing.
+- [x] Confirm current release metadata agrees at version 0.5.1 in
+  `Cargo.toml`, the root package in `Cargo.lock`, `debian/changelog`, AppStream
+  releases and screenshot URLs, README download commands, the Flatpak source
+  tag and packaging guide, local tag `v0.5.1`, and the published GitHub release.
+- [ ] For the next version, update Cargo, Debian, AppStream, README, Flatpak,
+  and release-note metadata together before committing the release candidate.
 - [ ] For the next version, push the release commit, run
   `scripts/build_release.sh --dry-run`, then run `scripts/build_release.sh` to
   tag, build, publish, and download the release artifacts.
