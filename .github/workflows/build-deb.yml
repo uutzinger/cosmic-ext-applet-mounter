@@ -33,8 +33,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            build-essential cmake debhelper devscripts libexpat1-dev \
-            libfontconfig1-dev libfreetype-dev libxkbcommon-dev pkg-config
+            appstream build-essential cargo cmake debhelper desktop-file-utils \
+            devscripts libexpat1-dev libfontconfig1-dev libfreetype-dev \
+            libxkbcommon-dev pkg-config rustc
 
       - name: Install pinned Rust toolchain
         run: |
