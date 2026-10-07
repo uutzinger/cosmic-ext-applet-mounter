@@ -98,9 +98,16 @@ retirement on April 17, 2027.
   tag and packaging guide, local tag `v0.5.1`, and the published GitHub release.
 - [x] Prepare version 0.5.2 and update Cargo, Debian, AppStream, README,
   Flatpak, and release-note metadata together.
-- [ ] Push the version 0.5.2 release commit, run
+- [x] Push the version 0.5.2 release commit, pass
   `scripts/build_release.sh --dry-run`, then run `scripts/build_release.sh` to
-  tag, build, publish, and download the release artifacts.
+  tag and build release `v0.5.2`. All six jobs in run `37649661706` passed and
+  the downloaded packages were verified as version 0.5.2 with the expected
+  architectures. Recovered the failed final publish step by giving GitHub CLI
+  explicit repository context, then published the six packages and combined
+  `SHA256SUMS` file to the `v0.5.2` GitHub release.
+- [ ] Update GitHub actions that still target the deprecated Node.js 20 runtime;
+  GitHub currently forces `actions/checkout@v4` and
+  `actions/upload-artifact@v4` to run on Node.js 24.
 - [ ] Remove the Ubuntu 22.04 matrix entries no later than GitHub's scheduled
   runner retirement on April 17, 2027.
 
