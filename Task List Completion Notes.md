@@ -4160,3 +4160,17 @@ review or immutable release-source approval.
 ⏳ Restage the inventory fix and Task List/completion/audit receipts, then run
 `git diff --cached --check`. Commit, candidate route/tag and push still require
 separate approval; none was performed here.
+
+### Local candidate source committed — October 12, 2026
+
+✅ User restaged documentation and approved the next local commit stage. Final
+cached whitespace check passed; there were no unstaged tracked changes. Created
+`efbf73e` (`Prepare 0.5.3 D-Bus integration and synchronization candidate`):
+80 intended changed/new/renamed paths, with required source/tests/docs included
+and no package outputs. Runtime/build source remains the tested native candidate.
+This freezes candidate source, not final Flatpak/release acceptance.
+
+⏳ No tag, push or publication was performed. Draft notes/development AppStream
+and final Flatpak source-pin/acceptance gates remain open. Record this receipt
+in a documentation-only follow-up commit; the implementation candidate stays
+immutable rather than being amended.

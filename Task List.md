@@ -4322,9 +4322,10 @@ complete so that one tagged artifact can close both tasks.
         build/test/packaging files match the tested native snapshot byte-for-byte.
         Retained organization-specific history remains explicit. Fixed three
         newly staged Markdown trailing-space lines; restaging remains below.
-      - [ ] Restage documentation fixes/receipts and pass final cached diff check,
-        then obtain separate commit/tag/push approval. No full line-by-line
-        security review or immutable commit identity is claimed by these checks.
+      - [x] Restage documentation fixes/receipts and pass final cached diff check.
+        User approved the next local commit stage; candidate source committed as
+        `efbf73e` on October 12. No full line-by-line security review is claimed.
+        Tag, push and publication approval remain separate and outstanding.
     - [ ] Accept the proposed immutable candidate-to-final sequence before any
       commit/tag/push: test candidate commit/prerelease with draft metadata, then
       finalize in a new commit and verify the final stable-tag artifact. Never

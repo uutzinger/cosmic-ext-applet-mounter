@@ -93,6 +93,11 @@ receipts. The staged whitespace check exposed three Markdown hard-break spaces
 in the newly included inventory; replaced them with blank-line separation.
 Restage that fix and the review receipts before final staged check/commit.
 
+Final cached whitespace check passed after user restaging. Candidate source was
+committed locally as `efbf73e` on October 12 under explicit approval. No tag/push
+was made. Implementation identity is immutable; any receipt follow-up is a
+separate documentation commit, not an amendment or claim of final acceptance.
+
 - Latest all-feature test gate is recorded as passed; ignored live tests are not
   counted as passes and retain their separate prior/remaining acceptance gates.
 - Focused content/reference and architecture-boundary checks above passed with
