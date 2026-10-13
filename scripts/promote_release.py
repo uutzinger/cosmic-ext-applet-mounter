@@ -7,7 +7,13 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from task_output import TaskReport, atomic_json
+
+_report = None
 
 
 MATRIX = [(os_version, arch) for os_version in ("22.04", "24.04", "26.04")
@@ -15,7 +21,15 @@ MATRIX = [(os_version, arch) for os_version in ("22.04", "24.04", "26.04")
 
 
 def output(*args):
+    if _report is not None:
+        return _report.capture(*args)
     return subprocess.check_output(args, text=True).strip()
+
+
+def command(args):
+    if _report is not None:
+        return _report.run(args, timeout=900)
+    return subprocess.run(args, check=True)
 
 
 def validate_run(run, artifacts, repository, sha):
@@ -69,11 +83,60 @@ def verify_packages(root, tag):
     return packages
 
 
+def operation(args, report):
+    repository = args.repo or output("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("Invalid repository identity")
+    sha = args.source_sha or output("git", "rev-parse", f"refs/tags/{args.tag}^{{commit}}")
+    report.update(repository=repository, ref=args.tag, source_sha=sha, run_id=args.run_id,
+                  run_url=f"https://github.com/{repository}/actions/runs/{args.run_id}",
+                  next_action="Inspect the private log and remote release state before retrying publication; never replace assets automatically.")
+    if not args.source_sha:
+        verify_remote_tag(repository, args.tag, sha)
+    run = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}"))
+    artifact_data = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100"))
+    if artifact_data.get("total_count") != 6:
+        raise ValueError("Build must supply exactly the six expected artifacts")
+    validate_run(run, artifact_data["artifacts"], repository, sha)
+    if args.check_run_only:
+        report.phase("run-validated", next_action="Run metadata verified only; no build, download or publication.")
+        return
+    if output("git", "rev-parse", "HEAD") != sha or output("git", "status", "--porcelain"):
+        raise ValueError("Use a clean checkout of the accepted tag for promotion")
+    command(["bash", "scripts/check-release-publication.sh", args.tag])
+    report.phase("downloading")
+    with tempfile.TemporaryDirectory(prefix="release-promotion-") as temporary:
+        root = Path(temporary)
+        for version, arch in MATRIX:
+            name = f"deb-ubuntu-{version}-{arch}"
+            command(["gh", "run", "download", args.run_id, "--repo", repository,
+                     "--name", name, "--dir", str(root / name)])
+        packages = verify_packages(root, args.tag)
+        sums = root / "SHA256SUMS"
+        sums.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in packages))
+        receipt = report.directory / "artifacts.json"
+        atomic_json(receipt, {"schema_version": 1, "source_sha": sha, "run_id": args.run_id,
+                    "repository": repository, "artifacts": [{"name": p.name,
+                    "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                    "origin": report.state["run_url"]} for p in [*packages, sums]]})
+        report.phase("artifacts-verified", artifact_receipt_path=str(receipt))
+        if args.publish:
+            report.phase("publishing")
+            command(["gh", "release", "create", args.tag, *map(str, packages), str(sums),
+                     "--repo", repository, "--verify-tag", "--title", args.tag,
+                     "--notes-file", f"docs/releases/{args.tag}.md"])
+            report.phase("published", next_action="Verify public asset digests against the artifact receipt and record acceptance; no rebuild performed.")
+        else:
+            report.phase("inspection-complete", next_action="Inspection only; publication requires separate approval and --publish --accepted.")
+
+
 def main():
+    global _report
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tag")
     parser.add_argument("run_id")
     parser.add_argument("--repo")
+    parser.add_argument("--log-dir", help="New private log/summary directory (default: target/task-runs/...) ")
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--accepted", action="store_true")
     parser.add_argument("--check-run-only", action="store_true")
@@ -85,39 +148,12 @@ def main():
         parser.error("Publication requires --accepted and an existing tag, not pre-tag validation")
     if args.source_sha and (not args.check_run_only or not re.fullmatch(r"[0-9a-f]{40}", args.source_sha)):
         parser.error("--source-sha is only valid for pre-tag --check-run-only")
-    repository = args.repo or output("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
-        parser.error("Invalid repository identity")
-    sha = args.source_sha or output("git", "rev-parse", f"refs/tags/{args.tag}^{{commit}}")
-    if not args.source_sha:
-        verify_remote_tag(repository, args.tag, sha)
-    run = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}"))
-    artifact_data = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100"))
-    if artifact_data.get("total_count") != 6:
-        raise ValueError("Build must supply exactly the six expected artifacts")
-    validate_run(run, artifact_data["artifacts"], repository, sha)
-    if args.check_run_only:
-        print(f"Verified reusable run {args.run_id} at {sha}; no build/download/publication")
-        return
-    if output("git", "rev-parse", "HEAD") != sha or output("git", "status", "--porcelain"):
-        raise ValueError("Use a clean checkout of the accepted tag for promotion")
-    subprocess.run(["bash", "scripts/check-release-publication.sh", args.tag], check=True)
-    with tempfile.TemporaryDirectory(prefix="release-promotion-") as temporary:
-        root = Path(temporary)
-        for version, arch in MATRIX:
-            name = f"deb-ubuntu-{version}-{arch}"
-            subprocess.run(["gh", "run", "download", args.run_id, "--repo", repository,
-                            "--name", name, "--dir", str(root / name)], check=True)
-        packages = verify_packages(root, args.tag)
-        sums = root / "SHA256SUMS"
-        sums.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in packages))
-        print(f"Verified {len(packages)} existing artifacts from run {args.run_id}; no build performed")
-        if args.publish:
-            subprocess.run(["gh", "release", "create", args.tag, *map(str, packages), str(sums),
-                            "--repo", repository, "--verify-tag", "--title", args.tag,
-                            "--notes-file", f"docs/releases/{args.tag}.md"], check=True)
-        else:
-            print("Inspection only; --publish --accepted is required to publish")
+    with TaskReport("release-promotion", args.log_dir) as report:
+        _report = report
+        try:
+            operation(args, report)
+        finally:
+            _report = None
 
 
 if __name__ == "__main__":

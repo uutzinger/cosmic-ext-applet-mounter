@@ -4584,6 +4584,52 @@ the attempted third matrix run during 0.5.3 publication. That run was not starte
   release. Source/offline tests and live metadata validation are not hosted
   publication acceptance; do not rebuild 0.5.3 merely to test this workflow.
 
+## Agent guide efficiency and organization — October 13, 2026
+
+- [x] Add rebuild justification, bounded output/status monitoring, reusable
+  acceptance receipts and operator shell-handoff rules to AGENTS.md. Documentation
+  diff checks pass; no build, installation or publication needed for these rules.
+- [x] Agree on clearer general versus project/API-specific chapters, separate
+  source/Debian/Flatpak workflows and Git/release script ownership. Discuss the
+  layout before restructuring; retain approval and artifact-reuse boundaries.
+  User approved the proposed layout. AGENTS.md now separates general policy
+  from project-specific workflows, with a guide map and script ownership table.
+  Refined the boundary after user review: reusable Rust/source/Debian/Flatpak/
+  GitHub procedures are in Part I; concrete recipes, manifests, COSMIC/API
+  choices and scripts are Part II project bindings.
+- [o] Improve maintained scripts' log/summary controls and operator handoff
+  support after the guide reorganization; no script implementation in this step.
+  Handled by the authoritative
+  [script tooling plan](#script-tooling-inventory-and-implementation-plan--october-13-2026).
+
+## Script tooling inventory and implementation plan — October 13, 2026
+
+- [x] Create scripts/README.md and the maintained
+  [script/tooling inventory](docs/engineering/script-tooling-inventory.md),
+  separating project deployment, runtime helpers and development/release tools.
+  All nine active scripts retained after caller review.
+- [x] Consolidate nine already archived local tools from archive/scripts/ into
+  scripts/archive/ with byte parity, README and preserved Git exclusion. No
+  active runtime payload retired; no install/service/data operation performed.
+- [x] P0: Update the stale Rust Debian publication source contract for split
+  build/promotion workflows; earlier Python-only checks missed this assertion.
+  Use the focused test, not a repeat package matrix.
+  Six focused contract tests pass, covering build-only/manual execution,
+  explicit approved promotion without rebuilding, artifact verification and
+  existing-run reuse. No package build or release operation performed.
+- [x] Agree/implement the inventory's bounded logging/receipt contract and
+  improve existing hosted/release scripts, precise run selection and safe resume.
+  P1: shared private logs/atomic summaries, request-ID correlation, structured
+  status polling, verified download cache, explicit tag/run resumption and
+  persistent promotion receipts. Tests use fake CLIs only; next approved hosted
+  acceptance remains separate. See
+  [output/resumption contracts](docs/engineering/script-output-contracts.md).
+- [ ] Add the justified dev, local-Debian and shared-inspection wrappers; improve
+  deployment-script reporting/tests. Keep existing just recipes as underlying
+  implementation rather than creating competing procedures.
+- [ ] After 0.5.4 engine/runtime decisions, add the shipping Flatpak wrapper.
+  Installed-smoke wrapper remains optional; full plan/status is in the inventory.
+
 ## Release 0.5.4 — Engine decision and Flatpak completion
 
 Planned October 13, 2026. Authoritative home for deferred Flatpak work from

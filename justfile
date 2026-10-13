@@ -33,6 +33,7 @@ test:
     python3 tests/release_publication_test.py
     python3 tests/github_download_test.py
     python3 tests/release_promotion_test.py
+    python3 tests/task_output_test.py
 
 metadata-check:
     # Strict freedesktop validators currently reject official COSMIC applet

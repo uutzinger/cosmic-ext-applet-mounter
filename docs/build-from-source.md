@@ -52,6 +52,9 @@ and explicitly starts one Debian matrix build; tag pushes do not auto-build.
 Use `--run-id <id>` to reuse a successful build at the exact same commit instead.
 It downloads artifacts without publishing. Finalize metadata before that build;
 acceptance receipts alone do not require recompiling an unchanged source.
+For interrupted preparation, use `--resume --run-id <id>` from the original
+source; an existing matching tag is not recreated or pushed again. Without a
+selected run, resumption refuses to start another build.
 
 After package acceptance and separate publication approval, dispatch
 **Promote verified release artifacts** (`publish-release.yml`) on the accepted
@@ -68,6 +71,15 @@ Generated packages belong in `target/artifacts/`: versioned release sets in
 `v<version>/`, distinct local builds in `candidates/`, and workflow downloads
 in run-specific folders. `scripts/run_github_linux_build.sh` defaults to
 `target/artifacts/ci-<run-id>/`; `--download-dir` overrides it.
+
+Build/release tools save private `task.log` and `summary.json` under
+`target/task-runs/` (or a new `--log-dir`). Return the concise result/summary path
+for operator handoffs. Hosted retrieval resumes via `--run-id <id>` or
+`--resume-report <summary.json>` without another dispatch; existing downloads
+are reused only after receipt/checksum verification. Full output is not streamed.
+See [script catalog](../scripts/README.md#logs-summaries-and-operator-handoff).
+Hosted promotion retains summary/checksum receipts as workflow artifacts; private
+raw task logs are not uploaded automatically.
 
 `just stage` installs into `target/stage/usr` and does not modify the host
 system. `just metadata-check` reports known COSMIC-specific freedesktop validation

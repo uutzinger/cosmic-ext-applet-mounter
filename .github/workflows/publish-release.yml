@@ -42,3 +42,13 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: python3 scripts/promote_release.py "$RELEASE_TAG" "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --publish --accepted
+      - name: Retain promotion summaries and checksum receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node.js 24
+        with:
+          name: promotion-receipts-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            target/task-runs/release-promotion-*/summary.json
+            target/task-runs/release-promotion-*/artifacts.json

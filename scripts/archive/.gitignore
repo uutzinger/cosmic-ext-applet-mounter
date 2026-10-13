@@ -1,0 +1,5 @@
+# Legacy files were ignored at their original archive/scripts location.
+# Keep that privacy/publication boundary until explicitly reviewed for tracking.
+*
+!.gitignore
+!README.md

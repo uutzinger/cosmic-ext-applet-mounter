@@ -15,6 +15,7 @@ override_dh_auto_test:
 	python3 tests/release_publication_test.py
 	python3 tests/github_download_test.py
 	python3 tests/release_promotion_test.py
+	python3 tests/task_output_test.py
 	# Strict freedesktop validators currently reject official COSMIC applet
 	# template fields such as Categories=COSMIC and AppStream provides/binaries.
 	# Keep these metadata checks visible but non-fatal for Debian builds.

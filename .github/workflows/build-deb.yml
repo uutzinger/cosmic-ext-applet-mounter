@@ -1,7 +1,13 @@
 name: Build Debian packages
+run-name: Debian packages · ${{ inputs.request_id || github.ref_name }}
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: "Optional unique dispatch correlation ID (set by build helper)"
+        required: false
+        type: string
 
 permissions:
   contents: read

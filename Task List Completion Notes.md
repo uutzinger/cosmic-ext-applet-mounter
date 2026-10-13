@@ -4853,3 +4853,179 @@ tooling item is [o], transferred to the chronological follow-up.
 release, not a repeat 0.5.3 build. Existing v0.5.3 tag predates these workflow
 files and will not be moved. Offline tests/live API validation do not establish
 the new workflow's hosted publication acceptance.
+
+### Agent guide efficiency rules — October 13, 2026
+
+✅ Added Efficient verification and operator handoff immediately after Working
+rules in AGENTS.md: bounded log reading, status-only monitoring, preserved exit
+status, receipt reuse, long-command handoff with working directory/log/result
+instructions, direct short checks and automation when explicitly requested.
+Added rebuild justification at the start of Build, installation, and packaging.
+Operator delegation never substitutes for approval or verification responsibility.
+Documentation-only diff checks pass; no rebuild or external mutation performed.
+
+⏳ Broader guide reorganization is proposed for discussion, not implemented:
+general policy separated from project/API rules; explicit source, Debian and
+Flatpak build/install workflows; Git/release authorization and maintained-script
+ownership. Policy alone does not change existing scripts' verbose watch output;
+bounded-output/script-summary support remains a potential implementation step.
+
+### Agent guide reorganization approved and completed — October 13, 2026
+
+✅ User approved the proposed layout and explicitly deferred script work.
+Reorganized AGENTS.md into Part I General policy and Part II Project-specific
+workflows, with a guide map. Preserved safety/approval, single-build/evidence,
+operator handoff, design, records, engineering-document and release-note rules.
+Moved concrete NetworkManager/systemd/portal choices to the COSMIC/API chapter
+and language-specific commands to Rust verification; general verification
+boundaries remain technology-independent.
+
+✅ Added maintained-script ownership and explicit Git/immutable release gates.
+Separated native source, Debian and Flatpak build/install/acceptance instructions
+and documented current release scripts/workflows in a task/entry-point/boundary
+table. Scripts are preferred over parallel ad hoc procedures; gaps should be
+fixed/tested, with approved documented exceptions only when necessary.
+Distinguished policy from tools that do not yet mechanically enforce bounded
+output. Added ARTIFACTS_DIR to project variables instead of embedding its path
+throughout the general policy.
+
+✅ Documentation structure/reference and whitespace checks pass. No rebuild,
+script/workflow edit, installation, service or publication change performed.
+Next task is script output/summary/operator-handoff improvements, as requested.
+
+### Reusable procedures versus project bindings — October 13, 2026
+
+✅ User requested a more accurate general/project split. Part I now contains
+general policy plus technology-specific procedures that apply across projects
+when that technology is used: native source, Debian, Flatpak, GitHub Actions
+artifact promotion and generic Rust verification. These are not requirements
+for every project to use every technology. Part II contains concrete project
+bindings: COSMIC/API choices, just recipes, package paths/manifests, shared runtime
+behavior and release script/workflow names. Updated guide map/anchors and removed
+duplicated procedural text from the bindings while retaining safeguards.
+
+✅ Documentation-only structure/reference and whitespace checks pass. No scripts,
+workflows, package builds, installs or releases changed. Script log/summary and
+operator-handoff improvements remain the next task.
+
+### Script catalog, inventory and archive review — October 13, 2026
+
+✅ Reviewed nine active scripts and callers across source, tests, recipes,
+packaging/workflows and guides. Created scripts/README.md and maintained
+docs/engineering/script-tooling-inventory.md with active/update/create categories,
+capability gaps, evidence boundaries and prioritized implementation sequence.
+All nine active scripts remain necessary, including the installed OneDrive
+helper and localization wrapper. Catalog/inventory linked from AGENTS and
+engineering index; task list has a dedicated chronological implementation plan.
+
+✅ Nine already archived scripts moved from archive/scripts/ to scripts/archive/
+with before/after SHA-256 parity. No current caller references were found. Names
+and old/new parents are recorded in archive README/inventory for rollback;
+old empty archive/scripts directory removed. They were ignored previously and
+remain ignored at the new location; no silent publication of local historical
+content. Narrow literal-secret scan negative, not a complete security review.
+No active script archived or dependency/runtime behavior changed. Python cache
+is generated output, not an archive candidate. No external configuration/data,
+installed executable, service or remote resource changed.
+
+⚠ Source review found stale Rust test
+tests/debian_packaging_contract.rs::publication_requires_explicit_manual_acceptance
+still requiring the removed rebuild-on-publication architecture. This was missed
+by the prior Python-focused workflow checks. Recorded as P0 before broader
+development/package gates; did not compile merely to reconfirm static assertions.
+This inventory task does not implement the proposed tool changes or test fix.
+
+✅ Local documentation references/anchors, inventory coverage and whitespace
+checks pass. No installer/authentication/build/release command executed. Next
+recommended action is the focused Rust packaging-contract correction, followed
+by the agreed logging/receipt interface and existing-tool improvements.
+
+### P0 Rust packaging contract repaired — October 13, 2026
+
+✅ Replaced the stale publication source contract in
+tests/debian_packaging_contract.rs with checks for manual build-only execution,
+explicit approved tag/run promotion without compilation, shared artifact/metadata
+verification, and release preparation that reuses a run without publishing.
+Kept the two existing optional-GUI dependency and helper/catalog payload tests.
+No production script, workflow, application code or package metadata changed.
+
+✅ cargo test --locked --test debian_packaging_contract passed: 6 tests,
+0 failures/ignored. The focused test target compiled in 1.57 seconds; no Debian,
+Flatpak or hosted release build ran. Captured full output under
+target/p0-packaging-contract.AzPD82/test.log and read only its bounded summary.
+Applied just fmt after its check identified wrapping differences; formatting
+and whitespace validation complete the source-only repair. Inventory/task P0
+marked [x]; hosted promotion acceptance still belongs to the next approved
+release. Existing unrelated guide/catalog/archive edits remain preserved.
+
+### P1 output contract and tooling implemented — October 13, 2026
+
+✅ User agreed the output contract and asked to start implementing "P0";
+clarified that P0 was already complete and treated the continuation as P1.
+Created docs/engineering/script-output-contracts.md before implementation.
+Implemented a Python standard-library shared TaskReport under scripts/lib/ for
+private unique task directories, logs, atomic versioned summaries, source/run/
+artifact identity, real command exit codes and bounded phase/final console output.
+Signal handling terminates/reaps local child groups and records cancellation;
+it does not cancel remote CI. Raw failures stay private, not automatically
+printed. This replaces the initially proposed Bash-only logging helper to avoid
+duplicated JSON/state code across Bash and Python entry points.
+
+✅ Stable Bash build/release entry points now delegate fixed tasks to
+scripts/lib/release_tasks.py. New dispatch intent gets a durable unique request
+ID before any network mutation; build workflow exposes that ID in its title.
+Run selection matches request/source/repository/workflow, not newest-run order.
+Ambiguous/failed dispatches do not retry; selected-run/receipt resume is explicit.
+Structured CI polling defaults to 30 seconds with timeouts/status changes only.
+Success precedes download; artifacts/checksums/identities verify in staging,
+then publish locally with provenance. Matching cached downloads are reverified
+and reused; missing/mismatched legacy receipts are not silently adopted.
+
+✅ Release preparation verifies clean original source, matching GitHub/Git
+remote and branch/tag identities; transport failure is not treated as absent
+tag. Existing tags require --resume --run-id, never move tags or implicitly
+dispatch. Partial tag-push recovery and existing tag/run/cache reuse are tested.
+Promotion remains inspection-only unless --publish --accepted; logs/summary and
+artifact name/hash/server-origin receipts persist without deleted temp paths.
+Hosted promotion retains summary/checksum receipts only, not private raw logs.
+No implicit publication retry or asset replacement was introduced.
+
+✅ Focused Python suites passed: 4 output, 8 hosted-build, 15 promotion,
+6 publication, 9 installer and 3 helper tests (45 methods, additional subcases).
+They cover noisy output, real exit codes, cancelled child cleanup, timeout,
+stale/ambiguous/wrong-source runs, dispatch uncertainty, failed downloads,
+verified cache reuse/tampering, dry-run and partial/existing-tag resume. All
+commands are disposable fake Git/GitHub/package CLIs; no real network mutation.
+Logs: target/p1-final-checks.drgroB/. Further receipt-symlink/unrelated-directory
+coverage adds a ninth hosted test method, with its focused final result below.
+The six Rust Debian packaging source contracts also passed; log:
+target/p1-tooling-tests.UXXgx3/rust.log. They now follow the stable entry points
+into the shared task driver, rather than requiring removed inline Bash logic.
+Formatting, Bash syntax, workflow YAML/manual-only structure and diff checks pass.
+
+⏳ New correlated dispatch, hosted promotion and runner receipt-upload acceptance
+remain for the next explicitly approved immutable release. No real CI dispatch,
+Git mutation, package build, installation or publication was performed for P1.
+Local tests do not establish hosted acceptance. Maintained catalogs/inventory,
+guide and task statuses are updated; P2/P3 wrappers/installers remain untouched.
+
+✅ Final focused additions also pass: hosted 9 methods (including refusing
+unrelated directories/symbolic receipts), promotion 15 methods (including
+receipt-only upload contract), six Rust contracts and shared reporting/other
+Python suites above. Aggregate applicable Python coverage is now 46 methods;
+no ignored/live/provider tests counted. Final hosted/promotion logs are
+target/p1-tooling-tests.UXXgx3/hosted-final.log and promotion-final.log;
+42 local links/anchors, manual-only workflow YAML, safe receipt upload paths,
+Python syntax, Bash syntax, Rust formatting and git diff --check pass.
+Changes remain local/uncommitted along with the preserved earlier guide/catalog
+work. Published v0.5.3 and running applet configuration remain untouched.
+
+### P0/P1 source commit and push authorization — October 13, 2026
+
+✅ User authorized committing and pushing the accumulated P0/P1 tooling,
+guide, catalog and inventory changes. Reviewed the worktree and manual-only
+workflow triggers; reused the focused verification above and confirmed
+git diff --check passes. Archived local script contents remain excluded from
+version control. This source update does not authorize or require another
+build, tag, installation or release publication. P2 remains the next
+implementation phase; hosted P1 acceptance remains separately pending.

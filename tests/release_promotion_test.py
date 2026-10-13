@@ -4,12 +4,12 @@ import copy
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from tooling_fixtures import ToolingFixture
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("promotion", ROOT / "scripts/promote_release.py")
@@ -75,10 +75,16 @@ class PromotionTests(unittest.TestCase):
             argv = ["promote_release.py", "v0.5.4", "123", "--repo", self.repo]
             if publish:
                 argv += ["--publish", "--accepted"]
-            with self.subTest(publish=publish), patch("sys.argv", argv), \
+            with self.subTest(publish=publish), tempfile.TemporaryDirectory() as logs, \
+                    patch("sys.argv", [*argv, "--log-dir", str(Path(logs) / "report")]), \
                     patch.object(promotion, "output", side_effect=fake_output), \
-                    patch.object(promotion.subprocess, "run", side_effect=fake_run):
+                    patch.object(promotion, "command", side_effect=fake_run):
                 promotion.main()
+                summary = json.loads((Path(logs) / "report/summary.json").read_text())
+                self.assertEqual(summary["status"], "succeeded")
+                receipt = json.loads(Path(summary["artifact_receipt_path"]).read_text())
+                self.assertEqual(len(receipt["artifacts"]), 7)
+                self.assertTrue(all("path" not in item for item in receipt["artifacts"]), "No deleted temporary artifact paths")
             self.assertEqual(len([c for c in commands if c[:3] == ["gh", "run", "download"]]), 6)
             self.assertEqual(len([c for c in commands if c[:3] == ["gh", "release", "create"]]), int(publish))
             self.assertFalse(any("workflow" in c or "cargo" in c or "dpkg-buildpackage" in c for c in commands))
@@ -166,59 +172,68 @@ class PromotionTests(unittest.TestCase):
         self.assertIn("--publish --accepted", publish)
         self.assertIn("build_run_id:", publish)
         self.assertIn("actions: read", publish)
+        self.assertIn("if: always()", publish)
+        self.assertIn("promotion-receipts-", publish)
+        self.assertIn("release-promotion-*/summary.json", publish)
+        self.assertNotIn("release-promotion-*/task.log", publish)
         self.assertIn("--run-id", script)
         self.assertNotIn("--wait-for-existing", script)
 
     def test_local_release_builds_once_or_reuses_run_without_dispatch(self):
         for reuse in [False, True]:
             with self.subTest(reuse=reuse), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / "scripts").mkdir()
-                for name in ["build_release.sh", "run_github_linux_build.sh", "promote_release.py"]:
-                    (root / "scripts" / name).write_bytes((ROOT / "scripts" / name).read_bytes())
-                fake = root / "fake"
-                fake.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, sys
-name=pathlib.Path(sys.argv[0]).name
-args=sys.argv[1:]
-with open(os.environ["COMMAND_LOG"], "a") as log:
-    log.write(json.dumps([name,*args])+"\\n")
-if name=="cargo":
-    print(json.dumps({"packages":[{"name":"cosmic-ext-applet-mounter","version":"0.5.4"}]}))
-elif name=="dpkg-parsechangelog":
-    print("0.5.4")
-elif name=="git":
-    if args[0]=="branch": print("master")
-    elif args[0]=="ls-remote": sys.exit(2)
-    elif args[0]=="rev-parse":
-        if "--verify" in args and any(a.startswith("refs/tags/") for a in args): sys.exit(1)
-        print("a"*40)
-elif name=="gh":
-    if args[:2]==["repo","view"]: print("example/project")
-    elif args[0]=="api":
-        if "artifacts?" in args[-1]:
-            print(json.dumps({"total_count":6,"artifacts":[{"name":f"deb-ubuntu-{v}-{a}","expired":False} for v in ["22.04","24.04","26.04"] for a in ["amd64","arm64"]]}))
-        else:
-            print(json.dumps({"repository":{"full_name":"example/project"},"head_repository":{"full_name":"example/project"},"head_sha":"a"*40,"path":".github/workflows/build-deb.yml","event":"workflow_dispatch","status":"completed","conclusion":"success"}))
-    elif args[:2]==["run","list"]: print("123")
-''')
-                fake.chmod(0o755)
-                for name in ["cargo", "git", "gh", "dpkg-parsechangelog"]:
-                    (root / name).symlink_to(fake)
-                env = os.environ.copy()
-                for key in ["DOWNLOAD_DIR", "WORKFLOW", "REF"]:
-                    env.pop(key, None)
-                log = root / "commands.jsonl"
-                env.update(PATH=f"{root}:{env['PATH']}", COMMAND_LOG=str(log))
-                args = ["bash", str(root / "scripts/build_release.sh")]
-                if reuse:
-                    args += ["--run-id", "123"]
-                result = subprocess.run(args, env=env, capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                commands = [json.loads(line) for line in log.read_text().splitlines()]
-                dispatches = [c for c in commands if c[:3] == ["gh", "workflow", "run"]]
-                self.assertEqual(len(dispatches), 0 if reuse else 1)
+                f = ToolingFixture(tmp)
+                args = ["--run-id", "123"] if reuse else []
+                result = f.run("build_release.sh", *args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                commands = f.commands()
+                self.assertEqual(len([c for c in commands if c[:3] == ["gh", "workflow", "run"]]), 0 if reuse else 1)
+                self.assertEqual(len([c for c in commands if c[:2] == ["git", "tag"]]), 1)
                 self.assertFalse(any(c[:3] == ["gh", "release", "create"] for c in commands))
+
+    def test_partial_tag_push_resumes_without_retagging_or_building(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = ToolingFixture(tmp)
+            f.configure(push_exit=19)
+            first = f.run("build_release.sh", "--run-id", "123")
+            self.assertEqual(first.returncode, 19)
+            f.configure(push_exit=0)
+            resumed = f.run("build_release.sh", "--resume", "--run-id", "123")
+            self.assertEqual(resumed.returncode, 0, resumed.stdout)
+            self.assertEqual(len([c for c in f.commands() if c[:2] == ["git", "tag"]]), 1)
+            self.assertFalse(any(c[:3] == ["gh", "workflow", "run"] for c in f.commands()))
+
+    def test_existing_remote_tag_resume_is_read_only_except_artifact_retrieval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = ToolingFixture(tmp)
+            f.configure(local_tag=True, remote_tag=True)
+            result = f.run("build_release.sh", "--resume", "--run-id", "123")
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertFalse(any(c[:2] in (["git", "tag"], ["git", "push"]) for c in f.commands()))
+            self.assertFalse(any(c[:3] == ["gh", "workflow", "run"] for c in f.commands()))
+
+    def test_network_tag_mismatch_and_unsafe_resume_fail_before_mutation(self):
+        for config, args in [
+            ({"remote_exit": 27}, []),
+            ({"local_tag": True, "remote_tag": True, "remote_tag_sha": "b" * 40}, ["--resume", "--run-id", "123"]),
+            ({"local_tag": True, "remote_tag": True}, ["--resume"]),
+            ({"run_sha": "b" * 40}, ["--run-id", "123"]),
+        ]:
+            with self.subTest(config=config), tempfile.TemporaryDirectory() as tmp:
+                f = ToolingFixture(tmp)
+                f.configure(**config)
+                result = f.run("build_release.sh", *args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(c[:2] in (["git", "tag"], ["git", "push"]) for c in f.commands()))
+                self.assertFalse(any(c[:3] == ["gh", "workflow", "run"] for c in f.commands()))
+
+    def test_release_dry_run_has_no_mutations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = ToolingFixture(tmp)
+            result = f.run("build_release.sh", "--dry-run")
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertFalse(any(c[:2] in (["git", "tag"], ["git", "push"]) for c in f.commands()))
+            self.assertFalse(any(c[:3] == ["gh", "workflow", "run"] for c in f.commands()))
 
 
 if __name__ == "__main__":
