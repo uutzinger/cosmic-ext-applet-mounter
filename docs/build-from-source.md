@@ -54,6 +54,9 @@ authorize a manual **Build Debian packages** dispatch on the accepted tag with
 `publish_after_acceptance=true`. This rebuilds all six packages before publishing.
 Do not run tag/publish commands without the corresponding approval.
 Release 0.5.3 targets native source/Debian delivery; final Flatpak is a 0.5.4 gate.
+For 0.5.3, the user approved direct publication of the already verified tagged
+artifacts rather than rebuilding them. Future promotion tooling should preserve
+that single-build identity and the separate approval gate.
 
 Generated packages belong in `target/artifacts/`: versioned release sets in
 `v<version>/`, distinct local builds in `candidates/`, and workflow downloads

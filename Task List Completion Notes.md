@@ -4757,3 +4757,52 @@ documentation changes were independently checked.
 verify the fresh six-platform tag build and package checksums, then use the
 explicit accepted-tag publication workflow. Preserve branch-CI identities
 and record tagged/public artifacts separately. No publication success yet.
+
+✅ Final native note/approval record committed and pushed as 346c97b. Created
+and pushed immutable tag v0.5.3 at exact source
+346c97bc090991d8f419caa1ebd74875e3516496. Tag-triggered build run 38447948939
+is in progress across all six Ubuntu/architecture jobs. Publication remains
+disabled for this run; no GitHub release yet. Existing branch-CI packages are
+preserved and must not be overwritten or equated to tagged/public identities.
+
+### Native v0.5.3 published — October 13, 2026
+
+✅ Tag run 38447948939 passed all six Ubuntu 22.04/24.04/26.04 amd64/arm64
+build/test/upload jobs at source 346c97bc090991d8f419caa1ebd74875e3516496.
+Publication correctly skipped on the tag-triggered run. All downloaded tag
+packages passed SHA-256, package/version/architecture, extracted payload MD5
+checks and helper/catalog byte parity with tagged source; stable AppStream 0.5.3.
+Inspection first used an incorrect helper filename, then incorrectly required
+an explicit AppStream type. Corrected the inspection to the actual helper path
+and default stable type; no package/source defect was found.
+
+✅ User directed a single accepted build to be sufficient. The extra manual
+publication workflow dispatch was denied and did not start. Published the
+already verified tagged packages directly with gh release create --verify-tag
+and finalized notes, not another rebuild. Canonical package files were compared
+byte-for-byte with downloaded tag artifacts before upload. Their six SHA-256
+values match the earlier branch-CI values after verification, not assumption.
+
+✅ Public release:
+https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.3
+Draft=false, prerelease=false. Six .deb files plus SHA256SUMS; all server-reported
+asset digests match the accepted local files. Package digests are the six values
+in the accepted-identity table above. Combined SHA256SUMS SHA-256:
+6c6e07bf70e3f4e912d2d5e200a109dc10293e888dbcfdfeb04364b2ef74f6c1.
+An API lookup during upload briefly returned 404; after the upload completed the
+public release and all seven assets were verified. Tag is immutable at 346c97b;
+publication receipt updates do not move it.
+
+✅ Native 0.5.3 approval/identity/publication gate closed. Installed user runtime,
+active mounts and configuration were not changed during publication. Final
+Flatpak/COSMIC Store claims remain excluded and owned by 0.5.4. Added a future
+release-promotion tooling task to enforce reuse of one verified immutable build
+without losing explicit acceptance/approval gates.
+
+✅ Confirmed all seven public asset sizes/digests programmatically and updated
+the GitHub release body with the explicit dated publication receipt. Removed six
+checksum-identical tag-download copies only after canonical/public verification;
+retained per-job checksums in target/artifacts/ci-38447948939/. Canonical packages
+remain in target/artifacts/v0.5.3/ and can be downloaded again from the release.
+No unique artifact removed. Publication metadata/fixture checks and diff checks
+pass; preparing the authorized receipt commit/push without moving the release tag.

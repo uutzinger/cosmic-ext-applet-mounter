@@ -4285,7 +4285,7 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
       and reinstall. dpkg integrity/build identity and reloaded `/usr/bin` Runtime
       owner were verified; user confirmed expected panel behavior. This is local
       candidate lifecycle evidence, not a cross-version 0.5.2-to-0.5.3 migration.
-- [ ] Advance all release metadata consistently to 0.5.3, prepare release
+- [x] Advance all release metadata consistently to 0.5.3, prepare release
   notes and checksums, review the complete worktree, and create the immutable
   accepted native release source. Final Flatpak identity is a 0.5.4 gate.
   - [x] Resolve publication ordering before pushing a `v*` tag. Tag pushes and
@@ -4535,7 +4535,7 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
 - [x] Review, commit and push October 13 follow-up records and run-specific
   download helper/tests. No applet/engine implementation changed since 95fa290;
   fresh final tagged builds and publication remain separate approval gates.
-- [ ] Record accepted native identity/checksums and obtain separate release-tag/
+- [x] Record accepted native identity/checksums and obtain separate release-tag/
   publication approval. No final Flatpak/submission claim for 0.5.3.
   - [x] Recorded/rechecked accepted installed/source identities and six verified
     branch-CI package SHA-256 values in completion notes (October 13).
@@ -4544,8 +4544,12 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
     after final-record commit and fresh tagged matrix verification; approval
     requested October 13. Initial reply authorized only cleanup; subsequent
     explicit "Yes publish 05.3" authorizes native v0.5.3 tag/publication.
-  - [ ] Verify final tagged six-platform artifacts and checksums, publish native
+  - [x] Verify final tagged six-platform artifacts and checksums, publish native
     GitHub release, then record public asset/source identities. Flatpak excluded.
+    October 13: v0.5.3 at 346c97b; tag run 38447948939 passed all six jobs.
+    Published inspected artifacts directly per user direction, without a third
+    build. Seven public asset digests verified; see completion notes and
+    [release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.3).
 - [x] Consolidate Debian packages under target/artifacts; preserve distinct local
   candidates/rollback files and remove only checksum-identical CI duplicates.
   October 13: download helper now defaults to run-specific directories; offline
@@ -4595,6 +4599,10 @@ steps are not completed. Start with architecture, not more WebKit/auth code.
 
 ### Consolidated Flatpak acceptance and release
 
+- [ ] Adjust release promotion tooling to publish the exact verified artifact
+  set from one successful immutable-source build without rebuilding it. Retain
+  explicit approval, source/run/checksum validation and native/Flatpak gates;
+  ordinary tag builds must still never publish automatically.
 - [ ] Commit accepted implementation and generate/check Cargo sources; pin
   immutable 0.5.4 candidate/final source. Keep COSMIC BaseApp/Freedesktop 25.08
   unless a separate reviewed runtime decision explicitly changes the target.
