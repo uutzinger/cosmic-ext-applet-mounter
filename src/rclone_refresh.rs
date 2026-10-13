@@ -19,7 +19,6 @@ const RC_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const RC_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 const JOB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const RC_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
-const CANCELLED: &str = "Google Drive directory refresh canceled";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RcloneRefreshJob {
@@ -93,16 +92,16 @@ async fn start_with(
                 .with_timeout(RC_COMMAND_TIMEOUT);
             let mount_ready = tokio::select! {
                 biased;
-                () = control.cancellation.cancelled() => return Err(CANCELLED.into()),
-                () = operation.cancelled() => return Err(CANCELLED.into()),
+                () = control.cancellation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
+                () = operation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
                 result = runner.run(mount_probe, control.cancellation.child_token()) => result.is_ok(),
             };
             let rc_ready = if mount_ready {
                 let probe = rc_request(&rc_socket, "rc/noop")?;
                 tokio::select! {
                     biased;
-                    () = control.cancellation.cancelled() => return Err(CANCELLED.into()),
-                    () = operation.cancelled() => return Err(CANCELLED.into()),
+                    () = control.cancellation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
+                    () = operation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
                     result = runner.run(probe, control.cancellation.child_token()) => result.is_ok(),
                 }
             } else {
@@ -112,12 +111,12 @@ async fn start_with(
                 break;
             }
             if Instant::now() >= deadline {
-                return Err("rclone RC socket did not become ready within 15 seconds".into());
+                return Err(crate::fl!("ui-rclone-refresh-rclone-rc-socket-did-not-become-ready"));
             }
             tokio::select! {
                 biased;
-                () = control.cancellation.cancelled() => return Err(CANCELLED.into()),
-                () = operation.cancelled() => return Err(CANCELLED.into()),
+                () = control.cancellation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
+                () = operation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
                 () = tokio::time::sleep(RC_PROBE_INTERVAL) => {}
             }
         }
@@ -131,8 +130,8 @@ async fn start_with(
             .map_err(|error| error.to_string())?;
         let output = tokio::select! {
             biased;
-            () = control.cancellation.cancelled() => return Err(CANCELLED.into()),
-            () = operation.cancelled() => return Err(CANCELLED.into()),
+            () = control.cancellation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
+            () = operation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
             result = runner.run(request, control.cancellation.child_token()) => {
                 result.map_err(|error| error.to_string())?
             }
@@ -141,7 +140,7 @@ async fn start_with(
         *control.job_id.lock().expect("rclone refresh job id") = Some(job_id);
         if control.cancellation.is_cancelled() || !is_current(connection_id, &control) {
             let _ = stop_job(runner, &rc_socket, job_id).await;
-            return Err(CANCELLED.into());
+            return Err(crate::fl!("refresh-cancelled"));
         }
         Ok(RcloneRefreshJob {
             connection_id,
@@ -212,9 +211,14 @@ async fn monitor_with(
                     break Ok(RcloneRefreshOutcome::Completed(report()));
                 }
                 break Err(if status.error.is_empty() {
-                    "rclone directory refresh finished without success".into()
+                    crate::fl!(
+                        "ui-rclone-refresh-rclone-directory-refresh-finished-without-success"
+                    )
                 } else {
-                    format!("rclone directory refresh failed: {}", status.error)
+                    crate::fl!(
+                        "ui-rclone-refresh-rclone-directory-refresh-failed-value1",
+                        value1 = (status.error).to_string()
+                    )
                 });
             }
             tokio::select! {
@@ -311,17 +315,21 @@ fn finish(connection_id: ConnectionId, control: &Arc<ActiveRefresh>) {
 }
 
 fn parse_job_start(output: &str) -> Result<(u64, String), String> {
-    let value: Value = serde_json::from_str(output)
-        .map_err(|error| format!("invalid rclone refresh response: {error}"))?;
+    let value: Value = serde_json::from_str(output).map_err(|error| {
+        crate::fl!(
+            "ui-rclone-refresh-invalid-rclone-refresh-response-error",
+            error = (error).to_string()
+        )
+    })?;
     let job_id = value
         .get("jobid")
         .and_then(Value::as_u64)
-        .ok_or_else(|| "rclone refresh response did not contain a job ID".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-rclone-refresh-rclone-refresh-response-did-not-contain-a"))?;
     let execute_id = value
         .get("executeId")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "rclone refresh response did not contain an execution ID".to_owned())?
+        .ok_or_else(|| crate::fl!("ui-rclone-refresh-rclone-refresh-response-did-not-contain-an"))?
         .to_owned();
     Ok((job_id, execute_id))
 }
@@ -334,17 +342,25 @@ struct JobStatus {
 }
 
 fn parse_job_status(output: &str, execute_id: &str, job_id: u64) -> Result<JobStatus, String> {
-    let value: Value = serde_json::from_str(output)
-        .map_err(|error| format!("invalid rclone job status: {error}"))?;
+    let value: Value = serde_json::from_str(output).map_err(|error| {
+        crate::fl!(
+            "ui-rclone-refresh-invalid-rclone-job-status-error",
+            error = (error).to_string()
+        )
+    })?;
     if value.get("id").and_then(Value::as_u64) != Some(job_id) {
-        return Err("rclone job status returned a different job ID".into());
+        return Err(crate::fl!(
+            "ui-rclone-refresh-rclone-job-status-returned-a-different-job"
+        ));
     }
     let returned_execute_id = value
         .get("executeId")
         .and_then(Value::as_str)
         .unwrap_or_default();
     if returned_execute_id != execute_id {
-        return Err("rclone restarted while the directory refresh was running".into());
+        return Err(crate::fl!(
+            "ui-rclone-refresh-rclone-restarted-while-the-directory-refresh-was"
+        ));
     }
     let provider_result_failed = value
         .pointer("/output/result")
@@ -367,7 +383,7 @@ fn parse_job_status(output: &str, execute_id: &str, job_id: u64) -> Result<JobSt
         .to_owned();
     if provider_result_failed {
         success = false;
-        error = "the storage provider rejected part of the directory refresh".into();
+        error = crate::fl!("ui-rclone-refresh-the-storage-provider-rejected-part-of-the");
     }
     Ok(JobStatus {
         finished: value

@@ -1,12 +1,21 @@
 [package]
 name = "cosmic-ext-applet-mounter"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Urs Utzinger", "OpenAI Codex"]
 license = "MIT"
 description = "An applet for COSMIC to manage online mounts and offline storage mirrors"
 repository = "https://github.com/uutzinger/cosmic-ext-applet-mounter"
+
+[features]
+# Extra executables belong only to the standalone transport probe, not the
+# default applet/worker build. Unit tests retain their fake-command coverage.
+development-probes = []
+
+[[example]]
+name = "flatpak_host_runner_probe"
+required-features = ["development-probes"]
 
 [dependencies]
 i18n-embed-fl = "0.10"
@@ -18,11 +27,12 @@ sha2 = "0.10"
 ron = "0.12"
 tokio = { version = "1.52.0", features = ["full"] }
 tokio-util = "0.7"
-zbus = { version = "5.16", default-features = false, features = ["tokio"] }
+zbus = { version = "5.16", default-features = false, features = ["blocking-api", "tokio"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
 percent-encoding = "2"
+libc = "0.2"
 
 [dependencies.i18n-embed]
 version = "0.16"

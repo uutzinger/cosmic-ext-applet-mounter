@@ -10,6 +10,7 @@ applet does not need to host a WebKit widget or GTK event loop.
 from __future__ import annotations
 
 import os
+import json
 import pathlib
 import sys
 import time
@@ -23,6 +24,36 @@ gi.require_version("WebKit2", "4.1")
 from gi.repository import GLib, Gtk, WebKit2  # noqa: E402
 
 NATIVECLIENT_PREFIX = "https://login.microsoftonline.com/common/oauth2/nativeclient"
+APP_ID = "io.github.uutzinger.cosmic-ext-applet-mounter"
+UI_KEYS = ("auth-helper-title", "auth-helper-intro", "auth-helper-captured", "auth-helper-completed")
+
+
+def load_ui_text() -> dict[str, str]:
+    # The applet supplies fully formatted Fluent text in its selected language.
+    # Direct CLI launches use only four plain English catalog entries; no
+    # general Fluent parser or new runtime dependency is needed here.
+    supplied = os.environ.get("COSMIC_MOUNTER_AUTH_UI")
+    if supplied is not None:
+        labels = json.loads(supplied)
+        if isinstance(labels, dict) and all(isinstance(labels.get(key), str) and labels[key] for key in UI_KEYS):
+            return {key: labels[key] for key in UI_KEYS}
+        raise RuntimeError("incomplete authentication helper localization")
+    prefix = pathlib.Path(__file__).resolve().parent.parent
+    relative = pathlib.Path("i18n/en/cosmic_ext_applet_mounter.ftl")
+    candidates = [prefix / relative, prefix / "share" / APP_ID / relative]
+    if os.environ.get("XDG_DATA_HOME"):
+        candidates.append(pathlib.Path(os.environ["XDG_DATA_HOME"]) / APP_ID / relative)
+    for catalog in candidates:
+        if not catalog.is_file():
+            continue
+        labels = {}
+        for line in catalog.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(" = ")
+            if separator and key in UI_KEYS:
+                labels[key] = value
+        if all(labels.get(key) for key in UI_KEYS):
+            return labels
+    raise RuntimeError("authentication helper fallback catalog is missing")
 
 
 def usage() -> int:
@@ -70,8 +101,9 @@ class AuthWindow:
     def __init__(self, auth_url: str, response_file: pathlib.Path) -> None:
         self.response_file = response_file
         self.completed = False
+        self.labels = load_ui_text()
 
-        self.window = Gtk.Window(title="OneDrive Authorization")
+        self.window = Gtk.Window(title=self.labels["auth-helper-title"])
         self.window.set_default_size(980, 760)
         self.window.connect("destroy", Gtk.main_quit)
 
@@ -81,11 +113,7 @@ class AuthWindow:
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         header = Gtk.Label(
-            label=(
-                "Sign in with Microsoft. This helper captures only the final "
-                "native-client redirect URL and writes it to onedrive's "
-                "transient response file."
-            )
+            label=self.labels["auth-helper-intro"]
         )
         header.set_line_wrap(True)
         header.set_margin_start(12)
@@ -110,13 +138,10 @@ class AuthWindow:
             modal=True,
             message_type=Gtk.MessageType.INFO,
             buttons=Gtk.ButtonsType.OK,
-            text="OneDrive authorization captured",
+            text=self.labels["auth-helper-captured"],
         )
         dialog.format_secondary_text(
-            "The response URL was written to onedrive's transient handoff file. "
-            "Cloud Mounter will continue with post-auth validation, which can "
-            "take several minutes on the first dry-run preview. You can close "
-            "this window and return to Cloud Mounter."
+            self.labels["auth-helper-completed"]
         )
         dialog.connect("response", lambda *_args: Gtk.main_quit())
         dialog.show_all()

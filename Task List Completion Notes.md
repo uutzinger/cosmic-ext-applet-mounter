@@ -1373,9 +1373,9 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   services, or requires unjustified unrestricted host access.
 - [x] Record the selected architecture and its security tradeoffs in
   `Requirements and Specifications.md` before implementing packaging changes.
-- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance before
-  submission if this applet requires broader host access than accepted applets
-  such as `dev.cappsy.CosmicExtAppletDrives`.
+- [x] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance before
+  submission. The October 7 response established the D-Bus-first direction
+  recorded in the dated completion note below.
 
 ### Flatpak Build Inputs
 
@@ -2684,3 +2684,1479 @@ annotated `v0.5.1` tag was created and pushed. GitHub Release **Cloud Mounter
 The public tag, README, Google Cloud OAuth guide, and all four tag-based
 AppStream screenshot URLs returned HTTP 200. The completed Tooltip Review was
 intentionally archived and removed from the repository as part of the release.
+
+## GitHub Debian release automation — October 7, 2026
+
+GitHub Actions now builds native Debian packages on Ubuntu 22.04, 24.04, and
+26.04 for amd64 and arm64. The workflow installs the declared Debian build
+dependencies and pinned Rust 1.95.0 toolchain, runs `dpkg-buildpackage`, checks
+package metadata and architecture, generates checksums, uploads artifacts, and
+publishes tagged releases. Local helpers validate release metadata, commit and
+tag state, monitor the workflow, and download its artifacts.
+
+The first cloud run exposed missing declared build dependencies. The second
+exposed test fixtures that existed only in an ignored local archive. Both were
+corrected, and neutral legacy-service fixtures were committed under
+`tests/fixtures/legacy-services`. Run `37642473346` then passed all six matrix
+jobs. Its Ubuntu 24.04 amd64 package passed metadata, layout, installation, UI,
+settings, OneDrive mount/unmount/remount, and journal checks on Pop!_OS 24.04;
+other matrix packages received structural rather than live-platform testing.
+The test package was removed without purging user data and the user-local build
+was restored.
+
+Release metadata was advanced consistently to 0.5.2. Running
+`scripts/build_release.sh` created and pushed tag `v0.5.2`; all six package jobs
+in run `37649661706` passed. The initial publishing job failed because GitHub
+CLI lacked explicit repository context in a job without a checkout. The six
+artifacts were downloaded and verified, the public release was recovered with
+all packages plus combined `SHA256SUMS`, and the workflow was corrected with
+`GH_REPO: ${{ github.repository }}` for subsequent releases. Obsolete local
+v0.5.1 artifacts were removed while the complete v0.5.2 artifact set was kept.
+
+## COSMIC Flatpak architecture guidance — October 7, 2026
+
+The locally built Flatpak had already passed the repository's `just build` and
+`just build-changed` paths and had been installed for panel, Store metadata,
+settings, host-dependency, and representative mount/mirror testing. The open
+question was repository acceptance of its broader host integration rather than
+manifest syntax.
+
+The architecture and permission question was posted in the official COSMIC
+Flatpak Mattermost channel. Michael Murphy (`@mmstick`), a System76 engineer
+and Pop!_OS/COSMIC maintainer, advised using D-Bus APIs wherever they are
+available and noted that spawning commands on the host requires additional
+review scrutiny. He specifically recommended the `freedesktop-rs/nmrs` Rust
+library for NetworkManager. The resulting direction is to replace `nmcli` with
+`nmrs`/NetworkManager D-Bus, replace `systemctl --user` with the systemd user
+manager D-Bus API, minimize remaining host execution, and explicitly justify
+the storage-engine commands that cannot be replaced. Implementation and live
+validation are tracked in the new D-Bus migration category at the end of
+`Task List.md`.
+
+## Flatpak host-command inventory — October 7, 2026
+
+✅ `docs/engineering/flatpak-host-command-inventory.md` inventories the production commands routed through
+`flatpak-spawn --host`, with dynamic command patterns and source locations. It
+classifies NetworkManager, systemd, and document-portal operations as D-Bus
+replacement candidates; identifies `rclone`, `onedriver`, and `onedrive` as
+unavoidable storage-engine invocations; and marks runtime diagnostics, shell
+orchestration, log scraping, and replaceable network probes as obsolete host
+commands. Required FUSE and host mount-namespace inspection are called out
+separately as unavoidable non-engine host helpers. Development-only tests and
+probes are separated from the shipped applet surface. No D-Bus migration code
+or Flatpak permission change was implemented by this inventory step.
+
+## NetworkManager D-Bus migration — October 7, 2026
+
+✅ Production NetworkManager integration now uses a typed `zbus` system-bus
+adapter instead of host `nmcli`. It discovers saved VPN and WireGuard profiles,
+activates and deactivates connections by UUID, reads active-connection state,
+checks global and per-interface readiness, reports dependency availability,
+and reads metered state. Existing desktop NetworkManager secret agents remain
+responsible for authentication prompts initiated by `ActivateConnection`.
+
+✅ Scheduled mirrors no longer embed the `nmcli`/shell/`grep` metered condition.
+Their generated service calls an app-owned `--require-unmetered-network` guard,
+which performs the same NetworkManager D-Bus query and fails closed if state
+cannot be determined. The Flatpak manifest now grants only
+`--system-talk-name=org.freedesktop.NetworkManager` for this integration, and
+the packaging rationale documents that permission.
+
+✅ `cargo test --all-targets` passed with 289 tests passed and 8 ignored
+live/destructive tests; the focused saved-profile/settings test also passed.
+A read-only live native NetworkManager smoke test passed against the host system
+bus, covering global state, saved-profile discovery, and saved-profile state.
+Activation/deactivation was not exercised automatically because it would alter
+the user's live VPN state. Rebuilt-Flatpak and interactive VPN validation remain
+tracked by the final migration validation item.
+
+The production boundary excludes test programs and the standalone host-runner
+probe. Their legacy parser fixtures and intentional `nmcli general status`
+probe remain available for regression and transport testing, but the shipped
+applet contains no reachable `nmcli` execution path or fallback.
+
+## systemd user-manager D-Bus migration — October 7, 2026
+
+✅ Production `systemctl --user` execution was replaced with the user systemd
+D-Bus API. The shared manager now performs daemon reload, enable/disable,
+start/stop/restart, status reads, and failure reset through typed `zbus` calls.
+Start, stop, and restart subscribe before queuing work and wait for the matching
+`JobRemoved` signal so failed jobs are not reported as successful.
+
+✅ The less-visible call sites were migrated too: synchronous popup status,
+sleep-cleanup active-state and stop-policy checks, deliberately nonblocking
+sleep stops, runtime dependency detection, and mirror `InvocationID` lookup.
+The Flatpak manifest grants session-bus access only to
+`org.freedesktop.systemd1`, and the packaging rationale records why. The
+system-manager Cisco agent start, obsolete `journalctl` pending-count scrape,
+and runtime `systemd-analyze verify` are separate inventory items and are not
+`systemctl --user` migration gaps.
+
+Development-only probes and integration-test cleanup retain direct
+`systemctl --user` calls by policy. They are not linked into normal applet
+execution and remain documented separately in `docs/engineering/flatpak-host-command-inventory.md`.
+
+## Documents portal D-Bus migration — October 8, 2026
+
+⏳ Selected document-portal folders now resolve through a validated D-Bus
+adapter whenever the portal supports a sandbox-safe method. Sandboxed portal
+v5+ uses `GetHostPaths`; native runs use `Info`. The adapter obtains the actual
+portal mount point, extracts direct or app-scoped document IDs, handles the
+portal's NUL-terminated byte paths, and rejects malformed or non-absolute
+results. Flatpak already permits `org.freedesktop.portal.*` by default, so no
+new manifest permission was added.
+
+The installed Pop!_OS Documents portal reports interface version 4. Its
+host-path-returning `Info` and `Lookup` methods are explicitly unavailable to
+sandboxed callers, while sandbox-safe `GetHostPaths` begins with version 5.
+The old host `flatpak document-info` invocation therefore remains only as a
+version-4 compatibility fallback; this migration item cannot be marked fully
+complete without either raising the minimum portal version or accepting a
+folder-selection regression.
+
+Focused portal parsing tests and `cargo check --all-targets` passed. The full
+all-target suite passed with 291 tests and 10 explicitly ignored live or
+destructive tests. A separately enabled read-only live test resolved an
+existing exported document through the native D-Bus `Info` path and matched
+its recorded host origin.
+
+## Mirror progress journal removal — October 8, 2026
+
+✅ The applet no longer invokes or scrapes `journalctl` to estimate progress for
+an active rclone bisync. Scheduled runs enable rclone's JSON-line log format in
+the app-owned mirror work directory and atomically publish a small versioned
+state file containing systemd's 32-character `INVOCATION_ID`. The reader gets
+the active unit invocation through the existing user-systemd D-Bus adapter and
+rejects stale state before deriving the Path1/Path2 total and completed
+copy/delete count.
+
+The reader rejects malformed and oversized state, treats a partially written
+last JSON record as still in progress, and preserves rclone failure and success
+handling. The production `Journalctl` executable variant was removed. Focused
+pending-count tests passed, and the ignored disposable live-bisync test was run
+explicitly and passed with the generated scheduled runner, its invocation state
+file, and real rclone JSON output. `cargo check --all-targets` passed, and the
+full suite passed with 290 tests passed and 10 explicitly ignored live or
+destructive tests.
+
+## In-process network readiness probes — October 8, 2026
+
+✅ Production readiness checks no longer invoke host `ip`, `getent`, or `nc`.
+Route checks use an IPv4/IPv6 UDP connect to ask the kernel for target-specific
+route selection without transmitting a packet. DNS checks use Tokio's
+asynchronous system resolver, and endpoint checks use a Tokio TCP connection.
+The existing Flatpak `--share=network` permission makes these operations
+available inside the sandbox without adding another permission.
+
+Route and DNS checks retain a five-second bound; endpoint connections retain
+the prior three-second bound. All three respond to cancellation, expose only
+the existing redacted `ready`/`not ready` details, and require no host command
+or newly added permission. The obsolete `Ip`, `Getent`, and `Nc` executable
+variants were removed. Focused loopback tests cover route selection, localhost
+resolution, open and closed TCP endpoints, invalid endpoint handling, and
+cancellation. Separate read-only lookups inside the Freedesktop 25.08 Flatpak
+runtime with `--share=network` resolved IPv4 and IPv6 addresses for both
+`localhost` and public `example.com`, confirming sandbox resolver access
+without installing a replacement applet.
+`cargo check --all-targets`, strict all-target Clippy, and the full suite passed;
+the suite reported 291 tests passed and 10 explicitly ignored live or
+destructive tests.
+
+## Runtime systemd unit verifier removal — October 8, 2026
+
+✅ Unit installation no longer invokes host `systemd-analyze --user verify`.
+Before writing, the app now strictly validates its generated service/timer
+schema, ownership markers, required sections, allowed directives, fixed policy
+values, timer/service pairing, and command shape. After the atomic write it
+calls the user manager's D-Bus `Reload` and `LoadUnit`, then requires a loaded
+unit with no `LoadError`, the exact app-managed `FragmentPath`, and no pending
+daemon reload. If reload or load validation fails, installation restores the
+previous unit (or removes the new one) and reloads that rollback.
+
+Systemd's parser remains an authoritative Linux build/test check over freshly
+generated paired service and timer files. The Debian package and Debian CI now
+declare `systemd` as a build dependency, while the production
+`SystemdAnalyze` executable variant and runtime request are removed. This
+preserves generated-unit verification without requiring another
+`flatpak-spawn --host` command or weakening rollback behavior.
+
+`cargo check --locked --all-targets`, strict all-target Clippy, and the full
+suite passed; the suite reported 294 tests passed and 10 explicitly ignored
+live or destructive tests. The separately enabled read-only live user-systemd
+D-Bus smoke test also passed, including exact managed-fragment load validation.
+
+## OpenConnect D-Bus lifecycle verification — October 10, 2026
+
+✅ The saved `UA Engineering OpenConnect` profile was activated directly with
+NetworkManager D-Bus. NetworkManager reported active-connection state `2` and
+VPN state `5` (activated). Its IPv4 configuration installed the private
+`10.138.0.0/17` route and UA DNS servers `128.196.11.233` and
+`128.196.11.234`, providing route and DNS readiness evidence without probing an
+unknown internal service.
+
+✅ D-Bus deactivation removed the VPN active-connection object while preserving
+the unrelated active connections. A second D-Bus activation completed the
+OpenConnect authentication flow, returned to the activated states, and restored
+the same private route and DNS configuration. Task (6) lifecycle steps 1–4 are
+complete. Logout/login or reboot autostart and post-session reconnection remain
+pending and must be verified from the resumed desktop session.
+
+⏳ After reboot, `nm-applet` autostarted as expected, owned
+`org.freedesktop.network-manager-applet`, and had the correct display, Wayland,
+desktop, and session-bus environment. Nevertheless, two direct NetworkManager
+D-Bus activations remained in preparation and opened no authentication dialog;
+each later failed and its active-connection object was removed. Restarting only
+`nm-applet` after COSMIC was fully running changed its registration order. The
+next D-Bus activation immediately presented authentication and reached active
+connection state `2` and VPN state `5`, restoring `10.138.0.0/17` and the two UA
+DNS servers. This demonstrates a post-login secret-agent ordering defect: mere
+process or well-known-bus-name detection is insufficient. Task (6) step 5 stays
+open until the session setup is corrected and succeeds without a manual agent
+restart.
+
+✅ The replacement on-demand service design passed its first live test. The old
+login autostart entry was absent and the static
+`cosmic-mounter-openconnect-agent.service` began inactive. Starting it through
+the systemd user-manager D-Bus completed the service's registration-stabilizing
+`ExecStartPost`; NetworkManager then logged the `nm-applet` secret-agent
+registration. Subsequent NetworkManager D-Bus activation presented the full
+three-field OpenConnect window, the user completed phone authentication, and
+the VPN reached active-connection state `2` and VPN state `5`. D-Bus inspection
+again found route `10.138.0.0/17` and UA DNS servers `128.196.11.233` and
+`128.196.11.234`.
+
+✅ The applet implementation now reads `vpn.service-type` from saved
+NetworkManager settings and starts the fixed authentication-agent unit through
+the existing job-waiting systemd user-manager D-Bus adapter only for
+`org.freedesktop.NetworkManager.openconnect`. Missing or failed service startup
+stops before VPN activation with installation guidance. Non-OpenConnect
+profiles do not acquire this dependency. The applet deliberately leaves the
+agent running for possible reauthentication; `PartOf=graphical-session.target`
+owns end-of-session cleanup, so the applet never stops a shared agent.
+
+Focused profile-selection and unit-name tests passed, as did the live
+application helper test against the installed static service. Formatting,
+strict all-target Clippy, and the complete suite passed; the suite reported 295
+tests passed and 11 explicitly ignored live or destructive tests. Task (6)
+step 5 remains open only for installation of this updated build followed by a
+logout/login or reboot reconnection with no terminal intervention.
+
+### Installed OpenConnect plus SMB lifecycle — October 10, 2026
+
+✅ After login and installation of the updated applet, the final acceptance run
+began with `cosmic-mounter-openconnect-agent.service`, the selected VPN, and the
+SMB mount inactive. Enabling `UA ENGR Research Storage VPN` in Cloud Mounter
+started the authentication agent on demand through the systemd user-manager
+D-Bus adapter. NetworkManager D-Bus activation presented the complete
+three-field OpenConnect authentication window; after phone authentication, the
+VPN reached its active state, restored route `10.138.0.0/17` and UA DNS servers
+`128.196.11.233` and `128.196.11.234`, and the applet mounted
+`ua_engr:Research/Utzinger` at `/home/uutzinger/Cloud/UA_ENGR`. The user
+confirmed that the mounted content was accessible.
+
+✅ Disabling the same row in the installed applet cleanly stopped its managed
+mount service, removed the FUSE mount, saved `start_at_login: false`, and
+deactivated `UA Engineering OpenConnect` because no configured mount still
+needed it and disconnect-when-unused was enabled. The OpenConnect
+authentication agent remained active intentionally: it is a shared secret
+agent retained for possible reauthentication and owned by the graphical
+session rather than by one mount. This completes Task (6) lifecycle step 5 and
+the successful installed-native activation, readiness, SMB mount/access,
+unmount, and conditional-deactivation path.
+
+⏳ Authentication cancellation and failure paths, confirmation that COSMIC's
+generic single-field prompt never remains open, the rebuilt Flatpak lifecycle,
+and final removal of proprietary Cisco handling remain separate Task (6)
+acceptance work. This result applies to the NetworkManager OpenConnect profile
+for the Cisco-compatible gateway, not to direct Cisco Secure Client control.
+
+### Installed Flatpak OpenConnect plus SMB positive lifecycle — October 10, 2026
+
+✅ The rebuilt Freedesktop 25.08 GUI prototype at user-installed Flatpak
+commit `b95fbbcccaa1` passed the positive OpenConnect lifecycle. The run began
+with the ENGR mount and VPN inactive. Enabling `UA ENGR Research Storage VPN`
+opened the three-field OpenConnect authentication flow, completed phone
+authentication, activated the NetworkManager VPN, and mounted
+`ua_engr:Research/Utzinger` through the managed user service. Live inspection
+confirmed the `fuse.rclone` mount, private route `10.138.0.0/17`, and UA DNS
+servers `128.196.11.233` and `128.196.11.234`; the user confirmed that mounted
+data was accessible.
+
+✅ Turning the connection off reported `Unmount completed`. The managed service
+then reported inactive/dead with `Result=success`, the FUSE mount was absent,
+the ENGR VPN was no longer active, and the persisted connection state was
+`start_at_login: false`. The tested Flatpak process remained running throughout,
+which distinguishes this evidence from the earlier installed-native lifecycle.
+This completes ordered Flatpak acceptance step 2; cancellation is the next
+acceptance case.
+
+✅ The installed prototype also passed ordered Flatpak acceptance step 3.
+Closing the three-field OpenConnect dialog produced the bounded notification
+`Mount failed: authentication was canceled or failed`; the connection row
+returned to off and no competing COSMIC single-field prompt appeared. Live
+inspection found the mount service inactive/dead, no ENGR FUSE mount, no stale
+UA VPN active object, and persisted `start_at_login: false`. The shared
+OpenConnect authentication agent remained active intentionally.
+
+✅ Ordered Flatpak acceptance step 4 passed with a deliberately rejected phone
+approval using valid primary credentials. OpenConnect displayed `Login failed`;
+after its dialog was closed, Cloud Mounter reported that VPN authentication
+failed or was canceled. No COSMIC single-field prompt appeared. The row returned
+to off, and live inspection confirmed no UA VPN active object, ENGR FUSE mount,
+or running managed mount service, with persisted `start_at_login: false`.
+
+✅ The COSMIC BaseApp dependency gate was resolved before bisync work. Contrary
+to the earlier unavailable-ref observation, Flathub now publishes
+`com.system76.Cosmic.BaseApp//stable`; the configured COSMIC remote does not.
+The installed BaseApp at commit `b3f1b274d540` declares Freedesktop Platform
+and SDK 25.08, exactly matching the project manifest. The GUI prototype was
+updated to declare that base, rebuilt successfully, installed as commit
+`20bd5aea1b91`, and launched on Freedesktop Platform 25.08.
+
+✅ Comparing the effective permissions found no new application D-Bus or writable
+filesystem access. NetworkManager, login1, the user systemd manager, the
+Flatpak host interface, the app-owned buses, and the existing scoped paths are
+unchanged. The effective report also contains the runtime/base defaults for
+read-only GTK/KDE color-scheme configuration. The final reproducible tagged
+manifest build and repeated lifecycle acceptance remain the later final-package
+gate; they are not implied by this prototype dependency resolution.
+
+### Bisync coordinator inventory and shared-engine decision — October 10, 2026
+
+✅ Task (5) began with a source-backed inventory of all five generated-shell
+modes, their ordered checks, mutations, recovery ownership, SharePoint second
+pass, structured scheduled progress, success-only retention, initial markers,
+and failure boundaries. The detailed equivalence contract is recorded in
+`docs/engineering/2026-10-10-bisync-coordinator-inventory.md`; no execution path changed during inventory.
+
+✅ Manual and scheduled rclone Offline Mirror operations will use one typed Rust
+coordinator. The UI and user-systemd service will call the same fixed-mode
+transaction implementation so backup, ownership, SharePoint, progress, and
+retention behavior cannot drift. The restricted native/Flatpak host entry point
+remains the next design gate.
+
+✅ The worker entry-point architecture was accepted. Native/source and Debian
+services will execute the absolute installed Cloud Mounter binary; a
+Flatpak-generated service will use `/usr/bin/flatpak run
+--command=cosmic-ext-applet-mounter` with the application ID. Both enter the
+same restricted Rust worker before GUI or applet-bus initialization. The caller
+may supply only a fixed mode and connection UUID; all paths and rclone arguments
+come from revalidated saved state. A non-mutating disposable user-systemd probe
+remains required before this accepted design is treated as runtime-confirmed.
+
+### Provider-wide online lifecycle and NetworkManager-only cleanup — October 10, 2026
+
+✅ Online operation dispatch is now exhaustive across every provider. OneDrive
+selects the onedriver engine; SharePoint, Google Drive, Box, SMB, and SFTP
+select the rclone engine. Both engine paths converge on the same managed online
+start and stop helpers for systemd user-manager D-Bus activation, bounded
+transitional-state reconciliation, slider persistence, clean mount
+disappearance verification, and conditional NetworkManager VPN release. A
+regression test covers all six providers and proves that Offline Mirror modes
+cannot enter this path. The successful installed SMB/OpenConnect lifecycle is
+the live example; no offline-mirror or bisync functionality is inferred from
+it.
+
+✅ Direct proprietary Cisco support was removed from production. The applet no
+longer discovers or invokes Cisco CLI, GUI, agent, status, startup, or disconnect
+operations, and dependency documentation and the host-command inventory now
+describe Cisco-compatible access only through NetworkManager OpenConnect. An
+old serialized `Cisco` profile kind loads as an inert `LegacyCisco`
+compatibility marker and is rejected before D-Bus access with instructions to
+select a saved NetworkManager profile; no UUID is guessed or rewritten.
+
+✅ Formatting, all-target check, strict Clippy, installer shell parsing, diff
+checks, and a production Cisco reachability scan passed. The full test suite
+passed serially outside the restricted network sandbox: 294 tests passed and 12
+live or destructive tests were explicitly ignored. The release binary was
+installed to the user location and exactly matches the built artifact.
+
+⏳ Task (6) still requires user-visible cancellation/failure testing,
+confirmation that COSMIC leaves no competing generic single-field prompt, and
+a complete installed-Flatpak lifecycle. The final manifest intentionally
+fetches tagged `v0.5.2`, so it cannot exercise these uncommitted changes; the
+configured COSMIC remote also does not currently offer its requested
+`com.system76.Cosmic.BaseApp//stable` ref. Those gates must not be reported as
+complete using an old tagged build.
+
+✅ As an intermediate packaging check, the current release binary was built and
+installed with the repository's Freedesktop 25.08 GUI prototype manifest after
+bringing its D-Bus permissions in sync with the final manifest. The installed
+Flatpak commit is
+`c8f461f6a408b77cfa8074b9c69227b52a4ac10718607de21fbe441d1c5970fe`.
+Read-only calls from inside that sandbox successfully reached the user systemd
+manager and NetworkManager; NetworkManager returned state `70`. This proves the
+required bus access, not OpenConnect authentication or mount lifecycle behavior.
+
+### Installed OpenConnect cancellation — October 10, 2026
+
+✅ The user requested the VPN-dependent SMB mount and closed the three-field
+OpenConnect authentication requester. This requester supplied no labeled Cancel
+button, so its window close control was the available cancellation action. The
+Cloud Mounter slider returned to off. Read-only live inspection confirmed the
+managed SMB unit was `inactive/dead` with `Result=success` and exit status zero,
+the SMB path had no FUSE mount, NetworkManager had no active VPN connection, and
+the saved connection retained `start_at_login: false`. The shared OpenConnect
+authentication agent remained active as designed for later authentication.
+
+⏳ The user clarified that the resulting notification was generated but had
+already disappeared by the time the applet UI was reopened. The timeout had
+been measured from background notice creation rather than from the next popup
+opening. `popup_notice_expired` now starts the 10-second visible interval at the
+later of those two events. Focused unit coverage, formatting, strict Clippy,
+and diff checks passed. Installed user verification remains pending.
+
+⏳ Confirmation that COSMIC did not leave its separate generic single-field
+prompt also remains pending. Rejected or expired Duo, timeout,
+network-interruption, and reconnect cases are still open.
+
+⚠ A subsequent post-login cancellation retest reproduced the competing-agent
+race. The OpenConnect service was already active from 12:02, then COSMIC
+registered its generic NetworkManager secret agent at 12:07:22. Cloud Mounter's
+OpenConnect activation at 12:07:27 reached NetworkManager, but `StartUnit` was a
+no-op and no three-field dialog process appeared; NetworkManager recorded the
+secret request as user-canceled. A second request remained in `activating` with
+`nm-openconnect-service` running but no authentication dialog.
+
+✅ The OpenConnect-only preparation now calls systemd user-manager
+`RestartUnit` and waits for the complete job, including the service's
+one-second `ExecStartPost`, before NetworkManager activation. This deliberately
+re-registers `nm-applet` after COSMIC while preserving the D-Bus-only applet
+boundary. `docs/openconnect.md` documents why restart rather than start is required.
+Installed live verification remains pending.
+
+✅ After logout/login with the installed `RestartUnit` build, COSMIC registered
+its generic secret agent at 12:13:13 and Cloud Mounter restarted `nm-applet`,
+which registered afterward at 12:13:26. NetworkManager accepted the applet's
+activation at 12:13:27 and the three-field OpenConnect authentication window
+appeared. This live result closes the registration-order portion of the fix.
+
+✅ The user closed the authentication window. NetworkManager recorded the final
+secret request as insufficient at 12:13:33, six seconds after activation. Live
+inspection found no active VPN, no managed mount unit, no FUSE mount, and the
+saved SMB connection still had `start_at_login: false`. The user was not certain
+of every transient notification message, so no exact wording or readability
+claim is recorded.
+
+✅ Readiness monitoring now treats an app-requested NetworkManager activation
+that returns to `Disconnected` or `Failed` as terminal. It will replace the
+waiting state with an explicit authentication/activation failure instead of
+waiting until the 90-second OpenConnect deadline. Focused unit coverage was
+added; installed live verification of the final notice remains pending.
+
+✅ The installed terminal-state build was retested. After closing the
+three-field authentication window, the user could read and report the explicit
+mount-failed-or-canceled and VPN-activation-canceled-or-failed result. Live
+inspection found no active VPN and no managed mount unit; only the shared
+OpenConnect authentication agent remained active as designed. Cancellation
+rollback and cancellation-notice visibility are now verified. Exact punctuation
+is not treated as a contractual message assertion.
+
+✅ A deliberate rejected second-factor attempt displayed `Login failed` inside
+the three-field OpenConnect dialog while NetworkManager appropriately remained
+in `activating` state to permit retry. The user then closed the dialog and read
+the applet's failure result. Live inspection found no OpenConnect service or
+authentication-dialog process, no active VPN, no managed mount unit, and no
+mount at the ENGR target. Rejected-authentication cleanup is verified.
+
+⚠ The first untouched-dialog timeout test exposed incomplete cleanup. The share
+remained unmounted, its saved state stayed off, and NetworkManager no longer
+listed the VPN activation, but `nm-openconnect-auth-dialog` remained alive in
+the authentication-agent service control group well beyond the applet's
+90-second deadline. Restarting that unit closed the orphan, but the stop phase
+then consumed nearly systemd's default service-stop allowance.
+
+✅ The timeout path now deactivates any remaining NetworkManager active object
+over D-Bus and restarts the OpenConnect agent through systemd user-manager
+D-Bus. The documented unit now bounds shutdown with `TimeoutStopSec=5` and
+explicitly cleans its control group. This preserves the D-Bus-only applet
+boundary and leaves a fresh authentication agent after timeout. Focused tests,
+formatting, strict Clippy, and the code diff check passed. The release binary
+was installed and matched the built artifact. The installed service contains
+the five-second stop and control-group settings, and systemd reported those as
+its effective properties. Reloading the applet and repeating the live timeout
+test remain pending.
+
+✅ The installed timeout cleanup passed its repeated live test. NetworkManager
+started the OpenConnect activation at 18:28:58 and the untouched three-field
+dialog remained pending. At 18:30:27, the applet deactivated that exact VPN
+object over D-Bus. Systemd stopped the complete authentication-agent control
+group, removing both the service and dialog, then registered a fresh
+`nm-applet`; the unit was active again at 18:30:28. No VPN or managed mount unit
+remained, the ENGR target was not a mountpoint, and `start_at_login` remained
+false. The installed five-second stop bound and control-group policy were
+effective. User confirmation of the visible timeout notice is tracked
+separately from this lifecycle result.
+
+✅ The user confirmed the applet displayed the mount-failure notice explaining
+that the VPN did not become ready within its timeout. The timeout test is now
+verified at both the lifecycle and user-visible result boundaries.
+
+✅ The user confirmed that no separate COSMIC single-field prompt appeared
+during the corrected installed-app activation flow. Together with the live
+agent-registration timestamps and the three-field OpenConnect dialog, this
+verifies the competing-agent UI portion of Task (6).
+
+✅ A successful recovery followed the cancellation, rejected-authentication,
+and timeout cases. NetworkManager activated OpenConnect and created `vpn0` with
+address `10.138.88.8/17`, private route `10.138.0.0/17`, and UA DNS servers
+`128.196.11.233` and `128.196.11.234`. The managed ENGR rclone service was
+active, the FUSE mount was present, and a bounded directory listing succeeded.
+
+⚠️ A controlled network-interruption test scheduled exact-profile Wi-Fi
+recovery before disconnecting Wi-Fi for 15 seconds. Wi-Fi returned, but
+NetworkManager stopped the OpenConnect VPN and did not reauthenticate it. The
+managed rclone service and FUSE mount remained present, while bounded remote
+access did not recover. The installed applet consequently showed a misleading
+healthy blue switch and cached zero pending-file count. This evidence does not
+satisfy the broader automatic safe-detach and remount requirements.
+
+✅ The applet now models a still-mounted Online connection whose required
+network or VPN is unavailable as degraded. It retains Unmount, hides the cached
+pending count behind an attention marker, and tells the user to turn the
+connection off and on to reauthenticate. Focused controller coverage includes
+both network and VPN dependency loss. The installed UI displayed the expected
+blue mounted switch, `Mounted, connection unavailable` status, `!` instead of
+the stale zero count, retained Unmount, and off/on recovery guidance. Clean
+unmount and authenticated remount validation remain pending.
+
+⚠️ The first degraded-state unmount attempt saved `start_at_login: false`
+but clean FUSE detach failed while the private SMB endpoint was unreachable.
+The service and mount correctly remained active rather than being forcefully
+detached. Inspection then found that Repair was allowed by the controller but
+not rendered in the popup, so the documented confirmed lazy-detach recovery was
+unreachable. A degraded-row Repair control and off-state persistence were added;
+installed confirmation remains pending.
+
+✅ Logging out after the failed clean-unmount attempt ended the stale user-session
+rclone process and mount. After login, the managed unit was inactive and
+disabled, the ENGR target was no longer a FUSE mount, and the saved
+`start_at_login` value remained false. Therefore the row correctly appeared off
+rather than degraded. This verifies safe session cleanup, but it does not count
+as installed confirmation of the newly exposed Repair button.
+
+✅ The subsequent applet-driven recovery succeeded. The three-field
+OpenConnect and phone-authentication flow restored `vpn0` at
+`10.138.88.25/17`, route `10.138.0.0/17`, and UA DNS servers
+`128.196.11.233` and `128.196.11.234`. The managed rclone service and FUSE mount
+were active, a bounded ENGR directory listing succeeded, preload started, and
+`start_at_login` was saved true. Live Repair-button validation remains the only
+open substep of this controlled interruption case.
+
+⚠️ The first installed Repair-button test exposed an ambiguous inline hit
+target, not execution of Repair: clicking the visible Repair area produced the
+exact `Unmount completed` notice, and lifecycle inspection confirmed the clean
+primary-unmount path stopped the service and detached the mount. Repair is now
+a separate full-width action below the warning. It arms for 1 to 30 seconds,
+visibly changes to `Confirm Repair`, and rejects repeated first-click delivery
+during the minimum interval. Installed retesting remains pending.
+
+✅ The separated full-width Repair action passed the installed safety test
+against a deliberately busy mount. Clean Unmount first failed without forcing
+detach. The first Repair click displayed the confirmation warning; the second
+started Repair, which stopped the service, lazily detached the busy FUSE mount,
+and retained `start_at_login: false`. The temporary shell holding the mount was
+closed afterward. The user observed one remaining presentation defect: the
+Repair button stayed visible while asynchronous cleanup ran. It is now hidden
+as soon as confirmation starts; installed confirmation of that timing remains
+pending.
+
+✅ Final installed confirmation passed. With the VPN disconnected and a
+temporary shell deliberately holding the mounted directory busy, the separate
+Repair action displayed its warning on the first click and changed to Confirm
+Repair. After the required delay, confirmation immediately removed the action
+while cleanup ran; `Repair completed` appeared afterward. Lifecycle inspection
+found the service inactive and disabled, no ENGR FUSE mount, and
+`start_at_login: false`; the temporary holder was then closed. An attempted
+no-VPN shortcut was also cleaned up after rclone correctly refused to create the
+SMB filesystem without private DNS. The native cancellation, rejected-factor,
+timeout, interruption, degraded-state, Repair, and reconnect checklist is now
+complete. Rebuilt-Flatpak live authentication remains a separate Task (6)
+acceptance gate.
+
+✅ Final regression validation passed: formatting, strict all-target Clippy,
+the scoped diff check, and 298 tests passed with 12 explicitly ignored live or
+destructive tests. The first sandboxed full-suite attempt could not bind the
+loopback listener used by an in-process readiness test; rerunning outside that
+network sandbox passed, so this was an execution-environment restriction rather
+than a product failure.
+The requested on-state was persisted. Successful reconnect is verified.
+
+✅ Task (5)'s restricted bisync worker transport probe is implemented and
+verified without touching mirror data. The native disposable user-systemd
+service completed in 6 ms and the Flatpak service in 172 ms; both emitted the
+single bounded success record and were collected. Missing, extra, malformed,
+and disabled production-mode requests are rejected, including an installed
+Flatpak extra-argument service that exited with status 2. Dispatch precedes
+localization, async-runtime, GUI, and applet initialization, and rebuilding the
+development Flatpak added no permission. This proves only safe worker
+invocation; production bisync remains on the existing shell pending the shared
+Rust coordinator and equivalence tests.
+
+✅ Task (5)'s engine-specific Offline Mirror Repair contracts are accepted and
+recorded. Shared rules make Repair a confirmed, bounded recovery-and-pause
+operation that preserves all mirror, recovery, engine, lock, ownership, and
+initialization state and never synchronizes or uses Online FUSE recovery.
+Rclone Repair disables its timer before stopping the finite service and retains
+the two-minute bisync safety lock; `abraunegg/onedrive` Repair stops and
+disables only its continuous monitor and preserves its token, database, and
+engine state. Requirements FR-060A through FR-060C and the separate live-test
+boundaries now capture these decisions. No Repair implementation changed in
+this design step.
+
+✅ The locally testable Offline Mirror Repair contract is now implemented.
+Offline and Online Repair share the protected one-to-30-second confirmation and
+pending-action hiding behavior. Typed dispatch reloads the saved connection by
+UUID, verifies applet-owned structurally valid units, and separates rclone's
+timer-first recovery from `abraunegg/onedrive`'s monitor-only recovery. Both
+paths use the systemd user-manager D-Bus adapter, disable their background
+service, reset only observed failed state, and reject success unless final
+service/timer state is inactive and disabled. No engine command, FUSE detach,
+resync, retention, authentication, or filesystem mutation is part of Repair.
+The complete automated suite passed with 315 tests and 12 intentionally ignored
+tests, and strict all-target Clippy passed. Coordinator-owned cancellation and
+separate installed rclone/OneDrive interruption tests remain open, so the Task
+(5) implementation item is intentionally not checked complete.
+
+### Task (5) focused failure and native integration closure — October 12, 2026
+
+✅ Completed the remaining coordinator failure matrix and native engine
+integration gaps. Required transaction phases stop on failure, timeout, or
+cancellation; failed initial work preserves initialization markers. Added
+coverage for foreign ownership, missing/changed access anchors, linked recovery
+paths and dangling marker links, malformed calendar dates, incomplete/invalid
+output, and bounded error redaction. Fixed remote owner inspection to stop on
+timeout/cancellation and require complete valid output before ownership or
+cleanup decisions. Incomplete ownership data cannot authorize a purge.
+
+✅ The new disposable alias/local and loopback-SFTP tests call the production
+Rust coordinator with isolated configuration. Both passed initial dry preview,
+initial sync, ordinary preview, two-way changes, deletion recovery, unique
+repeated backups, removal of marked old directories, and preservation of
+unmarked or invalid-date directories. Their temporary data and SFTP server are
+removed by test cleanup. The obsolete shell-era SFTP test and its unused helper
+were removed; its checklist disposition is `[o]` with replacement evidence.
+
+✅ Existing authenticated SharePoint identity/folder guards and the compiled
+changed-target guard passed. A writable test used only a new UUID child of
+`CloudMounter-TeamsMirror-Test-20261002`; initial and ordinary sync independently
+passed checksum comparison, Office archive validation, overwrite recovery,
+and ordinary preview. Test cleanup purged that child, without touching the
+approved parent or other mirrors. Corrected the stale test expectation that
+the original bisync outcome contained the later checksum-command log.
+
+✅ Both previously sandbox-blocked socket tests passed with host access. The
+full nonignored all-target host suite passed 357 tests, and six ignored engine/
+SharePoint tests were explicitly run successfully. Formatting, locked all-target
+checking, the 21 coordinator tests, and strict all-target Clippy passed.
+
+⏳ These results close the 0.5.3 focused-test source item, not final Flatpak
+acceptance. The accepted release artifact still needs the restricted-worker,
+offline-control, and OpenConnect lifecycle tests recorded in Tasks (5) and (6).
+
+### 0.5.3 UI translation audit — October 12, 2026
+
+✅ Extracted the remaining app-owned UI labels, validation messages, operation
+summaries, and diagnostics into Fluent, including messages returned by storage,
+VPN, systemd, recovery, configuration, import, preload, and sleep modules.
+Configuration errors now display localized explanations rather than enum debug
+names. Preserved executable/protocol values, user data, machine records, external
+error classifiers, and interpolated third-party diagnostics. Coverage and these
+intentional exceptions are recorded in `docs/engineering/2026-10-12-ui-translation-audit.md`.
+
+✅ Sleep attention is a typed flag carried over runtime IPC, so translated
+messages cannot hide the warning action. Retention singular/plural wording uses
+Fluent numeric selectors. Added regression coverage for non-English sleep text,
+plural selection, and older IPC payloads lacking the new flag.
+
+✅ `scripts/check-ui-translations.py` checks catalog key uniqueness and literal
+Rust references: 1,291 English messages and 1,443 references have no missing or
+duplicate keys. Formatting, locked all-target checks, strict Clippy, and all 358
+nonignored native host tests passed, including both socket-opening tests.
+
+✅ The separate OneDrive GTK authentication helper also uses Fluent-owned text.
+The applet supplies four localized labels in a JSON environment handoff; direct
+helper launches read the packaged English catalog. Native, Debian, and Flatpak
+install recipes include the fallback catalog. Three helper tests passed without
+a GUI or authentication. `just localization-check` also verifies key integrity
+and excludes test-module notice fixtures from its production scan.
+
+✅ Installed the audited native release build, helper, and English fallback
+catalog with `just install-user`. Byte comparisons confirm all three installed
+files match the validated workspace artifacts. Existing saved connection
+configuration was not changed. Reload the panel/session to use the new build.
+
+⏳ English is the only available catalog. Live UI layout/wrapping and the final
+Flatpak artifact remain separate release acceptance checks.
+
+### Production host-command source reconciliation — October 12, 2026
+
+✅ Reviewed the default Linux applet/settings/IPC, guards, restricted worker,
+command factories, generated services, and local child launches. A Rust syntax
+scan excluded test/development-feature branches; manual review followed callers,
+macros, and package-specific launchers. This is current-working-tree source
+evidence, not acceptance of the older v0.5.2 tag or the final rebuilt Flatpak.
+
+✅ Reconciled every row in
+`docs/engineering/flatpak-host-command-inventory.md` to Replaced by D-Bus,
+Removed, or a justified Unavoidable invocation. Added the Rust coordinator's
+recovery mkdir/cat/list/copy/check/purge operations, corrected stale shell and
+version-probe descriptions, removed obsolete idle-count/core-stats claims, and
+documented host service payloads and sandbox-local launches separately. The
+supported portal-v4 compatibility exception remains version-gated and explicit.
+
+✅ The default typed runner now has nine executable kinds. Ten development-only
+variants require tests or the explicit `development-probes` feature, and the
+unused Printf variant is removed. Cargo requires that feature for the standalone
+host-runner probe; its documented build/help commands are updated. Raw legacy
+bisync request factories are test-only. An initial default binary-test build
+exposed that library cfg(test) does not propagate to its binary-test consumer;
+the unused legacy NM detector fixture was therefore guarded by both test and
+development-feature conditions. Existing parser/probe coverage is retained.
+
+✅ Restricted the synchronous host bridge to exactly RcloneConfigDump and
+HostMountInfo, replacing its arbitrary executable/argument parameters at all
+five callers. The displayed OneDrive manual-auth shell instruction remains
+display-only; it is not the removed bisync wrapper or an applet shell invocation.
+
+✅ Default and all-feature all-target checks, strict all-feature Clippy,
+formatting, localization validation, the three helper tests, and all 358
+nonignored host regression tests in both default and all-feature suites passed.
+Local link targets and diff whitespace checks also passed. Existing native disposable engine
+acceptance is unchanged; no live cloud, mount, VPN, or user-service operation
+was initiated by this audit. Source inventory items are complete; Tasks (5)
+and (6) retain their final release-artifact acceptance gates.
+
+⏳ The audit also identified existing unbounded synchronous `.output()` waits
+in the fixed bridge. A new 0.5.3 pre-build item requires bounded/output-limited
+execution off the GUI loop, focused failure tests, and installed responsiveness
+acceptance before release. Manifest/permission/documentation reconciliation
+remains the following gate. This audit does not certify the bridge's timing
+behavior or install a final release package.
+
+### Fixed host-inspection bridge hardening — October 12, 2026
+
+✅ Replaced the blocking bridge with the fixed `HostInspection` adapter in
+`src/host_inspection.rs`. Configuration dumps have a 1 MiB per-stream capture
+limit; host mountinfo has a 4 MiB limit. Both use a 10-second execution deadline,
+no retries, cancellation, strict output validation, and sanitized failures that
+do not echo configuration or captured diagnostics. Native mountinfo remains an
+asynchronous bounded local `/proc` read, not a polling subprocess. Flatpak uses
+the same typed runner with scoped `--watch-bus`; the installed runtime's launcher
+help confirms support. Unrelated interactive launches retain their lifetime.
+
+✅ Removed all production app-module `.output()` waits. Remote discovery,
+SMB/SFTP prefill, and import backend inspection run as asynchronous UI tasks;
+completions carry parsed metadata rather than raw config dumps. Superseded
+discovery/prefill requests cancel older work and generation/context/revision
+guards preserve newer lists, user edits, identity, and operation notices.
+
+✅ UI mount consumers use a last-successful observation; periodic refresh is
+limited to open UI windows, with immediate requests on popup opening and relevant
+operation completions. Failures retain the last observation and report a
+sanitized warning; obsolete in-flight results are discarded and refreshed.
+Setup, unmount, repair, and shared-VPN release take fresh asynchronous observations.
+VPN release now fails closed if inspection fails. OneDrive setup also rechecks
+mount isolation after potentially long authentication; no mount/sync/VPN action
+was initiated to verify this source change.
+
+✅ Fixed a shared-runner timeout gap: output-pipe draining is now inside the
+command deadline, even if a descendant holds a pipe after the parent exits.
+Cleanup retains the original isolated process-group ID after reaping the parent.
+Added regression tests for that hang, scoped Flatpak lifetime flags, fixed bounds,
+invalid/truncated output, private diagnostics, pre-cancelled requests, stale
+discovery/prefill, edit revisions, and failed/obsolete mount observations.
+The final all-feature suite passed 369 nonignored Rust tests; the default suite
+also passed 369 before the final post-auth isolation-only wrapper adjustment.
+Final default all-target checking, strict all-feature Clippy, formatting, local
+link checks, and diff checks passed. Localization validation passed with 1,293
+English messages, 1,441 Rust references, and three helper tests. No ignored live
+engine test or final Flatpak artifact is claimed by this gate.
+
+✅ Installed the validated native build and English catalog with
+`just install-user`; byte comparisons match the workspace release binary and
+catalog. The saved connection document SHA-256 is unchanged before/after install.
+No saved configuration, generated user service, authentication, or cloud data
+was modified. The installed binary still carries the pending source version
+0.5.2; release metadata advancement remains a separate 0.5.3 gate.
+
+⏳ Reload the native panel/session and confirm Detect rclone remotes and
+SMB/SFTP editor prefill remain responsive and preserve expected values/mount
+state, without saving changes or initiating storage/VPN operations. The parent
+pre-build task remains unchecked until that installed UI receipt is obtained;
+source/tests/install subtasks are complete. Final rebuilt-Flatpak transport/UI
+acceptance and subsequent manifest/documentation reconciliation remain open.
+
+### Installed host-inspection UI receipts — October 12, 2026
+
+✅ User screenshots show successful discovery of eight rclone remotes, including
+two matching Google Drive remotes. The existing SFTP editor reports settings
+loaded with secrets remaining blank; the existing SMB editor reports host/user/
+domain loaded with password remaining blank. These establish visible completion
+of discovery and both editor prefill paths; private endpoint/account values are
+not copied into this record.
+
+⏳ Screenshots alone do not establish responsiveness during execution or popup
+mount-state accuracy. Those explicit user confirmations remain before closing
+the native bridge-hardening acceptance item; final Flatpak acceptance is separate.
+
+✅ The user subsequently confirmed that the windows are responsive and the main
+applet lists all expected connections. Discovery, SMB/SFTP prefill, responsiveness,
+and connection-list coverage now have installed UI receipts.
+
+⏳ Current mounted/unmounted state accuracy was not explicitly confirmed by that
+reply. Only this remaining native observation is needed to close the parent
+bridge-hardening item; final rebuilt-Flatpak acceptance remains separate.
+
+✅ The user confirmed that the mount sliders correctly reflect the current
+no-active-mounts state. Together with remote discovery, SMB/SFTP prefill,
+responsiveness, and expected connection-list receipts, this completes the native
+bridge-hardening acceptance item. Marked its parent and remaining UI subtask
+`[x]` in Task List.md. No new active-mount lifecycle or final rebuilt-Flatpak
+acceptance is claimed. Manifest/packaging/documentation reconciliation is next.
+
+### Packaging and documentation source reconciliation — October 12, 2026
+
+✅ Compared the final command inventory with both applet manifests, packaging
+guide, README, product description, requirements, dependency guide, Fluent text,
+native just/Cargo recipes, Debian recipes, shared adapters, and generated worker
+launch specifications. Replaced stale scheduled-shell/idle-bisync-count promises
+with the shared restricted Rust coordinator and invocation-matched progress
+contract. Added bounded asynchronous inspection requirements, explicit engine
+minimums, helper/namespace exceptions, and the preserved portal-v4 fallback.
+README changes are limited to one concise Flatpak paragraph.
+
+✅ Reviewed all 23 explicit grants. No obsolete command-specific/proprietary-VPN
+grant exists to remove: the replacements need their D-Bus service grants, and
+storage engines still need the documented host runner and shared paths. Retained
+the source manifest's COSMIC settings-daemon grant after checking pinned
+libcosmic a991d7b's `dbus-config` proxy/watch code; added the same grant to the GUI
+prototype for parity. Documented both Runtime/Settings IPC names and the fact
+that host-execution access is not an OS-enforced per-executable allowlist.
+No blanket host filesystem or session/system bus socket grant was added.
+
+✅ Preserved the accepted COSMIC BaseApp stable/Freedesktop 25.08 target. Local
+ref inspection confirmed the BaseApp's runtime and installed Platform/SDK 25.08.
+Kept the production scaffold pinned to v0.5.2 until the separate accepted 0.5.3
+tag gate, and documented that this cannot build the pending migrated source yet.
+Clarified that prototype/source manifests share the app ID, prototype installation
+replaces the user's existing Flatpak, and native/Flatpak owners must not compete.
+
+✅ Added two source packaging contract tests for exact grant parity, accepted
+base/runtime, release/prototype identity, default shipping build features, and
+packaged authentication helper/Fluent catalog. Both pass. Flatpak-builder parsed
+both manifests with 23 grants after correcting the `--show-manifest` invocation
+to take only the manifest path. Strict all-feature Clippy, formatting, diff and
+local Markdown link checks passed; the full default host suite passed all 371
+nonignored Rust tests, including the socket tests. Localization validation remains
+1,293 messages/1,441 references with no missing/duplicate keys; all three helper
+tests pass. Intentional unsupported-legacy-Cisco errors and display-only manual
+auth instructions remain; no obsolete runtime CLI guidance was found in Fluent.
+
+✅ Marked the 0.5.3 pre-build reconciliation item and matching migration-source
+documentation item `[x]`; preserved transferred `[o]` records and final-package
+gates. Native/source and Debian build recipes compile the same default Rust
+adapters; this is source/build evidence, not a fresh Debian package acceptance.
+No applet runtime implementation changed, and no package was rebuilt, installed,
+tagged, published, or submitted by this review. Saved user configuration,
+services, mounts, VPNs, credentials, and cloud data were not modified.
+
+⏳ Final worker acceptance must prove local mirror/recovery metadata access:
+resolving an original host path does not authorize sandbox access to it. Recorded
+this explicitly in the packaging guide and final Flatpak gate. Any missing path
+permission requires a documented approved narrow solution, not blanket host
+access or shell rollback. Installed effective grants (including BaseApp defaults),
+final source/runtime identity, Debian acceptance, Tasks (5)/(6) lifecycles, and
+release/publication remain separate gates. The next release-list item is CI action
+runtime cleanup, followed by final verification/native packaging and release prep.
+
+### GitHub Actions runtime cleanup — October 12, 2026
+
+✅ Reviewed the repository's single workflow and upgraded all three old v4 action
+references to official releases declaring Node.js 24. Resolved release tags with
+read-only `git ls-remote` and pinned immutable commits:
+
+- [checkout v7.0.1](https://github.com/actions/checkout/blob/v7.0.1/action.yml):
+  `3d3c42e5aac5ba805825da76410c181273ba90b1`.
+- [upload-artifact v7.0.2](https://github.com/actions/upload-artifact/blob/v7.0.2/action.yml):
+  `cf430e030ddbb5b0abf93d22962f4752f3646cd9`.
+- [download-artifact v8.0.1](https://github.com/actions/download-artifact/blob/v8.0.1/action.yml):
+  `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`.
+
+✅ Checked official tagged action metadata for runtime and compatibility with
+all existing inputs. Archive upload remains the default and download still
+extracts/merges artifacts; the newer download action defaults to failing a digest
+mismatch rather than weakening integrity checks. The checkout documentation
+specifies runner 2.327.1 or newer for Node.js 24; this workflow uses GitHub-hosted
+runners, not self-hosted/container action runners. No unsafe Node opt-out was added.
+
+✅ Local PyYAML validation checked triggers, three immutable action refs/inputs,
+all six Ubuntu/architecture targets, read-only build permissions, tag-only release
+publication, and release write permissions. `bash -n` passed all six run blocks;
+diff whitespace checks passed. `actionlint` is not installed, so these are local
+YAML/policy/syntax checks, not an actionlint or hosted-run result. Preserved the
+pre-existing addition of systemd to CI build dependencies and all other workflow
+behavior. No Rust/app code or README change was needed.
+
+✅ Marked action-runtime cleanup `[x]`. No commit, push, workflow dispatch, tag,
+release, or publication was performed. Recorded the fresh hosted verification
+step in the following final-verification gate: after an authorized push, dispatch
+from the updated branch and inspect all six jobs/artifacts. An old-job rerun
+cannot validate the newly edited workflow. Final verification and native Debian
+package acceptance are next; final Flatpak acceptance remains separate.
+
+### Local Debian candidate build and inspection — October 12, 2026
+
+✅ Built from an explicit temporary source snapshot rather than cleaning the
+dirty workspace or overwriting parent-directory release artifacts. Build
+dependencies were satisfied. Reused the declared Cargo cache with locked/offline
+resolution and host access for socket tests. The first build compiled and passed
+all 371 nonignored tests, then failed because install used a hard-coded target
+path despite the supported `CARGO_TARGET_DIR` override. Fixed that one install
+line in workspace and snapshot `debian/rules`, preserving the existing catalog
+addition, and rebuilt successfully with `dpkg-buildpackage -us -uc -b`.
+
+✅ Saved the main `.deb`, debug `.ddeb`, `.buildinfo`, `.changes`, and an explicit
+candidate README in `target/local-deb-2026-10-12.LBoZhW/`. This is an unsigned
+Pop!_OS 24.04 amd64 working-tree candidate with current metadata 0.5.2, not the
+published v0.5.2 package or accepted v0.5.3 release. The main package is 9,170,244
+bytes; SHA-256 is
+`c3840524ca93e4028df97633060db000d3891b958bcf8d288f199dca258b6d9e`.
+The extracted ELF is x86-64 PIE/stripped with build ID
+`6ce5272b6b0d9d3c023becda4dfc6e71cdf9fbb5`. Its generated runtime dependencies
+are libc6 >=2.39, libgcc-s1 >=4.2, and libxkbcommon0 >=0.5.0, so this host build
+is not an Ubuntu 22.04 compatibility artifact.
+
+✅ Verified all eight payload md5sums and exact source matches for helper,
+Fluent catalog, desktop entry, AppStream metadata, and icon. Executables have
+0755 modes without setuid/setgid bits; package payload has no user config,
+generated services/timers, conffiles, or maintainer scripts. These support a
+non-destructive packaging contract but do not prove installed upgrade/removal.
+The extracted binary's fixed probe succeeded and malformed identity returned
+exit 2, without loading real connection config or starting storage/VPN work.
+The helper's extracted label-loading function found its packaged catalog without
+GUI/authentication. Saved connection document SHA-256 is unchanged throughout.
+
+⏳ Dependency inspection found an undeclared optional GUI-helper runtime:
+the script imports Python GI, Gtk 3.0, and WebKit2 4.1, but package Depends/
+Recommends omit those components. They are installed on this host, which can
+mask the issue on a fresh installation. Recorded an explicit follow-up before
+release rather than claiming dependency closure. No helper-dependency metadata
+change or installation was performed in this inspection.
+
+⏳ Known COSMIC desktop/AppStream validation issues (COSMIC category and
+provides/binaries) remained nonfatal by existing recipe policy. dh_dwz reported
+no debug_info, and dpkg-shlibdeps reported merged-/usr libc diversions; packaging
+completed and declared dependencies were inspected. lintian is unavailable, so
+no lintian pass is claimed. Temporary snapshot/control/extracted artifacts remain
+under `/tmp/cosmic-mounter-deb.YBPy3u/`; no user files or existing releases were
+deleted. The parent package gate remains open for dependency remediation,
+explicitly approved installed smoke/lifecycle tests, six-platform hosted builds,
+and final 0.5.3 version/release acceptance. No tag/push/publication occurred.
+
+### OneDrive helper dependency remediation and installer — October 12, 2026
+
+✅ Added `python3`, `python3-gi`, `gir1.2-gtk-3.0`, and `gir1.2-webkit2-4.1` to
+Debian Recommends, keeping the optional GUI helper out of mandatory storage-mode
+dependencies. Added Python 3 to declared build/CI prerequisites because package
+tests now run installer/helper checks. Two Debian source contracts guard the
+recommendations, default shipping build, target-directory override, helper, and
+Fluent catalog. Updated the dependency guide and requirements; README unchanged.
+
+✅ Extended `scripts/install-dependencies.sh` with GUI import capability checks,
+`--onedrive-auth-helper` and `--skip-onedrive-auth-helper`. Default/`--all` and
+`--onedrive` include the check even if the onedrive engine is already current;
+unrelated selections do not install the GUI stack. Successful imports avoid
+package-manager calls; missing imports install verified Debian/Fedora/Arch
+runtime packages, then recheck. Package-manager failures propagate, and failed
+post-install imports report an actionable error. openSUSE/Gentoo give explicit
+manual variant/USE-flag guidance without guessed package changes. No GTK window,
+authentication, or user-state write is part of the capability probe.
+
+✅ Verified package naming against the official
+[Ubuntu 22.04](https://packages.ubuntu.com/jammy/gir1.2-webkit2-4.1),
+[Ubuntu 24.04](https://packages.ubuntu.com/noble/gir1.2-webkit2-4.1),
+[Fedora](https://packages.fedoraproject.org/pkgs/webkitgtk/webkit2gtk4.1/), and
+[Arch](https://archlinux.org/packages/extra/x86_64/webkit2gtk-4.1/) catalogs.
+This is package-name/API evidence, not cross-distribution installed acceptance.
+The current host passes the GI import probe; an APT simulation resolves the four
+packages without installs/upgrades/removals. No real installer or package-manager
+installation was run.
+
+✅ Nine installer tests use fake package/engine adapters for default/all,
+already-current OneDrive, helper-only/skip/base selections, three package maps,
+existing runtime, post-install/import failure, package-manager failure, manual
+distributions, and stdin help. Tests caught and fixed the source-guard edge case
+for `curl ... | bash`; sourcing remains non-executing for tests. `just test` runs
+installer tests, and Debian builds run them plus the three helper tests.
+Shell syntax, help, strict Clippy, formatting, localization, YAML/Python CI
+dependency, documentation links, and diff checks passed.
+
+✅ Rebuilt the unsigned candidate in `/tmp/cosmic-mounter-deb-helper.roKGLa/`,
+then saved artifacts to `target/local-deb-helper-2026-10-12.5hQiO7/`. Packaging
+passed all 373 nonignored Rust tests plus nine installer and three helper tests.
+The main package's actual Recommends includes all four runtimes, its eight
+payload md5sums pass, helper/catalog match source bytes, and the extracted worker
+safe probe succeeds. Main SHA-256:
+`2e8b8ed3190a2eb559ff5f4d2724cbb6ef4f5f87ba3d2fd39a7bdf61be67b975`.
+Marked the inspection-finding subtask `[x]`; retained the earlier candidate as
+historical evidence rather than overwriting it. Known COSMIC/merged-/usr metadata
+warnings remain unchanged; lintian is unavailable.
+
+⏳ No package was installed/published, no authentication/storage/VPN operation
+was requested, and saved connection checksum is unchanged. Metadata remains
+0.5.2 for this Pop!_OS 24.04 amd64 test candidate. Installed smoke/upgrade/removal,
+six-platform CI, and final 0.5.3 acceptance remain open. Recorded a final Flatpak
+helper-runtime import/handoff check: host packages do not supply sandbox libraries.
+
+### Installed Debian smoke preflight — October 12, 2026
+
+✅ User approved the installed-package smoke check. Preflight found no installed
+Debian Cloud Mounter package or `/usr/bin` binary; command lookup resolves the
+existing user-local native binary instead. Recorded the unchanged saved connection
+checksum before installation. APT simulation selects the candidate package;
+actual installation has not occurred. No autoremove is authorized or required.
+
+⏳ Noninteractive sudo requires a password. The user must run the scoped APT
+installation in their terminal; no password is requested in chat. After it
+completes, verify dpkg status, installed assets and explicit `/usr/bin` worker/UI
+smoke so the user-local executable cannot mask the result. Keep installed smoke,
+upgrade/removal, and final-release gates open until their own receipts exist.
+
+### Targeted failed-upload cache quarantine — October 12, 2026
+
+✅ After the user completed unmounting, verified the BME Assessment mount was
+absent, its rclone process stopped, and its user service inactive/dead. Moved only
+the previously identified recovered/precomment DOCX cache files and their two
+dirty VFS metadata records into the private recovery directory
+`/home/uutzinger/.local/state/cosmic-ext-applet-mounter/cache-quarantine/2026-10-12-bme.OHRuWI/`.
+The pending uploads are intentionally discarded; copies remain recoverable.
+
+✅ Verified all four original cache paths are absent, the two preserved DOCX
+sizes match, and no other dirty metadata entries remain in this mount's cache.
+No cloud deletion, general cache clearing, or mount restart was performed.
+The user must remount before confirming the live pending count clears. This
+cleanup does not diagnose or resolve the separate reported document regressions.
+
+✅ After remount, live read-only RC checks confirmed an empty upload queue,
+zero uploads queued/in progress, zero errored cache files, and no out-of-space
+condition. The two failed pending entries are cleared. This confirms current
+upload-queue health, not whole-library content/version correctness.
+
+### Final native and packaging gate resumed — October 12, 2026
+
+✅ Re-ran final local formatting, locked all-target checking, strict all-feature
+Clippy, localization, all 373 nonignored all-feature Rust tests (including socket
+tests), nine installer and three helper tests. All passed. The two ignored
+coordinator lifecycle integrations passed explicitly with isolated temporary
+configuration/data and a loopback SFTP server, including initialization, ordinary
+two-way work, unique backups, deletion recovery, and ownership-safe retention.
+These exercise the current shared process/coordinator path without production
+remotes or credentials. Earlier accepted SharePoint/native UI receipts are not
+relabelled as freshly repeated tests.
+
+✅ All 22 project/documentation Markdown files' local link targets resolve.
+Removed one trailing space from the user-added future runtime task without
+changing its text or runtime decision; diff checks now pass. Added a completed
+local-checkpoint subtask while leaving the combined hosted/native/package gate
+open. No live storage, VPN, user-service, mount, or production-data operation
+was initiated by these tests.
+
+⏳ The Debian package is still not installed according to dpkg preflight; its
+smoke/upgrade/removal acceptance remains open. Installation approval already
+exists, but noninteractive sudo requires the user's terminal password. Continue
+with the saved unsigned candidate and verify explicit `/usr/bin` execution so
+the user-local installation cannot mask the test. No installation/tag/push/
+workflow dispatch/release publication occurred in this resumed checkpoint.
+
+⏳ Confirmed a release-ordering conflict: `build_release.sh` pushes a `v*` tag,
+whose workflow publishes immediately after Debian builds, while the recorded
+gate requires final Flatpak acceptance before publication. Added a pre-tag
+planning/implementation item to separate source/tag builds from explicitly
+approved publication. Workflow behavior was not changed without resolving that
+decision; do not push the release tag until publication gating is corrected.
+
+### Installed Debian editor smoke — October 12, 2026
+
+✅ User installed the candidate successfully through APT: one new package, no
+upgrades/removals. The `_apt` local-file accessibility notice did not prevent
+installation. dpkg reports 0.5.2 installed; dpkg integrity verification passes.
+Fresh extraction of the saved candidate matches all six installed application
+assets byte-for-byte. The earlier temporary extraction was no longer present;
+verification was repeated from the retained artifact, not stale temporary state.
+Installed helper GI imports and `/usr/bin` restricted worker probe pass without
+authentication/storage work.
+
+✅ Explicit `/usr/bin/cosmic-ext-applet-mounter --settings` opened Add Connection
+(not General Settings); the user confirmed detected remotes appeared. Process
+identity verifies the Debian executable, not the shadowing user-local binary.
+Then opened `/usr/bin/cosmic-ext-applet-mounter --app-settings` for General
+Settings. Its D-Bus Settings owner is the packaged process, while the original
+user-local applet remains the sole Runtime owner. No competing runtime was started.
+
+✅ Configuration checksum remained identical across both installed-window
+launches and remote discovery. It differs from the much earlier package-build
+baseline after intervening user mount/config actions; no claim is made that it
+was unchanged across that entire interval or that installation caused a change.
+No mount/VPN/sync/preferences were modified by this smoke.
+
+⏳ Await the user's General Settings responsiveness/saved-preference/runtime
+receipt. Packaged panel launch and upgrade/removal preservation remain distinct
+acceptance steps; the current runtime owner is still the user-local build.
+
+✅ User confirmed the Debian General Settings window stayed responsive and
+showed expected behavior. The installed editor/General Settings/IPC smoke is
+accepted and its UI subtask marked `[x]`. Actual packaged panel identity and
+upgrade/removal preservation remain open; those are not inferred from editor
+success. Next is a reversible panel launcher switch with the user-local build
+preserved and existing storage services untouched.
+
+### Reversible Debian panel switch — October 12, 2026
+
+✅ User authorized a reversible panel switch. Preserved the exact existing
+user-local desktop launcher in
+`~/.local/state/cosmic-ext-applet-mounter/package-smoke/2026-10-12-panel.YuEmTu/launcher.desktop.before`.
+Staged its sole Exec-line change through apply_patch, then deployed
+`Exec=/usr/bin/cosmic-ext-applet-mounter`, refreshed the desktop database,
+terminated only the verified old user-local applet PID, and reloaded COSMIC panel.
+The user-local executable and installed package assets were not changed.
+
+✅ Verified new panel PID 83283 resolves to `/usr/bin/cosmic-ext-applet-mounter`
+and owns the sole Runtime D-Bus name. Saved configuration checksum is identical
+before/after. The BME Assessment service was already inactive/dead before the
+switch and remains inactive (MainPID zero); no mount service was stopped,
+restarted, or activated by the switch. Earlier expectations that it was still
+active were corrected against the fresh baseline rather than assumed.
+
+⏳ Await the user's popup/connection-state/gear responsiveness receipt before
+accepting actual packaged-panel smoke. The launcher override remains in place
+for this test; rollback is to restore the saved launcher, refresh desktop
+metadata, and reload the panel. Restore it before any future package-removal
+test if returning to the preserved user-local installation. Upgrade/removal,
+hosted matrix, and final 0.5.3/Flatpak release gates remain open.
+
+### Packaged panel popup latency diagnosis — October 12, 2026
+
+⏳ User reports responsive popup content but a 0.5–0.75-second opening delay.
+Kept packaged-panel acceptance open. Source tracing shows `view_popup` builds a
+controller snapshot, which reads Online unit and Offline service/timer status
+synchronously. `systemd_user_status_blocking` spawns a thread and immediately
+joins it, so rendering still waits; each unit establishes its own blocking
+D-Bus connection and performs multiple property requests.
+
+✅ A temporary read-only Rust probe used that exact public status function with
+the current saved unit set: all 13 serial queries succeeded in 382, 315, and
+395 ms across three passes. This establishes a substantial blocking component,
+not a complete click-to-first-frame profile or proof that no rendering/config
+cost contributes. The probe started/stopped no service and requested no cloud,
+mount, sync, or VPN operation. Temporary probe sources are under
+`/tmp/cosmic-mounter-popup-timing.IC2hP8/`; no production implementation was edited.
+
+⏳ Recorded the proposed correction under the panel smoke gate: asynchronous
+bounded cached unit-state observation, no service-status I/O during rendering,
+freshness/unknown-state/operation regression coverage, and rebuilt installed
+panel timing acceptance. This retains D-Bus, not a CLI fallback. The prior fixed
+host-inspection bridge hardening is separate; it did not remove these remaining
+synchronous systemd UI reads. Await implementation direction before changing code.
+
+### Nonblocking popup unit-observation implementation — October 12, 2026
+
+✅ User approved implementation. Popup/controller rendering and pending-count
+UI handlers now read cached Online service and Offline service/timer/warning
+observations, not blocking systemd queries or coordinator files. Added one
+asynchronous D-Bus connection per batch, two-second per-unit/five-second total
+deadlines, cancellation, and a bounded off-UI warning-file worker. Startup
+prefetch, popup opening, visible five-second refresh, and operation/configuration
+reconciliation keep the cache current without closing-popup polling.
+
+✅ Failed/unknown observations retain previous successful state, never fake
+inactive; pending/unavailable UI text and disabled primary controls identify
+untrusted observations. Fifteen-second freshness, exact saved configuration,
+generation and cancellation guards reject obsolete callbacks. Routed/control
+requests wait for a fresh observation and reject changed connection identity
+instead of applying stale intent. Existing backend safety checks and manual
+running-operation overlays remain; synchronous status helpers are retained only
+in off-UI backend/safety/test paths. No command fallback or permission was added.
+
+✅ Added eight cached render/failure/timer/manual-overlay/freshness/generation/
+identity/cancellation/unknown-not-paused tests and three asynchronous budget tests.
+The final Debian package suite passed all 384 nonignored Rust tests; the earlier
+all-feature suite passed 382 before the final timer-overlay-only test addition.
+Strict all-feature Clippy, formatting, locked all-target checking, diff/link
+checks, nine installer and three helper tests pass. Fluent validation reports
+1,296 messages and 1,451 references with no missing/duplicate keys. Requirements
+and the maintained inventory now state the UI-observation contract; README
+and shipping permissions are unchanged.
+
+✅ The same read-only 13-unit probe measured the new asynchronous single-
+connection batch at 241, 208, and 226 ms, compared with earlier 382/315/395 ms
+serial blocking passes. These reads no longer lie on the rendering path. This
+does not certify the installed click-to-first-frame latency; user confirmation
+is still required. No service start/stop or production data action was requested
+by either status probe.
+
+✅ Built an unsigned current-source candidate in
+`/tmp/cosmic-mounter-deb-popup.kjwEvL/` and saved artifacts to
+`target/local-deb-popup-2026-10-12.vc4ich/`. All eight payload checksums,
+helper/catalog byte comparisons and the extracted fixed worker probe pass.
+Main SHA-256:
+`0dd5cfc9d2c43f53e81a1e92d6e644ceb4ceff056dd6c4ced684346442835a36`.
+Build ID is `7bd3d2952ee843c5880855a48f8660140dcac997`. The new candidate retains
+helper runtime recommendations and current 0.5.2 metadata; known packaging
+warnings remain unchanged. No installed package was replaced or panel reloaded
+by this implementation turn.
+
+⏳ Reinstall the new candidate and recheck actual packaged panel opening/steady
+state. The saved configuration's latest checksum differs from the earlier
+panel-switch baseline during intervening user activity; no claim of an unchanged
+whole-session checksum is made. Source edits/probes initiated no configuration,
+storage or VPN changes. Capture a fresh baseline before reinstall/reload.
+Installed lifecycle, six-platform CI, final metadata/tag/publication ordering,
+and final Flatpak gates remain open; progress is saved.
+
+### Updated popup candidate installed and reloaded — October 12, 2026
+
+✅ User reinstalled the updated local candidate successfully over 0.5.2. dpkg
+integrity verification passes and installed build ID matches
+`7bd3d2952ee843c5880855a48f8660140dcac997`. The local-file `_apt` notice did not
+prevent installation. Verified the old runtime still used the deleted prior
+`/usr/bin` image and no stale editor window remained.
+
+✅ Terminated only that verified old Cloud Mounter runtime and reloaded COSMIC
+panel under the previously approved reversible launcher override. New PID 131404
+resolves to `/usr/bin/cosmic-ext-applet-mounter` and owns the sole Runtime bus
+name. Saved configuration checksum is identical before/after reload. The BME
+Assessment service remains inactive/MainPID zero, its fresh pre-reload baseline;
+no mount service was stopped/restarted by this step. The launcher backup remains
+available for rollback to the preserved user-local installation.
+
+⏳ Await updated panel opening-speed and normal popup/gear/slider confirmation.
+Technical reinstall/reload is marked `[x]`; visual timing acceptance stays open.
+No real sync, authentication, VPN, cloud edit, tag, or publication was initiated.
+
+✅ User confirmed that opening is noticeably faster on the updated packaged
+panel. Installed qualitative latency acceptance passes; no exact first-frame
+measurement is claimed. Marked that receipt `[x]`. Normal connection-list/slider/
+gear confirmation remains before closing the overall packaged-panel smoke item.
+
+### Packaged panel behavior accepted — October 12, 2026
+
+✅ User confirmed the updated panel works as expected after confirming noticeably
+faster opening. Connection-list/slider/gear behavior and the installed panel smoke
+are marked `[x]`, along with the popup latency fix. This is qualitative UI
+acceptance, not a new storage/VPN lifecycle test.
+
+⏳ Kept the overall installed package gate open. Finite offline control
+reconciliation on the updated package and installed upgrade/removal preservation
+remain explicit separate acceptance items. No configuration, service, storage,
+credential, installation, or launcher change was made while recording this receipt.
+
+### Installed Debian offline Start/Pause acceptance — October 12, 2026
+
+✅ User saved the approved disposable `Rust Coordinator Initial Test` connection.
+Its generated scheduled worker now resolves to `/usr/bin/cosmic-ext-applet-mounter`
+instead of the preserved user-local executable. Before Start, service and timer
+were inactive/disabled and MainPID was zero.
+
+✅ User started the connection without errors. Read-only unit inspection confirmed
+the timer was active/waiting and enabled; atomic coordinator state recorded
+`resume/succeeded` without warnings. No sync worker was running at observation.
+User then paused it and confirmed the slider turned off and stayed off. Service
+and timer were inactive/dead and disabled, MainPID zero, Result success; atomic
+state recorded `pause/succeeded` without warnings. Installed finite Start/Pause
+reconciliation is marked `[x]`; this does not claim a new file-transfer test.
+
+⏳ Installed upgrade/removal preservation remains next and requires an explicitly
+approved reversible lifecycle test. The disposable mirror is left paused.
+
+### Installed package preservation preflight — October 12, 2026
+
+✅ User approved reversible package removal/reinstallation. Confirmed the rollback
+candidate exists with SHA-256
+`0dd5cfc9d2c43f53e81a1e92d6e644ceb4ceff056dd6c4ced684346442835a36`.
+Package control archive contains only control/md5sums, with no maintainer removal
+scripts. Read-only content/mode fingerprint covers 5,328 files across app
+configuration/authentication, rclone configuration, generated units, app caches
+and state, saved offline mirror/recovery paths, and launcher. Private baseline is
+`/tmp/cloud-mounter-preservation-before-20261012.json`; the comparison helper is
+`/tmp/cloud-mounter-preservation-check.py`. Online mount paths were not traversed.
+
+⏳ No package removal has occurred. Sudo requires an interactive password, so the
+user must run the removal command in a terminal. Use remove, not purge or
+autoremove; inspect preservation before reinstalling the retained candidate.
+
+✅ User completed `apt remove cosmic-ext-applet-mounter` (not purge); dpkg confirms
+the package is absent. Post-removal fingerprint comparison passed: all 5,328
+tracked files retain identical content and modes, with zero added/removed/changed
+files and no root-existence changes. Configuration, authentication, generated
+units, caches, state, and offline mirror/recovery data covered by the baseline
+are preserved. Private result:
+`/tmp/cloud-mounter-preservation-after-remove-20261012.json`.
+
+⏳ Reinstall the retained popup candidate, repeat preservation/integrity checks,
+then reload the installed panel before closing lifecycle acceptance.
+
+✅ User reinstalled the retained popup candidate successfully. The `_apt` local-
+file access notice did not prevent installation. `dpkg -V` passes; installed
+build ID is `7bd3d2952ee843c5880855a48f8660140dcac997`. Post-reinstall fingerprint
+also passes: all 5,328 files are unchanged against the pre-removal baseline,
+including content/modes and root existence. Private result:
+`/tmp/cloud-mounter-preservation-after-reinstall-20261012.json`.
+
+✅ Verified old Runtime PID 131404 still used the deleted prior executable;
+terminated only that instance and reloaded COSMIC panel under the approved
+workflow. New Runtime owner is PID 137244. No storage/VPN action was initiated.
+
+⏳ Await user confirmation of the reinstalled panel's expected connections,
+off-state disposable mirror, and responsive popup/settings before marking
+installed lifecycle acceptance complete.
+
+### Installed candidate lifecycle accepted — October 12, 2026
+
+✅ User confirmed expected behavior after package reinstall and panel reload.
+New Runtime PID 137244 resolves to `/usr/bin/cosmic-ext-applet-mounter`.
+Local Debian candidate inspection, installed editor/panel smoke, offline
+Start/Pause reconciliation, and approved removal/reinstall preservation are
+marked `[x]`. All 5,328 baseline files retained identical contents and modes
+after removal and reinstall; package integrity and build identity passed.
+
+⏳ This accepts the local amd64 current-source candidate with 0.5.2 metadata,
+including same-version replacement, not an actual cross-version release upgrade.
+Six-platform hosted CI, publication-ordering repair, consistent 0.5.3 metadata,
+final versioned artifacts, and accepted-source final Flatpak tests remain open.
+The reversible panel launcher override and user-local rollback build are retained.
+
+### Release build/publication separation and 0.5.3 preparation — October 12, 2026
+
+✅ Tag pushes and ordinary manual Debian dispatches now build only. Publication
+requires a separately requested manual accepted-tag dispatch with
+`publish_after_acceptance=true`; branch publication requests fail. Publication
+waits for all six matrix builds, serializes by tag, verifies matching Cargo/lock/
+Debian/AppStream versions, rejects development AppStream metadata and missing/
+draft notes, and uses reviewed notes plus `--verify-tag`. The release orchestrator
+downloads to `target/artifacts` and explicitly reports no publication.
+
+✅ Prepared Cargo/lock and Debian 0.5.3 metadata, development AppStream entry,
+draft versioned release notes/index, and concise build-guide instructions. Kept
+published README download URLs/historical screenshots and the existing final
+Flatpak v0.5.2 source pin unchanged. No dependency version changed.
+
+✅ Bash syntax, formatting, diff check, three Debian source contracts, and six
+offline fixture preflight tests pass. Actual current-source publication preflight
+correctly rejects development metadata. Tests cover finalized success, invalid
+tag, lock mismatch, development status, and draft/missing notes without network,
+tags, or publication. New tests are wired into native/packaging test recipes.
+
+⏳ Hosted six-platform build/publication paths are not live-tested; acceptance is
+a manual authorization gate, not an automatic claim by CI. Final note/AppStream
+status and immutable candidate-to-final source identity need reconciliation
+before tag creation/final Flatpak acceptance. No installed artifacts, tags,
+commits, remote branches, releases, storage, or VPNs were changed by this turn.
+
+✅ Built the local versioned 0.5.3 candidate from a temporary current-source
+snapshot. First attempt correctly failed because the snapshot omitted `.github`,
+required by the new include_str workflow contract. Added that source directory
+and reran successfully; no product-code repair was needed. Package tests pass:
+385 nonignored Rust and 18 Python checks. Locked all-target compilation, strict
+all-feature Clippy, formatting, localization and workflow YAML parsing pass.
+Known nonfatal COSMIC metadata, missing debug-info and merged-/usr warnings remain.
+
+✅ Saved Debian/debug/buildinfo/changes artifacts and provenance README under
+`target/local-deb-053-2026-10-12.QlFmb9/`. Main SHA-256:
+`4821cc6c176406456b36298dca8a91a78d330ec08998e613c58789a872f9886b`.
+Build ID: `a6d63c5f420db4ca17526b999d1284dc87d6b8e0`.
+All eight extracted payload checksums pass, helper/catalog match source, and
+the fixed synthetic-UUID worker probe succeeds without configuration/engine work.
+No installation or publication occurred. Actual versioned upgrade acceptance
+remains next; prior same-version preservation remains separate evidence.
+
+### Versioned Debian upgrade preflight — October 12, 2026
+
+✅ User approved the actual local 0.5.2-to-0.5.3 upgrade test. Confirmed installed
+version is 0.5.2 and retained candidate is 0.5.3/amd64 with the recorded SHA-256.
+Fresh preservation baseline covers 5,328 files with no absent roots:
+`/tmp/cloud-mounter-upgrade-053-before-20261012.json`. No installation has occurred
+at this preflight; user will run APT in a terminal for password authentication.
+
+✅ User completed the actual 0.5.2-to-0.5.3 APT upgrade. dpkg reports installed
+0.5.3; integrity verification passes and build ID matches
+`a6d63c5f420db4ca17526b999d1284dc87d6b8e0`. The local-file `_apt` notice was
+nonfatal. Post-upgrade preservation comparison passes: all 5,328 files retain
+identical content/modes, with no added/removed files or root-existence changes.
+Private result: `/tmp/cloud-mounter-upgrade-053-after-20261012.json`.
+
+✅ Verified old Runtime PID 137244 used the deleted prior image; stopped only
+that applet and reloaded COSMIC panel through the approved workflow. New Runtime
+owner is PID 147124. No mounting, synchronization, saving, or VPN action was
+initiated. Await user confirmation of expected responsive panel/settings behavior
+before completing the versioned upgrade item.
+
+✅ User confirmed expected behavior after the installed 0.5.3 panel reload.
+New Runtime PID 147124 resolves to `/usr/bin/cosmic-ext-applet-mounter`.
+Actual local amd64 0.5.2-to-0.5.3 upgrade preservation and installed UI smoke
+are accepted and marked `[x]`. Configuration, credentials, units, cache/state,
+and offline mirror/recovery files in the 5,328-file baseline were unchanged by
+the upgrade. This does not close hosted six-platform or final Flatpak acceptance.
+
+### Source/worktree finalization review started — October 12, 2026
+
+✅ Inspected release gates, workflow/publication guard, Cargo/lock/version delta,
+source fixture references and worktree inclusion. Initial scope is 55 changed/
+deleted tracked paths and 28 untracked files. New source/test modules and moved
+guides must be included, not omitted by a tracked-only commit. Filename-based
+private-artifact scan found no matches; this is not a complete secret audit.
+Diff check, release shell syntax and six offline preflight tests pass.
+
+✅ Corrected draft notes that still described the actual native upgrade as
+pending. Created the maintained release-source audit/index entry and recorded
+the proposed immutable candidate/prerelease-to-final sequence, resolving the
+planning conflict without pretending draft metadata can pass final publication.
+
+⏳ User can run the latest all-feature test gate in their terminal and retain the
+output under target to reduce tool/chat overhead. Full source/content/reference
+review and immutable source approval remain open. No commit, stage, tag, push,
+publication, installed-artifact change or storage operation was performed.
+
+✅ User ran `cargo test --locked --all-targets --all-features` in the host terminal
+and reported exit status zero. Reviewed `target/0.5.3-all-features.log`: 385 tests
+passed, zero failed, 12 ignored, with no error/warning lines. Latest all-feature
+source gate is marked `[x]`; ignored integration tests remain separate evidence
+and are not converted to passing status. Source/content/reference review and
+immutable candidate/final approval remain outstanding.
+
+✅ Completed focused content/reference and architectural-boundary review across
+114 existing tracked/nonignored-untracked source files. Signature scan found two
+synthetic test-password literals and no confirmed credentials. Binary contents,
+remote history and unknown secret formats were not certified. Local inline
+Markdown file targets and heading anchors resolve; moved 0.5.0/0.5.1 notes are
+byte-identical to their historical HEAD originals. No external URL availability
+or complete line-by-line/security review is claimed.
+
+✅ Inspected production worker/host-inspection entry points and cfg boundaries
+around legacy CLI test adapters. Required untracked modules/tests/guides remain
+intended source; package/log outputs remain ignored. Retained organization-specific
+test/history context is recorded as a privacy consideration, not silently erased.
+Private report: `/tmp/cloud-mounter-source-review-20261012.json`. No runtime code,
+installed artifacts or storage changed; diff check passes.
+
+⏳ Next: intended staged-diff/source-inclusion review and explicit immutable
+candidate route approval, then separately authorized commit/tag/push. No source
+has been staged or committed by this review.
+
+### Staged source inclusion/candidate comparison — October 12, 2026
+
+✅ User staged the repo. Reviewed staged path status/renames: required new source,
+tests, guides and engineering records are included; no ignored package/cache/log
+artifacts are staged. Compared 88 runtime/build/test/packaging files from the
+index to the tested local 0.5.3 source snapshot: zero byte differences. Before
+review-receipt edits, index and working tree had no unstaged tracked differences.
+
+✅ Cached diff check found three trailing-space Markdown hard-break lines in
+the newly staged host inventory. Replaced them with blank-line separation;
+documentation-only correction does not invalidate native runtime acceptance.
+Staged inclusion/source-consistency item is marked `[x]`, not full code/security
+review or immutable release-source approval.
+
+⏳ Restage the inventory fix and Task List/completion/audit receipts, then run
+`git diff --cached --check`. Commit, candidate route/tag and push still require
+separate approval; none was performed here.

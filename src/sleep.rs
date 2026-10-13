@@ -26,7 +26,7 @@ use crate::services::{
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    Status(String),
+    Status { text: String, needs_attention: bool },
     Wake(Vec<ConnectionId>),
 }
 
@@ -44,7 +44,9 @@ static ONLINE_GATE: LazyLock<Mutex<OnlineGate>> =
 pub fn online_operation_token() -> Result<CancellationToken, String> {
     let gate = ONLINE_GATE.lock().expect("online gate");
     if gate.preparing {
-        Err("Online mounts are paused while preparing for sleep".into())
+        Err(crate::fl!(
+            "ui-sleep-online-mounts-are-paused-while-preparing-for"
+        ))
     } else {
         Ok(gate.cancellation.child_token())
     }
@@ -67,7 +69,9 @@ impl Drop for OnlineOperation {
 pub fn begin_online_operation() -> Result<OnlineOperation, String> {
     let mut gate = ONLINE_GATE.lock().expect("online gate");
     if gate.preparing {
-        return Err("Online mounts are paused while preparing for sleep".into());
+        return Err(crate::fl!(
+            "ui-sleep-online-mounts-are-paused-while-preparing-for"
+        ));
     }
     gate.active_operations += 1;
     Ok(OnlineOperation {
@@ -112,9 +116,13 @@ pub fn subscription() -> Subscription<Event> {
             loop {
                 if let Err(error) = listen(&mut output).await
                     && output
-                        .send(Event::Status(format!(
-                            "Sleep cleanup unavailable: {error}. Retrying…"
-                        )))
+                        .send(Event::Status {
+                            text: crate::fl!(
+                                "ui-sleep-sleep-cleanup-unavailable-error-retrying",
+                                error = (error).to_string()
+                            ),
+                            needs_attention: true,
+                        })
                         .await
                         .is_err()
                 {
@@ -132,8 +140,8 @@ async fn inhibit(proxy: &zbus::Proxy<'_>) -> Result<OwnedFd, String> {
             "Inhibit",
             &(
                 String::from("sleep"),
-                String::from("Cloud Mounter"),
-                String::from("Unmount Online connections before sleep"),
+                crate::fl!("app-title"),
+                crate::fl!("sleep-inhibitor-reason"),
                 String::from("delay"),
             ),
         )
@@ -171,11 +179,14 @@ async fn listen(output: &mut Sender<Event>) -> Result<(), String> {
         awake();
     }
     let mut restore = Vec::new();
-    let _ = output.try_send(Event::Status(if sleeping {
-        "Sleep already in progress; cleanup will be armed after wake".into()
-    } else {
-        "Online mount cleanup before sleep is ready".into()
-    }));
+    let _ = output.try_send(Event::Status {
+        text: if sleeping {
+            crate::fl!("ui-sleep-sleep-already-in-progress-cleanup-will-be")
+        } else {
+            crate::fl!("ui-sleep-online-mount-cleanup-before-sleep-is-ready")
+        },
+        needs_attention: sleeping,
+    });
     while let Some(signal) = signals.next().await {
         let (going_to_sleep,): (bool,) = signal
             .body()
@@ -188,16 +199,17 @@ async fn listen(output: &mut Sender<Event>) -> Result<(), String> {
             sleeping = true;
             preparing();
             let started = Instant::now();
-            let _ = output.try_send(Event::Status(
-                "Preparing for sleep: unmounting Online connections…".into(),
-            ));
+            let _ = output.try_send(Event::Status {
+                text: crate::fl!("ui-sleep-preparing-for-sleep-unmounting-online-connections"),
+                needs_attention: false,
+            });
             // Re-read the host policy for each cycle; reserve time to close the FD.
             let limit = tokio::time::timeout(
                 Duration::from_millis(250),
                 proxy.get_property::<u64>("InhibitDelayMaxUSec"),
             )
             .await
-            .map_err(|_| "could not read sleep delay deadline".to_string())?
+            .map_err(|_| crate::fl!("ui-sleep-could-not-read-sleep-delay-deadline"))?
             .map_err(|error| error.to_string())?;
             let budget = cleanup_budget(Duration::from_micros(limit));
             let config = Config::load_runtime().config;
@@ -213,7 +225,13 @@ async fn listen(output: &mut Sender<Event>) -> Result<(), String> {
                 )
                 .await
             } else {
-                CleanupReport { active: Vec::new(), summary: "Sleep cleanup incomplete: an Online operation did not cancel before the sleep deadline".into() }
+                CleanupReport {
+                    active: Vec::new(),
+                    needs_attention: true,
+                    summary: crate::fl!(
+                        "ui-sleep-sleep-cleanup-incomplete-an-online-operation-did"
+                    ),
+                }
             };
             restore = if config.document.restore_after_wake {
                 report.active
@@ -221,7 +239,10 @@ async fn listen(output: &mut Sender<Event>) -> Result<(), String> {
                 Vec::new()
             };
             inhibitor.take(); // Never hold sleep beyond the finite cleanup window.
-            let _ = output.try_send(Event::Status(report.summary));
+            let _ = output.try_send(Event::Status {
+                text: report.summary,
+                needs_attention: report.needs_attention,
+            });
         } else {
             if !sleeping {
                 continue;
@@ -232,7 +253,7 @@ async fn listen(output: &mut Sender<Event>) -> Result<(), String> {
             let _ = output.try_send(Event::Wake(std::mem::take(&mut restore)));
         }
     }
-    Err("logind signal stream ended".into())
+    Err(crate::fl!("ui-sleep-logind-signal-stream-ended"))
 }
 
 fn cleanup_budget(host_limit: Duration) -> Duration {
@@ -243,6 +264,7 @@ fn cleanup_budget(host_limit: Duration) -> Duration {
 
 #[derive(Debug)]
 pub struct CleanupReport {
+    pub needs_attention: bool,
     pub active: Vec<ConnectionId>,
     pub summary: String,
 }
@@ -265,7 +287,7 @@ async fn host_mounts(runner: &impl CommandRunner) -> Result<Vec<MountEntry>, Str
         .await
         .map_err(|error| error.to_string())?;
     if output.stdout.truncated {
-        return Err("host mount table is truncated".into());
+        return Err(crate::fl!("ui-sleep-host-mount-table-is-truncated"));
     }
     output
         .stdout
@@ -275,6 +297,7 @@ async fn host_mounts(runner: &impl CommandRunner) -> Result<Vec<MountEntry>, Str
         .collect()
 }
 
+#[cfg(test)]
 async fn systemctl(runner: &impl CommandRunner, args: &[String]) -> Result<String, String> {
     let mut request = CommandRequest::new(Executable::Systemctl)
         .arg("--user")
@@ -290,6 +313,12 @@ async fn systemctl(runner: &impl CommandRunner, args: &[String]) -> Result<Strin
 }
 
 async fn active(runner: &impl CommandRunner, unit: &str) -> Result<bool, String> {
+    #[cfg(not(test))]
+    let state = {
+        let _ = runner;
+        crate::services::systemd_user_active_state(unit).await?
+    };
+    #[cfg(test)]
     let state = systemctl(
         runner,
         &[
@@ -303,7 +332,64 @@ async fn active(runner: &impl CommandRunner, unit: &str) -> Result<bool, String>
     match state.trim() {
         "inactive" | "failed" => Ok(false),
         "active" | "activating" | "deactivating" | "reloading" => Ok(true),
-        _ => Err(format!("unknown service state: {}", state.trim())),
+        _ => Err(crate::fl!(
+            "ui-sleep-unknown-service-state-value1",
+            value1 = (state.trim()).to_string()
+        )),
+    }
+}
+
+async fn reload_user_manager(runner: &impl CommandRunner) -> Result<(), String> {
+    #[cfg(not(test))]
+    {
+        let _ = runner;
+        crate::services::systemd_user_reload().await
+    }
+    #[cfg(test)]
+    {
+        systemctl(runner, &["daemon-reload".into()])
+            .await
+            .map(|_| ())
+    }
+}
+
+async fn stop_policy_matches(runner: &impl CommandRunner, unit: &str) -> Result<bool, String> {
+    #[cfg(not(test))]
+    {
+        let _ = runner;
+        let (send_sigkill, timeout_stop_usec, failure_mode, kill_signal) =
+            crate::services::systemd_user_stop_policy(unit).await?;
+        Ok(!send_sigkill
+            && timeout_stop_usec == 2_000_000
+            && failure_mode == "terminate"
+            && kill_signal == 15)
+    }
+    #[cfg(test)]
+    {
+        let policy = systemctl(
+            runner,
+            &[
+                "show".into(),
+                "--property=SendSIGKILL,TimeoutStopUSec,TimeoutStopFailureMode,KillSignal".into(),
+                unit.into(),
+            ],
+        )
+        .await?;
+        Ok(stop_policy_applied(&policy))
+    }
+}
+
+async fn stop_no_wait(runner: &impl CommandRunner, unit: &str) -> Result<(), String> {
+    #[cfg(not(test))]
+    {
+        let _ = runner;
+        crate::services::systemd_user_stop_no_wait(unit).await
+    }
+    #[cfg(test)]
+    {
+        systemctl(runner, &["stop".into(), "--no-block".into(), unit.into()])
+            .await
+            .map(|_| ())
     }
 }
 
@@ -323,7 +409,9 @@ pub async fn cleanup(
                 )
                 .await;
                 let result = result.unwrap_or_else(|_| {
-                    Err("sleep cleanup deadline reached; inspect mount/service after wake".into())
+                    Err(crate::fl!(
+                        "ui-sleep-sleep-cleanup-deadline-reached-inspect-mount-service"
+                    ))
                 });
                 (connection, was_active, result)
             }
@@ -347,17 +435,20 @@ pub async fn cleanup(
         }
     }
     let summary = if failures.is_empty() {
-        format!(
-            "Sleep cleanup: {cleaned} Online connection(s) unmounted. Offline mirrors were untouched. Cached data is preserved; remote upload completion is not guaranteed."
+        crate::fl!(
+            "ui-sleep-sleep-cleanup-cleaned-online-connection-s-unmounted",
+            cleaned = (cleaned).to_string()
         )
     } else {
-        format!(
-            "Sleep cleanup incomplete ({cleaned} unmounted): {}. Caches preserved; no forced or lazy unmount was used.",
-            failures.join("; ")
+        crate::fl!(
+            "ui-sleep-sleep-cleanup-incomplete-cleaned-unmounted-value2-caches",
+            cleaned = (cleaned).to_string(),
+            value2 = (failures.join("; ")).to_string()
         )
     };
     CleanupReport {
         active: restored,
+        needs_attention: !failures.is_empty(),
         summary,
     }
 }
@@ -374,15 +465,19 @@ async fn clean_one(
     if store.state(&unit).map_err(|error| error.to_string())?
         != UnitFileState::Managed(connection.id)
     {
-        return Err("service ownership could not be verified; left untouched".into());
+        return Err(crate::fl!(
+            "ui-sleep-service-ownership-could-not-be-verified-left"
+        ));
     }
-    let root =
-        PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").ok_or("runtime directory unavailable")?)
-            .join("systemd/user");
+    let root = PathBuf::from(
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .ok_or(crate::fl!("ui-sleep-runtime-directory-unavailable"))?,
+    )
+    .join("systemd/user");
     prepare_stop_policy(&root, &unit)?;
     // Reload even if the file already exists: a previous cycle may have
     // exhausted its deadline after writing it but before completing reload.
-    systemctl(runner, &["daemon-reload".into()]).await?;
+    reload_user_manager(runner).await?;
     clean_owned(runner, connection, &unit.file_name(), deadline, was_active).await
 }
 
@@ -404,7 +499,9 @@ async fn clean_owned(
             "fuse.rclone"
         };
         if mount.filesystem != expected {
-            return Err("unexpected filesystem at mountpoint; left untouched".into());
+            return Err(crate::fl!(
+                "ui-sleep-unexpected-filesystem-at-mountpoint-left-untouched"
+            ));
         }
     }
     *was_active = mounted.is_some() || active(runner, unit).await?;
@@ -414,7 +511,8 @@ async fn clean_owned(
     if mounted.is_some() && connection.provider != Provider::OneDrive {
         // Do not infer an empty queue from missing/unrecognized health fields.
         let socket = PathBuf::from(
-            std::env::var_os("XDG_RUNTIME_DIR").ok_or("runtime directory unavailable")?,
+            std::env::var_os("XDG_RUNTIME_DIR")
+                .ok_or(crate::fl!("ui-sleep-runtime-directory-unavailable"))?,
         )
         .join("cosmic-ext-applet-mounter")
         .join(format!("rclone-{}.sock", connection.id));
@@ -429,34 +527,29 @@ async fn clean_owned(
             .await
             .map_err(|error| error.to_string())?;
         if !uploads_idle(&health.stdout.text)? {
-            return Err("pending uploads; mount left active".into());
+            return Err(crate::fl!("ui-sleep-pending-uploads-mount-left-active"));
         }
     }
     // Stop jobs outlive their systemctl client. Verify the effective unit
     // settings before enqueueing a stop; other user drop-ins may override ours.
     if deadline.saturating_duration_since(Instant::now()) < Duration::from_millis(2500) {
-        return Err("insufficient sleep delay for a clean stop".into());
+        return Err(crate::fl!(
+            "ui-sleep-insufficient-sleep-delay-for-a-clean-stop"
+        ));
     }
-    let policy = systemctl(
-        runner,
-        &[
-            "show".into(),
-            "--property=SendSIGKILL,TimeoutStopUSec,TimeoutStopFailureMode,KillSignal".into(),
-            unit.into(),
-        ],
-    )
-    .await?;
-    if !stop_policy_applied(&policy) {
-        return Err("nonforcing sleep stop policy was not applied; mount left active".into());
+    if !stop_policy_matches(runner, unit).await? {
+        return Err(crate::fl!(
+            "ui-sleep-nonforcing-sleep-stop-policy-was-not-applied"
+        ));
     }
     if mounted.is_some() && connection.provider == Provider::OneDrive {
         // onedriver exits if SIGTERM cannot cleanly detach a busy FUSE mount.
         // Detach first so a busy mount keeps its service alive across sleep.
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining < Duration::from_millis(2500) {
-            return Err(
-                "insufficient sleep delay for a clean OneDrive unmount; mount left active".into(),
-            );
+            return Err(crate::fl!(
+                "ui-sleep-insufficient-sleep-delay-for-a-clean-onedrive"
+            ));
         }
         let request = clean_unmount_request(&connection.local_path)
             .map_err(|error| error.to_string())?
@@ -473,18 +566,21 @@ async fn clean_owned(
         if still_mounted {
             return Err(match detach {
                 Err(error) => {
-                    format!("OneDrive mount is busy ({error}); service left running for wake")
+                    crate::fl!(
+                        "ui-sleep-onedrive-mount-is-busy-error-service-left",
+                        error = (error).to_string()
+                    )
                 }
-                Ok(_) => "OneDrive mount did not detach; service left running for wake".into(),
+                Ok(_) => crate::fl!("ui-sleep-onedrive-mount-did-not-detach-service-left"),
             });
         }
     }
     if deadline.saturating_duration_since(Instant::now()) < Duration::from_millis(500) {
-        return Err(
-            "sleep cleanup deadline reached after detaching; inspect service after wake".into(),
-        );
+        return Err(crate::fl!(
+            "ui-sleep-sleep-cleanup-deadline-reached-after-detaching-inspect"
+        ));
     }
-    systemctl(runner, &["stop".into(), "--no-block".into(), unit.into()]).await?;
+    stop_no_wait(runner, unit).await?;
     loop {
         let still_active = active(runner, unit).await?;
         let mounts = host_mounts(runner).await?;
@@ -516,7 +612,11 @@ fn prepare_stop_policy(root: &std::path::Path, unit: &UnitName) -> Result<bool, 
     let path = directory.join("90-cosmic-mounter-sleep.conf");
     match std::fs::read_to_string(&path) {
         Ok(existing) if existing == STOP_POLICY => return Ok(false),
-        Ok(_) => return Err("sleep stop policy file was modified; left untouched".into()),
+        Ok(_) => {
+            return Err(crate::fl!(
+                "ui-sleep-sleep-stop-policy-file-was-modified-left"
+            ));
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.to_string()),
     }
@@ -538,6 +638,7 @@ fn prepare_stop_policy(root: &std::path::Path, unit: &UnitName) -> Result<bool, 
         .map_err(|error: std::io::Error| error.to_string())
 }
 
+#[cfg(test)]
 fn stop_policy_applied(text: &str) -> bool {
     [
         "SendSIGKILL=no",
@@ -551,17 +652,21 @@ fn stop_policy_applied(text: &str) -> bool {
 
 fn uploads_idle(text: &str) -> Result<bool, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
-    let disk = value
-        .get("diskCache")
-        .ok_or("upload status unavailable; mount left active")?;
+    let disk = value.get("diskCache").ok_or(crate::fl!(
+        "ui-sleep-upload-status-unavailable-mount-left-active"
+    ))?;
     let queued = disk
         .get("uploadsQueued")
         .and_then(serde_json::Value::as_u64)
-        .ok_or("upload queue unknown; mount left active")?;
+        .ok_or(crate::fl!(
+            "ui-sleep-upload-queue-unknown-mount-left-active"
+        ))?;
     let active = disk
         .get("uploadsInProgress")
         .and_then(serde_json::Value::as_u64)
-        .ok_or("active uploads unknown; mount left active")?;
+        .ok_or(crate::fl!(
+            "ui-sleep-active-uploads-unknown-mount-left-active"
+        ))?;
     Ok(queued == 0 && active == 0)
 }
 

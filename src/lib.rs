@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: MIT
 
+pub mod bisync_coordinator;
+pub mod bisync_worker;
 pub mod config;
 pub mod controller;
 pub mod diagnostics;
 pub mod directory_preload;
+pub mod host_inspection;
 pub mod i18n;
 pub mod import;
 pub mod mirror_script;
 pub mod model;
 pub mod mount_guard;
 pub mod mounts;
+pub mod offline_coordinator;
 pub mod pending_count;
 pub mod preload_report;
 pub mod process;

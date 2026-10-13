@@ -15,329 +15,7 @@ release-candidate checks and user approval.
 This list implements `Requirements and Specifications.md`. The approved source
 description is `Applet Description.md`.
 
-## GitHub Debian release automation
-
-**Feasibility verified October 7, 2026.** GitHub-hosted native amd64 and arm64
-runners are available for Ubuntu 22.04, 24.04, and 26.04. A COSMIC desktop
-session is not required to compile or package the applet; Rust, libcosmic's
-native development headers, and Debian packaging tools are sufficient. Ubuntu
-22.04 runners entered deprecation on September 17, 2026 and are scheduled for
-retirement on April 17, 2027.
-
-### Chronological implementation and cloud validation
-
-- [x] Add a six-entry GitHub Actions matrix for Ubuntu 22.04, 24.04, and 26.04
-  on native amd64 and arm64 GitHub-hosted runners.
-- [x] Install the pinned Rust 1.95.0 toolchain, libcosmic build headers, and
-  Debian packaging tools on each runner.
-- [x] Run the package's existing Debian build and test path with
-  `dpkg-buildpackage -us -uc -b`.
-- [x] Inspect the resulting package architecture, add the Ubuntu version to
-  release filenames, generate SHA-256 checksums, and retain workflow artifacts.
-- [x] On `v*` tags, create a GitHub release only after every matrix build passes
-  and upload all packages plus a combined `SHA256SUMS` file.
-- [x] Add a local workflow trigger/download helper and a release script that
-  validates versions, a clean/pushed commit, and tag uniqueness before pushing
-  the release tag.
-- [x] Commit and push the initial workflow to the default branch.
-- [x] In GitHub **Settings > Actions > General**, confirm GitHub Actions and
-  GitHub-maintained actions are allowed for the repository.
-- [x] Confirm the repository workflow-permission setting permits the tagged
-  release job's requested `contents: write` access.
-- [x] Start the first manual **Build Debian packages** run and confirm all six
-  Ubuntu/architecture jobs are admitted by the runner policy.
-- [x] Diagnose the first six-job cloud run: every job stopped at
-  `dpkg-checkbuilddeps` because the runner did not install the declared
-  `cargo`, `rustc`, `desktop-file-utils`, and `appstream` build dependencies.
-- [x] Add all four declared packages to the workflow installation step. The
-  apt Rust packages satisfy Debian dependency checking; the subsequent rustup
-  step still selects the project's pinned Rust 1.95.0 toolchain for the build.
-- [x] Rerun **Build Debian packages**; all six jobs passed dependency checking
-  and reached the same test-compilation failure described next.
-- [x] Diagnose the second six-job run: test compilation referenced ignored
-  local files under `archive/services`, which do not exist in a clean checkout.
-- [x] Replace the local archive dependency with neutral, tracked legacy-service
-  fixtures under `tests/fixtures/legacy-services`; remove account-specific
-  names and paths while retaining Box, SMB, and Google Drive import coverage.
-- [x] Pass formatting, diff checks, and all 12 focused import tests with the
-  tracked fixtures (180 other tests filtered by the focused invocation).
-- [x] Commit and push the tracked fixtures and import-test changes.
-- [x] Complete the third **Build Debian packages** run successfully on all six
-  Ubuntu/architecture jobs after adding the tracked fixtures.
-- [x] Download the Ubuntu 24.04 amd64 artifact from successful run
-  `37642473346`; verify its SHA-256 checksum, package/version/architecture,
-  runtime dependency metadata, and installed-file layout.
-- [x] Back up Cloud Mounter configuration, rclone configuration, generated
-  services, and local installation files before package testing.
-- [x] Install the Ubuntu 24.04 amd64 package on Pop!_OS 24.04 and confirm the
-  packaged `/usr/bin/cosmic-ext-applet-mounter` replaces the parked user-local
-  executable during the test.
-- [x] Live-test the packaged applet UI, preserved connections, General
-  Settings, and OneDrive mount, unmount, and remount behavior.
-- [x] Review the live journal: no applet crash, panic, failed service exit, or
-  mount failure occurred. onedriver continued successfully after its optional
-  missing-config warning and one unsupported FUSE `STATX` request.
-- [x] Unmount all test connections, remove the Debian package without purging
-  user data, restore both parked user-local executables, and confirm command
-  resolution returned to `~/.local/bin` with no Cloud Mounter mounts left.
-- [x] Re-authenticate GitHub CLI and use it successfully to enumerate run
-  `37642473346`, list all six artifacts, and download the 24.04 amd64 package.
-- [x] Complete structural validation for all six packages in the workflow;
-  each matrix job checked the package architecture and metadata and generated
-  a matching SHA-256 checksum. Live installation was completed on the available
-  Pop!_OS 24.04 amd64 COSMIC system; other OS/architecture live checks require
-  matching external systems and are not part of this release gate.
-
-### Remaining for the next release
-
-- [x] Commit and push `.gitignore`, `scripts/build_release.sh`,
-  `scripts/run_github_linux_build.sh`, and this final task-list update.
-- [x] Confirm current release metadata agrees at version 0.5.1 in
-  `Cargo.toml`, the root package in `Cargo.lock`, `debian/changelog`, AppStream
-  releases and screenshot URLs, README download commands, the Flatpak source
-  tag and packaging guide, local tag `v0.5.1`, and the published GitHub release.
-- [x] Prepare version 0.5.2 and update Cargo, Debian, AppStream, README,
-  Flatpak, and release-note metadata together.
-- [x] Push the version 0.5.2 release commit, pass
-  `scripts/build_release.sh --dry-run`, then run `scripts/build_release.sh` to
-  tag and build release `v0.5.2`. All six jobs in run `37649661706` passed and
-  the downloaded packages were verified as version 0.5.2 with the expected
-  architectures. Recovered the failed final publish step by giving GitHub CLI
-  explicit repository context, then published the six packages and combined
-  `SHA256SUMS` file to the `v0.5.2` GitHub release.
-- [ ] Update GitHub actions that still target the deprecated Node.js 20 runtime;
-  GitHub currently forces `actions/checkout@v4` and
-  `actions/upload-artifact@v4` to run on Node.js 24.
-- [ ] Remove the Ubuntu 22.04 matrix entries no later than GitHub's scheduled
-  runner retirement on April 17, 2027.
-
-## Release 0.4.6
-
-- [x] Align Cargo, Debian, AppStream, README installation examples,
-  screenshots, and the Flatpak source tag with version 0.4.6.
-- [x] Run formatting, compilation, all-target/all-feature Clippy with warnings
-  denied, the complete 194-test suite, metadata checks, and diff validation.
-- [x] Build and inspect the amd64 Debian installation asset and prepare its
-  SHA256SUMS file.
-- [x] Record the final release scope and validation in Task List Completion
-  Notes.
-- User authorized commit, push, tag and GitHub release publication for
-  `v0.4.6` with the installation asset.
-
-## Online directory-cache optimization and Google OAuth client work
-
-**Planning recorded September 15–16, 2026. The OAuth client, Google Drive
-refresh-level fast-list, asynchronous Google Drive VFS refresh, and bounded
-OneDrive directory preload are implemented. Live Box and SMB prototypes reject
-recursive VFS refresh and approve bounded directory walks for implementation.**
-
-### Approved Google Drive and OneDrive work
-
-- [x] Add matching Google Drive custom OAuth client ID and client-secret fields
-  to the rclone remote create/update workflow. Keep both values out of applet
-  configuration, redact them from command/error output, clear the fields after
-  use, and preserve existing remotes unless the user explicitly updates one.
-  Existing-remote update repeats browser OAuth and advises remounting active
-  connections.
-- [x] Enable fast-list on Google Drive recursive VFS refresh requests and add
-  tests proving mount commands do not receive rclone's ignored `--fast-list`
-  argument. Regenerate the applet-owned unit before starting a mount so existing
-  saved Google Drive connections receive the private RC endpoint after an
-  unmount/remount.
-- [x] Measure whole-remote recursive directory-list latency and peak memory on
-  the configured `ua_gdrive:` remote. Five trials per mode returned identical
-  510-directory results; `--fast-list` showed no meaningful latency or memory
-  improvement under the measured conditions.
-- [x] After Google Drive mount and RC-socket readiness, run recursive
-  `vfs/refresh` as an asynchronous RC job. Retain its job ID and track its
-  connection and completion state.
-- [x] After onedriver mount readiness, run a directory-only background traversal
-  that neither opens file contents nor follows links outside the mount.
-- [x] Add an app-wide OneDrive preload-time setting to General Settings. Default
-  to 60 seconds, validate finite bounds, stop automatically at the deadline,
-  and provide no manual Cancel control.
-- [x] Use the existing notice path to report OneDrive preload
-  completion or timeout without adding persistent notification machinery.
-- [x] Cancel and finish a tracked Google Drive refresh before manual unmount,
-  connection removal, repair, and sleep cleanup. Keep cancellation and detach
-  bounded.
-- [x] Cancel and finish tracked OneDrive preload work before manual unmount,
-  connection removal, repair, and sleep cleanup. Keep cancellation and detach
-  bounded.
-- [x] Add unit/integration coverage for provider selection, command construction,
-  background lifecycle, timeout, cancellation, setting defaults, and bounds.
-Further Google Drive and cloud cold-cache trials are tracked under Deferred
-validation after the SFTP native release.
-
-### Approved provider preload settings and remaining implementation
-
-- [x] Fix clean-unmount completion for all Online providers. Do not prepare a
-  mountpoint during unmount; verify mount-table disappearance after service
-  stop; classify an inactive/failed service with a lingering FUSE entry as
-  Error so the confirmed Repair flow is offered; and skip `reset-failed` when
-  the service is already inactive with a successful result.
-
-- [x] Test Box recursive `vfs/refresh` without fast-list. Reject it after the UA
-  Box prototype reached HTTP 429 `rate_limit_exceeded` and retained little useful
-  metadata.
-- [x] Test an SMB recursive VFS refresh through Cisco VPN. Reject it because the
-  60-second cancellation did not promptly stop backend work and partial cache
-  progress was not retained.
-- [x] Test bounded directory walks. Approve Box depth 2 after a 16.67-second cold
-  and 0.05-second warm traversal cached 212 directories without a new 429.
-  Approve SMB depth 3 after a 15.84-second cold and 0.10-second warm traversal
-  cached 491 directories with no file-content reads.
-- [x] Replace the single OneDrive preload control with a General Settings
-  **Preload** section. Add enabled and 5-to-600-second maximum controls for all
-  providers; add depth 2 for Box and depth 3 for SMB. Default all providers to
-  enabled and 60 seconds.
-- [x] Migrate the existing OneDrive duration into the new provider-policy model
-  and initialize missing Google Drive, Box, and SMB values safely.
-- [x] Add SMB per-connection **Use global preload settings**, enabled by default,
-  with independent enabled, duration, and depth overrides.
-- [x] Implement mount/root readiness and tracked directory-only walks for Box
-  and SMB. Preserve incremental progress on timeout and cancel before unmount,
-  repair, removal, and sleep.
-- [x] Harden Google RC completion parsing so any non-`OK` `output.result` value
-  is a failure even when rclone returns top-level `success: true`. Enforce the
-  configured Google maximum.
-- [x] Add configuration, migration, IPC, UI, command-boundary, timeout,
-  cancellation, nested-RC-error, and effective-SMB-policy tests.
-The remaining UA Box, narrowed `ua_engr:Research/Utzinger` SMB, and LAN/home
-SMB live checks are tracked under Deferred validation.
-
-## Rclone mount access gate and multi-panel runtime fix (after 0.4.5)
-
-- [x] Diagnose UA Box `Input/output error` from the managed-service journal:
-  Box rejected the expired OAuth refresh token with `invalid_grant`.
-- [x] Reauthorize `ua_box` and verify read-only root access.
-- [x] Require a bounded remote/subtree listing before every applet-requested
-  rclone Online mount, including wake restoration; do not start FUSE when the
-  provider, credentials, network, or subtree is unavailable.
-- [x] Treat additional Cloud Mounter panel instances as clients of the existing
-  runtime owner instead of showing a false Settings communication warning.
-- [x] Pass formatting/diff checks and all 178 tests; install the repaired binary.
-- [x] Live-verify Box listing, healthy VFS state, clean unmount, and a responsive
-  empty mountpoint after unmount.
-
-## Settings background-poll UI fix (after 0.4.5)
-
-- [x] Keep Refresh and sleep toggles visually stable during background polling.
-- [x] Discard obsolete poll replies when a newer user action has started.
-- [x] Verify background polling, reply ordering and stale error handling with
-  regression tests; update design and completion documentation.
-The installed desktop button-stability check is tracked under Deferred
-validation.
-
-## Release 0.4.5
-
-- [x] Align design documentation and README with the final Settings/popup layout.
-- [x] Bump Cargo, Debian, AppStream, README examples and Flatpak tag to 0.4.5.
-- [x] Pass release-build validation and all 174 tests; inspect the amd64 Debian
-  package and prepare its SHA256SUMS for publication.
-- User authorized commit, push and publication of tag/release `v0.4.5`.
-
-## Compact Popup and General Settings Window
-
-**September 15, 2026 — implemented and locally tested; desktop/Flatpak live checks pending.**
-This revision supersedes previous popup placement of Add Connection, Refresh
-and sleep toggles. Earlier completed layout tasks remain historical evidence.
-
-- [x] Inspect title/button APIs, icon availability, separate-window architecture,
-  shared notices, Refresh behavior and runtime ownership.
-- [x] Update Applet Description, requirements, Tooltip Review and Completion
-  Notes; incorporate the preceding rclone remote-name help correction.
-- [x] Add right-aligned Settings gear with keyboard/accessible label, tooltip and
-  bundled icon independent of the installed icon theme. Keep title/status/connections and meaningful runtime notices.
-- [x] Add/focus one standalone General Settings window with a distinct launch
-  mode/title; retain existing connection-editor launch arguments and behavior.
-- [x] Implement runtime-owner IPC for settings, Refresh, current sleep status
-  and saved connection changes; review native/Flatpak service-name permissions.
-- [x] Move sleep toggles into General Settings; keep Restore visible but disabled
-  when Unmount when sleep is off. Persist through the applet owner without
-  duplicating its listener or changing Online-only cleanup semantics.
-- [x] Move Add Connection and Refresh to the top of General Settings, above
-  the sleep options. Refresh must reach
-  the actual applet; successful editor saves must refresh its connection list.
-- [x] Separate settings-action notices from popup runtime notices. Preserve
-  mount/unmount/repair errors and sleep warnings when settings is closed, and
-  keep provider/authentication/test/save feedback in the connection editor.
-- [x] Remove toolbar/footer and their popup height reservation. Update empty
-  state to direct users to Settings > Add Connection.
-- [x] Make rclone help context-sensitive: new-name/Create guidance in Add;
-  existing-name guidance in Modify where creation buttons are hidden.
-- [x] Test routing, owner-unavailable errors, persistent setting acknowledgments,
-  refresh completion, notice preservation and one-listener lifecycle.
-- [x] Match General Settings to the themed list surface; put button notices
-  below the top actions and plain sleep feedback below the Online-only sentence.
-  Remove the extra Offline sentence and separate cleanup-status heading/box.
-- [x] Align the title left and Settings gear right; replace the status/list
-  background gap with a thin divider on a continuous themed surface.
-Broader native/Flatpak window and editor visual checks are tracked under
-Deferred validation.
-
-## Rclone Remote Name Help Clarification
-
-**September 15, 2026 — source and documentation updated.**
-
-- [x] Explain entering a new remote name before creation in the Google Drive,
-  Box, and SMB field tooltips; retain detected/existing remote guidance.
-- [x] Identify provider-specific Create buttons and SMB Create/Update behavior.
-- [x] Update Applet Description, FR-011MA, Tooltip Review and Completion Notes.
-- [x] Review the three strings against creation code and run formatting/diff
-  checks. This text-only change does not alter provider behavior.
-
-## VPN Authentication Wait and Sleep Cleanup
-
-**Requested September 14, 2026. Status: A/B runtime implemented locally;
-live acceptance and additional VPN UI work remain open.**
-Requirements: FR-086 through FR-087A (A), FR-097 through FR-102 (B).
-
-- [x] Update Applet Description, Requirements and Specifications, and Completion
-  Notes; constrain sleep cleanup to Online connections only.
-- [x] A: Fix the Cisco GUI lifecycle without increasing the 90-second default.
-  Preserve launch behavior through the Flatpak host runner; report spawn errors.
-- [x] A: Preserve customized VPN timeouts/readiness checks on detection.
-- [x] A: Bound activation and full readiness by one deadline, retry transient
-  probe failures, serialize shared-profile activation and cancel Online starts
-  for sleep. Recheck connection changes after authentication.
-- [x] A: Test interactive child survival past its command timeout, Flatpak launch
-  wrapping, transient readiness failure and hung-probe deadline handling.
-- [ ] A: Add dedicated waiting/progress, Cancel and Retry UI (existing mount
-  control remains the retry action). Add explicit authentication-rejection UI.
-The live NetworkManager/Cisco authentication workflow is tracked under
-Deferred validation.
-- [x] B: Add persistent, default-off sleep cleanup toggle below the main popup
-  connection list and optional wake restoration beneath it.
-- [x] B: Implement logind listener/delay inhibitor independent of popup visibility,
-  finite cleanup budget, inhibitor reacquisition and visible degraded status.
-- [x] B: Select Online connections only, verify unit/filesystem ownership, cancel
-  Online operations and wait for them to leave before cleanup. Leave Offline
-  mirrors, sync jobs and shared VPNs untouched.
-- [x] B: Use nonforcing runtime service drop-ins, verify loaded stop policy, check
-  rclone upload queues, and verify host mount disappearance without traversal.
-- [x] B: Restore successfully cleaned connections only when explicitly enabled,
-  after network/VPN checks; preserve login policy and report incomplete cleanup.
-- [x] B: Test Online-only selection, mirror-only no-op, repeated sleep gate,
-  old-operation invalidation, deadlines, queue-state parsing, foreign mounts,
-  runtime drop-in ownership and effective stop-policy checks.
-The broader logind fault-cycle checks and OneDrive sleep-hang investigation
-are tracked under Deferred validation. The next native SFTP release gate
-includes one normal SFTP sleep/wake cycle.
-- [x] Final local formatting, all-target checks, warning-free Clippy, all 167
-  tests and debug build passed; results are recorded in Completion Notes.
-
-## Codex Working Rules
-
-- [x] Work one phase at a time and keep this list current.
-- [x] Inspect current files and preserve unrelated user changes.
-- [x] Use small, reviewable patches.
-- [x] Never place real credentials, tokens, or organization-specific secrets in
-  source or fixtures.
-- [x] Use temporary directories and fake adapters for automated tests.
-- [x] Run each phase's verification before reporting completion.
-- [x] Report changed files, tests, failures, and remaining risks.
-- [x] Stop at each approval gate and wait for explicit approval.
+Repository-wide working guidance is maintained in [AGENTS.md](AGENTS.md).
 
 ## Gate 0: Review and Approval
 
@@ -596,7 +274,56 @@ includes one normal SFTP sleep/wake cycle.
 - [x] Check keyboard-only operation.
 - [x] Check that every state is understandable without color.
 
-### Phase 9 UI/settings addendum
+## Historical Gate 1: Isolated Release Candidate (Superseded)
+
+- [x] All formatting, lint, unit, integration, and snapshot tests pass.
+- [x] No test has touched real services, mounts, VPNs, credentials, or cloud data.
+- [x] Review generated units, timers, logs, and fixtures for secret leakage.
+- [x] Review sync deletion, conflict, and recovery behavior for data-loss risks.
+- [x] Review detach and VPN policies against the approved specification.
+- [x] Obtain user approval for controlled real-system testing.
+
+## Historical Phase 10: Controlled Manual Testing Evidence (Superseded)
+
+- [x] Verify dependency detection and outdated-version guidance.
+- [x] Test a disposable rclone Online mount.
+- [x] Test safe connectivity-loss detach and automatic remount.
+- [x] Test pending-write protection during connectivity loss.
+- [x] Test `jstaf/onedriver` Online mount.
+- [x] Test `jstaf/onedriver` offline cached read-only behavior.
+- [x] Test a local-to-local rclone bisync mirror.
+- [x] Test one approved Google Drive or Box Offline mirror.
+- [x] Test offline editing followed by reconnect synchronization.
+- [x] Test conflict preservation, deletion propagation, and recovery.
+- [x] Test metered pause and Sync Now.
+- [x] Test `abraunegg/onedrive` with a non-critical account or subtree.
+- [x] Test NetworkManager VPN readiness.
+- [x] Test Cisco interactive authentication when installed.
+- [x] Test import preview from the real user service folder.
+- [x] Test confirmed import from the real user service folder.
+- [x] Verify removal preserves credentials, data, cache, recovery, and originals.
+
+## Historical Phase 11: Documentation and Packaging (Superseded)
+
+- [x] Document installation and current-version requirements for every engine.
+- [x] Document the Online mount versus Offline mirror tradeoff.
+- [x] Document synchronization conflicts, deletions, recovery, and backup limits.
+- [x] Document authentication and VPN behavior.
+- [x] Document generated files, legacy imports, and uninstall behavior.
+- [x] Add MIT license and author attribution.
+- [x] Finalize desktop entry, metainfo, and icon.
+- [x] Test staged installation and uninstallation.
+- [x] Prepare release notes and known limitations.
+
+## Historical Gate 2: Version 0.1 Completion (Superseded)
+
+- [x] Every acceptance criterion is demonstrated.
+- [x] Required automated and approved manual tests pass.
+- [x] No unresolved high-severity security, data-loss, or privilege issue remains.
+- [x] Known limitations are documented.
+- [x] User approves the release candidate.
+
+## Phase 9 UI/settings addendum
 
 - [x] Add a popup Settings control that opens the settings window.
 - [x] Add an empty-state Add connection control that opens settings in
@@ -1049,15 +776,6 @@ includes one normal SFTP sleep/wake cycle.
       the native-client redirect automatically. If it fails, verify that manual
       paste fallback remains usable.
 
-## Historical Gate 1: Isolated Release Candidate (Superseded)
-
-- [x] All formatting, lint, unit, integration, and snapshot tests pass.
-- [x] No test has touched real services, mounts, VPNs, credentials, or cloud data.
-- [x] Review generated units, timers, logs, and fixtures for secret leakage.
-- [x] Review sync deletion, conflict, and recovery behavior for data-loss risks.
-- [x] Review detach and VPN policies against the approved specification.
-- [x] Obtain user approval for controlled real-system testing.
-
 ## Current Gate 1 Recheck: Integrated Release Candidate
 
 - [x] Current formatting, lint, unit, integration, and snapshot tests pass.
@@ -1070,26 +788,6 @@ includes one normal SFTP sleep/wake cycle.
 - [x] Review detach, background sync readiness/metered policy, and VPN policies
   against the current specification.
 - [x] Obtain user approval for current controlled integrated manual testing.
-
-## Historical Phase 10: Controlled Manual Testing Evidence (Superseded)
-
-- [x] Verify dependency detection and outdated-version guidance.
-- [x] Test a disposable rclone Online mount.
-- [x] Test safe connectivity-loss detach and automatic remount.
-- [x] Test pending-write protection during connectivity loss.
-- [x] Test `jstaf/onedriver` Online mount.
-- [x] Test `jstaf/onedriver` offline cached read-only behavior.
-- [x] Test a local-to-local rclone bisync mirror.
-- [x] Test one approved Google Drive or Box Offline mirror.
-- [x] Test offline editing followed by reconnect synchronization.
-- [x] Test conflict preservation, deletion propagation, and recovery.
-- [x] Test metered pause and Sync Now.
-- [x] Test `abraunegg/onedrive` with a non-critical account or subtree.
-- [x] Test NetworkManager VPN readiness.
-- [x] Test Cisco interactive authentication when installed.
-- [x] Test import preview from the real user service folder.
-- [x] Test confirmed import from the real user service folder.
-- [x] Verify removal preserves credentials, data, cache, recovery, and originals.
 
 ## Current Phase 10: Integrated Manual Testing Recheck
 
@@ -1126,18 +824,6 @@ includes one normal SFTP sleep/wake cycle.
 - [x] Verify disposable local/remote test data and generated units/timers are
   either intentionally retained for inspection or cleaned up.
 
-## Historical Phase 11: Documentation and Packaging (Superseded)
-
-- [x] Document installation and current-version requirements for every engine.
-- [x] Document the Online mount versus Offline mirror tradeoff.
-- [x] Document synchronization conflicts, deletions, recovery, and backup limits.
-- [x] Document authentication and VPN behavior.
-- [x] Document generated files, legacy imports, and uninstall behavior.
-- [x] Add MIT license and author attribution.
-- [x] Finalize desktop entry, metainfo, and icon.
-- [x] Test staged installation and uninstallation.
-- [x] Prepare release notes and known limitations.
-
 ## Current Phase 11: Documentation and Packaging Recheck
 
 - [x] Update README for the current popup layout, Add/Modify workflow,
@@ -1153,14 +839,6 @@ includes one normal SFTP sleep/wake cycle.
 - [x] Re-test staged install/uninstall on current artifacts.
 - [x] Prepare final user-facing cleanup instructions for disposable verification
   connections, remotes, services, timers, mirrors, caches, and recovery paths.
-
-## Historical Gate 2: Version 0.1 Completion (Superseded)
-
-- [x] Every acceptance criterion is demonstrated.
-- [x] Required automated and approved manual tests pass.
-- [x] No unresolved high-severity security, data-loss, or privilege issue remains.
-- [x] Known limitations are documented.
-- [x] User approves the release candidate.
 
 ## Current Gate 2: Version 0.1 Release Candidate
 
@@ -1464,9 +1142,11 @@ makes the applet available to users who have enabled the COSMIC Flatpak remote.
   services, or requires unjustified unrestricted host access.
 - [x] Record the selected architecture and its security tradeoffs in
   `Requirements and Specifications.md` before implementing packaging changes.
-- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance before
-  submission if this applet requires broader host access than accepted applets
-  such as `dev.cappsy.CosmicExtAppletDrives`.
+- [x] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance before
+  submission. System76 engineer and Pop!_OS/COSMIC maintainer Michael Murphy
+  advised using D-Bus APIs wherever available and warned that spawning host
+  commands receives additional review scrutiny. He recommended `nmrs` for
+  NetworkManager integration.
 
 ### Flatpak Build Inputs
 
@@ -1785,6 +1465,222 @@ validation; it follows repository merge and publication.
 - [Flathub submission documentation](https://docs.flathub.org/docs/for-app-authors/submission)
 
 
+## VPN Authentication Wait and Sleep Cleanup
+
+**Requested September 14, 2026. Status: A/B runtime implemented locally;
+live acceptance and additional VPN UI work remain open.**
+Requirements: FR-086 through FR-087A (A), FR-097 through FR-102 (B).
+
+- [x] Update Applet Description, Requirements and Specifications, and Completion
+  Notes; constrain sleep cleanup to Online connections only.
+- [x] A: Fix the Cisco GUI lifecycle without increasing the 90-second default.
+  Preserve launch behavior through the Flatpak host runner; report spawn errors.
+- [x] A: Preserve customized VPN timeouts/readiness checks on detection.
+- [x] A: Bound activation and full readiness by one deadline, retry transient
+  probe failures, serialize shared-profile activation and cancel Online starts
+  for sleep. Recheck connection changes after authentication.
+- [x] A: Test interactive child survival past its command timeout, Flatpak launch
+  wrapping, transient readiness failure and hung-probe deadline handling.
+- [ ] A: Add dedicated waiting/progress, Cancel and Retry UI (existing mount
+  control remains the retry action). Add explicit authentication-rejection UI.
+The live NetworkManager/Cisco authentication workflow is tracked under
+Deferred validation.
+- [x] B: Add persistent, default-off sleep cleanup toggle below the main popup
+  connection list and optional wake restoration beneath it.
+- [x] B: Implement logind listener/delay inhibitor independent of popup visibility,
+  finite cleanup budget, inhibitor reacquisition and visible degraded status.
+- [x] B: Select Online connections only, verify unit/filesystem ownership, cancel
+  Online operations and wait for them to leave before cleanup. Leave Offline
+  mirrors, sync jobs and shared VPNs untouched.
+- [x] B: Use nonforcing runtime service drop-ins, verify loaded stop policy, check
+  rclone upload queues, and verify host mount disappearance without traversal.
+- [x] B: Restore successfully cleaned connections only when explicitly enabled,
+  after network/VPN checks; preserve login policy and report incomplete cleanup.
+- [x] B: Test Online-only selection, mirror-only no-op, repeated sleep gate,
+  old-operation invalidation, deadlines, queue-state parsing, foreign mounts,
+  runtime drop-in ownership and effective stop-policy checks.
+The broader logind fault-cycle checks and OneDrive sleep-hang investigation
+are tracked under Deferred validation. The next native SFTP release gate
+includes one normal SFTP sleep/wake cycle.
+- [x] Final local formatting, all-target checks, warning-free Clippy, all 167
+  tests and debug build passed; results are recorded in Completion Notes.
+
+## Rclone Remote Name Help Clarification
+
+**September 15, 2026 — source and documentation updated.**
+
+- [x] Explain entering a new remote name before creation in the Google Drive,
+  Box, and SMB field tooltips; retain detected/existing remote guidance.
+- [x] Identify provider-specific Create buttons and SMB Create/Update behavior.
+- [x] Update Applet Description, FR-011MA, Tooltip Review and Completion Notes.
+- [x] Review the three strings against creation code and run formatting/diff
+  checks. This text-only change does not alter provider behavior.
+
+## Compact Popup and General Settings Window
+
+**September 15, 2026 — implemented and locally tested; desktop/Flatpak live checks pending.**
+This revision supersedes previous popup placement of Add Connection, Refresh
+and sleep toggles. Earlier completed layout tasks remain historical evidence.
+
+- [x] Inspect title/button APIs, icon availability, separate-window architecture,
+  shared notices, Refresh behavior and runtime ownership.
+- [x] Update Applet Description, requirements, Tooltip Review and Completion
+  Notes; incorporate the preceding rclone remote-name help correction.
+- [x] Add right-aligned Settings gear with keyboard/accessible label, tooltip and
+  bundled icon independent of the installed icon theme. Keep title/status/connections and meaningful runtime notices.
+- [x] Add/focus one standalone General Settings window with a distinct launch
+  mode/title; retain existing connection-editor launch arguments and behavior.
+- [x] Implement runtime-owner IPC for settings, Refresh, current sleep status
+  and saved connection changes; review native/Flatpak service-name permissions.
+- [x] Move sleep toggles into General Settings; keep Restore visible but disabled
+  when Unmount when sleep is off. Persist through the applet owner without
+  duplicating its listener or changing Online-only cleanup semantics.
+- [x] Move Add Connection and Refresh to the top of General Settings, above
+  the sleep options. Refresh must reach
+  the actual applet; successful editor saves must refresh its connection list.
+- [x] Separate settings-action notices from popup runtime notices. Preserve
+  mount/unmount/repair errors and sleep warnings when settings is closed, and
+  keep provider/authentication/test/save feedback in the connection editor.
+- [x] Remove toolbar/footer and their popup height reservation. Update empty
+  state to direct users to Settings > Add Connection.
+- [x] Make rclone help context-sensitive: new-name/Create guidance in Add;
+  existing-name guidance in Modify where creation buttons are hidden.
+- [x] Test routing, owner-unavailable errors, persistent setting acknowledgments,
+  refresh completion, notice preservation and one-listener lifecycle.
+- [x] Match General Settings to the themed list surface; put button notices
+  below the top actions and plain sleep feedback below the Online-only sentence.
+  Remove the extra Offline sentence and separate cleanup-status heading/box.
+- [x] Align the title left and Settings gear right; replace the status/list
+  background gap with a thin divider on a continuous themed surface.
+Broader native/Flatpak window and editor visual checks are tracked under
+Deferred validation.
+
+## Release 0.4.5
+
+- [x] Align design documentation and README with the final Settings/popup layout.
+- [x] Bump Cargo, Debian, AppStream, README examples and Flatpak tag to 0.4.5.
+- [x] Pass release-build validation and all 174 tests; inspect the amd64 Debian
+  package and prepare its SHA256SUMS for publication.
+- User authorized commit, push and publication of tag/release `v0.4.5`.
+
+## Rclone mount access gate and multi-panel runtime fix (after 0.4.5)
+
+- [x] Diagnose UA Box `Input/output error` from the managed-service journal:
+  Box rejected the expired OAuth refresh token with `invalid_grant`.
+- [x] Reauthorize `ua_box` and verify read-only root access.
+- [x] Require a bounded remote/subtree listing before every applet-requested
+  rclone Online mount, including wake restoration; do not start FUSE when the
+  provider, credentials, network, or subtree is unavailable.
+- [x] Treat additional Cloud Mounter panel instances as clients of the existing
+  runtime owner instead of showing a false Settings communication warning.
+- [x] Pass formatting/diff checks and all 178 tests; install the repaired binary.
+- [x] Live-verify Box listing, healthy VFS state, clean unmount, and a responsive
+  empty mountpoint after unmount.
+
+## Settings background-poll UI fix (after 0.4.5)
+
+- [x] Keep Refresh and sleep toggles visually stable during background polling.
+- [x] Discard obsolete poll replies when a newer user action has started.
+- [x] Verify background polling, reply ordering and stale error handling with
+  regression tests; update design and completion documentation.
+The installed desktop button-stability check is tracked under Deferred
+validation.
+
+## Online directory-cache optimization and Google OAuth client work
+
+**Planning recorded September 15–16, 2026. The OAuth client, Google Drive
+refresh-level fast-list, asynchronous Google Drive VFS refresh, and bounded
+OneDrive directory preload are implemented. Live Box and SMB prototypes reject
+recursive VFS refresh and approve bounded directory walks for implementation.**
+
+### Approved Google Drive and OneDrive work
+
+- [x] Add matching Google Drive custom OAuth client ID and client-secret fields
+  to the rclone remote create/update workflow. Keep both values out of applet
+  configuration, redact them from command/error output, clear the fields after
+  use, and preserve existing remotes unless the user explicitly updates one.
+  Existing-remote update repeats browser OAuth and advises remounting active
+  connections.
+- [x] Enable fast-list on Google Drive recursive VFS refresh requests and add
+  tests proving mount commands do not receive rclone's ignored `--fast-list`
+  argument. Regenerate the applet-owned unit before starting a mount so existing
+  saved Google Drive connections receive the private RC endpoint after an
+  unmount/remount.
+- [x] Measure whole-remote recursive directory-list latency and peak memory on
+  the configured `ua_gdrive:` remote. Five trials per mode returned identical
+  510-directory results; `--fast-list` showed no meaningful latency or memory
+  improvement under the measured conditions.
+- [x] After Google Drive mount and RC-socket readiness, run recursive
+  `vfs/refresh` as an asynchronous RC job. Retain its job ID and track its
+  connection and completion state.
+- [x] After onedriver mount readiness, run a directory-only background traversal
+  that neither opens file contents nor follows links outside the mount.
+- [x] Add an app-wide OneDrive preload-time setting to General Settings. Default
+  to 60 seconds, validate finite bounds, stop automatically at the deadline,
+  and provide no manual Cancel control.
+- [x] Use the existing notice path to report OneDrive preload
+  completion or timeout without adding persistent notification machinery.
+- [x] Cancel and finish a tracked Google Drive refresh before manual unmount,
+  connection removal, repair, and sleep cleanup. Keep cancellation and detach
+  bounded.
+- [x] Cancel and finish tracked OneDrive preload work before manual unmount,
+  connection removal, repair, and sleep cleanup. Keep cancellation and detach
+  bounded.
+- [x] Add unit/integration coverage for provider selection, command construction,
+  background lifecycle, timeout, cancellation, setting defaults, and bounds.
+Further Google Drive and cloud cold-cache trials are tracked under Deferred
+validation after the SFTP native release.
+
+### Approved provider preload settings and remaining implementation
+
+- [x] Fix clean-unmount completion for all Online providers. Do not prepare a
+  mountpoint during unmount; verify mount-table disappearance after service
+  stop; classify an inactive/failed service with a lingering FUSE entry as
+  Error so the confirmed Repair flow is offered; and skip `reset-failed` when
+  the service is already inactive with a successful result.
+
+- [x] Test Box recursive `vfs/refresh` without fast-list. Reject it after the UA
+  Box prototype reached HTTP 429 `rate_limit_exceeded` and retained little useful
+  metadata.
+- [x] Test an SMB recursive VFS refresh through Cisco VPN. Reject it because the
+  60-second cancellation did not promptly stop backend work and partial cache
+  progress was not retained.
+- [x] Test bounded directory walks. Approve Box depth 2 after a 16.67-second cold
+  and 0.05-second warm traversal cached 212 directories without a new 429.
+  Approve SMB depth 3 after a 15.84-second cold and 0.10-second warm traversal
+  cached 491 directories with no file-content reads.
+- [x] Replace the single OneDrive preload control with a General Settings
+  **Preload** section. Add enabled and 5-to-600-second maximum controls for all
+  providers; add depth 2 for Box and depth 3 for SMB. Default all providers to
+  enabled and 60 seconds.
+- [x] Migrate the existing OneDrive duration into the new provider-policy model
+  and initialize missing Google Drive, Box, and SMB values safely.
+- [x] Add SMB per-connection **Use global preload settings**, enabled by default,
+  with independent enabled, duration, and depth overrides.
+- [x] Implement mount/root readiness and tracked directory-only walks for Box
+  and SMB. Preserve incremental progress on timeout and cancel before unmount,
+  repair, removal, and sleep.
+- [x] Harden Google RC completion parsing so any non-`OK` `output.result` value
+  is a failure even when rclone returns top-level `success: true`. Enforce the
+  configured Google maximum.
+- [x] Add configuration, migration, IPC, UI, command-boundary, timeout,
+  cancellation, nested-RC-error, and effective-SMB-policy tests.
+The remaining UA Box, narrowed `ua_engr:Research/Utzinger` SMB, and LAN/home
+SMB live checks are tracked under Deferred validation.
+
+## Release 0.4.6
+
+- [x] Align Cargo, Debian, AppStream, README installation examples,
+  screenshots, and the Flatpak source tag with version 0.4.6.
+- [x] Run formatting, compilation, all-target/all-feature Clippy with warnings
+  denied, the complete 194-test suite, metadata checks, and diff validation.
+- [x] Build and inspect the amd64 Debian installation asset and prepare its
+  SHA256SUMS file.
+- [x] Record the final release scope and validation in Task List Completion
+  Notes.
+- User authorized commit, push, tag and GitHub release publication for
+  `v0.4.6` with the installation asset.
+
 ## SFTP Provider Extension — September 29, 2026
 
 SFTP extends the earlier four-provider scope. Historical completed tasks above
@@ -2031,7 +1927,7 @@ existing-provider regression after any shared-code fix.
 - [x] Run focused automated checks for configuration compatibility, discovery,
   validation, setup/update commands, secret handling, authentication changes,
   remote-path preservation, and generated mount/mirror targets. The narrow
-  remaining release checks are listed at the end of this document.
+  remaining release checks are listed in the SFTP release-test gate below.
 - [x] Verify native and Flatpak UI placement beside SMB, similar form layout,
   conditional fields, Add/Modify actions, keyboard navigation, and no clipping
   in the reviewed editor sections. The locally built Flatpak prototype was also
@@ -2043,7 +1939,7 @@ existing-provider regression after any shared-code fix.
   to the ordinary service policy, not another SFTP-only test.
 
 The focused installed failed-update, Online safety/wake, and Offline control
-checks are consolidated in the next-release gate at the end of this list.
+checks are consolidated in the SFTP release-test gate below.
 Direct password, key, agent, host-key, timeout, and SFTP-only protocol probes
 already passed; exhaustive installed error variants are deferred.
 - [x] Run all-target compilation, formatting, all-target/all-feature Clippy
@@ -2067,8 +1963,8 @@ Editor — September 29, 2026” in `Task List Completion Notes.md`.
 Historical September 30 audit: legacy import and directory semantics were
 source-complete; the longer preload benchmark and duplicate host-service
 authentication item were superseded. Subsequent host-service, mirror, and
-visual checks are recorded above. The current release test gate and deferred
-validation lists are at the end of this document; this audit does not add
+visual checks are recorded above. The SFTP release-test gate follows below;
+deferred validation is in the final Future Task List. This audit does not add
 separate acceptance requirements. Release documentation remains open until
 the supported SFTP scope and verified limitations are stated accurately.
 
@@ -2082,6 +1978,31 @@ the supported SFTP scope and verified limitations are stated accurately.
 - [x] Compile the catalog, run the complete automated test suite, and check
   formatting and Clippy. Other-language catalogs and installed visual checks
   remain separate from this source change.
+
+## SharePoint (Teams Files) Provider — Planning, September 30, 2026
+
+SharePoint library connections are a future provider. Keep Online mount and
+Offline mirror as separate modes; implement and validate Online mount first.
+No SharePoint applet integration or live acceptance is claimed yet.
+
+- [x] Add the planned **Teams** engine for SharePoint libraries and two-mode strategy
+  to `Applet Description.md`.
+- [x] Add a requirements placeholder in Section 18 of
+  `Requirements and Specifications.md`.
+- [x] Record implementation and acceptance placeholders here.
+- [x] Define exact site/library URL parsing, persisted library identity,
+  preconfigured rclone remote selection, OAuth/tenant-consent errors, preload
+  policy, and native/Flatpak acceptance before implementation. The detailed
+  plan and unresolved authenticated-metadata probe are recorded in the new
+  October 1 planning section below.
+
+The unfinished Online and Offline implementation and acceptance items from
+this placeholder are expanded in the October 1 implementation plan below.
+
+Example site:
+https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment
+Example library URL path segment (not a local mountpoint):
+Shared%20Documents
 
 ## Remaining tests before the next SFTP release — October 1, 2026
 
@@ -2115,62 +2036,6 @@ deferred until that distribution is available.
   automated suite, formatting, Clippy, metadata validators, and native package
   installation check. Perform only a brief SFTP smoke test plus focused tests
   for any changed shared code; record the exact tested build/version.
-
-## Deferred validation after the SFTP native release — October 1, 2026
-
-These are follow-ups, not additional gates for the native SFTP release above.
-Move one here into the release gate only if its supported behavior changes or
-the final tests expose a related defect.
-
-- [ ] After the public COSMIC Flatpak repository/package is available, test
-  installed Flatpak SFTP editor notices, Online and Offline controls, generated
-  host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
-  test. The local Flatpak prototype and host bridge have separate evidence.
-- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
-  unreadable-file, permission, agent, and timeout variants, and live-check a
-  VPN-bound SFTP connection. Direct protocol and automated classifier tests
-  already cover these errors; they are not repeat gates for the native release.
-- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
-  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
-  preload trials without reading or changing file contents.
-- [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
-  cancellation on OneDrive, Box, SMB, and Google Drive's RC refresh when
-  suitable active-preload shares are available.
-- [ ] Complete broader installed native/Flatpak Settings title, focus,
-  keyboard, scaling, long-list, editor-save, and background-poll visual checks.
-- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
-  and rejected-credential path with a real VPN profile; add the separately
-  planned waiting/Cancel/Retry UI before accepting that extended workflow.
-  Include a VPN-bound SFTP connection when that combination is available.
-- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
-  fault cases, then investigate the separately reported OneDrive sleep hang
-  with journal evidence. The native SFTP release gate above includes one
-  normal sleep/wake cycle only.
-
-## SharePoint (Teams Files) Provider — Planning, September 30, 2026
-
-SharePoint library connections are a future provider. Keep Online mount and
-Offline mirror as separate modes; implement and validate Online mount first.
-No SharePoint applet integration or live acceptance is claimed yet.
-
-- [x] Add the planned **Teams** engine for SharePoint libraries and two-mode strategy
-  to `Applet Description.md`.
-- [x] Add a requirements placeholder in Section 18 of
-  `Requirements and Specifications.md`.
-- [x] Record implementation and acceptance placeholders here.
-- [x] Define exact site/library URL parsing, persisted library identity,
-  preconfigured rclone remote selection, OAuth/tenant-consent errors, preload
-  policy, and native/Flatpak acceptance before implementation. The detailed
-  plan and unresolved authenticated-metadata probe are recorded in the new
-  October 1 planning section below.
-
-The unfinished Online and Offline implementation and acceptance items from
-this placeholder are expanded in the October 1 implementation plan below.
-
-Example site:
-https://emailarizona.sharepoint.com/sites/ENGR-BME-Assessment
-Example library URL path segment (not a local mountpoint):
-Shared%20Documents
 
 ## Teams (SharePoint library) implementation plan — October 1, 2026
 
@@ -2791,7 +2656,7 @@ three-toggle Repair sequence occurred this morning.
   changes reorder the main applet popup list, and changes persist across applet
   restarts.
 
-- [x] Dependency installation. Converted `Dependency Installation.md` into `scripts/install-dependencies.sh`, which supports `--all`, `--rclone`, `--onedriver`, `--onedrive`, `--base`, and `--cisco-check`. It can be run via curl:
+- [x] Dependency installation. Converted `docs/dependency-installation.md` into `scripts/install-dependencies.sh`, which supports `--all`, `--rclone`, `--onedriver`, `--onedrive`, `--base`, and `--cisco-check`. It can be run via curl:
   ```sh
   curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
   ```
@@ -3146,7 +3011,7 @@ retest; completed tests do not need to be repeated otherwise.
     normal runtime-state write changed the configuration hash only after the
     package preservation checks had passed.
 - [x] Release documentation and publication
-  - [x] Create Release Notes 0.5.1.md.
+  - [x] Create docs/releases/v0.5.1.md.
   - [x] Update the completion notes with the final evidence.
   - [x] Generate the .deb (completed above) and SHA256SUMS.
   - [x] Review the complete dirty worktree before committing, including the
@@ -3159,29 +3024,1436 @@ retest; completed tests do not need to be repeated otherwise.
     tag, README, Google OAuth guide, and four AppStream screenshot URLs each
     returned HTTP 200.
 
-## Flatpak installation. - Started on October 3, 2026
 
-Remaining work to make the applet installable from COSMIC Store:
 
-- [ ] Ask `pop-os/cosmic-flatpak` maintainers for architecture guidance if the applet's
-      host-integration requirements need broader access than accepted applets such as
-       `dev.cappsy.CosmicExtAppletDrives`. Ask in COSMIC App Developer/Mattermost channel.
-- [ ] Open a focused pull request to `pop-os/cosmic-flatpak` containing:
-    - `app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json`
-    - Generated `cargo-sources.json`
-    - Links to source repository, MIT license, tagged release, build instructions,
-      AppStream metadata, and screenshots.
-- [ ] In the pull request, explicitly call out the host-integration architecture and
-      justify every non-default Flatpak permission, especially host-command execution,
-      systemd unit creation, sleep signals, and shared state.
-- [ ] Complete the repository pull-request checklist: disclose AI-generated or AI-assisted
-      code in commit messages, understand and be able to explain every submitted change,
-      accurately describe and test the change, and certify it under the Developer Certificate of Origin.
-- [ ] Address repository CI and maintainer review, updating the source tag/hash when
-      a packaging fix requires a new application release.
-- [ ] After merge and publication to a configured public remote, install from the
-      COSMIC Flatpak remote on a clean profile and run a final mount/mirror/VPN/uninstall smoke test.
+## Flatpak D-Bus host-integration migration — Started October 7, 2026
 
-Completed preparation work: local Flatpak manifest, cargo-sources generation,
-desktop/AppStream metadata, local `just build`/`just build-changed`, Store listing
-verification, panel add/remove, and permission rationale in `packaging/flatpak/README.md`.
+Maintainer guidance is to use D-Bus APIs wherever possible. Host command
+execution remains available but will receive additional scrutiny during
+`pop-os/cosmic-flatpak` review. Complete this migration before opening the
+packaging pull request.
+
+- [x] Inventory every command currently routed through `flatpak-spawn --host`;
+  classify each as replaceable by D-Bus, an unavoidable storage-engine
+  invocation, or obsolete. The production and development-only inventories,
+  command patterns, source locations, and migration dispositions are recorded
+  in `docs/engineering/flatpak-host-command-inventory.md`.
+- [x] Replace the `nmcli` adapter with NetworkManager D-Bus while
+  preserving saved-profile discovery, NetworkManager and Cisco-compatible VPN
+  identification, activation/deactivation, readiness, metered-state checks,
+  authentication prompts, timeouts, cancellation, and error redaction. The
+  typed `zbus` adapter also replaces dependency detection and the generated
+  scheduled-mirror metered condition; no production `nmcli` process remains.
+- [x] Replace `systemctl --user` execution with the systemd user-manager D-Bus
+  API. Cover daemon reload, unit enable/disable, start/stop/restart, status,
+  failure reset, and timer management without changing generated-unit safety.
+  Production control, sleep cleanup, synchronous UI status, dependency checks,
+  and invocation-ID lookup now use typed `zbus` calls. Start/stop/restart wait
+  for the matching `JobRemoved` result; the sleep stop remains deliberately
+  nonblocking. Direct `systemctl --user` references are confined to excluded
+  tests and the standalone host-runner probe.
+- [ ] Complete every remaining D-Bus-replaceable inventory item.
+  - [o] (1) Retain the version-gated host `flatpak document-info <path>`
+    fallback until the supported Documents portal provides the required D-Bus
+    API.
+    - [x] Add validated D-Bus resolution: use sandbox-enabled `GetHostPaths` on
+      Documents portal v5+, and `Info` for native execution. Direct and
+      app-scoped portal IDs, NUL-terminated byte paths, absolute-path checks,
+      and a read-only live portal lookup have focused coverage. Standard
+      `org.freedesktop.portal.*` access requires no extra Flatpak permission.
+    - [o] Remove the narrowly version-gated host-command fallback after the
+      Flatpak can require Documents portal v5. Pop!_OS currently exposes v4;
+      `Info` and `Lookup` are forbidden inside sandboxes and `GetHostPaths` is
+      unavailable, so removing the fallback now would break folder selection.
+  - [x] Route NetworkManager-managed Cisco-compatible profiles through the
+    NetworkManager D-Bus adapter. Direct proprietary Cisco profiles remain a
+    separate product-scope decision below.
+  - [ ] (6) Complete the packaged `network-manager-openconnect` migration for
+    the UA VPN, using `nm-applet` as the host NetworkManager secret agent only
+    for OpenConnect profiles that require interactive authentication. Follow the
+    separate
+    [Task 6 NetworkManager OpenConnect migration](#task-6-networkmanager-openconnect-migration)
+    below. Retain the installed Cisco client only as a rollback option until the
+    installed native and Flatpak acceptance tests pass.
+- [ ] Remove every production invocation classified as obsolete at runtime.
+  Test fixtures and standalone transport probes remain outside this boundary.
+  - [x] Remove `nmcli --version` and `systemctl --user --version` dependency
+    probes; the typed NetworkManager and user-systemd adapters now test D-Bus
+    availability directly.
+  - [x] (2) Replace the `journalctl --user _SYSTEMD_INVOCATION_ID=...` mirror
+    pending-count scrape with structured rclone or app-owned state. Preserve
+    current-invocation isolation, truncation/error handling, and accurate
+    queued/in-progress/completed counts, then remove the production
+    `Journalctl` executable path. Scheduled bisync now writes an app-owned
+    JSON-lines rclone log and atomically publishes its systemd invocation ID;
+    the reader accepts only state matching the unit's D-Bus `InvocationID`,
+    ignores a partially written final record, rejects malformed/oversized
+    state, and no production `Journalctl` executable remains.
+  - [x] (4) Remove runtime `systemd-analyze --user verify` from unit installation.
+    Generated units now pass a strict in-process structural validator before an
+    atomic write, then `Manager.Reload` and `Manager.LoadUnit` verify systemd's
+    `LoadState`, `LoadError`, exact managed `FragmentPath`, and
+    `NeedDaemonReload`. A failed reload/load check restores the prior file and
+    reloads the rollback. Systemd's parser verification remains in build/tests,
+    and the production `SystemdAnalyze` executable path is gone.
+  - [x] Replace startup-wide `rclone version` and help/capability probes with
+    packaging requirements plus typed, operation-time capability failures.
+    Retain equivalent minimum-version/capability coverage in build or focused
+    diagnostic tests rather than silently weakening compatibility checks.
+    Production inventory now performs path/route discovery only. The exact
+    minimum and command/flag matrix remains asserted by diagnostics tests, while
+    real rclone operations surface typed runner failures.
+  - [x] Remove runtime `onedriver --version`, `onedriver --help`, and
+    `onedrive --version` probes using the same packaging and operation-time
+    validation policy.
+    Debian recommendations, the dependency installer, and focused tests retain
+    both engine minimums; real setup, test, mount, and sync operations diagnose
+    failures at their operation boundary.
+  - [x] Remove runtime `fusermount3 --version` and `fuser --version` probes.
+    Keep actual `fusermount3 -u/-uz` failures actionable; `fuser` has no other
+    production use and should leave the executable inventory entirely.
+    `fuser` and `psmisc` are gone from source and packaging. Production retains
+    only the clean and user-confirmed lazy `fusermount3` detach operations.
+  - [x] (3) Replace `ip route get <target>` with an in-process kernel route
+    selection. An IPv4/IPv6 UDP connect validates the target-specific route
+    without sending a packet and is bounded to five seconds with cancellation.
+  - [x] (3) Replace `getent hosts <name>` with Tokio's asynchronous system
+    resolver. Native loopback resolution, timeout, and cancellation have
+    focused coverage. Read-only `localhost` and public `example.com` lookups
+    also succeeded over IPv4 and IPv6 inside the Freedesktop 25.08 Flatpak
+    runtime with the manifest's `--share=network` permission.
+  - [x] (3) Replace `nc -z -w 3 <host> <port>` with a bounded Tokio TCP
+    connection. Endpoint parsing and redacted ready/not-ready results remain,
+    the connection is limited to three seconds, and cancellation is immediate.
+  - [ ] (5, high risk) Accept removal of `/usr/bin/sh <mirror-script> ...` from
+    manual and scheduled rclone bisync in the final rebuilt Flatpak. Follow the
+    separate
+    [Task 5 bisync coordinator migration](#task-5-bisync-coordinator-migration)
+    below for the remaining packaging and lifecycle gates.
+    - Source implementation is complete for both manual and scheduled modes:
+      the shell path and executable variant are removed. The source inventory
+      now records **Removed**. Keep this final-artifact acceptance item open
+      until Task (5)'s rebuilt-Flatpak lifecycle confirms equivalent behavior.
+- [x] Close the source inventory after the conversions and removals above;
+  final release-package acceptance remains open below.
+  - [x] Run a production-reachability scan excluding test/example/probe paths.
+    No obsolete command reaches the default applet or restricted worker. The
+    version-gated Documents portal compatibility invocation remains an explicit
+    supported-host exception, not an unconditionally nested fallback.
+  - [x] Update every `docs/engineering/flatpak-host-command-inventory.md` row from **Replaceable by D-Bus** or
+    **Obsolete** to **Replaced by D-Bus**, **Removed**, or an explicitly
+    justified **Unavoidable invocation**; leave no unresolved mixed status.
+  - [x] Remove or isolate unreachable production executables and factories.
+    Ten probe-only variants require tests or `development-probes`; `Printf` is
+    removed. Legacy raw bisync request factories are test-only. Retain the
+    inert legacy Cisco marker/errors and explicitly scoped parser/probe tests.
+  - [o] Final permission, translation, and packaging-document reconciliation is
+    owned by the remaining 0.5.3 manifest/documentation gate below; do not count
+    source inventory closure as final-package permission approval.
+- [ ] Keep native source and Debian installations functional through the same
+  typed NetworkManager and systemd adapters; isolate Flatpak-specific D-Bus
+  permissions and connection setup.
+- [x] Restrict remaining host command execution to operations that genuinely
+  require host-installed storage tools, including `rclone`, `onedriver`, and
+  `onedrive`, justified host helpers, and the supported portal exception.
+  The default typed runner has nine executable kinds; the inspection adapter
+  accepts only two fixed operations. Bounded asynchronous execution is implemented;
+  its installed native responsiveness check passed on October 12.
+- [x] Update the Flatpak manifest, packaging guide, requirements, and user
+  documentation to remove obsolete command permissions and justify every
+  remaining host command and host-visible path.
+  Source documentation/permission reconciliation completed October 12 under
+  the 0.5.3 pre-build gate below; final effective-permission/artifact acceptance
+  is still required before publication.
+- [ ] Add focused tests for the new D-Bus adapters and regression tests proving
+  native and Flatpak behavior remain equivalent for VPN-dependent mounts,
+  generated services, timers, sleep cleanup, and failure recovery.
+- [ ] Rebuild with `just build` and `just build-changed`, install the resulting
+  Flatpak, and live-test NetworkManager/VPN handling plus generated mount and
+  mirror service lifecycles before opening the repository pull request.
+
+### Task (5): Bisync coordinator migration
+
+**Goal:** remove the general-purpose host shell from manual rclone bisync
+without weakening the transaction currently implemented by
+`mirror_script.rs`. The shell executable is replaceable; the coordination of
+preflight checks, rclone operations, recovery ownership, verification,
+progress, and cleanup is not optional. D-Bus can serialize and observe a user
+service but does not replace this workflow.
+
+**Current status:** the shared systemd user-manager D-Bus adapter, typed Rust
+coordinator, restricted scheduled worker, shell removal, and native coordinator
+lifecycle acceptance are implemented. Remaining work is limited to the explicit
+final Flatpak and release gates below. UI reconciliation, offline
+readiness/ownership, retention diagnostics, and focused/native integration
+tests are complete. The source inventory records the shell as **Removed**;
+acceptance of that removal in the final release artifact still requires the
+rebuilt-Flatpak lifecycle.
+
+- [ ] Complete the restricted coordinator gate across both packaging modes.
+  - [x] Inventory the wrapper's behavior for `initial-preview`, `preview`,
+    `initial-sync`, `sync`, and `scheduled`, including which steps may mutate
+    local, remote, recovery, work-state, and initial-sync marker data.
+    - The reviewed mode/mutation matrix, common transaction ordering, scheduled
+      progress contract, out-of-wrapper responsibilities, and migration gaps are
+      recorded in [Bisync Coordinator Inventory](docs/engineering/2026-10-10-bisync-coordinator-inventory.md).
+      This inventory changes no execution path and is the equivalence contract
+      for the remaining design and implementation stages.
+  - [x] Use one Rust coordinator for both manual and scheduled runs so their
+    backup, ownership, SharePoint, progress, and retention behavior cannot
+    drift. The coordinator exposes only the five fixed operation modes and a
+    validated connection identity; mode-specific policy selects preview,
+    initial, manual, or scheduled behavior without duplicating the transaction.
+  - [ ] Finish packaging acceptance for the accepted restricted coordinator
+    entry point.
+    - [x] Use two package-specific launch specifications for one Rust worker:
+      native/source and Debian units execute the absolute installed Cloud
+      Mounter binary, while Flatpak-generated units execute `/usr/bin/flatpak
+      run --command=cosmic-ext-applet-mounter
+      io.github.uutzinger.cosmic-ext-applet-mounter ...`.
+    - [x] Define the worker boundary as a fixed bisync mode plus connection UUID.
+      It loads and validates the saved connection and reconstructs the typed
+      plan; it accepts no executable, shell fragment, rclone argument, local or
+      remote path, recovery path, or serialized connection from the caller.
+    - [x] Enter worker mode before graphical startup and before acquiring the
+      applet runtime/settings D-Bus names so it can coexist with the panel
+      instance. Manual UI operations call the same coordinator library; the
+      scheduled service enters it through this restricted worker mode.
+    - [x] Add a non-mutating worker probe and confirm both native-direct and
+      Flatpak `flatpak run` forms from disposable user-systemd services. Verify
+      bounded completion, no window or applet-bus ownership, no new Flatpak
+      permission, and rejection of extra or malformed arguments.
+      - `--run-bisync probe <connection-UUID>` dispatches before localization,
+        async-runtime, GUI, and applet initialization. It performs no config,
+        filesystem, network, rclone, or D-Bus operation. The native disposable
+        service completed successfully in 6 ms; the Flatpak form completed in
+        172 ms. An extra-argument Flatpak service was rejected with status 2,
+        focused parser/launch tests passed, and the installed Flatpak permission
+        set remained unchanged.
+    - [x] Replace the probe with the production fixed-mode entry point after the
+      coordinator exists and remove the shell service from production source.
+      - [x] Implement the production entry point. It accepts only one of the
+        five fixed modes plus a connection UUID, reloads the authoritative
+        saved connection, reconstructs the typed plan, and enters before GUI
+        or applet-bus startup. Generated scheduled services now use
+        `--run-bisync scheduled <UUID>` for both native and Flatpak package
+        launch forms.
+      - [x] Remove the shell service implementation from source. The legacy
+        renderer and `Executable::Sh` variant are gone; scheduled unit tests
+        reject a service payload containing either a shell or raw rclone
+        arguments.
+      - [x] Repeat the installed native user-manager test with disposable
+        mirrors. The October 11 native release build exactly matched the
+        installed user-local binary. Regenerated units invoked only the
+        restricted Rust worker; manual, initial, scheduled, Pause, and Repair
+        lifecycles passed without a shell or surviving storage process.
+      - [ ] Repeat the production worker lifecycle from the final rebuilt
+        Flatpak before checking the packaging-mode parent item.
+  - [x] Confirm scheduled execution can safely use the accepted Rust
+    coordinator. The installed timer invoked the restricted worker, published
+    matching systemd invocation state, completed successfully, and left no
+    shell or storage process; no scheduled-shell exception is retained.
+  - Reject the shortcut of invoking the existing raw typed bisync request: it
+    omits required recovery preparation, ownership checks, SharePoint guards,
+    post-sync verification, and successful-run-only retention cleanup.
+  - [x] Define engine-specific offline Repair contracts before implementation and
+    keep them separate from online FUSE repair.
+    - The rclone bisync contract stops and disables the timer before stopping
+      the service, resets only observed failed state, preserves the bisync
+      safety lock and recovery guidance, and never triggers an implicit resync
+      or deletes data.
+    - The OneDrive Offline Mirror (`abraunegg/onedrive`) contract stops and
+      disables its continuous monitor without looking for an rclone timer and
+      preserves its client database and engine state. It never applies the
+      online onedriver lazy-detach behavior.
+    - The accepted shared, rclone bisync, and `abraunegg/onedrive` contracts,
+      partial-failure UI matrix, and separate installed-acceptance boundaries
+      are recorded in [Offline Mirror Repair Contracts](docs/engineering/offline-mirror-repair-contracts.md)
+      and requirements FR-060A through FR-060C.
+- [x] Implement the selected route in reviewable stages.
+  - [x] Extract an app-owned, typed bisync state machine with fixed operations and
+    validated arguments; retain host `rclone` only as the unavoidable storage
+    engine. Do not expose a general executable or shell-fragment parameter.
+  - [x] Preserve UTC day/stamp generation, unique backup suffixes, local and remote
+    ownership markers, strict dated-directory parsing, and the rule that
+    unowned or symlinked recovery data is never modified.
+  - [x] Preserve SharePoint saved-target verification, local/remote access-anchor
+    checks, and the post-sync checksum verification required for rewritten
+    Office files.
+  - [x] Preserve initial-preview and initial-sync markers, `--resync` selection,
+    bisync work-directory locking, current timeouts, no automatic destructive
+    retry, bounded/redacted output, and cancellation behavior.
+  - [x] Preserve scheduled invocation-ID state and JSON progress logging. Publish
+    request/result metadata atomically and prevent manual and timer-triggered
+    runs for the same connection from overlapping.
+    - Manual Preview/initial Preview/Sync Now/initial Sync and timer-triggered
+      scheduled runs now share `bisync_coordinator`. A per-connection
+      nonblocking `flock` is acquired before work files or state are changed.
+      Repair stops the timer-owned service and requires release of that same
+      lock before replacing stale running state; an independently owned lock
+      remains a hard failure.
+    - The former idle pending-count poll no longer starts an uncoordinated
+      bisync dry run every minute. Idle rclone mirrors display no inferred
+      count; an active scheduled run still uses its invocation-matched JSON
+      progress artifacts.
+  - [x] Reconcile offline service and timer state through the shared systemd D-Bus
+    adapter without applying the online mount helper's `active` expectation to
+    a completed oneshot bisync. Treat the coordinator result plus its atomic
+    state artifact as authoritative so an `inactive (success)` completion is
+    not reported as a false failure. Installed ordinary, initial, and scheduled
+    completion tests all reconciled successfully after the oneshot worker exited.
+  - [x] Give offline controls the same state-reconciliation guarantees now used by
+    online mounts: observed service/timer state must override stale saved UI
+    state, a failed persistence write must not hide a running operation, and
+    Stop/Repair must remain available whenever the coordinator is active.
+    - Offline restoration now evaluates observed `Running` and `Failed` state
+      before saved enablement or conflict state, and accepts observed `Idle` as
+      proof that the timer/monitor remains active. A genuinely disabled and
+      inactive connection remains unavailable.
+    - Focused coverage proves a running coordinator remains Syncing with both
+      Stop and Repair available despite stale disabled/conflict state; an
+      active engine remains stoppable after saved-state persistence failure;
+      observed failure remains repairable; and inactive disabled state remains
+      off. The 13-test controller suite, `cargo check --all-targets`, and strict
+      Clippy passed on October 11, 2026.
+    - Installed native regression acceptance passed on October 11, 2026: the
+      initialized disposable Rust Coordinator mirror started and then paused
+      successfully through the popup controls.
+  - [x] Implement typed, engine-specific offline Repair dispatch for both rclone
+    bisync and OneDrive Offline Mirror. Close the current OneDrive Offline gap,
+    and never route either engine through the online FUSE lazy-detach handler.
+    Hide the Repair action as soon as confirmed recovery begins and reconcile
+    the final UI from observed service/timer and coordinator state.
+    - [x] Add shared two-step confirmation and pending-state exclusion for
+      Online and Offline Repair. Expose controller-authorized Offline Repair in
+      the popup, hide it immediately after confirmation, and block other work
+      for that connection until reconciliation completes.
+    - [x] Add typed rclone-bisync and `abraunegg/onedrive` Repair plans. Reload
+      the saved connection by UUID, verify the generated unit ownership and
+      structure, and accept a disabled saved connection when observed runtime
+      state still needs cleanup.
+    - [x] Implement the engine-specific systemd D-Bus sequences. Rclone stops
+      and disables its timer before its service; OneDrive touches only its
+      monitor service. Both disable the service, reset only observed failed
+      state, re-read final state, and require inactive/disabled success without
+      modifying mirror, recovery, authentication, database, or lock data.
+    - [x] Add fake-manager coverage for provider dispatch, exact timer/service
+      ordering, conditional failed-state reset, disabled saved connections,
+      OneDrive's no-timer boundary, pending-action hiding, and rejection of a
+      service that remains active. The full suite passes with 315 tests and 12
+      intentionally ignored tests; strict all-target Clippy also passes.
+    - [x] Connect Repair to the shared coordinator's bounded manual-operation
+      cancellation and atomic result state after that coordinator exists.
+      - [x] Add the reusable coordinator foundation: retain a cancellation token
+        and completion signal for each in-process manual operation, atomically
+        replace a versioned per-connection JSON state artifact, and publish
+        typed running/succeeded/failed/cancelled/paused results.
+      - [x] Wire confirmed Repair to stop the rclone timer first, request manual
+        cancellation, wait at most five seconds, reject an unowned `running`
+        state, publish Repair state, and only then stop/reconcile the engine
+        service. OneDrive applies the same cancellation gate without inventing
+        a timer. The popup now observes manual work as Syncing and exposes
+        Repair while it runs.
+      - [x] Route Preview, Sync Now, Start/Stop, and Repair requests from
+        standalone connection windows and non-owner panel instances over the
+        existing private D-Bus IPC to the single runtime-owning panel process.
+        This keeps the manual operation and its cancellation handle in one
+        coordinator process instead of making the panel guess about work owned
+        by a settings-window process.
+      - [x] Cover atomic replacement, lost-wakeup avoidance, timeout, trigger-
+        before-cancellation ordering, post-cancellation service ordering, and
+        rejection of a running state without an in-process owner, and complete
+        process-tree termination for shell-launched storage engines. Each
+        bounded command now runs in an isolated process group; cancellation and
+        timeout signal the group, escalate from TERM to KILL when needed, and
+        wait before returning. A regression test proves a background shell
+        descendant cannot survive cancellation. Generic
+        rclone failures are short and sanitized rather than displaying raw
+        provider logs or local/remote paths in the settings UI. The complete
+        suite passes with 319 tests and 12 intentionally ignored live tests;
+        strict all-target Clippy also passes.
+      - [x] Route the restricted scheduled worker and all five rclone modes
+        through this shared coordinator before claiming cross-process
+        cancellation or manual/scheduled overlap prevention.
+        - The scheduled shell has now been removed. Focused tests cover the
+          fixed request shape for all five modes, transaction ordering,
+          cross-process lock exclusion, atomic invocation progress state, and
+          scheduled-worker Repair reconciliation. Installed native and Flatpak
+          cancellation remain separate acceptance items below.
+    - [x] Rebuild/install and separately live-test confirmed Repair against one
+      disposable rclone bisync mirror and one disposable OneDrive Offline
+      Mirror, including partial failures and final popup reconciliation.
+      - [x] Build and install the validated native user-local applet. The
+        installed executable exactly matches the release artifact; existing
+        connection configuration and generated units were not replaced.
+      - [x] Reload the COSMIC panel session, interrupt the existing disposable
+        `Test_SharePoint Offline UI` rclone mirror through the applet, confirm
+        Repair, and verify timer/service state, atomic coordinator result, and
+        final popup reconciliation.
+        - The first installed attempt on October 11 exposed that Sync Now was
+          owned by the separate Modify Connection process, so the panel had no
+          cancellation handle and did not show Repair. The exact disposable
+          rclone process was stopped without deleting its lock/recovery state.
+          Private-D-Bus routing and short sanitized failure notices are now
+          implemented and validated; repeat after reinstall/reload.
+        - The second installed attempt reached the new coordinator and displayed
+          Repair completion, with atomic `repair/paused` state and inactive,
+          disabled timer/service. Process inspection nevertheless found that
+          killing the shell wrapper had orphaned its child rclone briefly under
+          PID 1, so this was correctly rejected as acceptance evidence. The
+          exact child exited without committing the temporary remote object.
+          Isolated process-group cancellation was then implemented.
+        - The final installed repeat on October 11 passed. Confirmed Repair
+          changed the atomic coordinator result to `repair/paused`; the popup
+          reported completion and reconciled the connection to off. The exact
+          generated service and timer were inactive and disabled with no main
+          or control PID and a successful result. Immediate and delayed process
+          checks found no rclone or exact-UUID process, proving the shell child
+          was not orphaned. A read-only remote lookup found no committed test
+          object. The exact local 1 GiB sparse interruption payload was removed
+          after the test; no remote deletion was necessary.
+      - [x] Create or explicitly designate a disposable OneDrive Offline Mirror
+        instead of using the personal `uutzinger OneDrive mirror`; separately
+        interrupt/Repair it and verify no timer is touched, its monitor is
+        inactive/disabled, its database/authentication/data remain intact, and
+        the popup reconciles to Paused.
+        - On October 11, `OneDrive Mirror Repair Test` used a dedicated remote
+          subtree, local directory, setup reference, configuration/database,
+          UUID, and service while the production personal monitor remained
+          inactive and disabled. Preview and initial Sync Now succeeded before
+          the interruption attempt.
+        - Confirmed Repair cancelled a running manual upload, published atomic
+          `repair/paused`, reconciled the popup to off, and left the disposable
+          monitor inactive and disabled with no main/control PID. Immediate and
+          delayed checks found no surviving `onedrive` process. Its refresh
+          token, database/WAL state, initial-sync marker, mirror, and recovery
+          state remained present.
+        - The interrupted upload had committed a zero-byte remote placeholder.
+          A normal restart reconciled that partial result locally and updated
+          the database; after deleting the now-recorded placeholder, a second
+          Sync Now propagated cleanup. Final atomic state was `sync/succeeded`,
+          the exact local payload was absent, and `--display-sync-status`
+          reported no pending changes and matching local/remote state.
+  - [x] Reconcile routed operation completion back into an already-open
+    standalone Modify Connection window. The owning panel correctly shows
+    completion, and the sender window now replaces its earlier
+    `Preview requested` or `Sync Now requested` notice without being closed.
+    - The runtime status carries a bounded, revisioned completion history. The
+      standalone window polls only while its routed operation is outstanding
+      and accepts only a newer completion for the exact connection and
+      operation; it does not hold a long-running D-Bus request open.
+    - Focused tests prove history bounding and rejection of stale revisions,
+      other connections, and other operations. `cargo check --all-targets` and
+      strict Clippy passed on October 11, 2026.
+    - Installed native acceptance passed on October 11, 2026: the routed
+      operation completed in both the already-open Modify Connection window
+      and the main applet window.
+  - [x] Make the post-save Offline Mirror notice initialization-aware.
+    - After installing disabled managed units, both rclone bisync and OneDrive
+      Offline Mirror inspect their preserved `initial-sync-complete` marker.
+      Initialized mirrors now say that ordinary Preview/Sync Now and Start are
+      available; uninitialized mirrors retain the Preview plus confirmed
+      initial Sync Now instructions.
+    - A focused test covers initialized and uninitialized notices for both
+      engines. Formatting, `cargo check --all-targets`, and strict Clippy passed
+      on October 11, 2026.
+    - Installed native UI acceptance passed on October 11, 2026: saving the
+      initialized Rust Coordinator test mirror reported that initialization
+      state was preserved, Preview and Sync Now use normal bisync, and Start
+      resumes scheduled synchronization. It did not request another initial
+      Sync Now.
+  - [x] Apply NetworkManager D-Bus readiness and ownership rules to every offline
+    provider before the coordinator starts. Define and test when a VPN started
+    for a finite sync may be conditionally released without disconnecting a
+    pre-existing or shared tunnel.
+    - Manual Preview and Sync Now now require strict NetworkManager readiness,
+      may activate the saved NetworkManager VPN through D-Bus, and register the
+      finite operation as a shared VPN user. Completion conditionally releases
+      the tunnel only when the connection requests automatic disconnect, the
+      applet activated that profile, and no online mount, background mirror,
+      scheduled worker, or other finite operation still uses it. Pre-existing
+      and shared tunnels remain connected; release failure is a warning and
+      does not turn a successful storage operation into failure.
+    - Start performs the same interactive readiness/activation before enabling
+      a background timer or monitor and retains the VPN while it is active.
+      Successful Pause or Repair may conditionally release it; a failed Start
+      also performs safe ownership-based cleanup.
+    - Every generated rclone and OneDrive Offline Mirror service now has a
+      saved-connection NetworkManager readiness `ExecCondition` before its
+      restricted worker/monitor. Scheduled work is noninteractive: it never
+      starts a VPN or opens authentication, and is skipped unless the network,
+      saved NetworkManager profile, tunnel, and endpoint checks are already
+      ready. Start refreshes existing generated units for both engines, so an
+      upgrade does not require editing and resaving each connection.
+    - The six-provider service-condition matrix, finite-user reference counting,
+      non-destructive release reporting, malformed guard requests, and existing
+      pre-existing/shared shutdown decisions are covered. The library gate
+      passed 204 tests with six intentional live ignores and only the managed
+      sandbox's loopback-listener test excluded; the binary gate passed 132
+      tests with three intentional live ignores and only its private-D-Bus
+      socket test excluded. `cargo check --all-targets` and strict Clippy also
+      passed on October 11, 2026.
+    - The first installed post-login repeat regenerated the disposable Rust
+      Coordinator service with the unmetered-network and saved-connection
+      readiness conditions ahead of the restricted scheduled worker, and Start
+      made its timer active and enabled. Pause stopped both units and removed
+      their enablement links, but exposed that the shared D-Bus adapter did not
+      reload the user manager after `EnableUnitFiles` or `DisableUnitFiles`;
+      cached `UnitFileState` therefore remained stale and
+      `NeedDaemonReload=yes` until a manual reload.
+    - The shared systemd D-Bus adapter now reloads the manager after either
+      unit-file operation, covering online and offline generated units. The 19
+      non-live service tests passed with three intentional live ignores, along
+      with `cargo check --all-targets` and strict Clippy. Installed acceptance
+      passed after reloading the panel session on October 11, 2026. Start loaded
+      both readiness conditions ahead of the restricted scheduled worker and
+      left the timer active, waiting, enabled, and fully reloaded. Pause then
+      left both service and timer inactive, disabled, process-free, successful,
+      and at `NeedDaemonReload=no` without a manual reload.
+  - [x] Make retention cleanup failures non-destructive and actionable while
+    leaving the successful synchronization result intact. Retention already
+    starts only after bisync and any SharePoint post-sync verification succeeds;
+    local or remote cleanup failures are no longer discarded.
+    - Cleanup now returns bounded, redacted warnings for cancellation, local or
+      remote listing failure, unreadable entries or ownership markers, and
+      failed removal of applet-owned expired recovery directories. Failed or
+      unverifiable cleanup preserves the affected recovery data and recommends
+      the relevant access/permission check plus a later Sync Now retry.
+    - A successful synchronization remains `Succeeded`. Manual Preview/Sync
+      summaries append cleanup warnings, scheduled workers emit them, and the
+      atomic coordinator state persists them so the applet exposes scheduled
+      warnings without scraping the journal. Starting the next operation writes
+      a fresh running state and therefore clears stale warnings.
+    - Focused tests inject remote listing and purge failures, an unreadable local
+      recovery target, unowned dated data, and a dated symlink. They prove
+      successful-state preservation, warning redaction and bounds, applet-row
+      visibility, backward-compatible state loading, and that unowned or linked
+      data is never deleted. The complete library gate passed 211 tests with six
+      intentional live ignores and only the managed sandbox network-socket test
+      filtered; the binary gate passed 133 tests with three intentional live
+      ignores and only its private-D-Bus socket test filtered. Formatting,
+      `cargo check --all-targets`, and strict Clippy passed on October 11, 2026.
+- [x] Add focused behavioral and failure tests before switching production.
+  - [x] Snapshot the exact typed rclone requests and ordering for all five modes,
+    including ordinary providers and SharePoint-specific pre/post operations.
+  - [x] Cover malformed arguments, changed saved targets, missing/changed anchors,
+    foreign ownership markers, symlinked recovery paths, malformed date names,
+    truncated/invalid output, and redaction of remote or credential details.
+    Audited worker/config/SharePoint guard coverage and added coordinator
+    assertions for incomplete owner/listing output, missing/changed anchors,
+    foreign owners, dangling owner links, and linked recovery directories.
+    Ownership-sensitive output must be complete valid UTF-8. A remote owner
+    inspection timeout/cancellation now stops the transaction; only a nonzero
+    lookup followed by a complete empty listing can authorize a new marker.
+  - [x] Inject failure, timeout, and cancellation at every workflow phase and prove
+    that later mutation and retention steps do not run after a failed required
+    phase; prove cleanup failures cannot delete unowned data.
+    The matrix covers remote anchors, recovery creation/inspection/publication,
+    bisync, SharePoint convergence/checksum verification, and initial Preview/
+    Sync. It asserts exact stopping points and preservation of initialization
+    markers. Separate retention cases prove incomplete listings or markers
+    cannot authorize purge and cleanup warnings preserve successful sync.
+  - [x] Exercise concurrent manual/timer requests and interrupted runs, confirming
+    one-run-per-connection serialization and preservation of rclone's safety
+    lock/recovery guidance. Cross-process lock tests and installed interrupted
+    Repair tests passed for rclone bisync and OneDrive Offline Mirror.
+  - [x] Add an offline-repair engine matrix covering rclone-backed providers and
+    OneDrive Offline Mirror. Prove correct service/timer dispatch, failed-unit
+    reset, lock and recovery-state preservation, no implicit resync, and no
+    online FUSE lazy-detach attempt.
+  - [x] Extend the disposable alias/local integration test through dry preview,
+    initial sync, ordinary two-way sync, deletion recovery, unique repeated
+    backups, marked-old cleanup, and preservation of unmarked data.
+    `tests/bisync_coordinator_live.rs` exercises the production Rust coordinator
+    with isolated rclone configuration and temporary data. It also preserves
+    marked directories with invalid calendar dates. Both alias/local and
+    loopback SFTP variants passed with host access on October 12.
+  - [x] Run the ignored disposable SFTP recovery/cleanup test and SharePoint guard
+    tests where credentials are available; keep their external-system evidence
+    boundary explicit.
+    - [o] Retire `live_sftp_offline_mirror_controls_and_recovery`: its fake
+      `nmcli`, unsaved worker configuration, and old Flatpak-builder assumptions
+      are obsolete. The new loopback-SFTP test covers the engine transaction;
+      installed native timer/Pause/Repair evidence remains recorded below, and
+      final Flatpak controls are still an explicit packaging gate.
+    - [x] Run the replacement loopback-SFTP transaction, read-only SharePoint
+      identity/folder guards, compiled changed-target guard, and writable
+      SharePoint initial/ordinary/preview transaction. The latter used a fresh
+      UUID child of the approved test folder, independently checked both sides
+      by checksum, validated the Office archive and recovery copies, and purged
+      only that disposable child on completion.
+    - [x] Rerun Network readiness and private runtime-IPC socket tests with host
+      access. Both passed; neither is excluded from the full host suite.
+  - October 12 gate: 357 nonignored all-target tests passed with host access,
+    plus six explicitly run ignored engine/SharePoint integration tests. The
+    21-test coordinator suite, formatting, locked all-target check, and strict
+    all-target Clippy pass. These are native host results, not acceptance of the
+    final rebuilt Flatpak.
+- [ ] Validate both packaging modes before accepting shell removal in the final
+  release artifact.
+  - [x] Native: exercise manual preview/initial sync/normal sync and a timer-fired
+    run with the installed applet and user service.
+    - October 11 installed ordinary Preview passed on the initialized
+      disposable `Test_SharePoint Offline UI` mirror. Atomic state was
+      `preview/succeeded`, the panel reported zero changes, no shell/rclone
+      process survived, and the generated service/timer remained inactive and
+      disabled. The already-open Modify window retained `Preview requested`,
+      reproducing the separately tracked IPC completion-reconciliation gap.
+    - October 11 installed ordinary Sync Now also passed through the Rust
+      coordinator. While active, the panel showed Syncing, an on row, and
+      Repair; completion published atomic `sync/succeeded`, left no rclone or
+      shell process, and reported a successful zero-change sync without
+      transfer counts.
+    - October 11 the installed Start action enabled the disposable one-minute
+      timer, whose first firing completed through the restricted worker with
+      atomic `scheduled/succeeded`. The oneshot service ended inactive/dead
+      with `Result=success`; its systemd `InvocationID` exactly matched the
+      atomically published JSON progress state, the timer remained
+      active/waiting and enabled, and no shell or rclone process survived.
+    - The installed Pause action then reported completion, published atomic
+      `pause/succeeded`, and left both service and timer inactive/dead and
+      disabled. The established initial-sync marker remained intact and no
+      worker or rclone process survived.
+    - October 11 installed initial Preview passed on the new disposable
+      `Rust Coordinator Initial Test` SharePoint mirror. Its regenerated unit
+      invokes only `--run-bisync scheduled <UUID>` through the installed Rust
+      worker, with no shell wrapper, legacy managed script, or raw rclone
+      command; its service and timer remained inactive/dead and disabled. The
+      coordinator published `initial-preview/succeeded`, wrote the
+      `initial-preview-confirmable` marker, left `initial-sync-complete` absent,
+      created only the expected SharePoint access anchor, and left no worker or
+      rclone process running. Confirmed initial Sync Now remains the next step.
+    - October 11 confirmed initial Sync Now then passed on that disposable
+      mirror. The coordinator published `initial-sync/succeeded`, consumed the
+      preview-confirmation marker, wrote `initial-sync-complete`, and created
+      the normal bisync listings without leaving a worker or rclone process.
+      Read-only inspection found the same 37-byte app-owned access anchor on
+      both sides; the remote contained only that anchor plus the excluded
+      app-owned recovery directory. The standalone Modify window retained its
+      stale `Sync Now requested` notice, as tracked above.
+  - [ ] Rebuilt Flatpak: repeat the same lifecycle and confirm the user service can
+    invoke only the restricted coordinator, host rclone remains reachable, and
+    no new filesystem or general host-command permission is required.
+  - [ ] Verify progress counts, failure/repair UI, cancellation, initial-sync
+    confirmation, schedule pause/resume, and recovery retention from the
+    installed application rather than only unit tests. Native acceptance covers
+    the coordinator and both Repair engines; the final Flatpak repeat and
+    retention warning behavior remain.
+  - [ ] Repeat the installed lifecycle for OneDrive, SharePoint, Google Drive, Box,
+    SMB, and SFTP offline engines as applicable. Keep these results separate
+    from the provider-wide online-engine regression proof in Task (6).
+  - [x] Live-verify the confirmed Repair flow with at least one rclone bisync mirror
+    and OneDrive Offline Mirror, including interruption and restart. Treat these
+    as separate evidence; success for one offline engine does not validate the
+    other or any online mount.
+  - [x] Run a production-reachability scan proving manual bisync no longer reaches
+    `Executable::Sh` or `managed-bisync.sh`. If scheduled use also migrated,
+    remove script generation and the `Sh` executable variant entirely;
+    otherwise document the one remaining scheduled call and its justification.
+    - No production `Sh` variant, managed script renderer, script path, or
+      shell-launched bisync request remains. The only `/usr/bin/sh` source
+      reference is a generic process-runner test using `TestOnly`; negative
+      generated-unit assertions retain the obsolete names to prevent
+      regression.
+  - [x] Run source checks and reconcile the source inventory to **Removed**.
+    Default/all-feature all-target compilation, strict Clippy, and 358
+    nonignored host tests pass after executable isolation; the earlier six
+    disposable engine/SharePoint tests remain applicable because engine
+    arguments and coordinator behavior did not change. Final-artifact live
+    acceptance remains in the open packaging-mode items above.
+
+### Task (6): NetworkManager OpenConnect migration
+
+**Goal:** support the UA VPN as a saved NetworkManager OpenConnect profile and
+use the applet's existing NetworkManager D-Bus adapter exclusively. The applet
+requests profile activation over D-Bus; NetworkManager requests interactive
+secrets over D-Bus from the host `nm-applet` secret agent, which launches the
+OpenConnect multi-field authentication dialog. This `nm-applet` path applies
+only when the selected NetworkManager profile has service type
+`org.freedesktop.NetworkManager.openconnect`; other VPN plugins continue to use
+their own NetworkManager authentication paths and must not acquire an
+`nm-applet` dependency. The applet must not invoke an authentication helper
+directly or receive, store, or forward credentials. OpenConnect and `nm-applet`
+are host components and must not be bundled into the Flatpak. Remove all direct
+proprietary Cisco command, GUI, agent, and configuration handling after
+installed-app acceptance passes.
+
+**Current status:** native and prototype-Flatpak OpenConnect acceptance passed.
+Only the immutable 0.5.3 source/tag, final reproducible Flatpak lifecycle, and
+post-acceptance Cisco rollback disposition remain open; those release steps are
+also summarized in the 0.5.3 gate below.
+
+- [x] Establish the compatibility baseline and rollback boundary.
+  - [x] Confirm the current host state: Cisco Secure Client 5.1.19 is installed;
+    it remains available as a temporary rollback path.
+  - [x] Confirm the configured Pop!_OS/Ubuntu repository offers packaged
+    `network-manager-openconnect` 1.2.10 and OpenConnect 9.12.
+  - [x] Record the gateway and profile settings without copying credentials,
+    cookies, certificates, or other authentication material.
+  - [x] Preserve Cisco Secure Client and unrelated NetworkManager profiles so
+    the OpenConnect profile can be removed independently if rollback is needed.
+- [x] Install and validate the packaged host OpenConnect integration.
+  - [x] Install `openconnect`, `network-manager-openconnect`,
+    `network-manager-openconnect-gnome`, and `network-manager-gnome`; record the
+    installed versions in the completion notes.
+  - [x] Confirm the NetworkManager OpenConnect service and
+    `nm-openconnect-auth-dialog` are available without disrupting other network
+    profiles.
+  - [x] Confirm the OpenConnect authentication dialog presents the three fields
+    supplied by the UA gateway: username, password, and `NetID +Method`.
+- [x] Create and test a separate UA OpenConnect profile.
+  - [x] Create `UA Engineering OpenConnect` with `nm-connection-editor`, gateway
+    `https://vpn.arizona.edu/Engineering`, protocol `anyconnect`, connection type
+    `vpn`, service type `org.freedesktop.NetworkManager.openconnect`, and a
+    stable UUID.
+  - [x] Confirm the applet discovers the profile through its existing typed D-Bus
+    enumeration without adding an OpenConnect-specific adapter or storing
+    authentication secrets.
+  - [x] Confirm manual activation accepts the three authentication values,
+    starts phone-based second-factor authentication, establishes the VPN, and
+    displays the gateway's post-connection message.
+  - [x] Verify an internal route, DNS name, or TCP endpoint available only
+    through the UA VPN, clean D-Bus deactivation, and reconnection after logout
+    or reboot.
+    1. [x] Connect through the saved NetworkManager OpenConnect profile.
+    2. [x] Verify a route, DNS name, or TCP endpoint that is available only through
+       the UA VPN.
+    3. [x] Deactivate the profile through NetworkManager D-Bus and confirm a clean
+       disconnection.
+    4. [x] Reconnect and repeat the VPN-only readiness check.
+    5. [x] Log out and back in or reboot, reconnect, and repeat the readiness
+       check without manually restarting an authentication agent.
+       - First reboot result: `nm-applet` autostarted and owned
+         `org.freedesktop.network-manager-applet`, but two D-Bus activation
+         attempts remained in VPN preparation and opened no authentication
+         dialog. Restarting only `nm-applet` after COSMIC was fully running made
+         the next activation succeed and restored the private route and UA DNS.
+       - [x] Replace login autostart with a static, on-demand
+         `cosmic-mounter-openconnect-agent.service`. A live D-Bus test started
+         the unit, waited for its stabilization step, presented the three-field
+         OpenConnect dialog, completed phone authentication, activated the VPN,
+         and restored `10.138.0.0/17` plus UA DNS.
+       - [x] Extend saved-profile discovery to retain the VPN
+         `service-type`; `connection.type=vpn` alone cannot distinguish
+         OpenConnect from other NetworkManager VPN plugins.
+       - [x] For only
+         `org.freedesktop.NetworkManager.openconnect`, restart
+         `cosmic-mounter-openconnect-agent.service` through the systemd user
+         manager D-Bus and wait for the start job, including `ExecStartPost`,
+         before requesting NetworkManager activation. Restart rather than only
+         start so a service left active from an earlier request re-registers
+         after COSMIC's competing generic secret agent.
+       - [x] If the static unit is missing or its start fails, stop before VPN
+         activation and present actionable installation diagnostics. Never
+         execute `nm-applet`, `systemctl`, or the authentication dialog directly.
+       - [x] Keep the authentication agent available while OpenConnect may need
+         to reauthenticate. The applet never stops this shared helper; its
+         `PartOf=graphical-session.target` policy ends it with the graphical
+         session, so the applet cannot stop an agent it did not start.
+       - [x] Install the updated applet, log out and back in or reboot, confirm
+         the service begins inactive, then connect from Cloud Mounter and repeat
+         the route and DNS checks without terminal intervention.
+         - The first installed-app attempt activated OpenConnect but timed out at
+           the former 30-second saved timeout; OpenConnect now receives an
+           effective minimum of 90 seconds.
+         - A later attempt exposed a nested Tokio runtime panic in synchronous
+           systemd status reads; blocking zbus status work now runs outside the
+           Tokio worker.
+         - The next clean attempt reached unit installation but systemd D-Bus
+           `GetUnit` rejected the valid disabled unit as not loaded. Status paths
+           now use `LoadUnit`; the exact opt-in live D-Bus start test passes.
+         - The first `LoadUnit` applet attempt mounted successfully but displayed
+           a false `inactive (success)` failure while the start was still
+           transitioning. Post-start verification now polls bounded
+           `inactive/success` and `activating` states until active or a real
+           failure. The temporary queue-only `StartUnit` behavior was removed;
+           all systemd start, stop, and restart operations again wait for job
+           completion, including the unfinished offline-mirror paths. Unit tests
+           and a clean live D-Bus online start/mount pass.
+         - That false failure also skipped persistence of the requested popup
+           state, leaving a real mount with an off slider. Online rows now let
+           observed service/mount state override the saved startup flag, and an
+           existing mount remains Mounted with Unmount available even if VPN or
+           network readiness later becomes false.
+         - Final installed-app acceptance began with the authentication agent,
+           VPN, and mount inactive. Cloud Mounter started the agent on demand,
+           requested NetworkManager D-Bus activation, displayed the three-field
+           OpenConnect dialog, restored the private route and UA DNS, mounted
+           the SMB share, and exposed its contents. Toggling the row off cleanly
+           stopped the mount service and FUSE mount, persisted the off state,
+           and conditionally deactivated the VPN. The shared authentication
+           agent remained active by design for possible reauthentication.
+  - [x] Exercise canceled and failed authentication, denied/expired second
+    factor, timeout, network interruption, and reconnect. The separately
+    installed Cisco Secure Client may remain available for manual rollback, but
+    it is no longer part of the applet's supported or tested control surface.
+    - [x] Cancel authentication by closing the three-field OpenConnect requester
+      (this dialog version has no labeled Cancel button). The installed applet
+      returned its slider to off; live inspection found the managed SMB service
+      inactive with `Result=success`, no FUSE mount, no active VPN, and
+      `start_at_login: false`. The shared authentication agent remained active
+      by design.
+    - [x] Confirm the cancellation notice remains visible long enough to read
+      after reopening the applet popup.
+      - [x] Correct the notice timer so time spent with the popup closed does
+        not consume its 10-second visible interval; add focused unit coverage.
+      - [x] Install and user-verify the corrected visible interval by repeating
+        the requester-window-close cancellation. After the terminal-state fix,
+        the user could read and report the explicit mount/VPN
+        cancellation-or-failure result.
+      - [x] Stop readiness polling when an app-requested NetworkManager VPN
+        returns to `Disconnected` or `Failed`, and replace the waiting state
+        with an explicit authentication/activation failure instead of waiting
+        for the full OpenConnect deadline.
+    - [x] Exercise a rejected second-factor attempt. The OpenConnect dialog
+      displayed login failure and permitted retry; closing it produced the
+      applet failure notice, removed the VPN activation, left the share
+      unmounted, and created no managed mount unit.
+    - [x] Exercise authentication timeout and verify the pending NetworkManager
+      activation and authentication dialog are canceled, not merely abandoned.
+      - [x] Reproduce the defect: after the applet deadline, NetworkManager no
+        longer listed the VPN activation and the share remained unmounted, but
+        `nm-openconnect-auth-dialog` remained in the authentication-agent
+        service control group.
+      - [x] On timeout of an app-requested VPN, deactivate any remaining
+        NetworkManager active object and restart the OpenConnect agent through
+        systemd D-Bus so its complete control group is cleaned.
+      - [x] Add `TimeoutStopSec=5` and explicit `KillMode=control-group` to the
+        documented host service so an orphaned dialog cannot extend cleanup by
+        systemd's default stop timeout.
+      - [x] Update the installed host service with the bounded stop and
+        control-group settings; verify the effective systemd properties.
+      - [x] Reload the installed applet and repeat the live timeout test. At the
+        deadline, the applet deactivated the NetworkManager object, removed the
+        OpenConnect service and dialog, restarted a clean authentication agent,
+        left the share unmounted, and retained `start_at_login: false`.
+      - [x] Verify the installed applet replaces its waiting state with the
+        visible `did not become ready within ... seconds` mount-failure notice.
+    - [x] Exercise network interruption with controlled restoration.
+      - [x] Schedule recovery before disruption, disconnect Wi-Fi for 15
+        seconds, and verify restoration of the exact saved Wi-Fi profile.
+      - [x] Record the observed dependency-loss behavior: NetworkManager
+        stopped OpenConnect and did not reauthenticate it, while the managed
+        rclone service and FUSE mount remained present and could not recover
+        remote access.
+      - [x] Replace the misleading healthy state and cached zero count with a
+        degraded mounted state that keeps Unmount available, suppresses the
+        unverifiable pending count, and gives explicit off/on reauthentication
+        guidance. Do not automatically open an interactive Duo prompt merely
+        because background connectivity returned.
+      - [x] Install and live-verify the degraded state: the mounted connection
+        retained its blue switch and Unmount control, displayed `Mounted,
+        connection unavailable`, replaced the stale zero count with `!`, and
+        presented off/on reauthentication guidance.
+      - [x] Expose and live-verify the separately confirmed Repair/lazy-detach
+        action when clean unmount cannot detach a degraded mount. The first
+        interruption test found the controller allowed Repair but the popup
+        rendered only its primary switch, leaving the recovery action
+        unreachable.
+        - [x] Retest the hardened confirmation. The first live Repair-button
+          build placed Repair adjacent to the primary switch; clicking its
+          visible area produced `Unmount completed`, proving the primary
+          unmount hit target handled the click instead. Move Repair to a
+          separate full-width recovery action, use a separately labeled
+          `Confirm Repair` state, and retain the minimum arming interval.
+        - [x] Hide the recovery action immediately when Confirm Repair starts.
+          The separated two-stage confirmation passed live and Repair completed,
+          but its button remained visible until asynchronous cleanup finished.
+      - [x] Recover by toggling the connection off and on and completing
+        OpenConnect authentication. The rebuilt applet restored `vpn0`, the
+        private route and UA DNS, mounted and read the ENGR share, started
+        preload, and persisted the on state.
+    - [x] Exercise successful reconnect after the negative cases. OpenConnect
+      restored `vpn0`, the private `10.138.0.0/17` route and UA DNS; the managed
+      rclone service mounted ENGR Research and its directory contents were
+      readable.
+- [x] Integrate and validate the OpenConnect-only host `nm-applet` secret-agent
+  path.
+  - [x] Establish why it is required: COSMIC's agent currently exposes only one
+    generic entry, while `nm-applet` launches the OpenConnect dialog containing
+    all three gateway-defined authentication fields.
+  - [x] Document the static on-demand user-service installation, its current
+    extra-panel-icon limitation, `nm-connection-editor` profile creation, and
+    the division of responsibility among the applet, systemd, NetworkManager,
+    `nm-applet`, and OpenConnect in `docs/openconnect.md`; link it from `README.md`.
+  - [x] After profile discovery identifies service type
+    `org.freedesktop.NetworkManager.openconnect`, restart the narrowly scoped
+    `cosmic-mounter-openconnect-agent.service` through the systemd user-manager
+    D-Bus and wait for successful job completion before requesting activation.
+    This must re-register an already-running agent after COSMIC, not accept an
+    earlier active instance whose `StartUnit` operation would be a no-op.
+    Skip this step for every other NetworkManager VPN service type. Do not use
+    `pgrep`, execute `nm-applet` or `systemctl` from the Flatpak, or invoke
+    `nm-openconnect-auth-dialog` directly.
+  - [x] If the service is absent or fails to start, stop before activation and
+    show actionable host package and user-service installation instructions.
+    Never show this requirement for other VPN plugin types and never request or
+    display VPN secrets in the applet.
+  - [x] Reproduce the post-login competing-agent order, change the OpenConnect
+    preparation from systemd `StartUnit` to `RestartUnit`, and live-verify that
+    `nm-applet` registers after COSMIC and opens the three-field dialog.
+  - [x] Activate the saved profile only through NetworkManager D-Bus and verify
+    that NetworkManager's D-Bus secret request is handled by `nm-applet`, which
+    launches the multi-field OpenConnect authentication dialog.
+  - [x] Verify the COSMIC single-field prompt does not remain open after
+    applet-initiated activation. If two registered agents compete for the
+    request, determine and document a reliable agent-selection or session setup
+    before declaring the migration complete. The installed post-login,
+    cancellation, rejected-authentication, and timeout attempts displayed only
+    the three-field OpenConnect dialog after the `RestartUnit` ordering fix.
+  - [x] Add a non-OpenConnect VPN fixture proving that profile discovery,
+    activation, and diagnostics do not check for or require `nm-applet`.
+- [x] Record the preliminary go decision.
+  - [x] The successful three-field login, phone authentication, VPN activation,
+    and gateway banner justify proceeding with NetworkManager-only applet
+    integration.
+- [x] Convert the applet to NetworkManager-only VPN handling after a go result.
+  - [x] Associate an applet connection with the OpenConnect UUID and prove the
+    successful activation, readiness-gated mount, shared-use ownership, and
+    conditional-deactivation path through the current D-Bus adapter. Timeout,
+    cancellation, and authentication failure remain in the explicit negative
+    acceptance item above.
+  - [x] Migrate saved proprietary-Cisco configuration by requiring the user to
+    select the new NetworkManager profile. Never guess a UUID or silently
+    rewrite a connection to a similarly named profile. Legacy `Cisco` values
+    deserialize only as an inert compatibility marker and produce actionable
+    reselection guidance.
+  - [x] Remove `VpnKind::Cisco`, Cisco component discovery, `vpn -s stats`,
+    direct disconnect handling, `vpnui`, Cisco-agent detection/startup, their
+    executable variants and parsers, and Cisco-specific UI/configuration paths.
+  - [x] Correct the inventory's stale `vpn connect` entry: the former production
+    source opens `vpnui` and uses stats/disconnect but does not invoke
+    `vpn connect`.
+  - [x] Update OpenConnect-specific dependency diagnostics to distinguish a missing
+    profile, plugin/authentication dialog, and `nm-applet` secret agent without
+    attempting privileged installation or host process startup from inside the
+    applet or Flatpak. Do not apply these diagnostics to other VPN plugins.
+  - [x] Update `docs/engineering/flatpak-host-command-inventory.md`, packaging rationale, requirements, translations,
+    and user documentation so all supported VPNs are NetworkManager-managed and
+    no Cisco host command or system-manager permission remains.
+- [x] Apply the corrected managed online lifecycle to every online engine.
+  - [x] Route OneDrive through onedriver and SharePoint, Google Drive, Box, SMB,
+    and SFTP through rclone using one exhaustive provider-to-engine dispatch.
+  - [x] Make both engines use the same systemd user-manager D-Bus start helper,
+    bounded transitional-state reconciliation, persisted slider update, actual
+    mount-state restoration, clean stop verification, and conditional
+    NetworkManager VPN release.
+  - [x] Add a regression test covering every provider and proving offline modes
+    do not enter this online path. The installed SMB/OpenConnect lifecycle is
+    the live acceptance example; offline equivalents belong exclusively to
+    Task (5).
+- [x] Generalize and validate the confirmed online Repair action before the
+  rebuilt-Flatpak acceptance run.
+  - [x] Expose the separate full-width, two-stage Repair action in every actual
+    online recovery state: `Degraded` and `Error`. Do not offer it for healthy
+    Mounted/Unmounted states, unmet network or VPN dependencies, unavailable
+    connections, transitional work, or an already-confirmed repair. Hide it
+    immediately after confirmation begins.
+    - The popup derives visibility from the controller's enabled Repair action.
+      The controller limits that action to `Degraded` and `Error`, preventing a
+      normal mount, file read, or clean unmount from suggesting destructive
+      recovery. A failed clean Unmount sets a transient recovery latch so a
+      still-active service and mount are presented as `Error` with Repair
+      available; successful online operation or completed Repair clears it.
+  - [x] Add a provider/engine matrix covering OneDrive Online through onedriver
+    and SharePoint, Google Drive, Box, SMB, and SFTP Online through rclone.
+    Prove dispatch, `fuse.onedriver` versus `fuse.rclone` ownership checks,
+    rejection of foreign mounts, saved-state reconciliation, cancellation of
+    applicable preload/refresh work, service stop/reset, and bounded detach.
+    - A typed repair plan now makes each provider's engine, owned FUSE type, and
+      cancellation requirements explicit. Focused tests cover all six providers,
+      persistent off-state for each, foreign mounts, the bounded detach policy,
+      and Stop/Status/ResetFailed sequencing. The full suite passes with 301
+      tests and 12 explicitly ignored live or destructive tests.
+  - [x] Live-retest the current separated Repair UI with an onedriver mount.
+    The completed SMB/rclone test is the live rclone example; earlier onedriver
+    recovery evidence predates this UI and does not validate the final action.
+    - With `UA OneDrive` mounted through `fuse.onedriver`, a terminal working
+      directory deliberately made clean Unmount fail. The applet changed the
+      row to its recoverable Error state and exposed the separate Repair action.
+      After the terminal released the mount, the first click armed confirmation,
+      the second click hid Repair immediately, and recovery completed with the
+      slider off. Post-repair inspection found the service inactive/dead with
+      `Result=success`, its unit disabled, no onedriver process or FUSE mount,
+      and persisted `start_at_login: false`.
+- [ ] Complete automated and installed-app acceptance testing.
+  - [x] Add profile discovery/state/activation/deactivation coverage using an
+    OpenConnect service-type fixture, plus legacy-config migration and missing
+    profile errors. Installed D-Bus lifecycle evidence covers real activation
+    and deactivation; missing host plugin/dialog behavior remains part of the
+    Flatpak installation gate.
+  - [x] Prove the applet never disconnects a pre-existing or shared VPN and only
+    disconnects a profile it activated when the user enabled that policy.
+  - [x] Native: complete UA WebAuth/Duo, readiness, online mount, shared
+    dependency ownership, unmount, and conditional disconnect through the
+    installed applet. Offline sync acceptance is deferred to Task (5).
+  - [ ] Final tagged Flatpak: repeat the lifecycle through NetworkManager D-Bus
+    with no additional permission and confirm the host OpenConnect plugin owns
+    the VPN implementation and authentication UI. Prototype evidence and the
+    accepted runtime are recorded in the ordered gate below but do not replace
+    this final-package test.
+  - [x] Run a production-reachability scan proving the applet no longer reaches a
+    Cisco executable, GUI, agent, parser, or system-manager operation.
+  - [x] Run the Task (6) source gate: formatting, all-target check, strict
+    Clippy, and the full suite passed before the later Task (5) coordinator
+    changes. The repository-wide final gate is now centralized in the 0.5.3
+    release list and must be repeated after the last source change.
+  - [ ] Complete the remaining Flatpak acceptance work in this order.
+    1. [x] Rebuild and install the Freedesktop 25.08 GUI prototype from the
+       current local release binary and record its Flatpak commit. This did not
+       require a new source tag. Confirm the installed sandbox contains the
+       current migration and final NetworkManager and user-systemd D-Bus
+       permissions.
+       - The user-installed prototype advanced from commit `c8f461f6a408` to
+         `b95fbbcccaa1`. Its packaged binary contains the current OpenConnect,
+         confirmed Repair, and `fuse.onedriver`/`fuse.rclone` paths. Installed
+         permissions include network sharing plus access to NetworkManager,
+         login1, the user systemd manager, and the Flatpak host interface. The
+         native `~/.local/bin` installation and saved configuration remain
+         separate and were not overwritten by the Flatpak installation.
+    2. [x] Prove the positive OpenConnect lifecycle from that installed
+       prototype. Start with the VPN, SMB mount, and authentication-agent
+       service inactive; request ENGR Research, complete the three-field/Duo
+       flow, verify the private route and UA DNS, access the share, unmount it,
+       and verify conditional VPN deactivation.
+       - From installed Flatpak commit `b95fbbcccaa1`, the user completed the
+         three-field/Duo flow and accessed data from
+         `ua_engr:Research/Utzinger`. Live checks confirmed the `fuse.rclone`
+         mount, active managed user service, route `10.138.0.0/17`, and UA DNS
+         servers `128.196.11.233` and `128.196.11.234`. Turning the row off
+         completed cleanly: the service became inactive/dead with
+         `Result=success`, the FUSE mount disappeared, NetworkManager
+         deactivated `UA Engineering OpenConnect`, and the saved state was
+         `start_at_login: false` while the sandboxed app remained running.
+    3. [x] Repeat authentication cancellation from the installed prototype.
+       Verify a bounded actionable error and no mount, saved on-state, stale
+       NetworkManager active object, or competing COSMIC single-field prompt.
+       - Closing the three-field OpenConnect dialog produced `Mount failed:
+         authentication was canceled or failed`. The row returned to off, no
+         COSMIC single-field prompt appeared, the managed mount service was
+         inactive/dead, no FUSE mount or UA VPN active object remained, and the
+         persisted state stayed `start_at_login: false`. The shared OpenConnect
+         authentication agent remained active as designed.
+    4. [x] Repeat a rejected or expired second-factor attempt from the installed
+       prototype and verify the same clean failure state.
+       - The user submitted valid primary credentials and rejected the phone
+         approval. OpenConnect reported `Login failed`; after the dialog was
+         closed, Cloud Mounter reported that VPN authentication failed or was
+         canceled. The row returned to off without a COSMIC single-field
+         prompt. Live checks confirmed no VPN active object, FUSE mount, or
+         running mount service and persisted `start_at_login: false`.
+    5. [ ] Create and publish a commit/tag containing the accepted migration;
+       do not use the older `v0.5.2` source as final-package evidence. Update the
+       reproducible manifest and generated Cargo sources to that release.
+    6. [x] Resolve `com.system76.Cosmic.BaseApp//stable` with the COSMIC Flatpak
+       packaging target. Do not silently substitute a different base/runtime;
+       record the accepted runtime and resulting permission changes.
+       - The ref is now available from Flathub, although it is not published by
+         the configured COSMIC remote. The user-installed BaseApp is Flathub
+         commit `b3f1b274d540` and declares Freedesktop Platform/SDK 25.08,
+         matching the manifest. The GUI prototype now declares this exact base,
+         rebuilt successfully, and advanced to installed commit
+         `20bd5aea1b91`. It launched on Freedesktop Platform 25.08 with the
+         accepted NetworkManager, login1, user-systemd, Flatpak, app-bus, and
+         scoped filesystem permissions unchanged. Base/runtime default
+         read-only GTK/KDE color-scheme paths appear in the effective permission
+         report but no new application D-Bus or writable filesystem permission
+         was introduced.
+    7. [ ] Build and install the final reproducible manifest, confirm it uses
+       the accepted tag and runtime, and repeat at least the positive
+       OpenConnect/VPN/mount/unmount lifecycle plus one negative authentication
+       case. Prototype success alone does not close this final-package gate.
+  - [ ] Decide the Cisco Secure Client disposition only after the final Flatpak
+    lifecycle passes. Until then keep it installed as the rollback client;
+    afterward document whether it may be removed and update deployment guidance.
+
+## Release 0.5.3 — Flatpak host-integration completion
+
+This is the concise release gate. Tasks (5) and (6) retain the implementation
+and acceptance detail; do not duplicate their historical evidence here. Build
+the final reproducible Flatpak only after every pre-build source item below is
+complete so that one tagged artifact can close both tasks.
+
+### Pre-build source closure
+
+- [x] Complete the remaining Task (5) source work.
+  - [x] Reconcile routed operation completion into an open Modify window.
+  - [x] Make Offline Mirror save notices initialization-aware.
+  - [x] Finish offline control reconciliation for observed unit state and
+    persistence failures while preserving Stop/Repair access during work.
+  - [x] Apply NetworkManager readiness and VPN ownership rules to manual and
+    scheduled offline operations.
+  - [x] Report retention cleanup failures as non-destructive actionable warnings.
+- [x] Remove obsolete runtime dependency probes outside Tasks (5) and (6):
+  rclone version/help capability probes, onedriver version/help, onedrive
+  version, fusermount3 version, and the otherwise-unused fuser executable path.
+  Preserve packaging minimums and typed operation-time diagnostics.
+  - Production dependency inventory now performs no storage-tool command. Native
+    execution discovers executable paths; Flatpak execution records only that
+    its host-command route exists and lets the requested operation report a
+    typed missing-tool, nonzero-exit, timeout, or cancellation failure.
+  - Debian recommendations and the dependency installer retain rclone 1.74.3,
+    onedriver 0.15.0, and onedrive 2.5.10 minimums. Focused diagnostics tests
+    retain the former rclone and onedriver capability matrix without running
+    those probes at startup.
+  - The unused `fuser` executable and `psmisc` recommendation are removed.
+    Actual `fusermount3 -u` and `-uz` recovery operations remain actionable.
+- [x] Finish the focused failure and integration-test gaps named in Task (5),
+  including applicable ignored SFTP/SharePoint tests and the two socket-opening
+  tests that the managed sandbox cannot execute. Host-access socket tests,
+  disposable alias/local and loopback-SFTP lifecycles, SharePoint guards, and
+  the disposable SharePoint coordinator test passed on October 12, 2026.
+- [x] UI Translation Audit: Make sure that all app-owned text displayed in the
+  UI comes from the Fluent language file. The
+  [audit record](docs/engineering/2026-10-12-ui-translation-audit.md) documents coverage and intentional
+  protocol/data exceptions. Sleep-warning visibility is typed, retention
+  plurals use Fluent, and catalog/reference validation has no missing or
+  duplicate keys. Formatting, locked all-target checking, strict Clippy, and
+  358 nonignored native host tests passed on October 12, 2026. English remains
+  the only catalog; rendered native/Flatpak UI acceptance remains a release gate.
+- [x] Run the final production-reachability scan and reconcile every
+  `docs/engineering/flatpak-host-command-inventory.md` row to **Replaced by D-Bus**, **Removed**, or a justified
+  **Unavoidable invocation**. Treat the Documents portal v4 fallback as an
+  explicit supported-host exception, not as a 0.5.3 blocker.
+  - October 12 source review covers default Linux applet/settings/guard/worker
+    paths, command factories, generated units, and local child launches. The
+    inventory now includes coordinator recovery/ownership/check/purge calls,
+    has no unresolved mixed status, and distinguishes source removal from
+    final rebuilt-Flatpak acceptance. Probe-only commands are feature-gated;
+    the synchronous bridge no longer accepts arbitrary executables/arguments.
+- [x] Harden the fixed synchronous host-inspection bridge before release.
+  - [x] Route `RcloneConfigDump` and `HostMountInfo` through bounded, output-limited
+    execution off the GUI event loop. Preserve sanitized operation errors,
+    native/Flatpak behavior, remote discovery, SMB/SFTP editor prefill, legacy
+    import, mount/conflict/status inspection, and user configuration.
+  - [x] Add focused hung-command, oversized/invalid-output, and late-completion
+    coverage. October 12 implementation removes the blocking `.output()` bridge,
+    uses 10-second deadlines and 1 MiB/4 MiB capture limits, protects host-child
+    lifetime with scoped `--watch-bus`, and bounds pipe draining. GUI messages
+    carry parsed metadata only; cancelled/superseded jobs cannot replace newer
+    edits/lists, and failed/obsolete mount reads preserve the last observation.
+    Native mountinfo stays an asynchronous local read; fresh safety observations
+    still guard setup/unmount/repair/shared-VPN release, including post-auth
+    OneDrive isolation. No new command capability or permission is introduced.
+  - [x] Install the validated native release build and English catalog with
+    `just install-user`; byte comparisons match the tested workspace files and
+    the saved connection document's checksum is unchanged (October 12).
+  - [x] Confirm the installed native editor/popup remains responsive while
+    Detect rclone remotes and SMB/SFTP editor prefill complete; check existing
+    values and mount state without saving edits or starting storage/VPN work.
+    Final rebuilt-Flatpak transport/UI acceptance remains in the packaging gate.
+    These are justified engine/namespace operations; this is execution hardening,
+    not an additional D-Bus conversion.
+    - October 12 user screenshots confirm discovery of eight remotes (two
+      Google Drive matches), SFTP settings loaded, and SMB host/user/domain
+      loaded with password remaining blank. The user also confirmed responsive
+      windows and that the main applet lists all expected connections, with
+      sliders correctly showing no active mounts. Native acceptance is complete;
+      this does not claim a new active-mount lifecycle or final Flatpak acceptance.
+- [x] Reconcile the manifest, packaging guide, requirements, README,
+  translations, dependency instructions, and permissions with the final
+  executable inventory. Confirm native/source and Debian installations still
+  use the same typed NetworkManager and user-systemd adapters.
+  - October 12: all 23 explicit grants are justified; no obsolete command-specific
+    or proprietary-VPN grant remains to remove. Retained the libcosmic settings
+    daemon grant and added it to the GUI prototype for parity. Source packaging
+    contracts guard both manifests, fixed runtime/base, default shipping features,
+    helper/catalog installation, and release/prototype identity boundaries.
+    Updated coordinator/inspection/pending-count specifications and dependency
+    guidance; retained intentional legacy errors and display-only auth text.
+    README change is one short Flatpak paragraph. Final artifact/path access is
+    not claimed by this source gate.
+
+### Final native and packaging gate
+
+- [x] Update GitHub actions that still target the deprecated Node.js 20 runtime.
+  October 12: checkout v7.0.1, upload-artifact v7.0.2, and download-artifact v8.0.1
+  now use verified immutable commit pins declaring Node.js 24. YAML, action
+  inputs, six matrix targets, release guard/permissions, and shell syntax pass.
+  Existing dependency changes are preserved; this is not a fresh hosted CI receipt.
+- [ ] Run formatting, locked all-target checks, strict all-target Clippy, the
+  full nonignored suite, applicable ignored/live tests, and Markdown/diff/link
+  checks after the last source change.
+  - [x] Final local checkpoint on October 12: formatting, locked all-target
+    checking, strict all-feature Clippy, all 373 nonignored Rust tests, 12 Python
+    tests, localization, 22-document local link checks and diff checks passed.
+    The two isolated alias/local and loopback-SFTP coordinator lifecycle tests
+    also passed. Prior accepted SharePoint/native UI receipts remain separate;
+    no production cloud/VPN test was repeated and no ignored test is counted
+    as nonignored success.
+  - After an authorized push, dispatch a fresh Debian workflow from the updated
+    branch and confirm all six jobs/artifacts. Re-running an old job uses its
+    historical workflow, not these new pins. Ordinary manual dispatch and tag
+    pushes build only; publication requires a separately approved manual dispatch
+    on the accepted tag with `publish_after_acceptance=true` after release gates.
+- [x] Build and inspect the local Debian candidate; verify package contents,
+  dependencies, upgrade/removal preservation, and a native installed smoke
+  test without modifying saved user configuration during package installation/
+  removal. October 12 local amd64 acceptance passed; six-platform CI and final
+  versioned 0.5.3 package acceptance remain separate release gates.
+  - [x] Build and inspect an unsigned local amd64 test candidate. October 12
+    Pop!_OS 24.04 build passed all 371 nonignored tests; payload checksums,
+    helper/catalog/desktop/icon/metainfo comparisons, file modes, and extracted
+    worker probe/invalid-ID rejection passed. Candidate artifacts are under
+    `target/local-deb-2026-10-12.LBoZhW/`; metadata is still 0.5.2, not a release.
+    Fixed `debian/rules` to honor `CARGO_TARGET_DIR` at binary installation.
+  - [x] Resolve the inspection finding: declare optional OneDrive auth-helper
+    Python/GI, GTK 3, and WebKitGTK 4.1 runtime dependencies/recommendations,
+    reconcile dependency guidance, and rebuild/check the package metadata.
+    October 12: four helper runtime recommendations are in the rebuilt package.
+    Installer `--all`/`--onedrive` include its capability check, with helper-only
+    and explicit skip selections. Nine fake-adapter installer tests and two
+    Debian source contracts protect mappings/flow, stdin usage, optionality,
+    packaged catalog and target overrides. Latest candidate:
+    `target/local-deb-helper-2026-10-12.5hQiO7/`; 373 Rust plus 12 Python tests pass.
+  - [x] Complete installed package smoke and upgrade/removal preservation
+    acceptance after explicit installation approval. Static payload inspection
+    found no conffiles, generated units, user data, or maintainer scripts; it
+    does not substitute for installed lifecycle tests. Six-platform CI and
+    final 0.5.3 metadata/package acceptance also remain pending.
+    - [x] Install candidate and verify dpkg integrity, six installed assets,
+      helper GI imports and restricted worker probe. Explicit `/usr/bin` Add
+      Connection launched and the user confirmed remote discovery (October 12).
+    - [x] Confirm the packaged General Settings window is responsive and shows
+      expected saved preferences/runtime availability. Its Settings D-Bus owner
+      is the Debian executable; the existing user-local applet remains Runtime
+      owner, so editor smoke is not yet packaged panel/lifecycle acceptance.
+      User confirmed expected responsive behavior on October 12.
+    - [x] Verify the Debian executable in the actual COSMIC panel using a
+      controlled, reversible launcher switch. Preserve the user-local build,
+      active storage services, saved configuration and credentials; verify the
+      new Runtime owner resolves to `/usr/bin` before accepting the panel receipt.
+      October 12: reversible launcher override is deployed, Runtime owner
+      verified as the packaged panel process, and configuration checksum/service
+      state are unchanged. Original launcher backup:
+      `~/.local/state/cosmic-ext-applet-mounter/package-smoke/2026-10-12-panel.YuEmTu/launcher.desktop.before`.
+      User confirmed faster opening and expected connection-state/slider/gear
+      behavior on October 12. Installed panel smoke passes; lifecycle acceptance
+      remains separate below.
+      - [x] Resolve popup opening latency found during this smoke. User reports
+        0.5–0.75 seconds; a read-only probe measured the same 13 serialized
+        blocking systemd-status calls at 315–395 ms per pass. Rendering currently
+        performs those calls via thread spawn/join. Move UI status observation
+        to bounded asynchronous cached snapshots, preserve offline/online state
+        and freshness/safety contracts, add regressions, then rebuild/retest the
+        Debian panel.
+        - [x] Implement asynchronous one-connection bounded unit observation,
+          cached coordinator warnings, generation/configuration/freshness guards,
+          and deferred controls; failed reads retain last-known state and are
+          visibly unavailable. No status/file I/O occurs in popup rendering.
+        - [x] Add eleven cache/control/deadline regressions, including explicit
+          unknown-not-paused handling; the final package suite passes 384 Rust
+          tests plus 12 Python tests. Updated candidate:
+          `target/local-deb-popup-2026-10-12.vc4ich/`. Off-UI batch timing is
+          208–241 ms for the same 13 units; this is not first-frame acceptance.
+        - [x] Reinstall the updated candidate, reload the packaged panel, and
+          confirm opening latency and normal steady-state sliders/gear.
+          Preserve current configuration/services;
+          no real storage/VPN operation is required for the opening check.
+          - [x] User reinstalled the popup candidate; dpkg verification and
+            installed build ID match. Reloaded only the verified old applet and
+            panel; new `/usr/bin` Runtime owner confirmed. Configuration hash
+            and BME service inactive/MainPID-zero state are unchanged.
+          - [x] Obtain user opening-speed receipt: the user confirmed noticeably
+            faster opening on the updated packaged panel (October 12).
+          - [x] Confirm normal connection list/slider states and gear behavior
+            on this updated panel. User confirmed expected behavior (October 12).
+    - [x] Verify finite offline control reconciliation on the updated installed
+      package using an approved disposable mirror. October 12: saved
+      `Rust Coordinator Initial Test` regenerated its worker to `/usr/bin`;
+      installed Start enabled the waiting timer with `resume/succeeded`, and
+      Pause returned service/timer to inactive/disabled with `pause/succeeded`.
+      Both outcomes had no warnings; user confirmed the slider stayed off.
+      This verifies Start/Pause reconciliation, not a new sync-transfer test.
+    - [x] Verify installed upgrade/removal preservation with an explicitly
+      approved reversible lifecycle test; preserve configuration, credentials,
+      generated units, mirror/cache/recovery data, and the launcher rollback.
+      October 12: same-version candidate replacement and remove/reinstall passed.
+      All 5,328 fingerprinted files retained identical contents/modes after removal
+      and reinstall. dpkg integrity/build identity and reloaded `/usr/bin` Runtime
+      owner were verified; user confirmed expected panel behavior. This is local
+      candidate lifecycle evidence, not a cross-version 0.5.2-to-0.5.3 migration.
+- [ ] Advance all release metadata consistently to 0.5.3, prepare release
+  notes and checksums, review the complete worktree, and create the immutable
+  accepted commit/tag required by the reproducible Flatpak manifest.
+  - [x] Resolve publication ordering before pushing a `v*` tag. Tag pushes and
+    ordinary dispatch now build only. Explicit manual accepted-tag publication
+    requires all six builds, matching Cargo/lock/Debian/AppStream versions,
+    stable AppStream status, and finalized versioned notes. Draft/development
+    preparation cannot publish. Six offline preflight tests and three Debian
+    source contracts pass; hosted workflow execution remains pending.
+    `build_release.sh` downloads artifacts without publishing. No tag push or
+    publication is authorized by the local gate alone.
+  - [x] Prepare 0.5.3 Cargo/lock/Debian/AppStream metadata and draft release notes.
+    AppStream remains development and notes remain Draft pending final acceptance;
+    README installation URLs and historical screenshots retain published 0.5.2.
+    Flatpak source pin stays at v0.5.2 until the accepted immutable tag exists.
+  - [x] Build and inspect a local versioned 0.5.3 amd64 candidate. October 12:
+    385 nonignored Rust and 18 Python tests passed; payload checksums and fixed
+    worker probe passed. Artifacts: `target/local-deb-053-2026-10-12.QlFmb9/`.
+    Candidate is now installed and native-accepted below, not published;
+    known packaging warnings remain.
+  - [x] Verify actual installed 0.5.2-to-0.5.3 upgrade preservation and package
+    identity using the retained candidate; do not count same-version replacement
+    as this versioned upgrade. Reuse accepted functional smoke where unchanged.
+    October 12: installed version/integrity/build ID match; all 5,328 baseline
+    files preserved unchanged. Reloaded `/usr/bin` Runtime owner verified and
+    user confirmed expected panel/settings behavior. This is local amd64
+    acceptance; hosted matrix and final Flatpak gates remain pending.
+  - [ ] Finalize notes/AppStream status, review source and create the approved
+    immutable release source/tag without moving an existing tag. Resolve the
+    candidate-to-final source identity before final Flatpak acceptance; this
+    preparation does not authorize tagging, pushing, or publishing.
+    - [ ] Finish the [release source review](docs/engineering/release-source-audit.md),
+      including latest all-feature tests, intended new/moved file inclusion,
+      reference/secret checks and final staged diff. Existing default package
+      and installed receipts remain valid where source is unchanged.
+      - [x] Latest locked all-target/all-feature Rust tests: user terminal exit
+        status zero; saved log confirms 385 passed, zero failed, 12 ignored
+        (October 12). Ignored live tests are not counted as passing.
+      - [x] Focused source-content/reference review: 114 existing source files
+        enumerated; two credential signatures were synthetic test passwords,
+        no confirmed secrets. Local inline Markdown targets/anchors resolve;
+        moved historical release notes match originals. Fixed worker/inspection
+        and test-only CLI boundaries spot-checked. Coverage/privacy limitations
+        are recorded in the audit; no full security review is claimed.
+      - [x] Review staged inclusion and candidate-source consistency: required
+        new/moved files are present, no build artifacts staged, and 88 runtime/
+        build/test/packaging files match the tested native snapshot byte-for-byte.
+        Retained organization-specific history remains explicit. Fixed three
+        newly staged Markdown trailing-space lines; restaging remains below.
+      - [ ] Restage documentation fixes/receipts and pass final cached diff check,
+        then obtain separate commit/tag/push approval. No full line-by-line
+        security review or immutable commit identity is claimed by these checks.
+    - [ ] Accept the proposed immutable candidate-to-final sequence before any
+      commit/tag/push: test candidate commit/prerelease with draft metadata, then
+      finalize in a new commit and verify the final stable-tag artifact. Never
+      move an existing tag or treat candidate acceptance as final identity.
+- [ ] Build and install the final Flatpak from the accepted 0.5.3 tag and
+  accepted COSMIC BaseApp/Freedesktop 25.08 runtime. Verify its source identity,
+  generated Cargo sources, permissions, and restricted coordinator worker.
+  - Inspect effective grants including BaseApp defaults and the settings-daemon
+    grant added to the prototype. Prove manual and timer-worker access to local
+    mirror/recovery metadata under the reviewed grants/portal authorization:
+    host-path resolution alone grants no access to the original sandbox path.
+    If access fails, record the precise path/operation and approved narrow
+    solution; do not silently add `--filesystem=host` or restore a shell wrapper.
+  - Verify the optional OneDrive helper's Python GI/Gtk 3/WebKit2 4.1 imports
+    and sign-in handoff inside the accepted sandbox runtime/base, or explicitly
+    document manual URL handoff. Host helper package installation proves no
+    sandbox library availability.
+- [ ] From that final Flatpak, repeat the Task (5) offline coordinator lifecycle
+  and the Task (6) positive OpenConnect/VPN/mount/unmount lifecycle plus one
+  negative authentication case.
+- [ ] Close Tasks (5) and (6), update the host-command inventory, decide and
+  document the Cisco Secure Client rollback disposition, and only then publish
+  the 0.5.3 release and open the Flatpak packaging pull request.
+
+# Cloud Mounter Applet Future Task List
+
+Items that will be activated at some time in the future.
+
+## Deferred validation after the SFTP native release — October 1, 2026
+
+These are follow-ups, not additional gates for the native SFTP release above.
+Move one here into the release gate only if its supported behavior changes or
+the final tests expose a related defect.
+
+- [ ] After the public COSMIC Flatpak repository/package is available, test
+  installed Flatpak SFTP editor notices, Online and Offline controls, generated
+  host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
+  test. The local Flatpak prototype and host bridge have separate evidence.
+- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
+  unreadable-file, permission, agent, and timeout variants, and live-check a
+  VPN-bound SFTP connection. Direct protocol and automated classifier tests
+  already cover these errors; they are not repeat gates for the native release.
+- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
+  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
+  preload trials without reading or changing file contents.
+- [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
+  cancellation on OneDrive, Box, SMB, and Google Drive's RC refresh when
+  suitable active-preload shares are available.
+- [ ] Complete broader installed native/Flatpak Settings title, focus,
+  keyboard, scaling, long-list, editor-save, and background-poll visual checks.
+- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
+  and rejected-credential path with a real VPN profile; add the separately
+  planned waiting/Cancel/Retry UI before accepting that extended workflow.
+  Include a VPN-bound SFTP connection when that combination is available.
+- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
+  fault cases, then investigate the separately reported OneDrive sleep hang
+  with journal evidence. The native SFTP release gate above includes one
+  normal sleep/wake cycle only.
+
+## Future Tasks depending on Pop!_OS or COSMIC desktop upgrades
+
+- [ ] 25.08 is still maintained, but it is no longer the newest Freedesktop branch. Freedesktop 26.08 was released September 1, 2026;
+- [ ] Remove every `flatpak document-info` invocation after the minimum
+  supported Pop!_OS release provides Documents portal v5 or newer.
+  - Verify the supported host exposes sandbox-enabled `GetHostPaths` and repeat
+    the native and installed-Flatpak folder-selection tests before removing the
+    portal-v4 fallback.
+  - Remove the fallback executable path, parser, permission rationale, tests,
+    translations, and inventory entry; retain focused portal D-Bus coverage.
+- [ ] Remove the OpenConnect-only `nm-applet` dependency after COSMIC provides a
+  complete NetworkManager OpenConnect authentication experience.
+  - Do not use a COSMIC or Pop!_OS version number alone as the gate. Verify that
+    applet-initiated NetworkManager D-Bus activation opens every gateway-defined
+    field, including username, password, and second-factor method, completes
+    phone authentication, displays gateway messages, and leaves no stale generic
+    single-field prompt.
+  - Exercise cancellation, rejected or expired second factor, timeout,
+    reconnect, logout/login, and competing-agent behavior from both the native
+    package and installed Flatpak.
+  - Keep the host NetworkManager OpenConnect plugin and authentication dialog;
+    remove only the `nm-applet` workaround when COSMIC's agent reliably handles
+    NetworkManager's secret request and authentication UI.
+  - Remove OpenConnect-specific `nm-applet` session-bus detection, missing-agent
+    errors, package/startup/autostart guidance, tests, translations, and README
+    instructions. Do not remove or modify a user's autostart file automatically.
+  - Retest non-OpenConnect VPN profiles and prove they remain independent of
+    either authentication-agent implementation.
+
+- [ ] Remove the Ubuntu 22.04 matrix entries no later than GitHub's scheduled
+  runner retirement on April 17, 2027.
+
+## Future Tasks for project cleanup
+
+Start this section only after the Flatpak D-Bus host-integration migration,
+including Tasks (5) and (6), inventory closure, rebuilt-Flatpak installation,
+and live acceptance, is complete. Until then, continue using `Task List.md` as
+the active implementation and verification record.
+
+- [ ] Make `Applet Description.md` and `Requirements and Specifications.md`
+  self-contained descriptions of the accepted product and final architecture.
+  - Move every durable behavior, safety boundary, migration rule, and acceptance
+    criterion that exists only in the task list into the appropriate source
+    document.
+  - Replace references that delegate required behavior to `Task List.md` with
+    the actual requirement or a stable supporting document.
+- [ ] Separate current supported scope from future and acceptance-pending scope.
+  - Add a concise status matrix for implemented, pending live validation, and
+    future providers and features, including SFTP, SharePoint, Flatpak, and VPN
+    authentication.
+  - Remove obsolete `planned`, version-specific, or conditional wording after
+    the corresponding decision and acceptance gate has closed.
+- [ ] Reconcile the documentation with the final implementation.
+  - Audit the applet description, requirements, README, Flatpak packaging guide,
+    manifest rationale, `docs/engineering/flatpak-host-command-inventory.md`, configuration model, translations,
+    and tests for contradictions or stale command paths.
+  - Ensure the final host-command and permission descriptions agree with the
+    closed inventory and contain no removed Cisco, `nmcli`, `systemctl`, journal,
+    or shell-wrapper behavior.
+  - Resolve every remaining permitted architecture alternative, or clearly mark
+    it as an intentional supported variation with equivalent acceptance tests.
+- [ ] Restore clear document roles without discarding history.
+  - Keep `Applet Description.md` as the product source of truth and
+    `Requirements and Specifications.md` as its testable technical translation.
+  - Keep the active task list concise and actionable; move completed chronology,
+    failures, decisions, and validation evidence to
+    `Task List Completion Notes.md` rather than deleting it.
+  - Add requirement-to-test traceability for safety-critical mount, mirror,
+    systemd, portal, VPN, and Flatpak behaviors.
+- [ ] Validate the cleanup with link/anchor checks, Markdown and diff checks, a
+  stale-term scan, and a final human review confirming that the applet could be
+  rebuilt with equivalent user-visible behavior and security boundaries without
+  treating the task list as a design specification.

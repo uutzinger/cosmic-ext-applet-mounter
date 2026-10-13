@@ -22,14 +22,21 @@ impl PreloadOutcome {
     pub fn notice(&self, name: &str) -> Option<String> {
         let status = match self {
             Self::Completed(report) => match report.maximum_depth {
-                Some(depth) => format!("complete through depth {depth}"),
-                None => "complete".into(),
+                Some(depth) => crate::fl!(
+                    "ui-preload-report-complete-through-depth-depth",
+                    depth = (depth).to_string()
+                ),
+                None => crate::fl!("preload-complete-status"),
             },
-            Self::TimedOut(_) => "time limit reached; scan incomplete".into(),
-            Self::Skipped => "skipped (excluded system directory)".into(),
+            Self::TimedOut(_) => crate::fl!("ui-preload-report-time-limit-reached-scan-incomplete"),
+            Self::Skipped => crate::fl!("ui-preload-report-skipped-excluded-system-directory"),
             Self::Cancelled => return None,
         };
-        Some(format!("{name}: preload {status}."))
+        Some(crate::fl!(
+            "ui-preload-report-name-preload-status",
+            name = (name).to_string(),
+            status = (status).to_string()
+        ))
     }
 }
 

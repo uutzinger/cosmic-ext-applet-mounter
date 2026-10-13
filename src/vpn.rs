@@ -1,40 +1,76 @@
 // SPDX-License-Identifier: MIT
 
-//! NetworkManager and Cisco VPN integration and readiness checks.
+//! NetworkManager VPN integration and readiness checks.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::time::Duration;
 
+use tokio::net::{TcpStream, UdpSocket};
 use tokio_util::sync::CancellationToken;
+#[cfg(test)]
+use zbus::zvariant::Str;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
 use crate::model::{Connection, ConnectionId, ReadinessCheck, VpnKind, VpnProfile, VpnProfileId};
-use crate::process::{CommandError, CommandRequest, CommandRunner, Executable};
+use crate::process::{CommandError, Executable};
 
 pub type VpnFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, VpnError>> + Send + 'a>>;
+pub const METERED_GUARD_FLAG: &str = "--require-unmetered-network";
+pub const OFFLINE_READINESS_GUARD_FLAG: &str = "--require-offline-readiness";
+
+pub fn offline_readiness_guard_command(
+    connection_id: ConnectionId,
+) -> Result<crate::services::ServiceCommand, String> {
+    crate::mount_guard::service_command(vec![
+        OFFLINE_READINESS_GUARD_FLAG.into(),
+        connection_id.to_string(),
+    ])
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VpnError {
     InvalidProfileKind,
     MissingExternalProfileId,
     InvalidEndpoint,
+    ReadinessCancelled,
     MissingExecutable(Executable),
     Command(CommandError),
+    Dbus(String),
+    AuthenticationAgent(String),
 }
 
 impl fmt::Display for VpnError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidProfileKind => write!(formatter, "invalid VPN profile kind"),
-            Self::MissingExternalProfileId => write!(formatter, "missing external VPN profile id"),
-            Self::InvalidEndpoint => write!(formatter, "invalid endpoint readiness check"),
-            Self::MissingExecutable(executable) => {
-                write!(formatter, "{} was not found", executable.display_name())
+            Self::InvalidProfileKind => {
+                formatter.write_str(&crate::fl!("ui-vpn-invalid-vpn-profile-kind"))
             }
+            Self::MissingExternalProfileId => {
+                formatter.write_str(&crate::fl!("ui-vpn-missing-external-vpn-profile-id"))
+            }
+            Self::InvalidEndpoint => {
+                formatter.write_str(&crate::fl!("ui-vpn-invalid-endpoint-readiness-check"))
+            }
+            Self::ReadinessCancelled => {
+                formatter.write_str(&crate::fl!("ui-vpn-readiness-check-was-cancelled"))
+            }
+            Self::MissingExecutable(executable) => formatter.write_str(&crate::fl!(
+                "ui-vpn-value1-was-not-found",
+                value1 = (executable.display_name()).to_string()
+            )),
             Self::Command(error) => error.fmt(formatter),
+            Self::Dbus(error) => formatter.write_str(&crate::fl!(
+                "ui-vpn-networkmanager-d-bus-error-error",
+                error = (error).to_string()
+            )),
+            Self::AuthenticationAgent(error) => formatter.write_str(&crate::fl!(
+                "ui-vpn-openconnect-authentication-agent-error",
+                error = (error).to_string()
+            )),
         }
     }
 }
@@ -52,6 +88,14 @@ pub struct NetworkManagerVpnProfile {
     pub name: String,
     pub uuid: String,
     pub vpn_type: String,
+    pub service_type: Option<String>,
+}
+
+impl NetworkManagerVpnProfile {
+    #[must_use]
+    pub fn is_openconnect(&self) -> bool {
+        self.service_type.as_deref() == Some(OPENCONNECT_SERVICE_TYPE)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,24 +112,6 @@ impl VpnConnectionState {
     pub const fn ready(self) -> bool {
         matches!(self, Self::Activated)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CiscoTunnelState {
-    NotInstalled,
-    ServiceUnavailable,
-    Disconnected,
-    Connecting,
-    Connected,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CiscoComponents {
-    pub cli: bool,
-    pub gui: bool,
-    pub agent: bool,
-    pub tunnel: CiscoTunnelState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,54 +176,224 @@ pub trait NetworkManagerVpn: Send + Sync {
     ) -> VpnFuture<'a, VpnConnectionState>;
 }
 
-pub struct CommandNetworkManagerVpn<R> {
-    runner: R,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DbusNetworkManagerVpn;
+
+const NM_DESTINATION: &str = "org.freedesktop.NetworkManager";
+const NM_PATH: &str = "/org/freedesktop/NetworkManager";
+const NM_INTERFACE: &str = "org.freedesktop.NetworkManager";
+const NM_SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
+const NM_SETTINGS_INTERFACE: &str = "org.freedesktop.NetworkManager.Settings";
+const OPENCONNECT_SERVICE_TYPE: &str = "org.freedesktop.NetworkManager.openconnect";
+const OPENCONNECT_AGENT_UNIT: &str = "cosmic-mounter-openconnect-agent.service";
+
+type NmSettings = BTreeMap<String, BTreeMap<String, OwnedValue>>;
+
+fn profile_from_settings(values: &NmSettings) -> Option<NetworkManagerVpnProfile> {
+    let connection_values = values.get("connection")?;
+    let string = |name: &str| {
+        connection_values
+            .get(name)
+            .and_then(|value| String::try_from(value.clone()).ok())
+    };
+    let (name, uuid, connection_type) = (string("id")?, string("uuid")?, string("type")?);
+    let service_type = values
+        .get("vpn")
+        .and_then(|vpn| vpn.get("service-type"))
+        .and_then(|value| String::try_from(value.clone()).ok());
+    is_vpn_type(&connection_type).then_some(NetworkManagerVpnProfile {
+        name,
+        uuid,
+        vpn_type: connection_type,
+        service_type,
+    })
 }
 
-impl<R> CommandNetworkManagerVpn<R> {
-    #[must_use]
-    pub const fn new(runner: R) -> Self {
-        Self { runner }
+fn requires_openconnect_agent(profile: &NetworkManagerVpnProfile) -> bool {
+    profile.is_openconnect()
+}
+
+impl DbusNetworkManagerVpn {
+    async fn connection() -> Result<zbus::Connection, VpnError> {
+        zbus::Connection::system()
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))
+    }
+
+    async fn profiles() -> Result<Vec<(NetworkManagerVpnProfile, OwnedObjectPath)>, VpnError> {
+        let connection = Self::connection().await?;
+        let settings = zbus::Proxy::new(
+            &connection,
+            NM_DESTINATION,
+            NM_SETTINGS_PATH,
+            NM_SETTINGS_INTERFACE,
+        )
+        .await
+        .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let paths: Vec<OwnedObjectPath> = settings
+            .call("ListConnections", &())
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let mut profiles = Vec::new();
+        for path in paths {
+            let proxy = zbus::Proxy::new(
+                &connection,
+                NM_DESTINATION,
+                path.as_str(),
+                "org.freedesktop.NetworkManager.Settings.Connection",
+            )
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            let values: NmSettings = proxy
+                .call("GetSettings", &())
+                .await
+                .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            if let Some(profile) = profile_from_settings(&values) {
+                profiles.push((profile, path));
+            }
+        }
+        Ok(profiles)
+    }
+
+    async fn profile(uuid: &str) -> Result<(NetworkManagerVpnProfile, OwnedObjectPath), VpnError> {
+        Self::profiles()
+            .await?
+            .into_iter()
+            .find(|(profile, _)| profile.uuid == uuid)
+            .ok_or_else(|| VpnError::Dbus(crate::fl!("ui-vpn-saved-vpn-profile-was-not-found")))
+    }
+
+    pub async fn profile_is_openconnect(uuid: &str) -> Result<bool, VpnError> {
+        Self::profile(uuid)
+            .await
+            .map(|(profile, _)| profile.is_openconnect())
+    }
+
+    pub async fn restart_openconnect_agent() -> Result<(), VpnError> {
+        crate::services::systemd_user_restart_named_unit(OPENCONNECT_AGENT_UNIT)
+            .await
+            .map_err(|error| {
+                VpnError::AuthenticationAgent(crate::fl!(
+                    "ui-vpn-the-user-service-could-not-be-restarted",
+                    error = (error).to_string()
+                ))
+            })
+    }
+
+    async fn active_path(uuid: &str) -> Result<Option<OwnedObjectPath>, VpnError> {
+        let connection = Self::connection().await?;
+        let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let paths: Vec<OwnedObjectPath> = manager
+            .get_property("ActiveConnections")
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        for path in paths {
+            let active = zbus::Proxy::new(
+                &connection,
+                NM_DESTINATION,
+                path.as_str(),
+                "org.freedesktop.NetworkManager.Connection.Active",
+            )
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            let active_uuid: String = active
+                .get_property("Uuid")
+                .await
+                .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            if active_uuid == uuid {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn connected() -> Result<bool, VpnError> {
+        let connection = Self::connection().await?;
+        let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let state: u32 = manager
+            .get_property("State")
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        Ok(matches!(state, 60 | 70))
+    }
+
+    pub async fn metered() -> Result<bool, VpnError> {
+        let connection = Self::connection().await?;
+        let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let metered: u32 = manager
+            .get_property("Metered")
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        Ok(matches!(metered, 1 | 3))
+    }
+
+    pub async fn interface_ready(name: &str) -> Result<bool, VpnError> {
+        let connection = Self::connection().await?;
+        let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        let devices: Vec<OwnedObjectPath> = manager
+            .call("GetDevices", &())
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+        for path in devices {
+            let device = zbus::Proxy::new(
+                &connection,
+                NM_DESTINATION,
+                path.as_str(),
+                "org.freedesktop.NetworkManager.Device",
+            )
+            .await
+            .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            let interface: String = device
+                .get_property("Interface")
+                .await
+                .map_err(|error| VpnError::Dbus(error.to_string()))?;
+            if interface == name {
+                let state: u32 = device
+                    .get_property("State")
+                    .await
+                    .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                return Ok(state == 100);
+            }
+        }
+        Ok(false)
     }
 }
 
-impl<R: CommandRunner> NetworkManagerVpn for CommandNetworkManagerVpn<R> {
+pub async fn run_unmetered_guard() -> Result<(), String> {
+    match DbusNetworkManagerVpn::metered().await {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(crate::fl!(
+            "ui-vpn-automatic-synchronization-is-paused-on-a-metered"
+        )),
+        Err(error) => Err(crate::fl!(
+            "ui-vpn-could-not-inspect-networkmanager-metered-state-error",
+            error = (error).to_string()
+        )),
+    }
+}
+
+impl NetworkManagerVpn for DbusNetworkManagerVpn {
     fn list_profiles<'a>(
         &'a self,
         cancellation: CancellationToken,
     ) -> VpnFuture<'a, Vec<NetworkManagerVpnProfile>> {
         Box::pin(async move {
-            let output = self
-                .runner
-                .run(
-                    CommandRequest::new(Executable::Nmcli)
-                        .arg("-t")?
-                        .arg("-f")?
-                        .arg("NAME,TYPE,UUID")?
-                        .arg("connection")?
-                        .arg("show")?
-                        .with_timeout(Duration::from_secs(5)),
-                    cancellation.clone(),
-                )
-                .await?;
-            let profiles = parse_nmcli_profiles(&output.stdout.text);
-            if !profiles.is_empty() {
-                return Ok(profiles);
+            tokio::select! {
+                () = cancellation.cancelled() => Err(VpnError::Dbus("operation cancelled".into())),
+                result = tokio::time::timeout(Duration::from_secs(5), Self::profiles()) => {
+                    result
+                        .map_err(|_| VpnError::Dbus("saved-profile discovery timed out".into()))?
+                        .map(|profiles| profiles.into_iter().map(|(profile, _)| profile).collect())
+                },
             }
-
-            let fallback = self
-                .runner
-                .run(
-                    CommandRequest::new(Executable::Nmcli)
-                        .arg("-g")?
-                        .arg("NAME,UUID,TYPE")?
-                        .arg("connection")?
-                        .arg("show")?
-                        .with_timeout(Duration::from_secs(5)),
-                    cancellation,
-                )
-                .await?;
-            Ok(parse_nmcli_profiles(&fallback.stdout.text))
         })
     }
 
@@ -209,18 +405,30 @@ impl<R: CommandRunner> NetworkManagerVpn for CommandNetworkManagerVpn<R> {
         Box::pin(async move {
             ensure_kind(profile, VpnKind::NetworkManager)?;
             let id = external_profile_id(profile)?;
-            self.runner
-                .run(
-                    CommandRequest::new(Executable::Nmcli)
-                        .arg("connection")?
-                        .arg("up")?
-                        .arg("uuid")?
-                        .arg(id)?
-                        .with_timeout(Duration::from_secs(u64::from(profile.timeout_seconds))),
-                    cancellation,
-                )
-                .await?;
-            Ok(())
+            let operation = async {
+                let (saved_profile, path) = Self::profile(id).await?;
+                if requires_openconnect_agent(&saved_profile) {
+                    Self::restart_openconnect_agent().await?;
+                }
+                let connection = Self::connection().await?;
+                let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+                    .await
+                    .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                let root = OwnedObjectPath::try_from("/")
+                    .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                let arguments = (path, &root, &root);
+                manager
+                    .call::<_, _, OwnedObjectPath>("ActivateConnection", &arguments)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| VpnError::Dbus(error.to_string()))
+            };
+            tokio::select! {
+                () = cancellation.cancelled() => Err(VpnError::Dbus("operation cancelled".into())),
+                result = tokio::time::timeout(Duration::from_secs(u64::from(profile.timeout_seconds)), operation) => {
+                    result.map_err(|_| VpnError::Dbus("activation timed out".into()))?
+                },
+            }
         })
     }
 
@@ -232,18 +440,26 @@ impl<R: CommandRunner> NetworkManagerVpn for CommandNetworkManagerVpn<R> {
         Box::pin(async move {
             ensure_kind(profile, VpnKind::NetworkManager)?;
             let id = external_profile_id(profile)?;
-            self.runner
-                .run(
-                    CommandRequest::new(Executable::Nmcli)
-                        .arg("connection")?
-                        .arg("down")?
-                        .arg("uuid")?
-                        .arg(id)?
-                        .with_timeout(Duration::from_secs(20)),
-                    cancellation,
-                )
-                .await?;
-            Ok(())
+            let operation = async {
+                let Some(path) = Self::active_path(id).await? else {
+                    return Ok(());
+                };
+                let connection = Self::connection().await?;
+                let manager = zbus::Proxy::new(&connection, NM_DESTINATION, NM_PATH, NM_INTERFACE)
+                    .await
+                    .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                let arguments = (path,);
+                manager
+                    .call::<_, _, ()>("DeactivateConnection", &arguments)
+                    .await
+                    .map_err(|error| VpnError::Dbus(error.to_string()))
+            };
+            tokio::select! {
+                () = cancellation.cancelled() => Err(VpnError::Dbus("operation cancelled".into())),
+                result = tokio::time::timeout(Duration::from_secs(20), operation) => {
+                    result.map_err(|_| VpnError::Dbus("deactivation timed out".into()))?
+                },
+            }
         })
     }
 
@@ -255,88 +471,38 @@ impl<R: CommandRunner> NetworkManagerVpn for CommandNetworkManagerVpn<R> {
         Box::pin(async move {
             ensure_kind(profile, VpnKind::NetworkManager)?;
             let id = external_profile_id(profile)?;
-            let output = self
-                .runner
-                .run(
-                    CommandRequest::new(Executable::Nmcli)
-                        .arg("-t")?
-                        .arg("-f")?
-                        .arg("GENERAL.STATE")?
-                        .arg("connection")?
-                        .arg("show")?
-                        .arg(id)?
-                        .with_timeout(Duration::from_secs(5)),
-                    cancellation,
+            let operation = async {
+                let Some(path) = Self::active_path(id).await? else {
+                    return Ok(VpnConnectionState::Disconnected);
+                };
+                let connection = Self::connection().await?;
+                let active = zbus::Proxy::new(
+                    &connection,
+                    NM_DESTINATION,
+                    path.as_str(),
+                    "org.freedesktop.NetworkManager.Connection.Active",
                 )
-                .await?;
-            Ok(parse_nmcli_state(&output.stdout.text))
-        })
-    }
-}
-
-pub trait CiscoVpn: Send + Sync {
-    fn components<'a>(&'a self, cancellation: CancellationToken) -> VpnFuture<'a, CiscoComponents>;
-    fn open_gui_request(&self) -> Result<CommandRequest, VpnError>;
-    fn start_agent_request(&self) -> Result<CommandRequest, VpnError>;
-}
-
-pub struct CommandCiscoVpn<R> {
-    runner: R,
-}
-
-impl<R> CommandCiscoVpn<R> {
-    #[must_use]
-    pub const fn new(runner: R) -> Self {
-        Self { runner }
-    }
-}
-
-impl<R: CommandRunner> CiscoVpn for CommandCiscoVpn<R> {
-    fn components<'a>(&'a self, cancellation: CancellationToken) -> VpnFuture<'a, CiscoComponents> {
-        Box::pin(async move {
-            let cli = self.runner.resolve(Executable::CiscoVpn).is_some();
-            let gui = self.runner.resolve(Executable::CiscoVpnUi).is_some();
-            let agent = self.runner.resolve(Executable::CiscoAgent).is_some();
-            let tunnel = if cli {
-                match self
-                    .runner
-                    .run(
-                        CommandRequest::new(Executable::CiscoVpn)
-                            .arg("-s")?
-                            .arg("stats")?
-                            .with_timeout(Duration::from_secs(5)),
-                        cancellation,
-                    )
+                .await
+                .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                let state: u32 = active
+                    .get_property("State")
                     .await
-                {
-                    Ok(output) => {
-                        parse_cisco_stats(&combined(&output.stdout.text, &output.stderr.text))
-                    }
-                    Err(_) if agent => CiscoTunnelState::ServiceUnavailable,
-                    Err(_) => CiscoTunnelState::NotInstalled,
-                }
-            } else {
-                CiscoTunnelState::NotInstalled
+                    .map_err(|error| VpnError::Dbus(error.to_string()))?;
+                Ok(match state {
+                    1 => VpnConnectionState::Activating,
+                    2 => VpnConnectionState::Activated,
+                    3 => VpnConnectionState::Disconnected,
+                    4 => VpnConnectionState::Failed,
+                    _ => VpnConnectionState::Unknown,
+                })
             };
-            Ok(CiscoComponents {
-                cli,
-                gui,
-                agent,
-                tunnel,
-            })
+            tokio::select! {
+                () = cancellation.cancelled() => Err(VpnError::Dbus("operation cancelled".into())),
+                result = tokio::time::timeout(Duration::from_secs(5), operation) => {
+                    result.map_err(|_| VpnError::Dbus("state query timed out".into()))?
+                },
+            }
         })
-    }
-
-    fn open_gui_request(&self) -> Result<CommandRequest, VpnError> {
-        Ok(CommandRequest::new(Executable::CiscoVpnUi).launch_only())
-    }
-
-    fn start_agent_request(&self) -> Result<CommandRequest, VpnError> {
-        CommandRequest::new(Executable::Systemctl)
-            .arg("start")?
-            .arg("vpnagentd.service")?
-            .with_timeout(Duration::from_secs(20))
-            .pipe(Ok)
     }
 }
 
@@ -348,18 +514,9 @@ pub trait ReadinessProbe: Send + Sync {
     ) -> VpnFuture<'a, ReadinessCheckResult>;
 }
 
-pub struct CommandReadinessProbe<R> {
-    runner: R,
-}
+pub struct InProcessReadinessProbe;
 
-impl<R> CommandReadinessProbe<R> {
-    #[must_use]
-    pub const fn new(runner: R) -> Self {
-        Self { runner }
-    }
-}
-
-impl<R: CommandRunner> ReadinessProbe for CommandReadinessProbe<R> {
+impl ReadinessProbe for InProcessReadinessProbe {
     fn check<'a>(
         &'a self,
         check: &'a ReadinessCheck,
@@ -368,87 +525,92 @@ impl<R: CommandRunner> ReadinessProbe for CommandReadinessProbe<R> {
         Box::pin(async move {
             let ready = match check {
                 ReadinessCheck::NetworkManagerState => {
-                    let output = self
-                        .runner
-                        .run(
-                            CommandRequest::new(Executable::Nmcli)
-                                .arg("-t")?
-                                .arg("-f")?
-                                .arg("STATE")?
-                                .arg("general")?
-                                .with_timeout(Duration::from_secs(5)),
-                            cancellation,
-                        )
-                        .await?;
-                    output
-                        .stdout
-                        .text
-                        .to_ascii_lowercase()
-                        .contains("connected")
+                    tokio::select! {
+                        () = cancellation.cancelled() => return Err(VpnError::Dbus("operation cancelled".into())),
+                        result = DbusNetworkManagerVpn::connected() => result?,
+                    }
                 }
                 ReadinessCheck::Interface(name) => {
-                    let output = self
-                        .runner
-                        .run(
-                            CommandRequest::new(Executable::Nmcli)
-                                .arg("-t")?
-                                .arg("-f")?
-                                .arg("DEVICE,STATE")?
-                                .arg("device")?
-                                .arg("status")?
-                                .with_timeout(Duration::from_secs(5)),
-                            cancellation,
-                        )
-                        .await?;
-                    interface_ready(&output.stdout.text, name)
+                    tokio::select! {
+                        () = cancellation.cancelled() => return Err(VpnError::Dbus("operation cancelled".into())),
+                        result = DbusNetworkManagerVpn::interface_ready(name) => result?,
+                    }
                 }
-                ReadinessCheck::Route(target) => self
-                    .runner
-                    .run(
-                        CommandRequest::new(Executable::Ip)
-                            .arg("route")?
-                            .arg("get")?
-                            .arg(target)?
-                            .with_timeout(Duration::from_secs(5)),
-                        cancellation,
-                    )
-                    .await
-                    .is_ok(),
-                ReadinessCheck::DnsName(name) => self
-                    .runner
-                    .run(
-                        CommandRequest::new(Executable::Getent)
-                            .arg("hosts")?
-                            .arg(name)?
-                            .with_timeout(Duration::from_secs(5)),
-                        cancellation,
-                    )
-                    .await
-                    .is_ok(),
+                ReadinessCheck::Route(target) => {
+                    bounded_readiness(route_ready(target), Duration::from_secs(5), cancellation)
+                        .await?
+                }
+                ReadinessCheck::DnsName(name) => {
+                    bounded_readiness(dns_ready(name), Duration::from_secs(5), cancellation).await?
+                }
                 ReadinessCheck::Endpoint(endpoint) => {
                     let (host, port) = parse_endpoint(endpoint)?;
-                    self.runner
-                        .run(
-                            CommandRequest::new(Executable::Nc)
-                                .arg("-z")?
-                                .arg("-w")?
-                                .arg("3")?
-                                .arg(host)?
-                                .arg(port.to_string())?
-                                .with_timeout(Duration::from_secs(5)),
-                            cancellation,
-                        )
-                        .await
-                        .is_ok()
+                    bounded_readiness(
+                        endpoint_ready(&host, port),
+                        Duration::from_secs(3),
+                        cancellation,
+                    )
+                    .await?
                 }
             };
             Ok(ReadinessCheckResult {
                 check: check.clone(),
                 ready,
-                detail: if ready { "ready" } else { "not ready" }.into(),
+                detail: if ready {
+                    crate::fl!("readiness-ready")
+                } else {
+                    crate::fl!("readiness-not-ready")
+                },
             })
         })
     }
+}
+
+async fn bounded_readiness<F>(
+    check: F,
+    timeout: Duration,
+    cancellation: CancellationToken,
+) -> Result<bool, VpnError>
+where
+    F: Future<Output = bool>,
+{
+    tokio::select! {
+        () = cancellation.cancelled() => Err(VpnError::ReadinessCancelled),
+        result = tokio::time::timeout(timeout, check) => Ok(result.unwrap_or(false)),
+    }
+}
+
+async fn route_ready(target: &str) -> bool {
+    let addresses = match target.parse::<IpAddr>() {
+        Ok(address) => vec![address],
+        Err(_) => match tokio::net::lookup_host((target, 9)).await {
+            Ok(addresses) => addresses.map(|address| address.ip()).collect(),
+            Err(_) => return false,
+        },
+    };
+    for address in addresses {
+        let bind_address = match address {
+            IpAddr::V4(_) => "0.0.0.0:0",
+            IpAddr::V6(_) => "[::]:0",
+        };
+        let Ok(socket) = UdpSocket::bind(bind_address).await else {
+            continue;
+        };
+        if socket.connect(SocketAddr::new(address, 9)).await.is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+async fn dns_ready(name: &str) -> bool {
+    tokio::net::lookup_host((name, 0))
+        .await
+        .is_ok_and(|mut addresses| addresses.next().is_some())
+}
+
+async fn endpoint_ready(host: &str, port: u16) -> bool {
+    TcpStream::connect((host, port)).await.is_ok()
 }
 
 pub async fn readiness_report<P: ReadinessProbe>(
@@ -526,6 +688,7 @@ pub fn shutdown_decision(snapshot: &VpnUsageSnapshot) -> VpnShutdownDecision {
     }
 }
 
+#[cfg(test)]
 fn parse_nmcli_profiles(output: &str) -> Vec<NetworkManagerVpnProfile> {
     nmcli_profile_records(output)
         .into_iter()
@@ -540,11 +703,13 @@ fn parse_nmcli_profiles(output: &str) -> Vec<NetworkManagerVpnProfile> {
                 name: name.trim().to_owned(),
                 vpn_type: vpn_type.trim().to_owned(),
                 uuid: uuid.trim().to_owned(),
+                service_type: None,
             })
         })
         .collect()
 }
 
+#[cfg(test)]
 fn valid_nmcli_profile_fields(name: &str, vpn_type: &str, uuid: &str) -> bool {
     !name.trim().is_empty()
         && looks_like_uuid(uuid.trim())
@@ -552,6 +717,7 @@ fn valid_nmcli_profile_fields(name: &str, vpn_type: &str, uuid: &str) -> bool {
         && is_vpn_type(vpn_type)
 }
 
+#[cfg(test)]
 fn nmcli_profile_records(output: &str) -> Vec<String> {
     let line_records: Vec<_> = output
         .lines()
@@ -569,6 +735,7 @@ fn nmcli_profile_records(output: &str) -> Vec<String> {
     }
 }
 
+#[cfg(test)]
 fn flattened_nmcli_records(output: &str) -> impl Iterator<Item = String> + '_ {
     let mut records = Vec::new();
     let mut start = 0;
@@ -594,6 +761,7 @@ fn flattened_nmcli_records(output: &str) -> impl Iterator<Item = String> + '_ {
     records.into_iter()
 }
 
+#[cfg(test)]
 fn find_uuid_range(value: &str) -> Option<(usize, usize)> {
     for (index, _) in value.char_indices() {
         let Some(candidate) = value.get(index..index + 36) else {
@@ -606,6 +774,7 @@ fn find_uuid_range(value: &str) -> Option<(usize, usize)> {
     None
 }
 
+#[cfg(test)]
 fn looks_like_uuid(value: &str) -> bool {
     value.len() == 36
         && value
@@ -613,44 +782,7 @@ fn looks_like_uuid(value: &str) -> bool {
             .all(|character| character.is_ascii_hexdigit() || character == '-')
 }
 
-fn parse_nmcli_state(output: &str) -> VpnConnectionState {
-    let lower = output.to_ascii_lowercase();
-    if lower.contains("activated") || lower.contains(":100") {
-        VpnConnectionState::Activated
-    } else if lower.contains("activating") || lower.contains(":50") {
-        VpnConnectionState::Activating
-    } else if lower.contains("failed") {
-        VpnConnectionState::Failed
-    } else if lower.contains("deactivated") || lower.contains("disconnected") {
-        VpnConnectionState::Disconnected
-    } else {
-        VpnConnectionState::Unknown
-    }
-}
-
-fn parse_cisco_stats(output: &str) -> CiscoTunnelState {
-    let lower = output.to_ascii_lowercase();
-    if lower.contains("cannot contact the vpn service") {
-        return CiscoTunnelState::ServiceUnavailable;
-    }
-    for line in lower.lines() {
-        let Some((_, state)) = line.split_once("connection state:") else {
-            continue;
-        };
-        let state = state.trim();
-        if state.starts_with("connected") {
-            return CiscoTunnelState::Connected;
-        }
-        if state.starts_with("connecting") {
-            return CiscoTunnelState::Connecting;
-        }
-        if state.starts_with("disconnected") || state.starts_with("not available") {
-            return CiscoTunnelState::Disconnected;
-        }
-    }
-    CiscoTunnelState::Unknown
-}
-
+#[cfg(test)]
 fn split_nmcli(line: &str) -> Vec<String> {
     let mut values = Vec::new();
     let mut current = String::new();
@@ -680,23 +812,13 @@ fn is_vpn_type(value: &str) -> bool {
         || lower.contains("anyconnect")
 }
 
-fn interface_ready(output: &str, name: &str) -> bool {
-    output.lines().any(|line| {
-        let parts = split_nmcli(line);
-        let [device, state] = parts.as_slice() else {
-            return false;
-        };
-        device == name && state.eq_ignore_ascii_case("connected")
-    })
-}
-
 fn parse_endpoint(endpoint: &str) -> Result<(String, u16), VpnError> {
     let Some((host, port)) = endpoint.rsplit_once(':') else {
         return Err(VpnError::InvalidEndpoint);
     };
     let port = port.parse().map_err(|_| VpnError::InvalidEndpoint)?;
     let host = host.trim_matches(['[', ']']).to_owned();
-    if host.is_empty() || (host.as_str(), port).to_socket_addrs().is_err() {
+    if host.is_empty() {
         return Err(VpnError::InvalidEndpoint);
     }
     Ok((host, port))
@@ -718,43 +840,12 @@ fn external_profile_id(profile: &VpnProfile) -> Result<&str, VpnError> {
         .ok_or(VpnError::MissingExternalProfileId)
 }
 
-fn combined(stdout: &str, stderr: &str) -> String {
-    format!("{stdout}\n{stderr}")
-}
-
-trait Pipe: Sized {
-    fn pipe<T>(self, function: impl FnOnce(Self) -> T) -> T {
-        function(self)
-    }
-}
-
-impl<T> Pipe for T {}
-
 #[cfg(test)]
 mod tests {
     use crate::model::{AccessMode, ConnectionMode, OfflineMirrorConfig, TuningProfile};
-    use crate::process::{CapturedOutput, CommandOutput, FakeCommandRunner};
     use uuid::Uuid;
 
     use super::*;
-
-    fn output(stdout: &str) -> CommandOutput {
-        CommandOutput {
-            command: "fake".into(),
-            stdout: CapturedOutput {
-                text: stdout.into(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            stderr: CapturedOutput {
-                text: String::new(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            attempts: 1,
-            duration: Duration::ZERO,
-        }
-    }
 
     fn vpn_id() -> VpnProfileId {
         VpnProfileId::from_uuid(
@@ -774,6 +865,98 @@ mod tests {
             external_profile_id: Some("91a601dd-2df4-4b32-bc66-25a16a7612fe".into()),
             readiness_checks: vec![ReadinessCheck::NetworkManagerState],
             timeout_seconds: 30,
+        }
+    }
+
+    #[test]
+    fn network_manager_settings_select_only_vpn_profiles() {
+        let settings =
+            |name: &str, uuid: &str, connection_type: &str, service_type: Option<&str>| {
+                let mut settings = BTreeMap::from([(
+                    "connection".to_owned(),
+                    BTreeMap::from([
+                        (
+                            "id".to_owned(),
+                            OwnedValue::from(Str::from(name.to_owned())),
+                        ),
+                        (
+                            "uuid".to_owned(),
+                            OwnedValue::from(Str::from(uuid.to_owned())),
+                        ),
+                        (
+                            "type".to_owned(),
+                            OwnedValue::from(Str::from(connection_type.to_owned())),
+                        ),
+                    ]),
+                )]);
+                if let Some(service_type) = service_type {
+                    settings.insert(
+                        "vpn".to_owned(),
+                        BTreeMap::from([(
+                            "service-type".to_owned(),
+                            OwnedValue::from(Str::from(service_type.to_owned())),
+                        )]),
+                    );
+                }
+                settings
+            };
+        let profile = profile_from_settings(&settings(
+            "Work VPN",
+            "91a601dd-2df4-4b32-bc66-25a16a7612fe",
+            "vpn",
+            Some(OPENCONNECT_SERVICE_TYPE),
+        ))
+        .expect("VPN profile");
+        assert_eq!(profile.name, "Work VPN");
+        assert_eq!(profile.vpn_type, "vpn");
+        assert_eq!(
+            profile.service_type.as_deref(),
+            Some(OPENCONNECT_SERVICE_TYPE)
+        );
+        assert!(requires_openconnect_agent(&profile));
+        assert!(
+            profile_from_settings(&settings(
+                "Wi-Fi",
+                "9000c4f8-da8d-4cf5-baea-9d747e3161ee",
+                "802-11-wireless",
+                None,
+            ))
+            .is_none()
+        );
+
+        let wireguard = profile_from_settings(&settings(
+            "WireGuard",
+            "51424a59-495c-4483-ad44-a0bf49327d5e",
+            "wireguard",
+            None,
+        ))
+        .expect("WireGuard profile");
+        assert!(!requires_openconnect_agent(&wireguard));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the live NetworkManager system bus"]
+    async fn live_network_manager_dbus_smoke_test() {
+        DbusNetworkManagerVpn::connected()
+            .await
+            .expect("read NetworkManager state");
+        let profiles = DbusNetworkManagerVpn
+            .list_profiles(CancellationToken::new())
+            .await
+            .expect("list saved VPN profiles");
+        if let Some(saved) = profiles.first() {
+            let profile = VpnProfile {
+                id: vpn_id(),
+                name: saved.name.clone(),
+                kind: VpnKind::NetworkManager,
+                external_profile_id: Some(saved.uuid.clone()),
+                readiness_checks: Vec::new(),
+                timeout_seconds: 30,
+            };
+            DbusNetworkManagerVpn
+                .state(&profile, CancellationToken::new())
+                .await
+                .expect("read saved VPN state");
         }
     }
 
@@ -801,157 +984,75 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn network_manager_lists_activates_deactivates_and_reads_state() {
-        let runner = FakeCommandRunner::default().with_resolved([Executable::Nmcli]);
-        runner.push(Ok(output(
-            "Home:802-11-wireless:abc\nWork VPN:vpn:91a601dd-2df4-4b32-bc66-25a16a7612fe\n",
-        )));
-        runner.push(Ok(output("")));
-        runner.push(Ok(output("GENERAL.STATE:activated\n")));
-        runner.push(Ok(output("")));
-        let manager = CommandNetworkManagerVpn::new(runner.clone());
-        let profile = nm_profile();
-
-        let profiles = manager
-            .list_profiles(CancellationToken::new())
+    async fn readiness_checks_use_in_process_network_apis() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .expect("profiles");
-        assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].name, "Work VPN");
-        manager
-            .activate(&profile, CancellationToken::new())
-            .await
-            .expect("activate");
-        assert_eq!(
-            manager
-                .state(&profile, CancellationToken::new())
-                .await
-                .expect("state"),
-            VpnConnectionState::Activated
-        );
-        manager
-            .deactivate(&profile, CancellationToken::new())
-            .await
-            .expect("deactivate");
-
-        assert_eq!(
-            runner
-                .requests()
-                .iter()
-                .map(CommandRequest::sanitized_command)
-                .collect::<Vec<_>>(),
-            vec![
-                "nmcli -t -f NAME,TYPE,UUID connection show",
-                "nmcli connection up uuid 91a601dd-2df4-4b32-bc66-25a16a7612fe",
-                "nmcli -t -f GENERAL.STATE connection show 91a601dd-2df4-4b32-bc66-25a16a7612fe",
-                "nmcli connection down uuid 91a601dd-2df4-4b32-bc66-25a16a7612fe",
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn network_manager_list_profiles_falls_back_to_name_uuid_type_output() {
-        let runner = FakeCommandRunner::default().with_resolved([Executable::Nmcli]);
-        runner.push(Ok(output("")));
-        runner.push(Ok(output(
-            "SalterLab:51424a59-495c-4483-ad44-a0bf49327d5e:wireguard:\n",
-        )));
-        let manager = CommandNetworkManagerVpn::new(runner.clone());
-
-        let profiles = manager
-            .list_profiles(CancellationToken::new())
-            .await
-            .expect("profiles");
-        assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].name, "SalterLab");
-        assert_eq!(profiles[0].vpn_type, "wireguard");
-        assert_eq!(profiles[0].uuid, "51424a59-495c-4483-ad44-a0bf49327d5e");
-        assert_eq!(
-            runner
-                .requests()
-                .iter()
-                .map(CommandRequest::sanitized_command)
-                .collect::<Vec<_>>(),
-            vec![
-                "nmcli -t -f NAME,TYPE,UUID connection show",
-                "nmcli -g NAME,UUID,TYPE connection show",
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn readiness_checks_use_fixed_arguments() {
-        let runner = FakeCommandRunner::default().with_resolved([
-            Executable::Nmcli,
-            Executable::Ip,
-            Executable::Getent,
-            Executable::Nc,
-        ]);
-        runner.push(Ok(output("STATE:connected\n")));
-        runner.push(Ok(output("tun0:connected\nwlan0:connected\n")));
-        runner.push(Ok(output("10.0.0.1 via 192.168.1.1 dev tun0\n")));
-        runner.push(Ok(output("10.0.0.10 storage.example\n")));
-        runner.push(Ok(output("")));
-        let probe = CommandReadinessProbe::new(runner.clone());
+            .expect("loopback listener");
+        let port = listener.local_addr().unwrap().port();
+        let probe = InProcessReadinessProbe;
         let checks = vec![
-            ReadinessCheck::NetworkManagerState,
-            ReadinessCheck::Interface("tun0".into()),
-            ReadinessCheck::Route("10.0.0.10".into()),
-            ReadinessCheck::DnsName("storage.example".into()),
-            ReadinessCheck::Endpoint("127.0.0.1:443".into()),
+            ReadinessCheck::Route("127.0.0.1".into()),
+            ReadinessCheck::DnsName("localhost".into()),
+            ReadinessCheck::Endpoint(format!("127.0.0.1:{port}")),
         ];
         let report = readiness_report(&probe, &checks, CancellationToken::new())
             .await
             .expect("readiness");
         assert!(report.ready);
+        assert!(report.checks.iter().all(|result| result.detail == "ready"));
+
+        drop(listener);
+        // Port zero is reserved and cannot have a listening TCP endpoint.
+        // Reusing the just-released ephemeral port is racy under a parallel
+        // test suite because another process may bind it immediately.
+        let closed = InProcessReadinessProbe
+            .check(
+                &ReadinessCheck::Endpoint("127.0.0.1:0".into()),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("closed endpoint result");
+        assert!(!closed.ready);
+        assert_eq!(closed.detail, "not ready");
+    }
+
+    #[tokio::test]
+    async fn readiness_checks_are_cancellable_and_reject_invalid_endpoints() {
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let result = InProcessReadinessProbe
+            .check(&ReadinessCheck::DnsName("localhost".into()), cancellation)
+            .await;
+        assert_eq!(result, Err(VpnError::ReadinessCancelled));
         assert_eq!(
-            runner
-                .requests()
-                .iter()
-                .map(CommandRequest::sanitized_command)
-                .collect::<Vec<_>>(),
-            vec![
-                "nmcli -t -f STATE general",
-                "nmcli -t -f DEVICE,STATE device status",
-                "ip route get 10.0.0.10",
-                "getent hosts storage.example",
-                "nc -z -w 3 127.0.0.1 443",
-            ]
+            InProcessReadinessProbe
+                .check(
+                    &ReadinessCheck::Endpoint("missing-port".into()),
+                    CancellationToken::new(),
+                )
+                .await,
+            Err(VpnError::InvalidEndpoint)
         );
     }
 
     #[tokio::test]
-    async fn cisco_components_report_service_unavailable_and_gui_commands_are_typed() {
-        let runner = FakeCommandRunner::default().with_resolved([
-            Executable::CiscoVpn,
-            Executable::CiscoVpnUi,
-            Executable::CiscoAgent,
-        ]);
-        runner.push(Ok(output("error: Cannot contact the VPN service.")));
-        let cisco = CommandCiscoVpn::new(runner);
-        let components = cisco
-            .components(CancellationToken::new())
-            .await
-            .expect("components");
+    async fn network_manager_adapter_rejects_legacy_and_missing_profile_ids_before_dbus() {
+        let mut profile = nm_profile();
+        profile.kind = VpnKind::LegacyCisco;
         assert_eq!(
-            components,
-            CiscoComponents {
-                cli: true,
-                gui: true,
-                agent: true,
-                tunnel: CiscoTunnelState::ServiceUnavailable,
-            }
+            DbusNetworkManagerVpn
+                .activate(&profile, CancellationToken::new())
+                .await,
+            Err(VpnError::InvalidProfileKind)
         );
+
+        profile.kind = VpnKind::NetworkManager;
+        profile.external_profile_id = None;
         assert_eq!(
-            cisco.open_gui_request().expect("gui").sanitized_command(),
-            "Cisco Secure Client VPN UI"
-        );
-        assert_eq!(
-            cisco
-                .start_agent_request()
-                .expect("agent")
-                .sanitized_command(),
-            "systemctl start vpnagentd.service"
+            DbusNetworkManagerVpn
+                .activate(&profile, CancellationToken::new())
+                .await,
+            Err(VpnError::MissingExternalProfileId)
         );
     }
 
@@ -1056,7 +1157,7 @@ mod tests {
     }
 
     #[test]
-    fn parsers_handle_nmcli_escaping_cisco_connected_and_access_modes() {
+    fn legacy_nmcli_parsers_handle_escaping_and_access_modes() {
         assert_eq!(
             split_nmcli(r"Work\: VPN:vpn:uuid"),
             vec!["Work: VPN", "vpn", "uuid"]
@@ -1079,6 +1180,7 @@ mod tests {
                 name: "SalterLab".into(),
                 uuid: "51424a59-495c-4483-ad44-a0bf49327d5e".into(),
                 vpn_type: "wireguard".into(),
+                service_type: None,
             }]
         );
         let flattened_name_uuid_type_profiles = parse_nmcli_profiles(
@@ -1091,24 +1193,6 @@ mod tests {
             flattened_name_uuid_type_profiles
                 .iter()
                 .all(|profile| !profile.name.is_empty())
-        );
-        assert_eq!(
-            parse_cisco_stats("Connection State:            Connected\n"),
-            CiscoTunnelState::Connected
-        );
-        assert_eq!(
-            parse_cisco_stats("Connection State:            Disconnected\n"),
-            CiscoTunnelState::Disconnected
-        );
-        assert_eq!(
-            parse_cisco_stats("Connection State:            Not Available\n"),
-            CiscoTunnelState::Disconnected
-        );
-        assert_eq!(
-            parse_cisco_stats(
-                "Cannot contact the VPN service.\nConnection State:            Not Available\n"
-            ),
-            CiscoTunnelState::ServiceUnavailable
         );
         assert_eq!(
             AccessMode::OfflineMirror,

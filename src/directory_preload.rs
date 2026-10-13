@@ -65,7 +65,9 @@ pub fn start(
     wait_for_root: bool,
 ) -> Result<DirectoryPreloadJob, String> {
     if timeout.is_zero() {
-        return Err("Directory preload time must be greater than zero".into());
+        return Err(crate::fl!(
+            "ui-directory-preload-directory-preload-time-must-be-greater-than"
+        ));
     }
     let mut active = ACTIVE_PRELOADS.lock().expect("directory preload registry");
     if let Some(previous) = active.remove(&connection_id) {
@@ -172,7 +174,9 @@ async fn cancel_with_timeout(connection_id: ConnectionId, wait: Duration) -> Res
         && tokio::time::timeout(wait, completion).await.is_err()
         && !control.done.load(Ordering::Acquire)
     {
-        return Err("Directory preload is still stopping; the mount service was left running. Retry unmount after it finishes".into());
+        return Err(crate::fl!(
+            "ui-directory-preload-directory-preload-is-still-stopping-the-mount"
+        ));
     }
     finish(connection_id, &control);
     Ok(true)
@@ -353,7 +357,9 @@ async fn wait_for_mount(
             return if deadline == overall_deadline {
                 Err(TIMED_OUT.into())
             } else {
-                Err("Online mount did not become ready within 15 seconds".into())
+                Err(crate::fl!(
+                    "ui-directory-preload-online-mount-did-not-become-ready-within"
+                ))
             };
         }
         let probe = CommandRequest::new(Executable::Mountpoint)
@@ -375,7 +381,9 @@ async fn wait_for_mount(
             return if deadline == overall_deadline {
                 Err(TIMED_OUT.into())
             } else {
-                Err("Online mount did not become ready within 15 seconds".into())
+                Err(crate::fl!(
+                    "ui-directory-preload-online-mount-did-not-become-ready-within"
+                ))
             };
         }
         tokio::select! {

@@ -230,7 +230,11 @@ pub struct Connection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VpnKind {
     NetworkManager,
-    Cisco,
+    /// Read-only compatibility marker for configurations created before VPN
+    /// handling became NetworkManager-only. Production code never activates
+    /// this kind; the user must select a saved NetworkManager profile.
+    #[serde(rename = "Cisco")]
+    LegacyCisco,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,7 +256,7 @@ pub struct VpnProfile {
     pub timeout_seconds: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Operation {
     Mount,
     Unmount,
@@ -270,6 +274,7 @@ pub enum OnlineMountStatus {
     WaitingForVpn,
     Mounting,
     Mounted,
+    Degraded,
     PendingWrites,
     Detaching,
     Error,

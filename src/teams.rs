@@ -36,18 +36,20 @@ impl ServiceGuardBinding {
         if connection.provider != Provider::Teams
             || !matches!(connection.mode, ConnectionMode::OnlineMount(_))
         {
-            return Err("The service guard requires a SharePoint online mount.".into());
+            return Err(crate::fl!(
+                "ui-teams-the-service-guard-requires-a-sharepoint-online"
+            ));
         }
         let identity = connection.teams_identity.as_ref().ok_or_else(|| {
-            "The SharePoint connection has no verified library identity.".to_owned()
+            crate::fl!("ui-teams-the-sharepoint-connection-has-no-verified-library")
         })?;
         if identity.drive_id.trim().is_empty()
             || parse_library_url(&identity.library_url)
                 .map_or(true, |parsed| parsed.site_url != identity.site_url)
         {
-            return Err(
-                "The SharePoint connection has an invalid verified library identity.".into(),
-            );
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-connection-has-an-invalid-verified"
+            ));
         }
         Ok(Self {
             connection_id: connection.id,
@@ -82,13 +84,17 @@ impl ServiceGuardBinding {
             library_url,
         ] = arguments
         else {
-            return Err("The SharePoint service guard received invalid arguments.".into());
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-service-guard-received-invalid-arguments"
+            ));
         };
         let connection_id = uuid::Uuid::parse_str(id)
             .map(ConnectionId::from_uuid)
             .map_err(|_| "The SharePoint service guard received an invalid connection ID.")?;
         if remote_name.is_empty() || mountpoint.is_empty() || drive_id.is_empty() {
-            return Err("The SharePoint service guard received incomplete identity data.".into());
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-service-guard-received-incomplete-identity"
+            ));
         }
         Ok(Self {
             connection_id,
@@ -103,10 +109,9 @@ impl ServiceGuardBinding {
 
     pub fn matches_saved_connection(&self, connection: &Connection) -> Result<(), String> {
         if !connection.enabled || Self::from_connection(connection)? != *self {
-            return Err(
-                "The SharePoint connection changed or was disabled; save it again before mounting."
-                    .into(),
-            );
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-connection-changed-or-was-disabled"
+            ));
         }
         Ok(())
     }
@@ -121,9 +126,9 @@ pub async fn run_service_guard(arguments: &[String]) -> Result<(), String> {
     let binding = ServiceGuardBinding::parse_arguments(arguments)?;
     let report = Config::load_runtime();
     if report.source != LoadSource::Current {
-        return Err(
-            "Could not load the saved SharePoint connection for service verification.".into(),
-        );
+        return Err(crate::fl!(
+            "ui-teams-could-not-load-the-saved-sharepoint-connection"
+        ));
     }
     let connection = report
         .config
@@ -131,7 +136,7 @@ pub async fn run_service_guard(arguments: &[String]) -> Result<(), String> {
         .connections
         .iter()
         .find(|connection| connection.id == binding.connection_id)
-        .ok_or_else(|| "The SharePoint connection was removed; mount was blocked.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-connection-was-removed-mount-was"))?;
     binding.matches_saved_connection(connection)?;
     mount_guard::check_empty_mountpoint(
         &RuntimeCommandRunner::detect_current(),
@@ -141,7 +146,7 @@ pub async fn run_service_guard(arguments: &[String]) -> Result<(), String> {
     let expected = connection
         .teams_identity
         .as_ref()
-        .ok_or_else(|| "The SharePoint connection has no verified library identity.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-connection-has-no-verified-library"))?;
     verify_remote(
         &RuntimeCommandRunner::detect_current(),
         &binding.remote_name,
@@ -167,15 +172,19 @@ pub struct MirrorGuardBinding {
 impl MirrorGuardBinding {
     pub fn from_connection(connection: &Connection) -> Result<Self, String> {
         let ConnectionMode::OfflineMirror(options) = &connection.mode else {
-            return Err("The SharePoint mirror guard requires an offline mirror.".into());
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-mirror-guard-requires-an-offline"
+            ));
         };
         if connection.provider != Provider::Teams {
-            return Err("The SharePoint mirror guard requires a SharePoint connection.".into());
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-mirror-guard-requires-a-sharepoint"
+            ));
         }
         let subpath = connection
             .remote_subpath
             .as_deref()
-            .ok_or("Select a folder within the SharePoint library before mirroring it.")?;
+            .ok_or(crate::fl!("ui-teams-select-a-folder-before-mirroring"))?;
         crate::sync::validate_remote_name(&connection.remote_reference)
             .map_err(|error| error.to_string())?;
         crate::sync::validate_remote_subpath(subpath).map_err(|error| error.to_string())?;
@@ -183,20 +192,21 @@ impl MirrorGuardBinding {
             .split('/')
             .any(|component| component.is_empty() || matches!(component, "." | ".."))
         {
-            return Err("Select a folder within the SharePoint library, not its root.".into());
+            return Err(crate::fl!(
+                "ui-teams-select-a-folder-within-the-sharepoint-library"
+            ));
         }
-        let identity = connection
-            .teams_identity
-            .as_ref()
-            .ok_or("The SharePoint connection has no verified library identity.")?;
+        let identity = connection.teams_identity.as_ref().ok_or(crate::fl!(
+            "ui-teams-the-sharepoint-connection-has-no-verified-library"
+        ))?;
         if identity.drive_id.trim().is_empty()
             || parse_library_url(&identity.library_url).map_or(true, |parsed| {
                 parsed.site_url != identity.site_url || parsed.library_url != identity.library_url
             })
         {
-            return Err(
-                "The SharePoint connection has an invalid verified library identity.".into(),
-            );
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-connection-has-an-invalid-verified"
+            ));
         }
         Ok(Self {
             connection_id: connection.id,
@@ -212,10 +222,9 @@ impl MirrorGuardBinding {
 
     pub fn matches_saved_connection(&self, connection: &Connection) -> Result<(), String> {
         if !connection.enabled || Self::from_connection(connection)? != *self {
-            return Err(
-                "The SharePoint mirror target changed or was disabled; preview it again before syncing."
-                    .into(),
-            );
+            return Err(crate::fl!(
+                "ui-teams-the-sharepoint-mirror-target-changed-or-was"
+            ));
         }
         Ok(())
     }
@@ -226,19 +235,23 @@ pub fn mirror_guard_command(connection: &Connection) -> Result<ServiceCommand, S
     mount_guard::service_command(vec![
         MIRROR_GUARD_FLAG.into(),
         serde_json::to_string(&binding)
-            .map_err(|_| "Could not encode the SharePoint mirror identity.".to_owned())?,
+            .map_err(|_| crate::fl!("ui-teams-could-not-encode-the-sharepoint-mirror-identity"))?,
     ])
 }
 
 pub async fn run_mirror_service_guard(arguments: &[String]) -> Result<(), String> {
     let [encoded] = arguments else {
-        return Err("The SharePoint mirror guard received invalid arguments.".into());
+        return Err(crate::fl!(
+            "ui-teams-the-sharepoint-mirror-guard-received-invalid-arguments"
+        ));
     };
     let binding: MirrorGuardBinding = serde_json::from_str(encoded)
-        .map_err(|_| "The SharePoint mirror guard received an invalid identity.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-the-sharepoint-mirror-guard-received-an-invalid"))?;
     let report = Config::load_runtime();
     if report.source != LoadSource::Current {
-        return Err("Could not load the saved SharePoint mirror for verification.".into());
+        return Err(crate::fl!(
+            "ui-teams-could-not-load-the-saved-sharepoint-mirror"
+        ));
     }
     let connection = report
         .config
@@ -246,7 +259,9 @@ pub async fn run_mirror_service_guard(arguments: &[String]) -> Result<(), String
         .connections
         .iter()
         .find(|connection| connection.id == binding.connection_id)
-        .ok_or("The SharePoint mirror was removed; synchronization was blocked.")?;
+        .ok_or(crate::fl!(
+            "ui-teams-the-sharepoint-mirror-was-removed-synchronization-was"
+        ))?;
     verify_mirror_binding(
         &binding,
         connection,
@@ -261,10 +276,9 @@ pub async fn verify_mirror_binding<R: CommandRunner>(
     runner: &R,
 ) -> Result<(), String> {
     binding.matches_saved_connection(connection)?;
-    let expected = connection
-        .teams_identity
-        .as_ref()
-        .ok_or("The SharePoint connection has no verified library identity.")?;
+    let expected = connection.teams_identity.as_ref().ok_or(crate::fl!(
+        "ui-teams-the-sharepoint-connection-has-no-verified-library"
+    ))?;
     verify_remote(runner, &binding.remote_name, expected).await?;
     let target = format!("{}:{}", binding.remote_name, binding.remote_subpath);
     runner
@@ -295,38 +309,45 @@ fn decoded_segment(segment: &str) -> Result<String, String> {
                     .get(index + 2)
                     .is_none_or(|value| !value.is_ascii_hexdigit()))
         {
-            return Err("SharePoint URL has invalid percent encoding".into());
+            return Err(crate::fl!(
+                "ui-teams-sharepoint-url-has-invalid-percent-encoding"
+            ));
         }
     }
     let decoded = percent_decode_str(segment)
         .decode_utf8()
-        .map_err(|_| "SharePoint URL has invalid percent encoding".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-sharepoint-url-has-invalid-percent-encoding"))?;
     if decoded.is_empty()
         || decoded == "."
         || decoded == ".."
         || decoded.contains(['/', '\\', '\0'])
     {
-        return Err("SharePoint URL contains an unsafe path segment".into());
+        return Err(crate::fl!(
+            "ui-teams-sharepoint-url-contains-an-unsafe-path-segment"
+        ));
     }
     Ok(decoded.into_owned())
 }
 
 pub fn parse_library_url(input: &str) -> Result<TeamsLibraryIdentity, String> {
-    let url = Url::parse(input.trim()).map_err(|_| "Enter a SharePoint library URL.".to_owned())?;
+    let url = Url::parse(input.trim())
+        .map_err(|_| crate::fl!("ui-teams-enter-a-sharepoint-library-url"))?;
     let host = url
         .host_str()
-        .ok_or_else(|| "SharePoint URL needs a hostname.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-sharepoint-url-needs-a-hostname"))?;
     if url.scheme() != "https"
         || !(host.ends_with(".sharepoint.com") || host == "sharepoint.com")
         || url.username() != ""
         || url.password().is_some()
         || url.port().is_some()
     {
-        return Err("Use an HTTPS SharePoint library URL without credentials.".into());
+        return Err(crate::fl!(
+            "ui-teams-use-an-https-sharepoint-library-url-without"
+        ));
     }
     let mut raw_segments = url
         .path_segments()
-        .ok_or_else(|| "SharePoint URL needs a site and library path.".to_owned())?
+        .ok_or_else(|| crate::fl!("ui-teams-sharepoint-url-needs-a-site-and-library"))?
         .collect::<Vec<_>>();
     if raw_segments.last() == Some(&"") {
         raw_segments.pop();
@@ -338,18 +359,18 @@ pub fn parse_library_url(input: &str) -> Result<TeamsLibraryIdentity, String> {
     if segments.len() != 3
         || !matches!(segments[0].to_ascii_lowercase().as_str(), "sites" | "teams")
     {
-        return Err("Enter a library URL under /sites/<site>/<library> or /teams/<site>/<library>; choose any folder separately.".into());
+        return Err(crate::fl!("ui-teams-enter-a-library-url-under-sites-site"));
     }
     let mut canonical = Url::parse(&format!("https://{host}"))
-        .map_err(|_| "SharePoint URL has an invalid host.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-sharepoint-url-has-an-invalid-host"))?;
     canonical
         .path_segments_mut()
-        .map_err(|_| "SharePoint URL has an invalid path.".to_owned())?
+        .map_err(|_| crate::fl!("ui-teams-sharepoint-url-has-an-invalid-path"))?
         .extend(segments.iter().take(2).map(String::as_str));
     let site_url = canonical.as_str().trim_end_matches('/').to_owned();
     canonical
         .path_segments_mut()
-        .map_err(|_| "SharePoint URL has an invalid path.".to_owned())?
+        .map_err(|_| crate::fl!("ui-teams-sharepoint-url-has-an-invalid-path"))?
         .push(&segments[2]);
     let library_url = canonical.as_str().trim_end_matches('/').to_owned();
     Ok(TeamsLibraryIdentity {
@@ -382,22 +403,25 @@ pub struct VerifiedTeamsLibrary {
 
 fn remote_credentials(config_json: &str, remote_name: &str) -> Result<RemoteCredentials, String> {
     let dump: Value = serde_json::from_str(config_json)
-        .map_err(|_| "rclone returned invalid configuration data".to_owned())?;
-    let remote = dump
-        .get(remote_name)
-        .ok_or_else(|| format!("rclone remote `{remote_name}` was not found"))?;
+        .map_err(|_| crate::fl!("ui-teams-rclone-returned-invalid-configuration-data"))?;
+    let remote = dump.get(remote_name).ok_or_else(|| {
+        crate::fl!(
+            "ui-teams-rclone-remote-remote-name-was-not-found",
+            remote_name = (remote_name).to_string()
+        )
+    })?;
     if remote.get("type").and_then(Value::as_str) != Some("onedrive")
         || remote.get("drive_type").and_then(Value::as_str) != Some("documentLibrary")
     {
-        return Err(
-            "Choose a rclone onedrive remote configured for a SharePoint document library.".into(),
-        );
+        return Err(crate::fl!(
+            "ui-teams-choose-a-rclone-onedrive-remote-configured-for"
+        ));
     }
     let drive_id = remote
         .get("drive_id")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "The SharePoint remote has no drive ID.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-remote-has-no-drive-id"))?;
     let access_token = access_token_from_remote(remote)?;
     Ok(RemoteCredentials {
         drive_id: drive_id.to_owned(),
@@ -409,12 +433,15 @@ fn remote_credentials(config_json: &str, remote_name: &str) -> Result<RemoteCred
 /// Teams remote is still in its drive-selection step. Never persist or log it.
 pub fn oauth_access_token(config_json: &str, remote_name: &str) -> Result<String, String> {
     let dump: Value = serde_json::from_str(config_json)
-        .map_err(|_| "rclone returned invalid configuration data".to_owned())?;
-    let remote = dump
-        .get(remote_name)
-        .ok_or_else(|| format!("rclone remote `{remote_name}` was not found"))?;
+        .map_err(|_| crate::fl!("ui-teams-rclone-returned-invalid-configuration-data"))?;
+    let remote = dump.get(remote_name).ok_or_else(|| {
+        crate::fl!(
+            "ui-teams-rclone-remote-remote-name-was-not-found",
+            remote_name = (remote_name).to_string()
+        )
+    })?;
     if remote.get("type").and_then(Value::as_str) != Some("onedrive") {
-        return Err("The new remote is not a Microsoft OneDrive backend.".into());
+        return Err(crate::fl!("ui-teams-the-new-remote-is-not-a-microsoft"));
     }
     access_token_from_remote(remote)
 }
@@ -422,10 +449,10 @@ pub fn oauth_access_token(config_json: &str, remote_name: &str) -> Result<String
 fn access_token_from_remote(remote: &Value) -> Result<String, String> {
     let token = remote
         .get("token")
-        .ok_or_else(|| "The SharePoint remote is not authenticated.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-remote-is-not-authenticated"))?;
     let token = if let Some(text) = token.as_str() {
         serde_json::from_str::<Value>(text)
-            .map_err(|_| "The SharePoint remote has an invalid token format.".to_owned())?
+            .map_err(|_| crate::fl!("ui-teams-the-sharepoint-remote-has-an-invalid-token"))?
     } else {
         token.clone()
     };
@@ -433,7 +460,9 @@ fn access_token_from_remote(remote: &Value) -> Result<String, String> {
         .get("access_token")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "The SharePoint remote needs browser reauthorization.".to_owned())?;
+        .ok_or_else(|| {
+            crate::fl!("ui-teams-the-sharepoint-remote-needs-browser-reauthorization")
+        })?;
     Ok(access_token.to_owned())
 }
 
@@ -445,22 +474,21 @@ pub fn verify_graph_drive(
     if graph_response.get("id").and_then(Value::as_str) != Some(configured_drive_id)
         || graph_response.get("driveType").and_then(Value::as_str) != Some("documentLibrary")
     {
-        return Err("Microsoft returned a different drive or a non-library drive.".into());
+        return Err(crate::fl!(
+            "ui-teams-microsoft-returned-a-different-drive-or-a"
+        ));
     }
     let actual_url = graph_response
         .get("webUrl")
         .and_then(Value::as_str)
-        .ok_or_else(|| "Microsoft did not return the document library URL.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-teams-microsoft-did-not-return-the-document-library"))?;
     if !same_library_url(&expected.library_url, actual_url) {
-        return Err(
-            "The rclone remote points to a different SharePoint library than the entered URL."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-teams-the-rclone-remote-points-to-a-different"
+        ));
     }
     if !expected.drive_id.is_empty() && expected.drive_id != configured_drive_id {
-        return Err(
-            "The rclone remote's drive ID changed; retest the connection before mounting.".into(),
-        );
+        return Err(crate::fl!("ui-teams-the-rclone-remote-s-drive-id-changed"));
     }
     let mut verified = expected.clone();
     verified.drive_id = configured_drive_id.to_owned();
@@ -472,18 +500,19 @@ pub fn verify_graph_drive(
 pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String {
     match error {
         CommandError::MissingExecutable(_) => {
-            "rclone is missing; install it before testing SharePoint.".into()
+            crate::fl!("ui-teams-rclone-is-missing-install-it-before-testing")
         }
         CommandError::InvalidArgument => {
-            "SharePoint remote or folder contains an invalid command argument.".into()
+            crate::fl!("ui-teams-sharepoint-remote-or-folder-contains-an-invalid")
         }
         CommandError::Timeout { .. } => {
-            "The SharePoint read-only access check timed out; check network or VPN connectivity."
-                .into()
+            crate::fl!("ui-teams-the-sharepoint-read-only-access-check-timed")
         }
-        CommandError::Cancelled { .. } => "The SharePoint access check was cancelled.".into(),
+        CommandError::Cancelled { .. } => {
+            crate::fl!("ui-teams-the-sharepoint-access-check-was-cancelled")
+        }
         CommandError::Spawn { .. } => {
-            "Could not start rclone for the SharePoint access check.".into()
+            crate::fl!("ui-teams-could-not-start-rclone-for-the-sharepoint")
         }
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
@@ -497,7 +526,7 @@ pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String 
                 || detail.contains("admin consent")
                 || detail.contains("consent is required")
             {
-                "Microsoft tenant consent is required for this SharePoint remote; ask your administrator or reconnect with an approved account.".into()
+                crate::fl!("ui-teams-microsoft-tenant-consent-is-required-for-this")
             } else if detail.contains("invalid_grant")
                 || detail.contains("token expired")
                 || detail.contains("expired token")
@@ -505,23 +534,21 @@ pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String 
                 || detail.contains("unauthorized")
                 || detail.contains("401")
             {
-                "SharePoint rclone authorization expired or was revoked; reconnect the remote."
-                    .into()
+                crate::fl!("ui-teams-sharepoint-rclone-authorization-expired-or-was-revoked")
             } else if detail.contains("429")
                 || detail.contains("503")
                 || detail.contains("too many requests")
                 || detail.contains("throttl")
                 || detail.contains("server too busy")
             {
-                "SharePoint is limiting requests; wait before retrying the SharePoint access check."
-                    .into()
+                crate::fl!("ui-teams-sharepoint-is-limiting-requests-wait-before-retrying")
             } else if detail.contains("403")
                 || detail.contains("accessdenied")
                 || detail.contains("access denied")
                 || detail.contains("forbidden")
                 || detail.contains("permission denied")
             {
-                "The signed-in account cannot read this SharePoint library; check its permissions and tenant policy.".into()
+                crate::fl!("ui-teams-the-signed-in-account-cannot-read-this")
             } else if detail.contains("404")
                 || detail.contains("itemnotfound")
                 || detail.contains("directory not found")
@@ -529,10 +556,9 @@ pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String 
                 || detail.contains("not found")
             {
                 if folder_selected {
-                    "The selected SharePoint folder was not found or is inaccessible in this library."
-                        .into()
+                    crate::fl!("ui-teams-the-selected-sharepoint-folder-was-not-found")
                 } else {
-                    "The SharePoint library is unavailable to this remote; check its selected drive and access.".into()
+                    crate::fl!("ui-teams-the-sharepoint-library-is-unavailable-to-this")
                 }
             } else if detail.contains("network")
                 || detail.contains("connection")
@@ -540,10 +566,9 @@ pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String 
                 || detail.contains("no route")
                 || detail.contains("dns")
             {
-                "Could not reach SharePoint; check network or VPN connectivity.".into()
+                crate::fl!("ui-teams-could-not-reach-sharepoint-check-network-or")
             } else {
-                "The SharePoint read-only access check failed; inspect the rclone log for details."
-                    .into()
+                crate::fl!("ui-teams-the-sharepoint-read-only-access-check-failed")
             }
         }
     }
@@ -581,7 +606,7 @@ pub async fn verify_remote<R: CommandRunner>(
             CancellationToken::new(),
         )
         .await
-        .map_err(|_| "Could not inspect the SharePoint rclone remote.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-could-not-inspect-the-sharepoint-rclone-remote"))?;
     let credentials = remote_credentials(&output.stdout.text, remote_name)?;
     let url = format!(
         "https://graph.microsoft.com/v1.0/drives/{}",
@@ -590,20 +615,20 @@ pub async fn verify_remote<R: CommandRunner>(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|_| "Could not prepare Microsoft library verification.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-could-not-prepare-microsoft-library-verification"))?;
     let response = client
         .get(url)
         .bearer_auth(&credentials.access_token)
         .send()
         .await
-        .map_err(|_| "Could not contact Microsoft to verify the library identity.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-could-not-contact-microsoft-to-verify-the"))?;
     if !response.status().is_success() {
         return Err(graph_identity_error(response.status()));
     }
     let graph_response: Value = response
         .json()
         .await
-        .map_err(|_| "Microsoft returned invalid library metadata.".to_owned())?;
+        .map_err(|_| crate::fl!("ui-teams-microsoft-returned-invalid-library-metadata"))?;
     let identity = verify_graph_drive(&graph_response, expected, &credentials.drive_id)?;
     let account = match client
         .get("https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail")
@@ -627,15 +652,18 @@ pub async fn verify_remote<R: CommandRunner>(
 
 fn graph_identity_error(status: reqwest::StatusCode) -> String {
     match status.as_u16() {
-        401 => "Microsoft authorization expired; reconnect this rclone remote.".into(),
+        401 => crate::fl!("ui-teams-microsoft-authorization-expired-reconnect-this-rclone-remote"),
         403 => {
-            "Microsoft denied library metadata access; check account permission or tenant consent."
-                .into()
+            crate::fl!("ui-teams-microsoft-denied-library-metadata-access-check-account")
         }
-        404 => "Microsoft could not find this library drive; check the selected site and remote."
-            .into(),
-        429 | 503 => "Microsoft limited library verification; wait before retrying.".into(),
-        code => format!("Microsoft library verification failed (HTTP {code})."),
+        404 => crate::fl!("ui-teams-microsoft-could-not-find-this-library-drive"),
+        429 | 503 => {
+            crate::fl!("ui-teams-microsoft-limited-library-verification-wait-before-retrying")
+        }
+        code => crate::fl!(
+            "ui-teams-microsoft-library-verification-failed-http-code",
+            code = (code).to_string()
+        ),
     }
 }
 

@@ -2,9 +2,12 @@
 
 //! Read-only pending-upload observations for an active rclone VFS mount.
 
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -148,110 +151,133 @@ pub fn parse_rclone_mirror_status(output: &str) -> Result<u64, String> {
     Err(fl!("pending-count-mirror-unreadable"))
 }
 
-/// An active bisync's journal can show a directional change total and
-/// completed file operations. This is an estimate until bisync reports success.
-pub fn parse_rclone_mirror_progress(output: &str) -> Result<u64, String> {
-    let output = strip_ansi(output);
-    let output = output
-        .rsplit_once("Synching Path1")
-        .map_or(output.as_str(), |(_, tail)| tail);
-    if output.contains("Bisync successful") {
-        return Ok(0);
-    }
-    if output.contains("Bisync critical error")
-        || output.contains("Bisync aborted")
-        || output.contains("Bisync failed")
-    {
-        return Err(fl!("pending-count-rclone-mirror-unavailable"));
-    }
-    let mut path1 = None;
-    let mut path2 = None;
-    for line in output.lines() {
-        for (label, slot) in [("Path1:", &mut path1), ("Path2:", &mut path2)] {
-            if let Some(rest) = line.split_once(label).map(|(_, rest)| rest)
+#[derive(Deserialize)]
+struct LiveProgressState {
+    version: u8,
+    invocation_id: String,
+}
+
+#[derive(Default)]
+struct MirrorProgress {
+    started: bool,
+    succeeded: bool,
+    failed: bool,
+    path1: Option<u64>,
+    path2: Option<u64>,
+    completed: u64,
+}
+
+impl MirrorProgress {
+    fn observe(&mut self, message: &str, object: Option<&str>) {
+        if message.contains("Synching Path1") {
+            *self = Self {
+                started: true,
+                ..Self::default()
+            };
+        }
+        if !self.started {
+            return;
+        }
+        if message.contains("Bisync successful") {
+            self.succeeded = true;
+        }
+        if message.contains("Bisync critical error")
+            || message.contains("Bisync aborted")
+            || message.contains("Bisync failed")
+        {
+            self.failed = true;
+        }
+        for (label, slot) in [("Path1:", &mut self.path1), ("Path2:", &mut self.path2)] {
+            if let Some(rest) = message.split_once(label).map(|(_, rest)| rest)
                 && let Some((count, _)) = rest.trim().split_once(" changes:")
             {
                 *slot = count.trim().parse::<u64>().ok();
             }
         }
+        if object.is_some() && (message.starts_with("Copied (") || message.starts_with("Deleted")) {
+            self.completed = self.completed.saturating_add(1);
+        }
     }
-    let total = match (path1, path2) {
-        (Some(left), Some(right)) => left.saturating_add(right),
-        _ => return Err(fl!("pending-count-mirror-unreadable")),
-    };
-    let completed = output
-        .lines()
-        .filter(|line| line.contains(": Copied (") || line.contains(": Deleted"))
-        .count() as u64;
-    Ok(total.saturating_sub(completed).max(u64::from(total > 0)))
+
+    fn pending(self) -> Result<u64, String> {
+        if self.succeeded {
+            return Ok(0);
+        }
+        if self.failed {
+            return Err(fl!("pending-count-rclone-mirror-unavailable"));
+        }
+        let total = match (self.path1, self.path2) {
+            (Some(left), Some(right)) => left.saturating_add(right),
+            _ => return Err(fl!("pending-count-mirror-unreadable")),
+        };
+        Ok(total
+            .saturating_sub(self.completed)
+            .max(u64::from(total > 0)))
+    }
 }
 
-/// Read only the current systemd invocation, so an earlier successful run
-/// cannot make a new or failed run appear complete.
-pub async fn rclone_mirror_live_pending<R: CommandRunner>(
-    runner: &R,
+/// Read only app-owned structured rclone output for the current systemd
+/// invocation, so an earlier successful run cannot make a new run look clean.
+pub async fn rclone_mirror_live_pending(
+    work_directory: &Path,
     service: &str,
 ) -> Result<u64, String> {
-    let show = CommandRequest::new(Executable::Systemctl)
-        .arg("--user")
-        .and_then(|request| request.arg("show"))
-        .and_then(|request| request.arg("--property=InvocationID"))
-        .and_then(|request| request.arg("--value"))
-        .and_then(|request| request.arg(service))
-        .map_err(|_| fl!("pending-count-request-failed"))?;
-    let output = runner
-        .run(
-            show.with_timeout(Duration::from_secs(5)),
-            CancellationToken::new(),
-        )
+    let invocation = crate::services::systemd_user_invocation_id(service)
         .await
         .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
-    if output.stdout.truncated || output.stdout.invalid_utf8 {
-        return Err(fl!("pending-count-response-incomplete"));
-    }
-    let invocation = output.stdout.text.trim();
     if invocation.len() != 32 || !invocation.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(fl!("pending-count-rclone-mirror-unavailable"));
     }
-    let filter = format!("_SYSTEMD_INVOCATION_ID={invocation}");
-    let journal = CommandRequest::new(Executable::Journalctl)
-        .arg("--user")
-        .and_then(|request| request.arg(&filter))
-        .and_then(|request| request.arg("--output=cat"))
-        .and_then(|request| request.arg("--no-pager"))
-        .and_then(|request| request.arg("-n"))
-        .and_then(|request| request.arg("1000"))
-        .map_err(|_| fl!("pending-count-request-failed"))?;
-    let output = runner
-        .run(
-            journal
-                .with_timeout(Duration::from_secs(5))
-                .with_output_limit(512 * 1024),
-            CancellationToken::new(),
-        )
-        .await
-        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
-    if output.stdout.truncated || output.stdout.invalid_utf8 {
-        return Err(fl!("pending-count-response-incomplete"));
-    }
-    parse_rclone_mirror_progress(&output.stdout.text)
+    rclone_mirror_progress_for_invocation(work_directory, &invocation)
 }
 
-fn strip_ansi(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars();
-    while let Some(character) = chars.next() {
-        if character == '\u{1b}' && chars.next() == Some('[') {
-            for code in chars.by_ref() {
-                if code.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            output.push(character);
-        }
+fn rclone_mirror_progress_for_invocation(
+    work_directory: &Path,
+    invocation: &str,
+) -> Result<u64, String> {
+    let state_path = crate::mirror_script::live_progress_state_path(work_directory);
+    let state_metadata = std::fs::metadata(&state_path)
+        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+    if state_metadata.len() > 4096 {
+        return Err(fl!("pending-count-response-incomplete"));
     }
-    output
+    let state: LiveProgressState = serde_json::from_slice(
+        &std::fs::read(state_path).map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?,
+    )
+    .map_err(|_| fl!("pending-count-mirror-unreadable"))?;
+    if state.version != 1 || state.invocation_id != invocation {
+        return Err(fl!("pending-count-rclone-mirror-unavailable"));
+    }
+
+    let log = File::open(crate::mirror_script::live_progress_log_path(work_directory))
+        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+    let mut reader = BufReader::new(log);
+    let mut line = String::new();
+    let mut progress = MirrorProgress::default();
+    loop {
+        line.clear();
+        let bytes = reader
+            .read_line(&mut line)
+            .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+        if bytes == 0 {
+            break;
+        }
+        if line.len() > 1024 * 1024 {
+            return Err(fl!("pending-count-response-incomplete"));
+        }
+        let complete = line.ends_with('\n');
+        let record: Value = match serde_json::from_str(&line) {
+            Ok(record) => record,
+            Err(_) if !complete => break,
+            Err(_) => return Err(fl!("pending-count-mirror-unreadable")),
+        };
+        let message = record
+            .get("msg")
+            .and_then(Value::as_str)
+            .ok_or_else(|| fl!("pending-count-mirror-unreadable"))?;
+        progress.observe(message, record.get("object").and_then(Value::as_str));
+    }
+    progress.pending()
 }
 
 fn status_count(output: &str, label: &str) -> Option<u64> {
@@ -338,41 +364,78 @@ mod tests {
     }
 
     #[test]
-    fn bisync_progress_decreases_only_after_reported_file_completion() {
-        let log = "INFO: Synching Path1 remote: with Path2 local\nINFO: Path1: 2 changes: 2 new\nINFO: Path2: 1 changes: 1 new\nINFO: first.txt: Copied (new)\n";
-        assert_eq!(parse_rclone_mirror_progress(log).unwrap(), 2);
+    fn live_mirror_uses_only_structured_state_for_current_invocation() {
+        let temp = tempfile::tempdir().unwrap();
+        let invocation = "0123456789abcdef0123456789abcdef";
+        std::fs::write(
+            crate::mirror_script::live_progress_state_path(temp.path()),
+            format!(r#"{{"version":1,"invocation_id":"{invocation}"}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            crate::mirror_script::live_progress_log_path(temp.path()),
+            concat!(
+                r#"{"level":"info","msg":"Synching Path1 remote: with Path2 local"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path1: 2 changes: 2 new"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path2: 1 changes: 1 new"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Copied (new)","object":"first.txt"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
         assert_eq!(
-            parse_rclone_mirror_progress(&format!("{log}INFO: second.txt: Copied (new)\n"))
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            parse_rclone_mirror_progress(&format!("{log}INFO: Bisync successful\n")).unwrap(),
-            0
-        );
-        assert!(parse_rclone_mirror_progress("INFO: Path1: 2 changes: 2 new\n").is_err());
-        assert!(parse_rclone_mirror_progress("INFO: Synching Path1\nINFO: Path1: 2 changes: 2 new\nINFO: Path2: 1 changes: 1 new\nINFO: Bisync aborted\n").is_err());
-    }
-
-    #[tokio::test]
-    async fn live_mirror_uses_only_current_invocation() {
-        let runner = FakeCommandRunner::default();
-        runner.push(Ok(response("0123456789abcdef0123456789abcdef\n")));
-        runner.push(Ok(response("INFO: Synching Path1 remote: with Path2 local\nINFO: Path1: 2 changes: 2 new\nINFO: Path2: 1 changes: 1 new\nINFO: first.txt: Copied (new)\n")));
-        assert_eq!(
-            rclone_mirror_live_pending(&runner, "cosmic-mounter-example.service")
-                .await
-                .unwrap(),
+            rclone_mirror_progress_for_invocation(temp.path(), invocation).unwrap(),
             2
         );
-        let requests = runner.requests();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].executable, Executable::Systemctl);
-        assert_eq!(requests[1].executable, Executable::Journalctl);
+        use std::io::Write;
+        let mut log = std::fs::OpenOptions::new()
+            .append(true)
+            .open(crate::mirror_script::live_progress_log_path(temp.path()))
+            .unwrap();
+        write!(log, r#"{{"level":"info","msg":"incomplete""#).unwrap();
+        assert_eq!(
+            rclone_mirror_progress_for_invocation(temp.path(), invocation).unwrap(),
+            2
+        );
+        std::fs::write(
+            crate::mirror_script::live_progress_log_path(temp.path()),
+            concat!(
+                r#"{"level":"info","msg":"Synching Path1 remote: with Path2 local"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path1: 2 changes: 2 new"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path2: 1 changes: 1 new"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Bisync successful"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            rclone_mirror_progress_for_invocation(temp.path(), invocation).unwrap(),
+            0
+        );
+        std::fs::write(
+            crate::mirror_script::live_progress_log_path(temp.path()),
+            concat!(
+                r#"{"level":"info","msg":"Synching Path1 remote: with Path2 local"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path1: 2 changes: 2 new"}"#,
+                "\n",
+                r#"{"level":"info","msg":"Path2: 1 changes: 1 new"}"#,
+                "\n",
+                r#"{"level":"error","msg":"Bisync aborted"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        assert!(rclone_mirror_progress_for_invocation(temp.path(), invocation).is_err());
         assert!(
-            requests[1]
-                .sanitized_command()
-                .contains("_SYSTEMD_INVOCATION_ID=0123456789abcdef0123456789abcdef")
+            rclone_mirror_progress_for_invocation(temp.path(), "ffffffffffffffffffffffffffffffff")
+                .is_err()
         );
     }
 

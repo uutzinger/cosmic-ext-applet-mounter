@@ -40,22 +40,33 @@ pub enum ProviderError {
 impl fmt::Display for ProviderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedProvider(provider) => {
-                write!(formatter, "unsupported provider {provider:?}")
+            Self::UnsupportedProvider(provider) => formatter.write_str(&crate::fl!(
+                "ui-providers-unsupported-provider-provider",
+                provider = format!("{:?}", provider)
+            )),
+            Self::InvalidMode => formatter.write_str(&crate::fl!(
+                "ui-providers-connection-is-not-an-online-mount"
+            )),
+            Self::InvalidRemoteReference => {
+                formatter.write_str(&crate::fl!("ui-providers-invalid-remote-reference"))
             }
-            Self::InvalidMode => write!(formatter, "connection is not an online mount"),
-            Self::InvalidRemoteReference => write!(formatter, "invalid remote reference"),
-            Self::InvalidRemoteSubpath => write!(formatter, "invalid remote subpath"),
-            Self::MissingExecutable(executable) => {
-                write!(formatter, "{} was not found", executable.display_name())
+            Self::InvalidRemoteSubpath => {
+                formatter.write_str(&crate::fl!("ui-providers-invalid-remote-subpath"))
             }
+            Self::MissingExecutable(executable) => formatter.write_str(&crate::fl!(
+                "ui-providers-value1-was-not-found",
+                value1 = (executable.display_name()).to_string()
+            )),
             Self::Command(error) => error.fmt(formatter),
-            Self::InvalidResponse(message) => {
-                write!(formatter, "invalid provider response: {message}")
-            }
+            Self::InvalidResponse(message) => formatter.write_str(&crate::fl!(
+                "ui-providers-invalid-provider-response-message",
+                message = (message).to_string()
+            )),
             Self::InvalidTeamsIdentity(message) => formatter.write_str(message),
             Self::InvalidMountpointGuard(message) => formatter.write_str(message),
-            Self::Unauthenticated => write!(formatter, "provider is not authenticated"),
+            Self::Unauthenticated => {
+                formatter.write_str(&crate::fl!("ui-providers-provider-is-not-authenticated"))
+            }
         }
     }
 }
@@ -402,7 +413,10 @@ pub fn rclone_mount_plan(
         rc_socket,
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("Cloud Mounter: {}", connection.name),
+            description: crate::fl!(
+                "ui-providers-cloud-mounter-value1",
+                value1 = (connection.name).to_string()
+            ),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
             pre_start_condition,
@@ -455,7 +469,10 @@ pub fn onedriver_mount_plan(
         config_file,
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("Cloud Mounter: {}", connection.name),
+            description: crate::fl!(
+                "ui-providers-cloud-mounter-value1",
+                value1 = (connection.name).to_string()
+            ),
             executable: PathBuf::from(DEFAULT_ONEDRIVER),
             arguments,
             pre_start_condition: Some(
@@ -708,7 +725,9 @@ fn parse_rclone_config_dump(output: &str) -> Result<Vec<RcloneRemote>, ProviderE
     let value: Value = serde_json::from_str(output)
         .map_err(|error| ProviderError::InvalidResponse(error.to_string()))?;
     let object = value.as_object().ok_or_else(|| {
-        ProviderError::InvalidResponse("rclone config dump is not an object".into())
+        ProviderError::InvalidResponse(crate::fl!(
+            "ui-providers-rclone-config-dump-is-not-an-object"
+        ))
     })?;
     let mut remotes = Vec::new();
     for (name, settings) in object {

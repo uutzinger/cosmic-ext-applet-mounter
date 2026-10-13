@@ -9,6 +9,7 @@ appdata-dst := base-dir / 'share' / 'metainfo' / appid + '.metainfo.xml'
 bin-dst := base-dir / 'bin' / name
 desktop-dst := base-dir / 'share' / 'applications' / appid + '.desktop'
 icon-dst := base-dir / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / appid + '.svg'
+catalog-dst := base-dir / 'share' / appid / 'i18n' / 'en' / 'cosmic_ext_applet_mounter.ftl'
 user-data-dir := env('XDG_DATA_HOME', env('HOME') / '.local' / 'share')
 user-bin-dir := env('HOME') / '.local' / 'bin'
 
@@ -28,6 +29,8 @@ lint:
 
 test:
     cargo test --all-targets
+    python3 tests/dependency_installer_test.py
+    python3 tests/release_publication_test.py
 
 metadata-check:
     # Strict freedesktop validators currently reject official COSMIC applet
@@ -87,6 +90,7 @@ stage destination='target/stage':
 install-user: build-release
     install -Dm0755 {{cargo-target-dir / 'release' / name}} {{user-bin-dir / name}}
     install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper {{user-bin-dir / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}}
+    install -Dm0644 i18n/en/cosmic_ext_applet_mounter.ftl {{user-data-dir / appid / 'i18n' / 'en' / 'cosmic_ext_applet_mounter.ftl'}}
     install -Dm0644 resources/app.desktop {{user-data-dir / 'applications' / appid + '.desktop'}}
     install -Dm0644 resources/app.metainfo.xml {{user-data-dir / 'metainfo' / appid + '.metainfo.xml'}}
     install -Dm0644 resources/icon.svg {{user-data-dir / 'icons' / 'hicolor' / 'scalable' / 'apps' / appid + '.svg'}}
@@ -96,12 +100,13 @@ install-user: build-release
 install: build-release
     install -Dm0755 {{cargo-target-dir / 'release' / name}} {{bin-dst}}
     install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper {{base-dir / 'bin' / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}}
+    install -Dm0644 i18n/en/cosmic_ext_applet_mounter.ftl {{catalog-dst}}
     install -Dm0644 resources/app.desktop {{desktop-dst}}
     install -Dm0644 resources/app.metainfo.xml {{appdata-dst}}
     install -Dm0644 resources/icon.svg {{icon-dst}}
 
 uninstall:
-    rm -f {{bin-dst}} {{base-dir / 'bin' / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
+    rm -f {{bin-dst}} {{base-dir / 'bin' / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}} {{catalog-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
 clean:
     cargo clean

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installs host dependencies for cosmic-ext-applet-mounter on Debian/Ubuntu/Pop!_OS.
+# Installs host dependencies for cosmic-ext-applet-mounter.
+#
+# Supported distributions (where COSMIC itself is packaged):
+#   Debian/Ubuntu/Pop!_OS  apt
+#   Fedora                 dnf
+#   Arch Linux             pacman (+ AUR helper for onedriver/onedrive)
+#   openSUSE Tumbleweed    zypper
+#   Gentoo                 emerge
+#
 # This script can be fetched and run directly:
 #   curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
 # Or run locally:
@@ -40,48 +48,84 @@ version_ge() {
 # Distro detection
 # ---------------------------------------------------------------------------
 
-OS_ID=""
-OS_VERSION=""
 read_os_release() {
+    local key="${1:-ID}"
     if [ -f /etc/os-release ]; then
         # shellcheck source=/dev/null
         . /etc/os-release
-        OS_ID="${ID:-unknown}"
-        OS_VERSION="${VERSION_ID:-unknown}"
+        printf '%s' "${!key:-unknown}"
     else
-        OS_ID="unknown"
-        OS_VERSION="unknown"
+        printf '%s' "unknown"
     fi
 }
-read_os_release
+
+detect_distro() {
+    local id_like
+    id_like="$(read_os_release ID_LIKE)"
+    case "$(read_os_release ID)" in
+        ubuntu|pop|debian)
+            printf '%s' "debian" ;;
+        fedora|rhel|centos|rocky|almalinux)
+            printf '%s' "fedora" ;;
+        arch|manjaro|endeavouros)
+            printf '%s' "arch" ;;
+        opensuse*)
+            printf '%s' "opensuse" ;;
+        gentoo)
+            printf '%s' "gentoo" ;;
+        nixos)
+            printf '%s' "nixos" ;;
+        *)
+            # Fallback to ID_LIKE for derivatives.
+            case "$id_like" in
+                *debian*) printf '%s' "debian" ;;
+                *fedora*|*rhel*) printf '%s' "fedora" ;;
+                *arch*) printf '%s' "arch" ;;
+                *opensuse*|*suse*) printf '%s' "opensuse" ;;
+                *) printf '%s' "unknown" ;;
+            esac
+            ;;
+    esac
+}
+
+require_supported_distro() {
+    local distro
+    distro="$(detect_distro)"
+    case "$distro" in
+        debian|fedora|arch|opensuse|gentoo) return 0 ;;
+        nixos)
+            error "NixOS is not supported by this script."
+            error "Add the required packages in your configuration.nix instead."
+            exit 1
+            ;;
+        *)
+            error "Unsupported distribution: $(read_os_release ID) (ID_LIKE: $(read_os_release ID_LIKE))"
+            error "This script supports Debian, Ubuntu, Pop!_OS, Fedora, Arch Linux, openSUSE Tumbleweed, and Gentoo."
+            error "For other distributions, follow docs/dependency-installation.md manually."
+            exit 1
+            ;;
+    esac
+}
 
 obs_repo_suffix() {
-    case "$OS_ID" in
+    case "$(detect_distro)" in
+        debian)
+            case "$(read_os_release VERSION_ID)" in
+                11) printf '%s' "Debian_11" ;;
+                12) printf '%s' "Debian_12" ;;
+            esac
+            ;;
         ubuntu|pop)
-            case "$OS_VERSION" in
+            case "$(read_os_release VERSION_ID)" in
                 22.04) printf '%s' "xUbuntu_22.04" ;;
                 24.04) printf '%s' "xUbuntu_24.04" ;;
                 24.10) printf '%s' "xUbuntu_24.10" ;;
                 25.04) printf '%s' "xUbuntu_25.04" ;;
             esac
             ;;
-        debian)
-            case "$OS_VERSION" in
-                11) printf '%s' "Debian_11" ;;
-                12) printf '%s' "Debian_12" ;;
-            esac
-            ;;
+        opensuse)
+            printf '%s' "openSUSE_Tumbleweed" ;;
     esac
-}
-
-require_debian_family() {
-    case "$OS_ID" in
-        ubuntu|pop|debian) return 0 ;;
-    esac
-    error "This script currently supports Debian, Ubuntu, and Pop!_OS."
-    error "Detected OS: ${OS_ID} ${OS_VERSION}"
-    error "For other distributions, follow Dependency Installation.md manually."
-    exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -108,30 +152,79 @@ run_sudo() {
 }
 
 # ---------------------------------------------------------------------------
+# Package manager abstraction
+# ---------------------------------------------------------------------------
+
+pkg_update_index() {
+    case "$(detect_distro)" in
+        debian)
+            run_sudo apt update ;;
+        fedora)
+            run_sudo dnf makecache ;;
+        arch)
+            run_sudo pacman -Sy ;;
+        opensuse)
+            run_sudo zypper refresh ;;
+        gentoo)
+            run_sudo emerge --sync ;;
+    esac
+}
+
+pkg_install() {
+    case "$(detect_distro)" in
+        debian)
+            run_sudo apt install --no-install-recommends --no-install-suggests -y "$@" ;;
+        fedora)
+            run_sudo dnf install -y "$@" ;;
+        arch)
+            run_sudo pacman -Sy --noconfirm "$@" ;;
+        opensuse)
+            run_sudo zypper --non-interactive install "$@" ;;
+        gentoo)
+            warn "Gentoo packages are built from source and may take a long time."
+            run_sudo emerge --ask=n -v "$@" ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # Base system dependencies
 # ---------------------------------------------------------------------------
 
 install_base() {
     info "Checking base system dependencies..."
+
+    local distro
+    distro="$(detect_distro)"
+
     local packages=""
-
-    if ! command -v fusermount3 >/dev/null 2>&1; then
-        packages="${packages} fuse3"
-    fi
-
-    if ! command -v fuser >/dev/null 2>&1; then
-        packages="${packages} psmisc"
-    fi
-
-    if ! command -v nmcli >/dev/null 2>&1; then
-        packages="${packages} network-manager"
-    fi
+    case "$distro" in
+        debian)
+            if ! command -v fusermount3 >/dev/null 2>&1; then packages="${packages} fuse3"; fi
+            if ! command -v nmcli >/dev/null 2>&1; then packages="${packages} network-manager"; fi
+            ;;
+        fedora)
+            if ! command -v fusermount3 >/dev/null 2>&1; then packages="${packages} fuse3"; fi
+            if ! command -v nmcli >/dev/null 2>&1; then packages="${packages} NetworkManager"; fi
+            ;;
+        arch)
+            if ! command -v fusermount3 >/dev/null 2>&1; then packages="${packages} fuse3"; fi
+            if ! command -v nmcli >/dev/null 2>&1; then packages="${packages} networkmanager"; fi
+            ;;
+        opensuse)
+            if ! command -v fusermount3 >/dev/null 2>&1; then packages="${packages} fuse3"; fi
+            if ! command -v nmcli >/dev/null 2>&1; then packages="${packages} NetworkManager"; fi
+            ;;
+        gentoo)
+            if ! command -v fusermount3 >/dev/null 2>&1; then packages="${packages} sys-fs/fuse"; fi
+            if ! command -v nmcli >/dev/null 2>&1; then packages="${packages} net-misc/networkmanager"; fi
+            ;;
+    esac
 
     if [ -n "$packages" ]; then
         info "Installing:${packages}"
-        run_sudo apt update
+        pkg_update_index
         # shellcheck disable=SC2086
-        run_sudo apt install --no-install-recommends --no-install-suggests -y ${packages}
+        pkg_install ${packages}
     else
         info "Base dependencies already present."
     fi
@@ -158,6 +251,14 @@ backup_rclone_config() {
     fi
 }
 
+rclone_selfupdate_package() {
+    case "$(detect_distro)" in
+        debian) printf '%s' "deb" ;;
+        fedora) printf '%s' "rpm" ;;
+        *) printf '%s' "" ;;
+    esac
+}
+
 install_rclone() {
     info "Checking rclone..."
     local current_version
@@ -172,13 +273,26 @@ install_rclone() {
     backup_rclone_config
 
     if [ "$PREFER_RCLONE_SELFUPDATE" = true ] && command -v rclone >/dev/null 2>&1; then
+        local pkg
+        pkg="$(rclone_selfupdate_package)"
         info "Attempting package-aware self-update (--rclone-selfupdate was given)..."
-        if run_sudo rclone selfupdate --stable --package deb; then
-            hash -r
-            current_version="$(get_rclone_version)"
-            if version_ge "$current_version" "$RCLONE_MIN_VERSION"; then
-                info "rclone updated to ${current_version}."
-                return 0
+        if [ -n "$pkg" ]; then
+            if run_sudo rclone selfupdate --stable --package "$pkg"; then
+                hash -r
+                current_version="$(get_rclone_version)"
+                if version_ge "$current_version" "$RCLONE_MIN_VERSION"; then
+                    info "rclone updated to ${current_version}."
+                    return 0
+                fi
+            fi
+        else
+            if run_sudo rclone selfupdate --stable; then
+                hash -r
+                current_version="$(get_rclone_version)"
+                if version_ge "$current_version" "$RCLONE_MIN_VERSION"; then
+                    info "rclone updated to ${current_version}."
+                    return 0
+                fi
             fi
         fi
         warn "rclone selfupdate did not produce a usable version; falling back to the official installer."
@@ -211,25 +325,25 @@ get_onedriver_version() {
     fi
 }
 
-install_onedriver() {
-    info "Checking jstaf/onedriver..."
-    local current_version
-    current_version="$(get_onedriver_version)"
-
-    if version_ge "$current_version" "$ONEDRIVER_MIN_VERSION"; then
-        info "onedriver ${current_version} already meets the minimum (${ONEDRIVER_MIN_VERSION})."
-        return 0
+detect_aur_helper() {
+    if command -v paru >/dev/null 2>&1; then
+        printf '%s' "paru"
+    elif command -v yay >/dev/null 2>&1; then
+        printf '%s' "yay"
+    else
+        printf '%s' ""
     fi
+}
 
+install_onedriver_debian() {
     local suffix
     suffix="$(obs_repo_suffix)"
     if [ -z "$suffix" ]; then
-        error "No Open Build Service repository mapping for ${OS_ID} ${OS_VERSION}."
+        error "No Open Build Service repository mapping for $(read_os_release ID) $(read_os_release VERSION_ID)."
         error "Install onedriver manually from: https://software.opensuse.org/download.html?project=home%3Ajstaf&package=onedriver"
         exit 1
     fi
 
-    warn "onedriver ${current_version} is below the recommended minimum ${ONEDRIVER_MIN_VERSION}."
     info "Adding home:jstaf OBS repository for ${suffix}..."
 
     local key_url="https://download.opensuse.org/repositories/home:/jstaf/${suffix}/Release.key"
@@ -244,8 +358,71 @@ install_onedriver() {
         "$(dpkg --print-architecture)" "$keyring" "$suffix" \
         | run_sudo tee "$list_file" >/dev/null
 
-    run_sudo apt update
-    run_sudo apt install --no-install-recommends --no-install-suggests -y onedriver
+    pkg_update_index
+    pkg_install onedriver
+}
+
+install_onedriver_fedora() {
+    info "Enabling jstaf/onedriver COPR..."
+    run_sudo dnf copr enable -y jstaf/onedriver
+    pkg_update_index
+    pkg_install onedriver
+}
+
+install_onedriver_arch() {
+    local helper
+    helper="$(detect_aur_helper)"
+    if [ -z "$helper" ]; then
+        error "An AUR helper (yay or paru) is required to install onedriver on Arch Linux."
+        error "Install one manually, then re-run this script, or install onedriver from the AUR yourself:"
+        error "  https://aur.archlinux.org/packages/onedriver"
+        exit 1
+    fi
+    info "Installing onedriver from AUR using ${helper}..."
+    "$helper" -Sy --noconfirm onedriver
+}
+
+install_onedriver_opensuse() {
+    local suffix
+    suffix="$(obs_repo_suffix)"
+    if [ -z "$suffix" ]; then
+        error "No Open Build Service repository mapping for openSUSE."
+        error "Install onedriver manually from: https://software.opensuse.org/download.html?project=home%3Ajstaf&package=onedriver"
+        exit 1
+    fi
+
+    info "Adding home:jstaf OBS repository for ${suffix}..."
+    run_sudo zypper --non-interactive addrepo \
+        "https://download.opensuse.org/repositories/home:/jstaf/${suffix}/home:jstaf.repo"
+    run_sudo zypper --gpg-auto-import-keys refresh
+    pkg_install onedriver
+}
+
+install_onedriver_gentoo() {
+    error "Gentoo does not have an official onedriver package."
+    error "Build and install onedriver manually from: https://github.com/jstaf/onedriver"
+    exit 1
+}
+
+install_onedriver() {
+    info "Checking jstaf/onedriver..."
+    local current_version
+    current_version="$(get_onedriver_version)"
+
+    if version_ge "$current_version" "$ONEDRIVER_MIN_VERSION"; then
+        info "onedriver ${current_version} already meets the minimum (${ONEDRIVER_MIN_VERSION})."
+        return 0
+    fi
+
+    warn "onedriver ${current_version} is below the recommended minimum ${ONEDRIVER_MIN_VERSION}."
+
+    case "$(detect_distro)" in
+        debian) install_onedriver_debian ;;
+        fedora) install_onedriver_fedora ;;
+        arch) install_onedriver_arch ;;
+        opensuse) install_onedriver_opensuse ;;
+        gentoo) install_onedriver_gentoo ;;
+    esac
 
     current_version="$(get_onedriver_version)"
     if ! version_ge "$current_version" "$ONEDRIVER_MIN_VERSION"; then
@@ -267,25 +444,15 @@ get_onedrive_version() {
     fi
 }
 
-install_onedrive() {
-    info "Checking abraunegg/onedrive..."
-    local current_version
-    current_version="$(get_onedrive_version)"
-
-    if version_ge "$current_version" "$ONEDRIVE_MIN_VERSION"; then
-        info "onedrive ${current_version} already meets the minimum (${ONEDRIVE_MIN_VERSION})."
-        return 0
-    fi
-
+install_onedrive_debian() {
     local suffix
     suffix="$(obs_repo_suffix)"
     if [ -z "$suffix" ]; then
-        error "No Open Build Service repository mapping for ${OS_ID} ${OS_VERSION}."
+        error "No Open Build Service repository mapping for $(read_os_release ID) $(read_os_release VERSION_ID)."
         error "Install abraunegg/onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/ubuntu-package-install.md"
         exit 1
     fi
 
-    warn "onedrive ${current_version} is below the recommended minimum ${ONEDRIVE_MIN_VERSION}."
     info "Adding npreining OBS repository for ${suffix}..."
 
     local key_url="https://download.opensuse.org/repositories/home:/npreining:/debian-ubuntu-onedrive/${suffix}/Release.key"
@@ -300,9 +467,62 @@ install_onedrive() {
         "$(dpkg --print-architecture)" "$keyring" "$suffix" \
         | run_sudo tee "$list_file" >/dev/null
 
-    run_sudo apt update
+    pkg_update_index
     run_sudo apt-cache policy onedrive
-    run_sudo apt install --no-install-recommends --no-install-suggests -y onedrive
+    pkg_install onedrive
+}
+
+install_onedrive_fedora() {
+    info "Enabling abraunegg/onedrive COPR..."
+    run_sudo dnf copr enable -y abraunegg/onedrive
+    pkg_update_index
+    pkg_install onedrive
+}
+
+install_onedrive_arch() {
+    local helper
+    helper="$(detect_aur_helper)"
+    if [ -z "$helper" ]; then
+        error "An AUR helper (yay or paru) is required to install abraunegg/onedrive on Arch Linux."
+        error "Install one manually, then re-run this script, or install onedrive from the AUR yourself:"
+        error "  https://aur.archlinux.org/packages/onedrive-abraunegg"
+        exit 1
+    fi
+    info "Installing onedrive from AUR using ${helper}..."
+    "$helper" -Sy --noconfirm onedrive-abraunegg
+}
+
+install_onedrive_opensuse() {
+    error "openSUSE does not have a prebuilt abraunegg/onedrive package in this script."
+    error "Build and install onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/INSTALL.md"
+    exit 1
+}
+
+install_onedrive_gentoo() {
+    error "Gentoo does not have an official abraunegg/onedrive package."
+    error "Build and install onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/INSTALL.md"
+    exit 1
+}
+
+install_onedrive() {
+    info "Checking abraunegg/onedrive..."
+    local current_version
+    current_version="$(get_onedrive_version)"
+
+    if version_ge "$current_version" "$ONEDRIVE_MIN_VERSION"; then
+        info "onedrive ${current_version} already meets the minimum (${ONEDRIVE_MIN_VERSION})."
+        return 0
+    fi
+
+    warn "onedrive ${current_version} is below the recommended minimum ${ONEDRIVE_MIN_VERSION}."
+
+    case "$(detect_distro)" in
+        debian) install_onedrive_debian ;;
+        fedora) install_onedrive_fedora ;;
+        arch) install_onedrive_arch ;;
+        opensuse) install_onedrive_opensuse ;;
+        gentoo) install_onedrive_gentoo ;;
+    esac
 
     current_version="$(get_onedrive_version)"
     if ! version_ge "$current_version" "$ONEDRIVE_MIN_VERSION"; then
@@ -313,36 +533,41 @@ install_onedrive() {
 }
 
 # ---------------------------------------------------------------------------
-# Cisco Secure Client check only
-# ---------------------------------------------------------------------------
-
-check_cisco() {
-    info "Checking Cisco Secure Client (optional, organization-provided)..."
-    local cli="/opt/cisco/secureclient/bin/vpn"
-    local agent_service="vpnagentd.service"
-
-    if [ ! -x "$cli" ]; then
-        warn "Cisco Secure Client CLI not found at ${cli}."
-        warn "Install it using your organization's provided package."
-        return 0
-    fi
-
-    info "Cisco CLI found."
-    if systemctl is-active --quiet "$agent_service" 2>/dev/null; then
-        info "${agent_service} is active."
-    else
-        info "${agent_service} is not active."
-        info "To enable it:"
-        info "  sudo systemctl enable ${agent_service}"
-        info "To start it:"
-        info "  sudo systemctl start ${agent_service}"
-
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
+
+# Check imports only: no GTK initialization, browser, OAuth, or user-state writes.
+onedrive_auth_helper_available() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("WebKit2", "4.1"); from gi.repository import GLib, Gtk, WebKit2' >/dev/null 2>&1
+}
+
+install_onedrive_auth_helper() {
+    info "Checking optional OneDrive sign-in GUI dependencies..."
+    if onedrive_auth_helper_available; then
+        info "Python GI, GTK 3, and WebKitGTK 4.1 are already available."
+        return 0
+    fi
+    local packages=()
+    case "$(detect_distro)" in
+        debian) packages=(python3 python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1) ;;
+        fedora) packages=(python3 python3-gobject gtk3 webkit2gtk4.1) ;;
+        arch) packages=(python python-gobject gtk3 webkit2gtk-4.1) ;;
+        opensuse|gentoo)
+            warn "Install your distribution's Python GI, GTK 3 and WebKit2 4.1 introspection runtime manually; package variants/USE flags are not automated here."
+            warn "Until the import check passes, use Cloud Mounter's manual browser/response-URL handoff."
+            return 0
+            ;;
+        *) error "Unsupported OneDrive GUI helper distribution."; return 1 ;;
+    esac
+    pkg_update_index
+    pkg_install "${packages[@]}"
+    if ! onedrive_auth_helper_available; then
+        error "OneDrive GUI imports are unavailable after installation. Check the system python3 GI/GTK 3/WebKit2 4.1 runtime, or rerun with --skip-onedrive-auth-helper and use manual URL handoff."
+        return 1
+    fi
+    info "OneDrive sign-in GUI dependencies are available."
+}
 
 print_summary() {
     info "Dependency status:"
@@ -359,7 +584,7 @@ print_summary() {
     fi
     printf '  %-12s %s\n' "fusermount3" "$(command -v fusermount3 >/dev/null 2>&1 && echo present || echo missing)"
     printf '  %-12s %s\n' "nmcli" "$(command -v nmcli >/dev/null 2>&1 && echo present || echo missing)"
-    printf '  %-12s %s\n' "fuser" "$(command -v fuser >/dev/null 2>&1 && echo present || echo missing)"
+    printf '  %-12s %s\n' "OneDrive GUI" "$(onedrive_auth_helper_available && echo available || echo 'unavailable (manual URL handoff remains available)')"
 }
 
 # ---------------------------------------------------------------------------
@@ -373,16 +598,20 @@ Usage: $0 [OPTION]...
 Install or update host dependencies for cosmic-ext-applet-mounter.
 
 Options:
-  --all                Install/update base tools, rclone, onedriver, and onedrive.
-  --base               Install base tools only (fuse3, psmisc, network-manager).
+  --all                Install/update base tools, engines, and OneDrive GUI runtime.
+  --base               Install base tools only (fuse3, network-manager).
   --rclone             Install/update rclone using the official installer.
   --rclone-selfupdate  Try rclone's package-aware selfupdate first (opt-in).
   --onedriver          Install/update jstaf/onedriver.
-  --onedrive           Install/update abraunegg/onedrive.
-  --cisco-check        Check Cisco Secure Client status without installing.
+  --onedrive           Install/update abraunegg/onedrive and its optional GUI runtime.
+  --onedrive-auth-helper Install/check only the optional OneDrive GUI runtime.
+  --skip-onedrive-auth-helper Omit GUI runtime; use manual browser/URL handoff.
   --help               Show this help message.
 
 With no options, --all is assumed.
+
+Supported distributions: Debian, Ubuntu, Pop!_OS, Fedora, Arch Linux,
+openSUSE Tumbleweed, and Gentoo.
 EOF
 }
 
@@ -396,7 +625,8 @@ main() {
     local do_rclone=false
     local do_onedriver=false
     local do_onedrive=false
-    local do_cisco=false
+    local do_auth_helper=false
+    local skip_auth_helper=false
 
     if [ $# -eq 0 ]; then
         do_all=true
@@ -410,7 +640,8 @@ main() {
             --rclone-selfupdate) PREFER_RCLONE_SELFUPDATE=true ;;
             --onedriver) do_onedriver=true ;;
             --onedrive) do_onedrive=true ;;
-            --cisco-check) do_cisco=true ;;
+            --onedrive-auth-helper) do_auth_helper=true ;;
+            --skip-onedrive-auth-helper) skip_auth_helper=true ;;
             --help) usage; exit 0 ;;
             *) error "Unknown option: $1"; usage; exit 1 ;;
         esac
@@ -422,11 +653,13 @@ main() {
         do_rclone=true
         do_onedriver=true
         do_onedrive=true
-        do_cisco=true
     fi
 
-    require_debian_family
+    require_supported_distro
     require_sudo
+
+    if [ "$do_onedrive" = true ]; then do_auth_helper=true; fi
+    if [ "$skip_auth_helper" = true ]; then do_auth_helper=false; fi
 
     if [ "$do_base" = true ]; then
         install_base
@@ -440,12 +673,13 @@ main() {
     if [ "$do_onedrive" = true ]; then
         install_onedrive
     fi
-    if [ "$do_cisco" = true ]; then
-        check_cisco
+    if [ "$do_auth_helper" = true ]; then
+        install_onedrive_auth_helper
     fi
-
     print_summary
     info "Done."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+    main "$@"
+fi

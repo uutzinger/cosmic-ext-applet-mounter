@@ -37,7 +37,8 @@ mechanism.
 - Treat the popup connection switch as the persistent desired state: Online
   mounts that are on return at the next login, while stopped mounts and mirrors
   remain stopped.
-- Configure optional NetworkManager or Cisco VPN dependencies.
+- Configure optional NetworkManager VPN dependencies, including
+  Cisco-compatible gateways provided through the OpenConnect plugin.
 - Detect, create, select, and safely remove unused rclone remotes for Google
   Drive, Box, SMB, and SFTP workflows.
 - Generate and manage applet-owned systemd user services and timers.
@@ -73,9 +74,10 @@ are tracked in Section 17 and
 - Online mount lifecycle and health management.
 - Offline mirror initialization, scheduling, synchronization, conflict
   preservation, deletion propagation, and recovery retention.
-- NetworkManager VPN enumeration and activation.
-- Cisco Secure Client detection, agent startup, GUI launch, and readiness
-  monitoring.
+- NetworkManager VPN enumeration, activation, deactivation, and state monitoring
+  over D-Bus.
+- OpenConnect interactive authentication through NetworkManager and a host
+  `nm-applet` secret agent when the selected profile requires it.
 - Dependency and version checks for rclone, `jstaf/onedriver`,
   `abraunegg/onedrive`, FUSE, and supporting utilities.
 - Import of compatible legacy services found in
@@ -86,7 +88,8 @@ are tracked in Section 17 and
 
 - Implementing storage, synchronization, or VPN protocols in the applet.
 - Supporting providers outside the approved matrix.
-- Managing VPN profiles, VPN credentials, or Cisco authentication.
+- Creating or editing VPN profiles, handling VPN credentials, or implementing a
+  VPN authentication client.
 - Treating an Online mount cache as a complete offline copy.
 - Automatically installing packages, adding repositories, or updating tools.
 - Storing provider or VPN secrets.
@@ -121,11 +124,23 @@ Google Docs, Sheets, and Slides do not round-trip safely through exported file
 formats. Offline mirror mode shall skip these cloud-native documents, report
 them to the user, and offer to open them in the browser.
 
-### 4.4 Cisco VPN control
+### 4.4 NetworkManager VPN control
 
-An active Cisco agent does not prove that an authenticated tunnel exists. The
-applet may start the agent and open the Cisco UI, but storage operations shall
-wait for configured readiness checks.
+NetworkManager state is authoritative for saved VPN profile discovery and
+lifecycle. The applet shall use D-Bus for enumeration, activation, state, and
+deactivation and shall not invoke `nmcli` or a proprietary Cisco client.
+
+Cisco-compatible gateways shall use a NetworkManager OpenConnect profile. For an
+OpenConnect profile requiring interactive authentication, NetworkManager shall
+obtain secrets from a host `nm-applet` secret agent over D-Bus. The agent, not
+the applet, launches the multi-field OpenConnect authentication dialog. The
+applet shall neither handle credentials nor invoke the dialog directly.
+For an OpenConnect profile only, the applet shall start the installed static
+authentication-agent user service through the systemd user-manager D-Bus and
+wait for successful job completion before asking NetworkManager to activate the
+profile. It shall never execute `nm-applet` directly. `nm-applet` is an
+OpenConnect-specific dependency in this design; other NetworkManager VPN
+plugins shall not require it unless separately specified.
 
 ### 4.5 Settings windows
 
@@ -234,6 +249,18 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   `conflict`, `error`, and `unavailable`.
 - **FR-006:** The UI shall distinguish an active service from an actual
   filesystem mount.
+- **FR-006A:** If an Online filesystem remains mounted after its required
+  network or VPN dependency becomes unavailable, the UI shall show a degraded
+  mounted state rather than healthy/connected. It shall retain safe Unmount and
+  expose the separately confirmed Repair/lazy-detach action if clean unmount
+  cannot detach the mount. Repair confirmation shall require a separately
+  labeled second activation after a minimum arming interval so duplicate UI
+  delivery cannot execute a lazy detach. The Repair action shall be spatially
+  separate from the primary mount switch so its hit target is unambiguous, and
+  it shall disappear immediately after confirmation while Repair is running. It
+  shall suppress any cached pending-upload number as unverified and provide
+  explicit off/on reauthentication guidance. This state does not satisfy the
+  separate automatic safe-detach and remount requirements.
 - **FR-007:** The UI shall show the last successful synchronization time for
   Offline mirrors.
 - **FR-008:** The UI shall show pending uploads, conflicts, warnings, and
@@ -344,8 +371,9 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 
 ### 6.3 Dependency management
 
-- **FR-021:** The applet shall detect each required executable and report its
-  version.
+- **FR-021:** Packaging shall declare required executables. The applet shall
+  report a missing dependency or an operation-time capability failure without
+  running startup-wide version/help probes solely for inventory.
 - **FR-022:** The applet shall require a current supported release of each
   selected storage engine.
 - **FR-023:** The applet shall reject the installed rclone `1.60.1` for managed
@@ -354,8 +382,19 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   and shall not perform installation or repository changes.
 - **FR-025:** A missing dependency for one provider or mode shall not prevent use
   of other available providers or modes.
-- **FR-026:** Capability checks shall verify required commands and flags rather
-  than relying only on a version string.
+- **FR-026:** Required capabilities shall be verified in packaging/build tests
+  or by typed operation-time results rather than relying only on a version
+  string or repeated runtime help probes.
+- **FR-026A:** Production startup shall not run `rclone version`, rclone help,
+  `onedriver --version`, `onedriver --help`, `onedrive --version`,
+  `fusermount3 --version`, or `fuser --version` solely as dependency probes.
+  Packaging shall declare minimum dependencies, focused diagnostic/build tests
+  shall retain capability coverage, and operation-time failures shall remain
+  actionable. Actual clean/lazy `fusermount3` unmount operations remain allowed;
+  `fuser` shall not remain when it has no production operation.
+- **FR-026B:** NetworkManager and the systemd user manager shall be detected by
+  connecting to their D-Bus APIs, not by running `nmcli --version` or
+  `systemctl --user --version`.
 
 ### 6.4 Provider behavior
 
@@ -510,6 +549,10 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-054:** Only one synchronization operation may run per connection.
 - **FR-055:** Automatic synchronization shall pause on metered networks by
   default, with Sync Now and a per-connection override available.
+- **FR-055A:** Metered-state detection shall use NetworkManager D-Bus in both
+  native and Flatpak operation. Generated scheduled-mirror behavior shall not
+  invoke `nmcli`; manual and scheduled synchronization shall apply the same
+  metered-network policy.
 - **FR-056:** Changes and deletions shall propagate in both directions.
 - **FR-057:** When the same file changes on both sides, neither version shall be
   silently overwritten; both versions shall be preserved and reported.
@@ -519,6 +562,25 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   connection is active.
 - **FR-060:** Interrupted synchronization shall retain engine state and offer
   automatic recovery or a reviewed recovery workflow.
+- **FR-060A:** Offline Mirror Repair shall be a confirmed recovery-and-pause
+  operation, not a synchronization operation. It shall cancel and boundedly
+  await app-owned manual work, use the systemd user-manager D-Bus adapter,
+  reconcile observed final state, and never run preview, sync, resync,
+  authentication, retention, or cleanup. It shall preserve mirror data,
+  recovery data, engine state, locks, ownership and initialization markers, and
+  shall never use Online-mount FUSE Repair.
+- **FR-060B:** Rclone bisync Repair shall stop and disable the periodic timer
+  before stopping its finite service, reset only an observed failed service,
+  and finish only when the timer is inactive/disabled and the service is
+  inactive/non-failed. It shall preserve the renewable bisync lock and direct
+  the user to wait through its two-minute maximum or use reviewed manual
+  recovery; it shall never delete the lock or trigger implicit resync.
+- **FR-060C:** `abraunegg/onedrive` Repair shall stop and disable only its
+  continuous monitor service, reset only observed failed state, and preserve
+  its configuration, token, sync database, lock/state, local mirror, recovery
+  data, selection, and initialization markers. It shall not create an rclone
+  timer, invoke sync/resync/reauthentication, or touch a `jstaf/onedriver`
+  Online mount or cache.
 - **FR-061:** A resync or state-database rebuild shall not run as routine startup
   behavior and shall require a dry preview and explicit confirmation.
 - **FR-062:** Synchronization errors shall preserve local user work.
@@ -551,9 +613,21 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-075:** The applet shall update or remove only files whose ownership marker
   and UUID match its configuration.
 - **FR-076:** Generated unit content shall be deterministic.
-- **FR-077:** Unit writes shall use a temporary file, validation, and atomic
-  rename.
-- **FR-078:** The user manager shall be reloaded after managed unit changes.
+- **FR-077:** Unit writes shall use strict in-process structural validation, a
+  temporary file, and atomic rename. Runtime validation shall not invoke
+  `systemd-analyze`.
+- **FR-078:** Managed user-unit lifecycle shall use the systemd user-manager
+  D-Bus API for reload, enable/disable, start/stop/restart, job completion,
+  status, failure reset, and timer management. Production code shall not invoke
+  `systemctl --user`.
+- **FR-078A:** After a write and manager reload, `LoadUnit` results shall verify
+  load state, load error, the exact applet-managed fragment path, and daemon
+  reload state. Failure shall restore the previous file and reload the rollback.
+- **FR-078B:** Start, stop, and restart operations shall correlate the returned
+  job path with the matching `JobRemoved` signal and report its result. A local
+  timeout or cancellation shall not be reported as cancellation of an already
+  queued systemd job. Pre-sleep stop requests may be deliberately nonblocking
+  when the shared sleep deadline owns completion monitoring.
 - **FR-079:** A failed update shall preserve or restore the last valid
   configuration and unit.
 - **FR-080:** Commands shall use fixed executables and separate validated
@@ -563,37 +637,59 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 
 - **FR-081:** A connection may reference zero or one VPN profile.
 - **FR-082:** The applet shall enumerate NetworkManager VPN profiles visible to
-  the current user.
+  the current user through NetworkManager D-Bus.
 - **FR-082A:** NetworkManager VPN detection shall import existing profile
-  references by UUID and display name without storing VPN credentials. Detection
-  shall tolerate normal newline-separated `nmcli` output and applet-session
-  output where records may be flattened into a single line.
-- **FR-082B:** Repeated VPN detection shall update known NetworkManager and Cisco
-  references rather than creating duplicates.
-- **FR-083:** NetworkManager activation and status shall use D-Bus when
-  practical, with a documented fixed-argument fallback.
-- **FR-084:** Cisco support shall detect its agent, GUI, interface, and tunnel
-  state separately.
-- **FR-084A:** Cisco support shall import an applet reference to Cisco Secure
-  Client availability without storing Cisco credentials, account names, or
-  authentication material.
+  references by UUID, display name, and VPN service type without storing VPN
+  credentials. Repeated detection shall update existing references rather than
+  creating duplicates.
+- **FR-082B:** The applet shall identify OpenConnect profiles by service type
+  `org.freedesktop.NetworkManager.openconnect`; it shall not infer plugin type
+  from a display name.
+- **FR-083:** NetworkManager profile enumeration, activation, active-state
+  observation, and deactivation shall use typed D-Bus calls. No production
+  `nmcli` fallback is permitted.
+- **FR-084:** Before activating an OpenConnect profile, the applet shall start
+  `cosmic-mounter-openconnect-agent.service` through the systemd user-manager
+  D-Bus and wait for the start job, including its registration-stabilization
+  step, to complete. This operation shall not run for other VPN service types.
+- **FR-084A:** If the required OpenConnect authentication-agent user service is
+  absent or fails to start, the applet shall stop before activation and provide
+  actionable package and service-installation guidance. It shall not execute
+  `nm-applet`, `systemctl`, or `nm-openconnect-auth-dialog` from the Flatpak.
+- **FR-084B:** NetworkManager shall request OpenConnect secrets over D-Bus from
+  the registered host agent. The applet shall not request, receive, store,
+  display, log, or forward usernames, passwords, cookies, or second-factor
+  responses.
+- **FR-084C:** If more than one NetworkManager secret agent is registered, the
+  installed native and Flatpak applet shall prove that OpenConnect activation
+  opens the complete multi-field dialog without leaving COSMIC's generic
+  single-field prompt active. A reliable session or agent-selection rule is
+  required before OpenConnect support is accepted.
+- **FR-084D:** OpenConnect dependency diagnostics shall distinguish a missing
+  saved profile, NetworkManager plugin, graphical authentication dialog, and
+  authentication-agent user service. The applet and Flatpak shall not install
+  packages, execute host agents directly, or bundle OpenConnect or `nm-applet`.
+- **FR-084E:** After it is started, the OpenConnect authentication-agent service
+  shall remain available for possible reauthentication until the COSMIC
+  graphical session ends. The applet shall not stop the service and therefore
+  cannot stop an agent started by another application.
 - **FR-085:** Each dependency shall support readiness checks using one or more of
   NetworkManager state, interface, route, DNS, or endpoint reachability.
+- **FR-085A:** Route, DNS, and TCP readiness shall use bounded native socket and
+  asynchronous resolver APIs. Production readiness checks shall not invoke
+  `ip`, `getent`, or `nc`.
 - **FR-086:** Mounting or synchronization shall start only after the tunnel is
   connected and all configured readiness checks pass. Timeout shall fail the
   attempt without starting storage.
-- **FR-087:** The UI shall report when interactive Cisco authentication is
-  required.
-- **FR-086A (A):** Use one monotonic overall activation/readiness
-  deadline using the saved profile timeout (Cisco default 90 seconds,
-  NetworkManager default 30 seconds). Include interactive password/MFA time.
-  Launch the Cisco GUI with lifecycle handling suitable for an interactive
-  application; the short command-runner timeout shall not kill its window. Coordinate the
-  NetworkManager activation wait with this deadline so a shorter CLI timeout
-  does not end authentication early. Short probe timeouts shall remain separate.
+- **FR-087:** The UI shall report when external interactive VPN authentication
+  is required and shall keep the applet responsive while it is pending.
+- **FR-086A (A):** Use one monotonic overall activation/readiness deadline from
+  the saved profile. Include interactive password and second-factor time in that
+  deadline. NetworkManager D-Bus activation monitoring shall not impose a
+  shorter process timeout. Short readiness-probe timeouts shall remain separate.
 - **FR-086B (A):** Existing saved positive timeouts shall be preserved;
-  do not increase Cisco’s default to mask premature GUI termination. Detect VPNs shall
-  preserve user timeout and readiness settings when refreshing references.
+  Detect VPNs shall preserve user timeout and readiness settings when refreshing
+  references.
 - **FR-087A (planned A):** Show waiting, connected/checking, timeout and failed
   states, elapsed/remaining time, Cancel and Retry. Cancel shall prevent a late
   activation result from starting storage. Transient probe failures shall retry
@@ -606,16 +702,19 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-090:** The applet shall automatically disconnect a VPN only when the
   applet activated it and no mounting, mounted, previewing, or syncing connection
   still depends on it.
-- **FR-090A:** The Add/Modify VPN section shall offer No VPN, detected or
-  configured NetworkManager profiles, and detected Cisco Secure Client
-  dependencies as mutually exclusive choices. Visible group headers are not
-  required; NetworkManager profiles and Cisco choices may be arranged in one
-  compact selector when space allows.
+- **FR-090A:** The Add/Modify VPN section shall offer No VPN and detected or
+  configured NetworkManager profiles as mutually exclusive choices. Direct
+  proprietary Cisco dependencies shall not be offered. Cisco-compatible access
+  is represented by a saved NetworkManager OpenConnect profile.
 - **FR-090B:** The Add/Modify VPN section shall show the
   disconnect-when-unused control only when a VPN dependency is selected.
 - **FR-090C:** Detect VPNs shall report success or failure through the app's
   normal notice path. It shall not leave a detection transcript, detected-profile
   list, or debug log text in the VPN section body.
+- **FR-090D:** A saved proprietary-Cisco dependency shall not be silently mapped
+  to a NetworkManager profile by name. Migration shall require the user to
+  select a saved NetworkManager profile UUID; obsolete Cisco-specific
+  configuration shall be removed only after that explicit replacement.
 
 ### 6.10 Errors, logs, and notifications
 
@@ -656,8 +755,8 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   Verify service state and mount-table disappearance without traversing a
   potentially hung mount. Record busy mounts, unknown flush state and failures;
   release the delay inhibitor on completion or deadline even if cleanup fails.
-  Bound the actual service stop jobs as well as command waits: timing out a
-  `systemctl` client does not cancel its already queued systemd job.
+  Bound and track the actual systemd D-Bus stop jobs; a local wait timeout shall
+  not be treated as cancellation of an already queued manager job.
 - **FR-101:** On wake or canceled sleep, reconcile mount/service state, report
   incomplete cleanup once, and reacquire the delay inhibitor. A separate
   “Restore after wake up” setting in General Settings defaults false. Show it
@@ -698,9 +797,9 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
   polling.
 - **NFR-006 Security:** Secrets shall not appear in applet configuration, unit
   files, process logs, notifications, or test fixtures.
-- **NFR-007 Least privilege:** Storage engines shall run as the user. System
-  authorization shall be limited to starting or stopping the Cisco agent when
-  required.
+- **NFR-007 Least privilege:** Storage engines shall run as the user. Host
+  integration shall use narrowly scoped D-Bus access where available; no system
+  authorization is required for proprietary VPN-agent control.
 - **NFR-008 Accessibility:** Controls shall have accessible names, keyboard
   focus, and non-color-only state indicators.
 - **NFR-009 Localization:** All user-visible strings shall be translatable.
@@ -728,23 +827,35 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 
 | Capability | Required software |
 |---|---|
-| Google Drive, Box, SMB, SFTP Online mount | Current stable `rclone` and FUSE 3 |
-| Google Drive, Box, SMB, SFTP Offline mirror | Current stable `rclone` with required bisync safety features |
-| OneDrive Online mount | Current supported `jstaf/onedriver` |
-| OneDrive Offline mirror | Current supported `abraunegg/onedrive` |
+| Google Drive, Box, SMB, SFTP, SharePoint Online mount | `rclone` 1.74.3 or newer and FUSE 3 |
+| Google Drive, Box, SMB, SFTP, SharePoint Offline mirror | `rclone` 1.74.3 or newer with required bisync safety features |
+| OneDrive Online mount | `jstaf/onedriver` 0.15.0 or newer |
+| OneDrive Offline mirror | `abraunegg/onedrive` 2.5.10 or newer |
+| User service/timer control and optional sleep cleanup | Host systemd user-manager and logind D-Bus services |
 | NetworkManager VPN | NetworkManager D-Bus service |
-| Cisco VPN | Cisco Secure Client agent and optional GUI |
-| Busy-mount diagnostics | Optional `fuser` from `psmisc` |
+| OpenConnect VPN | Host `network-manager-openconnect` plugin and authentication dialog |
+| Interactive OpenConnect authentication | Host `nm-applet` secret agent |
+| Optional OneDrive Offline Mirror sign-in helper | Python 3/PyGObject, GTK 3 and WebKitGTK 4.1 runtime/introspection libraries |
 
 Dependencies shall be checked independently. An unavailable mode shall not
 disable unrelated modes.
+
+The Debian package shall recommend, not require for unrelated storage modes,
+the OneDrive helper runtime (`python3`, `python3-gi`, `gir1.2-gtk-3.0`,
+`gir1.2-webkit2-4.1`). Source dependency setup shall include an explicit helper
+selection and manual-handoff opt-out, validate GI imports without opening a GUI,
+and include the helper check when Offline OneDrive is selected even if its engine
+already meets the minimum. Unverified distribution package variants shall receive
+manual guidance rather than guessed package/USE-flag changes. Flatpak must supply
+the helper runtime inside the accepted sandbox base/runtime; host installation
+does not establish sandbox availability. Manual browser/response-URL handoff
+shall remain available when this optional sign-in window is omitted.
 
 ### 8.3 Permissions
 
 - Mountpoints, mirror directories, caches, recovery directories, and units shall
   be user-owned.
 - Storage services and sync jobs shall run without root privileges.
-- Cisco system-service control may request system authorization.
 - The applet shall not embed or request a reusable sudo password.
 
 ## 9. Proposed Architecture
@@ -762,11 +873,13 @@ COSMIC configuration, and systemd user services.
 | `providers` | rclone, `jstaf/onedriver`, and `abraunegg/onedrive` adapters |
 | `mounts` | Mount lifecycle, mount-table inspection, and VFS health |
 | `sync` | Preview, scheduling, conflict/recovery state, and sync lifecycle |
-| `services` | systemd unit/timer rendering and management |
-| `vpn` | NetworkManager, Cisco, readiness checks, and dependency references |
+| `services` | systemd unit/timer rendering and user-manager D-Bus control |
+| `vpn` | NetworkManager D-Bus, OpenConnect agent checks, readiness, and dependency references |
 | `process` | Typed asynchronous command execution and sanitized results |
+| `host_inspection` | Fixed, bounded asynchronous configuration and mount observations |
+| `bisync_coordinator` / `bisync_worker` | Shared Rust transactions and restricted scheduled entry point |
 | `import` | Structured legacy unit discovery, parsing, and preview |
-| `diagnostics` | Dependency checks, journal access, and error mapping |
+| `diagnostics` | Dependency checks, structured app-owned state, and error mapping |
 | `i18n` | Localization resources and initialization |
 
 External interactions shall be represented by traits so tests can use fake
@@ -778,41 +891,88 @@ process, provider, mount, synchronization, service, and VPN implementations.
   and `ConfirmInitialSync`.
 - Operations are serialized per connection.
 - Provider and VPN work runs asynchronously.
+- Popup rendering shall read cached service/timer status and coordinator warnings,
+  never synchronously query systemd or read coordinator files. Prefetch unit state
+  off the UI thread at startup, refresh on opening/configuration/operation changes,
+  and bound periodic refresh to visible UI. Use one asynchronous D-Bus connection
+  per batch with a five-second batch deadline and two-second per-unit deadlines.
+  Keep last-known data on failed reads, visibly identify pending/unavailable
+  observations, and reject stale generations/configuration results. Control
+  actions shall wait for observations no older than 15 seconds, with unchanged
+  connection identity, and retain the backend's fresh safety checks. Expired or
+  failed observations shall not authorize controls or imply inactive/zero state.
 - Applet exit does not terminate enabled systemd services.
 - Shell scripts are references only and are not the applet execution API.
 
 ### 9.3 Command execution
 
-The preferred order is:
+Host integration shall use this order:
 
 1. Stable native Rust or D-Bus API.
-2. A known executable with separate validated arguments.
-3. No `sh -c`, command concatenation, or execution of imported configuration.
+2. A required external storage engine with a fixed executable identity and
+   separate validated arguments.
+3. A narrowly scoped, documented compatibility fallback when the required API
+   is unavailable on a supported host version.
+
+An executable shall not remain merely because it predates an available D-Bus or
+native API. Obsolete invocations shall be removed from production reachability.
+There shall be no `sh -c`, command concatenation, or execution of imported
+configuration. Manual and generated scheduled bisync execution shall use the
+shared Rust coordinator, not a host shell wrapper. Display-only manual-auth
+instructions and test/deployment scripts are not applet runtime execution.
 
 Output shall be bounded, decoded safely, and redacted before logging.
 
 ### 9.4 Flatpak execution architecture
 
-The native source and Debian installations remain the primary execution model
-for version 0.3. Native installations run approved external commands directly
-through the typed command-runner boundary.
+Native, Debian, and Flatpak installations shall share the same typed D-Bus and
+native integration interfaces. Flatpak is an additional packaging target, not a
+separate implementation. Because the applet coordinates host storage, FUSE
+mounts, host user systemd units, existing provider configuration, and host VPN
+state, the sandbox shall receive only the D-Bus and filesystem access required
+for those operations.
 
-Flatpak installation shall be treated as an additional packaging target, not as
-a replacement for the native package. Because the applet manages host storage,
-host FUSE mounts, host user systemd units, existing host rclone configuration,
-and host VPN state, a sandbox-only design is not acceptable. The Flatpak build
-shall add an explicit Flatpak runtime mode that routes approved host operations
-through `flatpak-spawn --host`.
+The following host operations shall use D-Bus rather than
+`flatpak-spawn --host`:
 
-The Flatpak command-runner mode shall preserve the current safety model:
+- NetworkManager profile discovery, activation, state, and deactivation;
+- systemd user-manager reload, unit enable/disable, start/stop/restart, job
+  completion, failure reset, and timer lifecycle;
+- logind sleep preparation; and
+- Documents portal path resolution when the installed portal supplies the
+  required API.
+
+`flatpak-spawn --host` is not the default host-integration mechanism. It may be
+used only for an invocation classified in `docs/engineering/flatpak-host-command-inventory.md` as an unavoidable
+storage-engine operation, required FUSE/host-namespace helper, or documented, version-gated compatibility
+fallback. Production invocations classified as obsolete shall be removed.
+Tests and standalone transport probes shall not be treated as production
+requirements.
+
+Every remaining host command shall preserve the safety model:
 
 - fixed executable identities rather than arbitrary shell commands;
 - separate validated arguments;
 - no `sh -c` or command concatenation;
 - bounded stdout and stderr capture;
-- timeout and cancellation behavior equivalent to the native runner;
+- bounded lifetime and cancellation behavior equivalent to the native runner;
 - redaction of secrets, OAuth URLs, tokens, and passwords before display or
   logging.
+
+Read-only host inspection shall accept only `RcloneConfigDump` and `HostMountInfo`.
+Configuration capture shall be limited to 1 MiB per stream and mountinfo capture
+to 4 MiB, with a 10-second execution deadline, no retries, cancellation, and
+bounded child cleanup. Deadlines shall include output-pipe draining; Flatpak
+inspection children shall exit when their transport disappears (`--watch-bus`).
+Reject truncated, invalid-UTF-8, or malformed results instead of applying partial
+data. Native mountinfo shall use a bounded asynchronous local `/proc` read.
+GUI completions shall carry parsed non-secret metadata, not raw configuration.
+Superseded discovery/prefill shall cancel old work and reject late results after
+identity/revision/user-edit changes. UI rendering shall read a refreshed mount
+snapshot without executing host commands; failed/obsolete reads shall not imply
+mount disappearance. Safety-critical setup, unmount, repair, and shared-VPN
+release shall obtain fresh observations and fail closed on inspection failure,
+including OneDrive isolation after potentially long authentication.
 
 The following resources are host resources and shall not be silently copied into
 a Flatpak-private credential or configuration store:
@@ -823,7 +983,7 @@ a Flatpak-private credential or configuration store:
 - generated user systemd services and timers under the host user session;
 - user-selected mountpoints, mirror directories, cache directories, and
   recovery directories;
-- NetworkManager and Cisco VPN state.
+- NetworkManager VPN state.
 
 Flatpak installations shall use the same user-visible applet configuration as
 native source and Debian installations, or shall migrate to that configuration
@@ -837,13 +997,15 @@ use an isolated sandbox configuration for normal operation.
 Any host-side helper or bridge shall keep the same safety constraints as the
 native code path: fixed operations, validated connection IDs and paths, applet
 ownership markers for unit changes, atomic writes, no secret disclosure, and no
-general-purpose shell execution. The helper shall also make it clear which
-state is applet-owned and which state remains provider-owned by rclone,
-onedriver, onedrive, NetworkManager, Cisco Secure Client, or systemd.
+general-purpose shell execution. The helper shall also make clear which state is
+applet-owned and which remains provider-owned by rclone, onedriver, onedrive,
+NetworkManager, OpenConnect, or systemd.
 
 Flatpak permissions shall start from the accepted COSMIC applet pattern with
-Wayland/session access and `--talk-name=org.freedesktop.Flatpak` for
-`flatpak-spawn --host`. Broader filesystem access, including
+Wayland/session access. Add narrowly scoped access to NetworkManager, the
+systemd user manager, logind, portals, and the applet runtime interface as each
+feature requires. Retain `--talk-name=org.freedesktop.Flatpak` only while a
+justified `flatpak-spawn --host` invocation remains. Broader filesystem access, including
 `--filesystem=host`, is permitted only if prototype testing proves narrower
 permissions cannot support user-selected storage targets, generated host
 services, or host-visible FUSE mounts. Any broader permission must be documented
@@ -854,6 +1016,43 @@ package cannot expose mounts to ordinary host applications, cannot manage the
 intended host user services, silently uses different rclone or OneDrive
 credentials or applet connection configuration than the native applet, or
 requires unjustified unrestricted host access.
+
+The Documents portal implementation shall use sandbox-capable `GetHostPaths`
+when portal version 5 or newer is available. On supported systems exposing only
+portal version 4, a narrowly version-gated `flatpak document-info` host fallback
+may remain because `Info` and `Lookup` are forbidden to the sandbox and
+`GetHostPaths` is unavailable. The fallback shall be removed when portal v5 can
+be required and shall not establish a general host-command exception.
+
+Portal results shall support direct and app-scoped document IDs, decode
+NUL-terminated byte paths safely, and reject non-absolute host paths. Native
+execution may use portal `Info`; sandbox execution shall not rely on portal
+methods forbidden to sandbox callers. Standard portal access shall not acquire
+an unnecessary additional Flatpak permission.
+
+For an OpenConnect profile only, the applet shall start the installed static
+`cosmic-mounter-openconnect-agent.service` through the systemd user-manager
+D-Bus and wait for successful job completion before asking NetworkManager to
+activate the profile. NetworkManager, not the applet, owns the subsequent D-Bus
+secret exchange and launches the host authentication dialog. The Flatpak shall
+not execute `nm-applet`, `systemctl`, or the dialog and shall not require
+`nm-applet` for other VPN service types.
+
+Migration completion requires reconciliation against `docs/engineering/flatpak-host-command-inventory.md`. Every
+production row shall end as **Replaced by D-Bus**, **Removed**, or an explicitly
+justified **Unavoidable invocation**; no unresolved replaceable, obsolete, or
+mixed disposition may remain. A production-reachability scan shall exclude only
+test code, examples, and the standalone transport probe and shall confirm that
+obsolete executable variants, parsers, permissions, translations, and
+documentation are removed. A nested or ungated `flatpak document-info` path is
+not permitted.
+
+Native source and Debian packages shall use the same typed NetworkManager and
+systemd adapters as the Flatpak. Flatpak-specific behavior shall be confined to
+required bus permissions, portal/sandbox setup, host-visible paths, and the
+narrow command-runner boundary. Packaging documentation and the submission
+rationale shall identify every remaining host command and host-visible path and
+justify its permission.
 
 ### 9.5 General Settings runtime coordination
 
@@ -948,8 +1147,9 @@ Connection
 VpnProfile
   id: UUID
   name
-  kind: NetworkManager | Cisco
-  external_profile_id?
+  kind: NetworkManager
+  external_profile_id: NetworkManager UUID
+  service_type
   readiness_checks[]
   timeout_seconds
 ```
@@ -1065,6 +1265,40 @@ The generated service and timer shall:
 - renew locks held by active bisync runs and allow locks left by interrupted
   runs to expire after a bounded interval, without removing a live run's lock;
 - never add routine `--resync` behavior.
+
+Manual and scheduled bisync preview/synchronization shall use one app-owned
+Rust coordinator instead of a generated shell wrapper. The coordinator
+shall expose only fixed modes—`initial-preview`, `preview`, `initial-sync`,
+`sync`, and `scheduled`—with validated typed inputs; it shall not expose an
+arbitrary executable or shell-fragment parameter. Host `rclone` remains the
+external storage engine.
+
+The coordinator shall preserve the complete storage-safety transaction:
+
+- preflight validation, recovery preparation, operation ordering, post-sync
+  verification, progress publication, and successful-run-only retention;
+- UTC recovery stamps, unique backup suffixes, local and remote ownership
+  markers, strict dated-directory parsing, and preservation of unowned or
+  symlinked recovery data;
+- SharePoint saved-target verification, local and remote access anchors, and
+  checksum verification for rewritten Office files;
+- initial-preview and initial-sync markers, explicit `--resync` selection,
+  per-connection work-directory locking, bounded/redacted output, existing
+  deadlines, cancellation, and no automatic destructive retry;
+- atomic request/result metadata, structured invocation-ID progress state, and
+  prevention of overlap between manual and timer-triggered runs; and
+- retention only after bisync and required post-sync verification succeed.
+  Cleanup failure shall be actionable but shall not invalidate or destructively
+  roll back a successful synchronization.
+
+Native/Debian services shall invoke the installed restricted `--run-bisync`
+worker with a fixed mode and saved connection UUID. Flatpak services shall use
+the same worker through the fixed `flatpak run --command=cosmic-ext-applet-mounter`
+entry point. Paths and engine arguments shall be reconstructed from authoritative
+saved configuration, not supplied as arbitrary command payloads. Neither route
+shall retain a scheduled shell wrapper or acquire a general-command interface.
+Failure of the final Flatpak worker acceptance gate shall block publication,
+not silently restore shell execution.
 
 ### 11.3 OneDrive services
 
@@ -1251,13 +1485,13 @@ Remote deletion shall:
   manual Sync Now availability, metered-network default pause, per-connection
   metered override, recovery location, 30-day retention, conflict preservation,
   and resync/state-rebuild confirmation.
-- VPN configuration is per connection. The user can choose no VPN, a detected or
-  configured NetworkManager VPN profile, or a detected Cisco Secure Client
-  dependency. The applet may import these as applet VPN profile references, but
-  it does not create or edit VPN profiles and does not store VPN credentials.
-  The VPN selector presents No VPN, NetworkManager VPN profiles, Cisco Secure
-  Client dependencies, and Detect VPNs compactly; visible NetworkManager/Cisco
-  group headers should be avoided when the choices are self-explanatory. The
+- VPN configuration is per connection. The user can choose no VPN or a detected
+  or configured NetworkManager VPN profile. Cisco-compatible gateways are
+  represented by NetworkManager OpenConnect profiles; direct Cisco Secure Client
+  dependencies are not offered. The applet may import these as applet VPN
+  profile references, but it does not create or edit VPN profiles and does not
+  store VPN credentials. The VPN selector presents No VPN, NetworkManager VPN
+  profiles, and Detect VPNs compactly. The
   Detect VPNs action imports or updates references and reports completion
   through the normal app notice path; it shall not leave a detection transcript
   or detected-profile list in the VPN section body. VPN fields include readiness
@@ -1293,8 +1527,8 @@ Remote deletion shall:
   button being explained. Tooltips shall appear after a short delay,
   approximately one second, so ordinary pointer movement does not constantly
   open help. Tooltip wrappers shall not be nested around controls that already
-  have their own tooltip. Selected-item details, such as NetworkManager or Cisco
-  VPN external profile behavior, readiness checks, timeout, and activation
+  have their own tooltip. Selected-item details, such as NetworkManager or
+  OpenConnect external profile behavior, readiness checks, timeout, and activation
   expectations, belong in the relevant choice tooltip rather than as inline body
   text. Longer dependency, safety, setup, and troubleshooting guidance belongs
   in documentation rather than a standalone main-popup Help control.
@@ -1327,6 +1561,11 @@ sleep lifecycle and service-stop races, plus native/Flatpak live acceptance.
 - Mode/path overlap and recursive-sync validation.
 - Dependency version and capability checks.
 - Deterministic service and timer rendering.
+- NetworkManager and systemd D-Bus availability, method/error mapping,
+  `JobRemoved` correlation, unit-load verification, rollback, timeout, and
+  cancellation behavior without production command fallbacks.
+- Documents portal v5 host-path resolution, portal-v4 fallback gating, direct
+  and app-scoped IDs, byte/NUL decoding, and rejection of relative paths.
 - Provider argument construction without shell interpretation.
 - Rclone remote detection, creation request construction, duplicate-name
   rejection, confirmed removal, and in-use removal blocking.
@@ -1348,20 +1587,34 @@ sleep lifecycle and service-stop races, plus native/Flatpak live acceptance.
 - Thirty-day recovery retention and cleanup exclusions.
 - Metered-network pause and manual override.
 - Interrupted sync recovery without routine resync.
+- Typed bisync-coordinator request ordering for all five modes, ordinary and
+  SharePoint-specific guards, ownership and symlink rejection, failure/timeout/
+  cancellation at every phase, one-run-per-connection serialization, and proof
+  that failed required phases cannot run later mutation or retention steps.
 - Google cloud-native document exclusion.
 - Legacy import parsing, preview, ownership, and conflicts.
-- VPN readiness, shared dependencies, applet-activation tracking, and approved
-  shutdown behavior.
+- VPN D-Bus discovery and lifecycle, readiness, shared dependencies,
+  applet-activation tracking, and approved shutdown behavior.
+- OpenConnect-only authentication-agent service startup and job completion,
+  missing-service guidance, external multi-field authentication, and proof that
+  other VPN service types do not acquire the agent dependency.
 - Secret redaction and error mapping.
 
 ### 14.2 Isolated integration tests
 
 Tests shall use temporary directories and fakes for systemd, mount tables,
-NetworkManager, Cisco, and cloud providers. Local-to-local rclone test remotes may
-exercise mount and bisync behavior without real accounts.
+NetworkManager, the OpenConnect agent-availability boundary, and cloud providers.
+Local-to-local rclone test remotes may exercise mount and bisync behavior without
+real accounts.
 
 Tests shall not write to the real `~/.config/systemd/user/`, activate real VPNs,
 or access real cloud data.
+
+Disposable local/alias integration tests shall cover initial preview, initial
+sync, ordinary two-way sync, deletion recovery, unique repeated backups,
+marked-old cleanup, and preservation of unmarked data. Credentialed SFTP,
+SharePoint, and VPN tests remain opt-in and shall state their external-system
+evidence boundary.
 
 ### 14.3 Manual acceptance tests
 
@@ -1431,7 +1684,14 @@ or access real cloud data.
 - Metered-network pause and Sync Now.
 - Google cloud-native document exclusion.
 - OneDrive Offline mirror with `abraunegg/onedrive`.
-- NetworkManager and Cisco VPN readiness.
+- NetworkManager VPN readiness, OpenConnect multi-field authentication through
+  the host agent, missing-agent guidance, and non-OpenConnect independence from
+  `nm-applet`.
+- Native and rebuilt-Flatpak parity for VPN-dependent mount/sync, generated
+  service and timer lifecycle, sleep cleanup, failure recovery, manual bisync,
+  and a timer-fired bisync run. Verify that a scheduled Flatpak coordinator, if
+  selected, exposes only its restricted operation interface and can reach host
+  rclone without a broader command permission.
 - Import from `~/.config/systemd/user/`.
 - Removal without credential, data, cache, or recovery deletion.
 - Unused rclone remote removal without deleting applet connections or local/cloud
@@ -1462,6 +1722,14 @@ The current implemented scope is acceptable when:
 14. The v0.2 popup and Add/Modify UI refinements pass user-guided visual review,
     including compact popup rows, bounded scrolling, action-row layout, help
     tooltip placement, and rclone remote management.
+15. The host-command inventory has no unresolved replaceable or obsolete
+    production invocation, and each retained invocation and permission has a
+    documented justification.
+16. Focused adapter tests, formatting, all-target compilation, strict Clippy,
+    the full test suite, `just build`, and `just build-changed` pass before the
+    Flatpak packaging pull request.
+17. The installed rebuilt Flatpak passes live NetworkManager/OpenConnect and
+    generated mount/mirror service lifecycle tests before submission.
 
 ## 16. Decisions Required Before Development
 
@@ -1510,6 +1778,16 @@ The following decisions are approved and are no longer implementation choices:
 13. **Version 0.2 Add/Modify UI:** Add and Modify share one editor. Modify locks
     provider and access-mode changes, moves secondary actions such as Preview
     and Sync Now into the editor, and uses tooltips for field-specific help.
+14. **Flatpak host integration:** Use stable D-Bus or native APIs before host
+    process execution. NetworkManager, the systemd user manager, logind, and the
+    Documents portal use D-Bus where the supported host API permits it. Retain
+    `flatpak-spawn --host` only for inventoried unavoidable storage-engine calls
+    and narrowly version-gated compatibility fallbacks.
+15. **VPN scope:** Support saved NetworkManager VPN profiles only. A
+    Cisco-compatible gateway uses the NetworkManager OpenConnect plugin. For an
+    OpenConnect profile only, NetworkManager obtains interactive secrets from a
+    host `nm-applet` agent over D-Bus; the applet never controls proprietary
+    Cisco software or handles VPN credentials.
 
 All current design decisions required for the implemented scope are resolved.
 Future feature work shall update this specification and `Task List.md` before
@@ -1857,20 +2135,23 @@ applet update without restarting active mounts.
   successful current query with no unresolved upload/cache error; a stopped
   service, unavailable socket, unsupported response, or query failure is
   unknown, not zero. Never sum `diskCache.files` or `bytesUsed` as pending work.
-- For Offline mirrors, count pending file operations in the configured sync
-  scope: uploads, downloads, deletions, and unresolved conflicts. Derive an
-  idle baseline from a bounded read-only preview/status operation, with its
-  check time; do not launch a second bisync preview while sync or recovery is
-  running. During a run, update the count only from that run's confirmed
-  progress, then perform a fresh scoped check after completion. Scheduled and
-  manual runs shall use the same reporting path. A new local or remote change
-  can increase the count; a failed or interrupted run must not imply zero.
-- Use rclone bisync's existing preview path for Google Drive, Box, SMB, and
-  SFTP mirrors. Use the configured abraunegg/onedrive client's read-only
+- For Offline mirrors, show only counts supported by the active engine's scoped
+  observations. Rclone mirrors shall use invocation-matched structured progress
+  during a run; idle mirrors shall show an unknown count rather than launch an
+  uncoordinated dry-run bisync or infer zero. Preview is an explicit coordinator
+  operation, not a background pending-count scrape. OneDrive may obtain a bounded
+  read-only client status with its check time. A failed/interrupted run must not
+  imply zero, and a new local/remote change can increase the count.
+- Scheduled rclone bisync runs shall publish structured app-owned progress state
+  tied to the current systemd invocation ID. The applet shall compare that state
+  with the unit's D-Bus `InvocationID`, tolerate a partially written final
+  record, and reject malformed or oversized state. Production code shall not
+  scrape `journalctl` output for pending counts.
+- Use the configured abraunegg/onedrive client's read-only
   `--display-sync-status` for OneDrive mirrors when supported, interpreting its
   textual status and pending directions rather than its exit code alone.
-  SharePoint mirror counting begins only if that engine passes its
-  separate Offline mirror safety gate and becomes supported.
+  SharePoint rclone mirrors shall use the same coordinator progress path and
+  retain their additional saved-target/access-anchor safety guards.
 - onedriver Online mounts expose no supported pending-upload count. Display
   `+` while mounted or `-` while inactive, with an explanation until a reliable
   engine-supported source exists;

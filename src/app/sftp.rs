@@ -117,13 +117,16 @@ impl SftpDraft {
         {
             return Err(fl!("sftp-port-invalid"));
         }
-        file_path("known-hosts file", &self.known_hosts)?;
+        file_path(&fl!("sftp-known-hosts-label"), &self.known_hosts)?;
         if self.auth == SftpAuth::Key {
             file_path(&fl!("sftp-private-key-label"), &self.key_file)?;
-            optional_secret_value("key passphrase", &self.key_passphrase)?;
+            optional_secret_value(
+                &crate::fl!("ui-app-sftp-key-passphrase"),
+                &self.key_passphrase,
+            )?;
         }
         if self.auth == SftpAuth::Password {
-            optional_secret_value("password", &self.password)?;
+            optional_secret_value(&fl!("sftp-password"), &self.password)?;
         }
         Ok(())
     }
@@ -187,6 +190,10 @@ fn file_path(label: &str, value: &str) -> Result<String, String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
+pub(super) fn prefill_from_dump(output: &str, name: &str) -> Result<Option<SftpDraft>, String> {
+    config_section(output, name).map(|config| config.as_ref().map(SftpDraft::from_config))
+}
+
 fn config_section(output: &str, name: &str) -> Result<Option<serde_json::Value>, String> {
     // Never include config dump text or parser excerpts in an error.
     let value: serde_json::Value =
@@ -240,33 +247,10 @@ impl AppModel {
                         .any(|remote| remote.name == self.draft.remote_reference.trim())))
     }
 
-    pub(super) fn load_sftp_details(&mut self) {
-        self.reset_sftp_settings_tracking();
-        self.draft.sftp = SftpDraft::default();
-        if !self
-            .rclone_remotes
-            .iter()
-            .any(|r| r.name == self.draft.remote_reference && r.backend == "sftp")
-            && !self.config.document.connections.iter().any(|c| {
-                c.provider == Provider::Sftp && c.remote_reference == self.draft.remote_reference
-            })
-        {
-            return;
-        }
-        let result = run_sync_host_command("rclone", &["config", "dump"])
-            .map_err(|_| fl!("sftp-config-read"))
-            .and_then(|output| {
-                if !output.status.success() {
-                    return Err(fl!("sftp-config-read"));
-                }
-                config_section(
-                    &String::from_utf8_lossy(&output.stdout),
-                    &self.draft.remote_reference,
-                )
-            });
+    pub(super) fn finish_sftp_details(&mut self, result: Result<Option<SftpDraft>, String>) {
         match result {
-            Ok(Some(config)) => {
-                self.draft.sftp = SftpDraft::from_config(&config);
+            Ok(Some(draft)) => {
+                self.draft.sftp = draft;
                 self.last_notice = Some(fl!("sftp-settings-loaded"));
             }
             Ok(None) => self.last_notice = Some(fl!("sftp-remote-not-found-help")),

@@ -2,17 +2,37 @@
 
 //! Dependency inventories, capability checks, and setup guidance.
 
-use std::collections::BTreeSet;
-use std::time::Duration;
-
 use semver::Version;
+use std::collections::BTreeSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::process::{CommandError, CommandOutput, CommandRequest, CommandRunner, Executable};
+use crate::process::{CommandRunner, Executable};
+use crate::services::systemd_user_available;
+use crate::vpn::DbusNetworkManagerVpn;
 
 pub const MIN_RCLONE_VERSION: &str = "1.74.3";
 pub const MIN_ONEDRIVER_VERSION: &str = "0.15.0";
 pub const MIN_ONEDRIVE_VERSION: &str = "2.5.10";
+pub const RCLONE_REQUIRED_CAPABILITIES: &[(&str, &str)] = &[
+    ("command:mount", "mount"),
+    ("command:bisync", "bisync"),
+    ("command:listremotes", "listremotes"),
+    ("command:rc", "rc"),
+    ("mount:vfs-cache-mode", "--vfs-cache-mode"),
+    ("mount:vfs-cache-max-size", "--vfs-cache-max-size"),
+    ("mount:rc", "--rc"),
+    ("bisync:resilient", "--resilient"),
+    ("bisync:recover", "--recover"),
+    ("bisync:max-lock", "--max-lock"),
+    ("bisync:conflict-resolve", "--conflict-resolve"),
+    ("bisync:backup-dir", "--backup-dir"),
+];
+pub const ONEDRIVER_REQUIRED_CAPABILITIES: &[(&str, &str)] = &[
+    ("auth-only", "--auth-only"),
+    ("cache-directory", "--cache-dir"),
+    ("config-file", "--config-file"),
+    ("read-only-offline", "read-only"),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DependencyKind {
@@ -21,9 +41,7 @@ pub enum DependencyKind {
     OneDriveSync,
     Fuse3,
     NetworkManager,
-    CiscoSecureClient,
     SystemdUser,
-    Fuser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,312 +86,134 @@ impl DependencyInventory {
 
     pub async fn inspect(runner: &dyn CommandRunner, cancellation: CancellationToken) -> Self {
         let reports = vec![
-            inspect_rclone(runner, cancellation.child_token()).await,
-            inspect_onedriver(runner, cancellation.child_token()).await,
-            inspect_onedrive(runner, cancellation.child_token()).await,
-            inspect_simple(
+            inspect_executable(
                 runner,
-                cancellation.child_token(),
-                SimpleDependency {
-                    kind: DependencyKind::Fuse3,
-                    executable: Executable::Fusermount3,
-                    args: &["--version"],
-                    required: true,
-                    guidance_url: "https://github.com/libfuse/libfuse",
-                },
-            )
-            .await,
-            inspect_simple(
+                DependencyKind::Rclone,
+                Executable::Rclone,
+                true,
+                "https://rclone.org/downloads/",
+            ),
+            inspect_executable(
                 runner,
-                cancellation.child_token(),
-                SimpleDependency {
-                    kind: DependencyKind::NetworkManager,
-                    executable: Executable::Nmcli,
-                    args: &["--version"],
-                    required: true,
-                    guidance_url: "https://networkmanager.dev/",
-                },
-            )
-            .await,
-            inspect_cisco(runner),
-            inspect_simple(
+                DependencyKind::Onedriver,
+                Executable::Onedriver,
+                true,
+                "https://github.com/jstaf/onedriver",
+            ),
+            inspect_executable(
                 runner,
-                cancellation.child_token(),
-                SimpleDependency {
-                    kind: DependencyKind::SystemdUser,
-                    executable: Executable::Systemctl,
-                    args: &["--version"],
-                    required: true,
-                    guidance_url: "https://systemd.io/",
-                },
-            )
-            .await,
-            inspect_simple(
+                DependencyKind::OneDriveSync,
+                Executable::OneDrive,
+                true,
+                "https://github.com/abraunegg/onedrive",
+            ),
+            inspect_executable(
                 runner,
-                cancellation,
-                SimpleDependency {
-                    kind: DependencyKind::Fuser,
-                    executable: Executable::Fuser,
-                    args: &["--version"],
-                    required: false,
-                    guidance_url: "https://gitlab.com/psmisc/psmisc",
-                },
-            )
-            .await,
+                DependencyKind::Fuse3,
+                Executable::Fusermount3,
+                true,
+                "https://github.com/libfuse/libfuse",
+            ),
+            inspect_network_manager(cancellation.child_token()).await,
+            inspect_systemd_user(cancellation).await,
         ];
         Self { reports }
     }
 }
 
-struct SimpleDependency {
+fn inspect_executable(
+    runner: &dyn CommandRunner,
     kind: DependencyKind,
     executable: Executable,
-    args: &'static [&'static str],
     required: bool,
     guidance_url: &'static str,
-}
-
-async fn inspect_simple(
-    runner: &dyn CommandRunner,
-    cancellation: CancellationToken,
-    dependency: SimpleDependency,
 ) -> DependencyReport {
-    let Some(path) = runner.resolve(dependency.executable) else {
-        return missing_report(
-            dependency.kind,
-            dependency.required,
-            dependency.guidance_url,
-        );
+    let Some(path) = runner.resolve(executable) else {
+        return missing_report(kind, required, guidance_url);
     };
-    let request = request(dependency.executable, dependency.args);
-    match runner.run(request, cancellation).await {
-        Ok(output) => DependencyReport {
-            kind: dependency.kind,
-            required: dependency.required,
-            state: DependencyState::Available,
-            version: parse_version(&combined_output(&output)),
-            path: Some(path.display().to_string()),
-            capabilities: BTreeSet::new(),
-            missing_capabilities: BTreeSet::new(),
-            summary: "Available".into(),
-            guidance_url: dependency.guidance_url,
-        },
-        Err(error) => error_report(
-            dependency.kind,
-            dependency.required,
-            Some(path.display().to_string()),
-            dependency.guidance_url,
-            error,
-        ),
-    }
-}
-
-async fn inspect_rclone(
-    runner: &dyn CommandRunner,
-    cancellation: CancellationToken,
-) -> DependencyReport {
-    const REQUIRED: &[(&str, &str)] = &[
-        ("command:mount", "mount"),
-        ("command:bisync", "bisync"),
-        ("command:listremotes", "listremotes"),
-        ("command:rc", "rc"),
-        ("mount:vfs-cache-mode", "--vfs-cache-mode"),
-        ("mount:vfs-cache-max-size", "--vfs-cache-max-size"),
-        ("mount:rc", "--rc"),
-        ("bisync:resilient", "--resilient"),
-        ("bisync:recover", "--recover"),
-        ("bisync:max-lock", "--max-lock"),
-        ("bisync:conflict-resolve", "--conflict-resolve"),
-        ("bisync:backup-dir", "--backup-dir"),
-    ];
-
-    let Some(path) = runner.resolve(Executable::Rclone) else {
-        return missing_report(
-            DependencyKind::Rclone,
-            true,
-            "https://rclone.org/downloads/",
-        );
-    };
-
-    let version_output = match runner
-        .run(
-            request(Executable::Rclone, &["version"]),
-            cancellation.child_token(),
-        )
-        .await
-    {
-        Ok(output) => output,
-        Err(error) => {
-            return error_report(
-                DependencyKind::Rclone,
-                true,
-                Some(path.display().to_string()),
-                "https://rclone.org/downloads/",
-                error,
-            );
-        }
-    };
-
-    let mut help = String::new();
-    for args in [
-        &["help"][..],
-        &["mount", "--help"][..],
-        &["help", "flags", "rc"][..],
-        &["bisync", "--help"][..],
-    ] {
-        match runner
-            .run(
-                request(Executable::Rclone, args),
-                cancellation.child_token(),
+    DependencyReport {
+        kind,
+        required,
+        state: DependencyState::Available,
+        version: None,
+        path: Some(path.display().to_string()),
+        capabilities: BTreeSet::new(),
+        missing_capabilities: BTreeSet::new(),
+        summary: if path.to_string_lossy().starts_with("host:") {
+            crate::fl!(
+                "ui-diagnostics-host-execution-route-available-installation-and-compatibility"
             )
-            .await
-        {
-            Ok(output) => {
-                help.push_str(&combined_output(&output));
-                help.push('\n');
-            }
-            Err(error) => {
-                return error_report(
-                    DependencyKind::Rclone,
-                    true,
-                    Some(path.display().to_string()),
-                    "https://rclone.org/downloads/",
-                    error,
-                );
-            }
-        }
-    }
-
-    assess_versioned(
-        DependencyKind::Rclone,
-        true,
-        path.display().to_string(),
-        parse_version(&combined_output(&version_output)),
-        MIN_RCLONE_VERSION,
-        REQUIRED,
-        &help,
-        "https://rclone.org/downloads/",
-    )
-}
-
-async fn inspect_onedriver(
-    runner: &dyn CommandRunner,
-    cancellation: CancellationToken,
-) -> DependencyReport {
-    const REQUIRED: &[(&str, &str)] = &[
-        ("auth-only", "--auth-only"),
-        ("cache-directory", "--cache-dir"),
-        ("config-file", "--config-file"),
-        ("read-only-offline", "read-only"),
-    ];
-    inspect_versioned_tool(
-        runner,
-        cancellation,
-        VersionedDependency {
-            kind: DependencyKind::Onedriver,
-            executable: Executable::Onedriver,
-            version_args: &["--version"],
-            help_args: &["--help"],
-            minimum: MIN_ONEDRIVER_VERSION,
-            required_capabilities: REQUIRED,
-            required: true,
-            guidance_url: "https://github.com/jstaf/onedriver",
+        } else {
+            crate::fl!("ui-diagnostics-executable-available-compatibility-is-enforced-by-packaging")
         },
-    )
-    .await
-}
-
-async fn inspect_onedrive(
-    runner: &dyn CommandRunner,
-    cancellation: CancellationToken,
-) -> DependencyReport {
-    const GUIDANCE_URL: &str = "https://github.com/abraunegg/onedrive";
-    let Some(path) = runner.resolve(Executable::OneDrive) else {
-        return missing_report(DependencyKind::OneDriveSync, true, GUIDANCE_URL);
-    };
-    match runner
-        .run(request(Executable::OneDrive, &["--version"]), cancellation)
-        .await
-    {
-        Ok(output) => assess_versioned(
-            DependencyKind::OneDriveSync,
-            true,
-            path.display().to_string(),
-            parse_version(&combined_output(&output)),
-            MIN_ONEDRIVE_VERSION,
-            &[],
-            "",
-            GUIDANCE_URL,
-        ),
-        Err(error) => error_report(
-            DependencyKind::OneDriveSync,
-            true,
-            Some(path.display().to_string()),
-            GUIDANCE_URL,
-            error,
-        ),
+        guidance_url,
     }
 }
 
-struct VersionedDependency {
-    kind: DependencyKind,
-    executable: Executable,
-    version_args: &'static [&'static str],
-    help_args: &'static [&'static str],
-    minimum: &'static str,
-    required_capabilities: &'static [(&'static str, &'static str)],
-    required: bool,
-    guidance_url: &'static str,
+async fn inspect_network_manager(cancellation: CancellationToken) -> DependencyReport {
+    let result = tokio::select! {
+        () = cancellation.cancelled() => Err(crate::fl!("dependency-inspection-cancelled")),
+        result = DbusNetworkManagerVpn::connected() => result.map(|_| ()).map_err(|error| error.to_string()),
+    };
+    match result {
+        Ok(()) => DependencyReport {
+            kind: DependencyKind::NetworkManager,
+            required: true,
+            state: DependencyState::Available,
+            version: None,
+            path: Some("org.freedesktop.NetworkManager (system bus)".into()),
+            capabilities: ["dbus".to_owned()].into_iter().collect(),
+            missing_capabilities: BTreeSet::new(),
+            summary: crate::fl!("ui-diagnostics-available-through-d-bus"),
+            guidance_url: "https://networkmanager.dev/",
+        },
+        Err(error) => DependencyReport {
+            kind: DependencyKind::NetworkManager,
+            required: true,
+            state: DependencyState::Error,
+            version: None,
+            path: None,
+            capabilities: BTreeSet::new(),
+            missing_capabilities: ["dbus".to_owned()].into_iter().collect(),
+            summary: error,
+            guidance_url: "https://networkmanager.dev/",
+        },
+    }
 }
 
-async fn inspect_versioned_tool(
-    runner: &dyn CommandRunner,
-    cancellation: CancellationToken,
-    dependency: VersionedDependency,
-) -> DependencyReport {
-    let Some(path) = runner.resolve(dependency.executable) else {
-        return missing_report(
-            dependency.kind,
-            dependency.required,
-            dependency.guidance_url,
-        );
+async fn inspect_systemd_user(cancellation: CancellationToken) -> DependencyReport {
+    let result = tokio::select! {
+        () = cancellation.cancelled() => Err(crate::fl!("dependency-inspection-cancelled")),
+        result = systemd_user_available() => result,
     };
-
-    let version = runner
-        .run(
-            request(dependency.executable, dependency.version_args),
-            cancellation.child_token(),
-        )
-        .await;
-    let help = runner
-        .run(
-            request(dependency.executable, dependency.help_args),
-            cancellation,
-        )
-        .await;
-
-    match (version, help) {
-        (Ok(version), Ok(help)) => assess_versioned(
-            dependency.kind,
-            dependency.required,
-            path.display().to_string(),
-            parse_version(&combined_output(&version)),
-            dependency.minimum,
-            dependency.required_capabilities,
-            &combined_output(&help),
-            dependency.guidance_url,
-        ),
-        (Err(error), _) | (_, Err(error)) => error_report(
-            dependency.kind,
-            dependency.required,
-            Some(path.display().to_string()),
-            dependency.guidance_url,
-            error,
-        ),
+    match result {
+        Ok(()) => DependencyReport {
+            kind: DependencyKind::SystemdUser,
+            required: true,
+            state: DependencyState::Available,
+            version: None,
+            path: Some("org.freedesktop.systemd1 (user bus)".into()),
+            capabilities: ["dbus".to_owned()].into_iter().collect(),
+            missing_capabilities: BTreeSet::new(),
+            summary: crate::fl!("ui-diagnostics-available-through-d-bus"),
+            guidance_url: "https://systemd.io/",
+        },
+        Err(error) => DependencyReport {
+            kind: DependencyKind::SystemdUser,
+            required: true,
+            state: DependencyState::Error,
+            version: None,
+            path: None,
+            capabilities: BTreeSet::new(),
+            missing_capabilities: ["dbus".to_owned()].into_iter().collect(),
+            summary: error,
+            guidance_url: "https://systemd.io/",
+        },
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn assess_versioned(
     kind: DependencyKind,
     required: bool,
@@ -434,44 +274,6 @@ fn assess_versioned(
     }
 }
 
-fn inspect_cisco(runner: &dyn CommandRunner) -> DependencyReport {
-    let cli = runner.resolve(Executable::CiscoVpn);
-    let ui = runner.resolve(Executable::CiscoVpnUi);
-    let agent = runner.resolve(Executable::CiscoAgent);
-    let capabilities: BTreeSet<_> = [
-        cli.as_ref().map(|_| "cli".to_owned()),
-        ui.as_ref().map(|_| "gui".to_owned()),
-        agent.as_ref().map(|_| "agent".to_owned()),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    let missing_capabilities: BTreeSet<_> = ["cli", "gui", "agent"]
-        .into_iter()
-        .filter(|capability| !capabilities.contains(*capability))
-        .map(str::to_owned)
-        .collect();
-    let state = if capabilities.is_empty() {
-        DependencyState::Missing
-    } else if missing_capabilities.is_empty() {
-        DependencyState::Available
-    } else {
-        DependencyState::MissingCapabilities
-    };
-
-    DependencyReport {
-        kind: DependencyKind::CiscoSecureClient,
-        required: false,
-        state,
-        version: None,
-        path: cli.or(ui).or(agent).map(|path| path.display().to_string()),
-        capabilities,
-        missing_capabilities,
-        summary: "Cisco Secure Client components are detected independently".into(),
-        guidance_url: "https://www.cisco.com/site/us/en/products/security/secure-client/",
-    }
-}
-
 fn missing_report(
     kind: DependencyKind,
     required: bool,
@@ -485,44 +287,12 @@ fn missing_report(
         path: None,
         capabilities: BTreeSet::new(),
         missing_capabilities: BTreeSet::new(),
-        summary: "Not installed or not discoverable".into(),
+        summary: crate::fl!("ui-diagnostics-not-installed-or-not-discoverable"),
         guidance_url,
     }
 }
 
-fn error_report(
-    kind: DependencyKind,
-    required: bool,
-    path: Option<String>,
-    guidance_url: &'static str,
-    error: CommandError,
-) -> DependencyReport {
-    DependencyReport {
-        kind,
-        required,
-        state: DependencyState::Error,
-        version: None,
-        path,
-        capabilities: BTreeSet::new(),
-        missing_capabilities: BTreeSet::new(),
-        summary: error.to_string(),
-        guidance_url,
-    }
-}
-
-fn request(executable: Executable, args: &[&str]) -> CommandRequest {
-    args.iter().fold(
-        CommandRequest::new(executable)
-            .with_timeout(Duration::from_secs(5))
-            .with_output_limit(128 * 1024),
-        |request, argument| request.arg(*argument).expect("fixed arguments are safe"),
-    )
-}
-
-fn combined_output(output: &CommandOutput) -> String {
-    format!("{}\n{}", output.stdout.text, output.stderr.text)
-}
-
+#[cfg(test)]
 fn parse_version(output: &str) -> Option<Version> {
     output
         .split(|character: char| {
@@ -536,6 +306,7 @@ fn parse_version(output: &str) -> Option<Version> {
         })
 }
 
+#[cfg(test)]
 fn parse_packaged_version(token: &str) -> Option<Version> {
     let mut parts = token.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -552,25 +323,7 @@ fn parse_packaged_version(token: &str) -> Option<Version> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::{CapturedOutput, FakeCommandRunner};
-
-    fn output(stdout: &str) -> CommandOutput {
-        CommandOutput {
-            command: "fake".into(),
-            stdout: CapturedOutput {
-                text: stdout.into(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            stderr: CapturedOutput {
-                text: String::new(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            attempts: 1,
-            duration: Duration::ZERO,
-        }
-    }
+    use crate::process::FakeCommandRunner;
 
     #[test]
     fn version_parser_handles_supported_formats() {
@@ -627,33 +380,96 @@ mod tests {
         assert!(report.missing_capabilities.contains("bisync"));
     }
 
+    #[test]
+    fn packaging_policy_retains_all_storage_engine_minimums_and_capabilities() {
+        let rclone_help = RCLONE_REQUIRED_CAPABILITIES
+            .iter()
+            .map(|(_, marker)| *marker)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let rclone = assess_versioned(
+            DependencyKind::Rclone,
+            true,
+            "/usr/bin/rclone".into(),
+            parse_version("rclone v1.74.3"),
+            MIN_RCLONE_VERSION,
+            RCLONE_REQUIRED_CAPABILITIES,
+            &rclone_help,
+            "https://rclone.org/downloads/",
+        );
+        assert_eq!(rclone.state, DependencyState::Available);
+        assert_eq!(
+            rclone.capabilities.len(),
+            RCLONE_REQUIRED_CAPABILITIES.len()
+        );
+
+        let onedriver_help = ONEDRIVER_REQUIRED_CAPABILITIES
+            .iter()
+            .map(|(_, marker)| *marker)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let onedriver = assess_versioned(
+            DependencyKind::Onedriver,
+            true,
+            "/usr/bin/onedriver".into(),
+            parse_version("onedriver v0.15.0"),
+            MIN_ONEDRIVER_VERSION,
+            ONEDRIVER_REQUIRED_CAPABILITIES,
+            &onedriver_help,
+            "https://github.com/jstaf/onedriver",
+        );
+        assert_eq!(onedriver.state, DependencyState::Available);
+
+        let onedrive = assess_versioned(
+            DependencyKind::OneDriveSync,
+            true,
+            "/usr/bin/onedrive".into(),
+            parse_version("onedrive v2.5.10"),
+            MIN_ONEDRIVE_VERSION,
+            &[],
+            "",
+            "https://github.com/abraunegg/onedrive",
+        );
+        assert_eq!(onedrive.state, DependencyState::Available);
+    }
+
     #[tokio::test]
     async fn missing_tools_are_reported_independently() {
         let inventory =
             DependencyInventory::inspect(&FakeCommandRunner::default(), CancellationToken::new())
                 .await;
-        assert_eq!(inventory.reports.len(), 8);
-        assert!(
+        assert_eq!(inventory.reports.len(), 6);
+        assert!(inventory.reports.iter().all(|report| {
+            matches!(
+                report.kind,
+                DependencyKind::NetworkManager | DependencyKind::SystemdUser
+            ) || report.state == DependencyState::Missing
+        }));
+        assert_ne!(
             inventory
-                .reports
-                .iter()
-                .all(|report| report.state == DependencyState::Missing)
+                .get(DependencyKind::NetworkManager)
+                .expect("NetworkManager report")
+                .state,
+            DependencyState::Missing
         );
     }
 
     #[tokio::test]
-    async fn fake_runner_records_fixed_arguments() {
-        let runner = FakeCommandRunner::default().with_resolved([Executable::Onedriver]);
-        runner.push(Ok(output("onedriver v0.15.0")));
-        runner.push(Ok(output(
-            "--auth-only --cache-dir --config-file read-only",
-        )));
+    async fn runtime_inventory_discovers_tools_without_executing_probes() {
+        let runner = FakeCommandRunner::default().with_resolved([
+            Executable::Rclone,
+            Executable::Onedriver,
+            Executable::OneDrive,
+            Executable::Fusermount3,
+        ]);
 
-        let report = inspect_onedriver(&runner, CancellationToken::new()).await;
+        let inventory = DependencyInventory::inspect(&runner, CancellationToken::new()).await;
+        let report = inventory
+            .get(DependencyKind::Onedriver)
+            .expect("onedriver report");
         assert_eq!(report.state, DependencyState::Available);
-        let requests = runner.requests();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].sanitized_command(), "onedriver --version");
-        assert_eq!(requests[1].sanitized_command(), "onedriver --help");
+        assert!(report.version.is_none());
+        assert!(report.capabilities.is_empty());
+        assert!(runner.requests().is_empty());
     }
 }

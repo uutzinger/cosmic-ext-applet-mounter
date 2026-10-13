@@ -61,8 +61,12 @@ impl ProcMountTable {
 
 impl MountTable for ProcMountTable {
     fn entries(&self) -> Result<Vec<MountEntry>, MountTableError> {
-        let content = fs::read_to_string(&self.path)
-            .map_err(|error| MountTableError(format!("read mount table: {error}")))?;
+        let content = fs::read_to_string(&self.path).map_err(|error| {
+            MountTableError(crate::fl!(
+                "ui-mounts-read-mount-table-error",
+                error = (error).to_string()
+            ))
+        })?;
         content
             .lines()
             .map(parse_mountinfo_line)
@@ -73,11 +77,13 @@ impl MountTable for ProcMountTable {
 pub fn parse_mountinfo_line(line: &str) -> Result<MountEntry, MountTableError> {
     let (left, right) = line
         .split_once(" - ")
-        .ok_or_else(|| MountTableError("mountinfo line lacks separator".into()))?;
+        .ok_or_else(|| MountTableError(crate::fl!("ui-mounts-mountinfo-line-lacks-separator")))?;
     let left: Vec<_> = left.split_whitespace().collect();
     let right: Vec<_> = right.split_whitespace().collect();
     if left.len() < 6 || right.len() < 2 {
-        return Err(MountTableError("mountinfo line is incomplete".into()));
+        return Err(MountTableError(crate::fl!(
+            "ui-mounts-mountinfo-line-is-incomplete"
+        )));
     }
     Ok(MountEntry {
         target: PathBuf::from(unescape_mount_field(left[4])),

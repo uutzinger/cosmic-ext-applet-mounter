@@ -12,12 +12,13 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use cosmic::iced::futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::fl;
 use crate::model::ConnectionId;
-use crate::process::{CommandError, CommandRequest, CommandRunner, Executable};
 
 const MANAGED_MARKER: &str = "# X-Cosmic-Mounter-Managed=true";
 const UUID_MARKER: &str = "# X-Cosmic-Mounter-Connection=";
@@ -135,13 +136,16 @@ impl UnitDocument {
             ""
         };
         let metered_condition = if spec.skip_on_metered {
-            // systemd expands $$ to a literal $ before passing the expression to sh.
-            let expression =
-                "! nmcli -t -f GENERAL.METERED device show 2>/dev/null | grep -Eq ':(yes|2)$$'";
-            format!(
-                "ExecCondition=\"/usr/bin/sh\" \"-c\" {}\n",
-                escape_systemd_argument(expression)?
-            )
+            let command =
+                crate::mount_guard::service_command(vec![crate::vpn::METERED_GUARD_FLAG.into()])
+                    .map_err(ServiceError::InvalidSpec)?;
+            let executable = validate_absolute_executable(&command.executable)?;
+            let mut rendered = escape_systemd_argument(executable)?;
+            for argument in &command.arguments {
+                rendered.push(' ');
+                rendered.push_str(&escape_systemd_argument(argument)?);
+            }
+            format!("ExecCondition={rendered}\n")
         } else {
             String::new()
         };
@@ -158,9 +162,9 @@ impl UnitDocument {
     pub fn timer(spec: &TimerSpec) -> Result<Self, ServiceError> {
         validate_text(&spec.description)?;
         if spec.interval.is_zero() {
-            return Err(ServiceError::InvalidSpec(
-                "timer interval must be greater than zero".into(),
-            ));
+            return Err(ServiceError::InvalidSpec(crate::fl!(
+                "ui-services-timer-interval-must-be-greater-than-zero"
+            )));
         }
         let service = UnitName::new(spec.connection_id, UnitKind::Service).file_name();
         let persistent = if spec.persistent { "true" } else { "false" };
@@ -204,12 +208,13 @@ pub struct UnitStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemdAction {
-    Verify,
     DaemonReload,
+    ValidateLoaded,
     Enable,
     Disable,
     Start,
     Stop,
+    Restart,
     ResetFailed,
     Status,
 }
@@ -221,7 +226,6 @@ pub enum ServiceError {
     OwnershipMismatch { path: PathBuf },
     Validation(String),
     Runtime(String),
-    Command(CommandError),
 }
 
 impl fmt::Display for ServiceError {
@@ -231,14 +235,10 @@ impl fmt::Display for ServiceError {
                 formatter.write_str(message)
             }
             Self::Io(error) => error.fmt(formatter),
-            Self::OwnershipMismatch { path } => {
-                write!(
-                    formatter,
-                    "unit is not owned by this applet: {}",
-                    path.display()
-                )
-            }
-            Self::Command(error) => error.fmt(formatter),
+            Self::OwnershipMismatch { path } => formatter.write_str(&crate::fl!(
+                "ui-services-unit-is-not-owned-by-this-applet",
+                value1 = (path.display()).to_string()
+            )),
         }
     }
 }
@@ -251,12 +251,6 @@ impl From<std::io::Error> for ServiceError {
     }
 }
 
-impl From<CommandError> for ServiceError {
-    fn from(error: CommandError) -> Self {
-        Self::Command(error)
-    }
-}
-
 pub trait UnitValidator: Send + Sync {
     fn validate(&self, document: &UnitDocument) -> Result<(), ServiceError>;
 }
@@ -266,25 +260,168 @@ pub struct StructuralUnitValidator;
 
 impl UnitValidator for StructuralUnitValidator {
     fn validate(&self, document: &UnitDocument) -> Result<(), ServiceError> {
-        if !document.content.starts_with(MANAGED_MARKER)
-            || !document
-                .content
-                .contains(&format!("{UUID_MARKER}{}", document.name.connection_id()))
-            || !document.content.contains("[Unit]")
-        {
-            return Err(ServiceError::Validation(
-                "generated unit is missing required structure or ownership markers".into(),
-            ));
+        let expected_uuid = format!("{UUID_MARKER}{}", document.name.connection_id());
+        let mut lines = document.content.lines();
+        if lines.next() != Some(MANAGED_MARKER) || lines.next() != Some(expected_uuid.as_str()) {
+            return Err(ServiceError::Validation(crate::fl!(
+                "ui-services-generated-unit-has-invalid-ownership-markers"
+            )));
+        }
+        if document.content.contains(['\0', '\r']) {
+            return Err(ServiceError::Validation(crate::fl!(
+                "ui-services-generated-unit-contains-unsafe-control-characters"
+            )));
+        }
+
+        let allowed_sections: &[&str] = match document.name.kind {
+            UnitKind::Service => &["Unit", "Service", "Install"],
+            UnitKind::Timer => &["Unit", "Timer", "Install"],
+        };
+        let mut section = None;
+        let mut sections = HashMap::<String, usize>::new();
+        let mut directives = HashMap::<(String, String), Vec<String>>::new();
+        for line in lines {
+            if line == MANAGED_MARKER || line.starts_with(UUID_MARKER) {
+                return Err(ServiceError::Validation(crate::fl!(
+                    "ui-services-generated-unit-repeats-ownership-markers"
+                )));
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(name) = line
+                .strip_prefix('[')
+                .and_then(|line| line.strip_suffix(']'))
+            {
+                if !allowed_sections.contains(&name) {
+                    return Err(ServiceError::Validation(crate::fl!(
+                        "ui-services-generated-unit-contains-unsupported-name-section",
+                        name = (name).to_string()
+                    )));
+                }
+                if *sections.entry(name.to_owned()).or_default() != 0 {
+                    return Err(ServiceError::Validation(crate::fl!(
+                        "ui-services-generated-unit-repeats-name-section",
+                        name = (name).to_string()
+                    )));
+                }
+                sections.insert(name.to_owned(), 1);
+                section = Some(name.to_owned());
+                continue;
+            }
+            let current = section.as_deref().ok_or_else(|| {
+                ServiceError::Validation(crate::fl!(
+                    "ui-services-unit-directive-appears-outside-a-section"
+                ))
+            })?;
+            let (key, value) = line.split_once('=').ok_or_else(|| {
+                ServiceError::Validation(crate::fl!(
+                    "ui-services-generated-unit-contains-a-malformed-directive"
+                ))
+            })?;
+            let allowed = match current {
+                "Unit" => matches!(key, "Description"),
+                "Service" => matches!(
+                    key,
+                    "Type"
+                        | "RuntimeDirectory"
+                        | "SuccessExitStatus"
+                        | "ExecCondition"
+                        | "ExecStart"
+                        | "Restart"
+                        | "RestartSec"
+                ),
+                "Timer" => matches!(
+                    key,
+                    "OnActiveSec" | "OnUnitInactiveSec" | "Persistent" | "Unit"
+                ),
+                "Install" => key == "WantedBy",
+                _ => false,
+            };
+            if !allowed || value.is_empty() {
+                return Err(ServiceError::Validation(crate::fl!(
+                    "ui-services-generated-unit-contains-unsupported-or-empty-current",
+                    current = (current).to_string(),
+                    key = (key).to_string()
+                )));
+            }
+            directives
+                .entry((current.to_owned(), key.to_owned()))
+                .or_default()
+                .push(value.to_owned());
+        }
+        for expected in allowed_sections {
+            if sections.get(*expected) != Some(&1) {
+                return Err(ServiceError::Validation(crate::fl!(
+                    "ui-services-generated-unit-lacks-expected-section",
+                    expected = (expected).to_string()
+                )));
+            }
+        }
+
+        let one = |section: &str, key: &str| -> Result<&str, ServiceError> {
+            match directives.get(&(section.to_owned(), key.to_owned())) {
+                Some(values) if values.len() == 1 => Ok(values[0].as_str()),
+                _ => Err(ServiceError::Validation(crate::fl!(
+                    "ui-services-generated-unit-requires-exactly-one-section-key",
+                    section = (section).to_string(),
+                    key = (key).to_string()
+                ))),
+            }
+        };
+        if one("Unit", "Description")?.chars().any(char::is_control) {
+            return Err(ServiceError::Validation(crate::fl!(
+                "ui-services-generated-unit-description-contains-control-characters"
+            )));
         }
         match document.name.kind {
-            UnitKind::Service if !document.content.contains("[Service]") => Err(
-                ServiceError::Validation("service document lacks [Service]".into()),
-            ),
-            UnitKind::Timer if !document.content.contains("[Timer]") => Err(
-                ServiceError::Validation("timer document lacks [Timer]".into()),
-            ),
-            _ => Ok(()),
+            UnitKind::Service => {
+                if one("Service", "Type")? != "simple"
+                    || one("Service", "RuntimeDirectory")? != "cosmic-ext-applet-mounter"
+                    || one("Service", "SuccessExitStatus")? != "130 143"
+                    || !one("Service", "ExecStart")?.starts_with("\"/")
+                    || one("Install", "WantedBy")? != "default.target"
+                {
+                    return Err(ServiceError::Validation(crate::fl!(
+                        "ui-services-generated-service-has-invalid-fixed-directives"
+                    )));
+                }
+                let restart = directives.get(&("Service".into(), "Restart".into()));
+                let restart_sec = directives.get(&("Service".into(), "RestartSec".into()));
+                if !matches!((restart, restart_sec), (None, None))
+                    && !matches!((restart, restart_sec), (Some(a), Some(b)) if a.as_slice() == ["on-failure"] && b.as_slice() == ["5s"])
+                {
+                    return Err(ServiceError::Validation(crate::fl!(
+                        "ui-services-generated-service-has-inconsistent-restart-policy"
+                    )));
+                }
+            }
+            UnitKind::Timer => {
+                for key in ["OnActiveSec", "OnUnitInactiveSec"] {
+                    one("Timer", key)?
+                        .strip_suffix('s')
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .filter(|value| *value > 0)
+                        .ok_or_else(|| {
+                            ServiceError::Validation(crate::fl!(
+                                "ui-services-generated-timer-has-invalid-key",
+                                key = (key).to_string()
+                            ))
+                        })?;
+                }
+                let expected_service =
+                    UnitName::new(document.name.connection_id(), UnitKind::Service).file_name();
+                if one("Timer", "Unit")? != expected_service
+                    || !matches!(one("Timer", "Persistent")?, "true" | "false")
+                    || one("Install", "WantedBy")? != "timers.target"
+                {
+                    return Err(ServiceError::Validation(crate::fl!(
+                        "ui-services-generated-timer-has-invalid-fixed-directives"
+                    )));
+                }
+            }
         }
+        Ok(())
     }
 }
 
@@ -309,7 +446,7 @@ impl FileUnitStore {
 
     pub fn user(validator: Arc<dyn UnitValidator>) -> Result<Self, ServiceError> {
         let home = std::env::var_os("HOME")
-            .ok_or_else(|| ServiceError::Runtime("HOME is unavailable".into()))?;
+            .ok_or_else(|| ServiceError::Runtime(crate::fl!("ui-services-home-is-unavailable")))?;
         Ok(Self::new(
             PathBuf::from(home).join(".config/systemd/user"),
             validator,
@@ -415,18 +552,480 @@ pub trait SystemdManager: Send + Sync {
     ) -> ServiceFuture<'a, Option<UnitStatus>>;
 }
 
-pub struct CommandSystemdManager<R> {
-    runner: R,
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DbusSystemdManager;
+
+const SYSTEMD_DESTINATION: &str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
+const SYSTEMD_MANAGER_INTERFACE: &str = "org.freedesktop.systemd1.Manager";
+const SYSTEMD_UNIT_INTERFACE: &str = "org.freedesktop.systemd1.Unit";
+const SYSTEMD_SERVICE_INTERFACE: &str = "org.freedesktop.systemd1.Service";
+
+async fn systemd_user_connection() -> Result<zbus::Connection, ServiceError> {
+    zbus::Connection::session().await.map_err(|error| {
+        ServiceError::Runtime(crate::fl!(
+            "ui-services-systemd-user-d-bus-error",
+            error = (error).to_string()
+        ))
+    })
 }
 
-impl<R> CommandSystemdManager<R> {
-    #[must_use]
-    pub const fn new(runner: R) -> Self {
-        Self { runner }
+async fn systemd_user_manager(
+    connection: &zbus::Connection,
+) -> Result<zbus::Proxy<'_>, ServiceError> {
+    zbus::Proxy::new(
+        connection,
+        SYSTEMD_DESTINATION,
+        SYSTEMD_PATH,
+        SYSTEMD_MANAGER_INTERFACE,
+    )
+    .await
+    .map_err(|error| {
+        ServiceError::Runtime(crate::fl!(
+            "ui-services-systemd-user-d-bus-error",
+            error = (error).to_string()
+        ))
+    })
+}
+
+async fn systemd_user_unit_path(
+    connection: &zbus::Connection,
+    unit: &str,
+) -> Result<OwnedObjectPath, ServiceError> {
+    systemd_user_manager(connection)
+        .await?
+        .call("LoadUnit", &(unit,))
+        .await
+        .map_err(|error| {
+            ServiceError::Runtime(crate::fl!(
+                "ui-services-systemd-unit-unit-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            ))
+        })
+}
+
+async fn systemd_user_unit_proxy<'a>(
+    connection: &'a zbus::Connection,
+    path: &'a OwnedObjectPath,
+    interface: &'static str,
+) -> Result<zbus::Proxy<'a>, ServiceError> {
+    zbus::Proxy::new(connection, SYSTEMD_DESTINATION, path.as_str(), interface)
+        .await
+        .map_err(|error| {
+            ServiceError::Runtime(crate::fl!(
+                "ui-services-systemd-user-d-bus-error",
+                error = (error).to_string()
+            ))
+        })
+}
+
+async fn systemd_user_run_job(
+    manager: &zbus::Proxy<'_>,
+    method: &str,
+    unit: &str,
+) -> Result<(), ServiceError> {
+    manager
+        .call::<_, _, ()>("Subscribe", &())
+        .await
+        .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+    let mut jobs = manager
+        .receive_signal("JobRemoved")
+        .await
+        .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+    let job: OwnedObjectPath = manager
+        .call(method, &(unit, "replace"))
+        .await
+        .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+
+    while let Some(signal) = jobs.next().await {
+        let (_, finished_job, finished_unit, result): (u32, OwnedObjectPath, String, String) =
+            signal
+                .body()
+                .deserialize()
+                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+        if finished_job == job {
+            return if result == "done" {
+                Ok(())
+            } else {
+                Err(ServiceError::Runtime(crate::fl!(
+                    "ui-services-systemd-method-job-for-finished-unit-finished",
+                    method = (method).to_string(),
+                    finished_unit = (finished_unit).to_string(),
+                    result = (result).to_string()
+                )))
+            };
+        }
+    }
+    Err(ServiceError::Runtime(crate::fl!(
+        "ui-services-systemd-method-job-for-unit-ended-without",
+        method = (method).to_string(),
+        unit = (unit).to_string()
+    )))
+}
+
+pub async fn systemd_user_reload() -> Result<(), String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_manager(&connection)
+        .await
+        .map_err(|error| error.to_string())?
+        .call("Reload", &())
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-user-reload-error",
+                error = (error).to_string()
+            )
+        })
+}
+
+pub async fn systemd_user_available() -> Result<(), String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_manager(&connection)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn valid_systemd_service_name(unit: &str) -> bool {
+    !unit.is_empty()
+        && unit.ends_with(".service")
+        && !unit
+            .chars()
+            .any(|character| character.is_whitespace() || character == '/')
+}
+
+pub async fn systemd_user_start_named_unit(unit: &str) -> Result<(), String> {
+    if !valid_systemd_service_name(unit) {
+        return Err(crate::fl!(
+            "ui-services-invalid-systemd-user-service-name-unit",
+            unit = (unit).to_string()
+        ));
+    }
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    let manager = systemd_user_manager(&connection)
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_run_job(&manager, "StartUnit", unit)
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-start-unit-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            )
+        })
+}
+
+pub async fn systemd_user_restart_named_unit(unit: &str) -> Result<(), String> {
+    if !valid_systemd_service_name(unit) {
+        return Err(crate::fl!(
+            "ui-services-invalid-systemd-user-service-name-unit",
+            unit = (unit).to_string()
+        ));
+    }
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    let manager = systemd_user_manager(&connection)
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_run_job(&manager, "RestartUnit", unit)
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-restart-unit-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            )
+        })
+}
+
+pub async fn systemd_user_active_state(unit: &str) -> Result<String, String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = systemd_user_unit_path(&connection, unit)
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE)
+        .await
+        .map_err(|error| error.to_string())?
+        .get_property("ActiveState")
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-unit-unit-state-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            )
+        })
+}
+
+pub async fn systemd_user_stop_no_wait(unit: &str) -> Result<(), String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    systemd_user_manager(&connection)
+        .await
+        .map_err(|error| error.to_string())?
+        .call::<_, _, OwnedObjectPath>("StopUnit", &(unit, "replace"))
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-stop-unit-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            )
+        })
+}
+
+pub async fn systemd_user_stop_policy(unit: &str) -> Result<(bool, u64, String, i32), String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = systemd_user_unit_path(&connection, unit)
+        .await
+        .map_err(|error| error.to_string())?;
+    let proxy = systemd_user_unit_proxy(&connection, &path, SYSTEMD_SERVICE_INTERFACE)
+        .await
+        .map_err(|error| error.to_string())?;
+    let send_sigkill = proxy
+        .get_property("SendSIGKILL")
+        .await
+        .map_err(|error| error.to_string())?;
+    let timeout_stop_usec = proxy
+        .get_property("TimeoutStopUSec")
+        .await
+        .map_err(|error| error.to_string())?;
+    let timeout_stop_failure_mode = proxy
+        .get_property("TimeoutStopFailureMode")
+        .await
+        .map_err(|error| error.to_string())?;
+    let kill_signal = proxy
+        .get_property("KillSignal")
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((
+        send_sigkill,
+        timeout_stop_usec,
+        timeout_stop_failure_mode,
+        kill_signal,
+    ))
+}
+
+pub async fn systemd_user_invocation_id(unit: &str) -> Result<String, String> {
+    let connection = systemd_user_connection()
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = systemd_user_unit_path(&connection, unit)
+        .await
+        .map_err(|error| error.to_string())?;
+    let bytes: Vec<u8> = systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE)
+        .await
+        .map_err(|error| error.to_string())?
+        .get_property("InvocationID")
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-unit-unit-invocation-error",
+                unit = (unit).to_string(),
+                error = (error).to_string()
+            )
+        })?;
+    if bytes.len() != 16 {
+        return Err(crate::fl!(
+            "ui-services-systemd-unit-unit-has-no-current-invocation",
+            unit = (unit).to_string()
+        ));
+    }
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn systemd_user_status_blocking(unit: &UnitName) -> Result<UnitStatus, String> {
+    let unit = unit.clone();
+    std::thread::Builder::new()
+        .name("systemd-user-status".into())
+        .spawn(move || systemd_user_status_on_blocking_thread(&unit))
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-could-not-start-systemd-status-worker-error",
+                error = (error).to_string()
+            )
+        })?
+        .join()
+        .map_err(|_| crate::fl!("ui-services-systemd-status-worker-panicked"))?
+}
+
+/// Observe app-owned units asynchronously over one connection. Failed reads
+/// remain unknown, never synthesized inactive; the caller retains last-known data.
+pub async fn systemd_user_status_batch(
+    units: &[UnitName],
+    cancellation: CancellationToken,
+) -> Result<Vec<(UnitName, Option<UnitStatus>)>, String> {
+    if cancellation.is_cancelled() {
+        return Err(crate::fl!("unit-status-refresh-unavailable"));
+    }
+    if units.is_empty() {
+        return Ok(Vec::new());
+    }
+    let operation = async {
+        let connection = systemd_user_connection()
+            .await
+            .map_err(|error| error.to_string())?;
+        let manager = systemd_user_manager(&connection)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut observations = Vec::with_capacity(units.len());
+        for unit in units {
+            let read = async {
+                let name = unit.file_name();
+                let path = systemd_user_unit_path(&connection, &name).await?;
+                let proxy =
+                    systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE).await?;
+                let active: String = proxy
+                    .get_property("ActiveState")
+                    .await
+                    .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                let detail: String = proxy
+                    .get_property("SubState")
+                    .await
+                    .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                let enabled: String = manager
+                    .call("GetUnitFileState", &(name.as_str(),))
+                    .await
+                    .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                let result = if unit.kind == UnitKind::Service {
+                    systemd_user_unit_proxy(&connection, &path, SYSTEMD_SERVICE_INTERFACE)
+                        .await?
+                        .get_property("Result")
+                        .await
+                        .map_err(|error| ServiceError::Runtime(error.to_string()))?
+                } else {
+                    String::new()
+                };
+                let active = parse_active_state(&active);
+                if active == ActiveState::Unknown {
+                    return Err(ServiceError::Runtime(crate::fl!(
+                        "unit-status-refresh-unavailable"
+                    )));
+                }
+                Ok::<_, ServiceError>(UnitStatus {
+                    active,
+                    enabled: matches!(
+                        enabled.as_str(),
+                        "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
+                    ),
+                    detail,
+                    result,
+                })
+            };
+            let status = tokio::time::timeout(Duration::from_secs(2), read)
+                .await
+                .ok()
+                .and_then(Result::ok);
+            observations.push((unit.clone(), status));
+        }
+        Ok(observations)
+    };
+    bounded_unit_observation(operation, Duration::from_secs(5), cancellation).await
+}
+
+async fn bounded_unit_observation<T>(
+    operation: impl Future<Output = Result<T, String>>,
+    timeout: Duration,
+    cancellation: CancellationToken,
+) -> Result<T, String> {
+    tokio::select! {
+        () = cancellation.cancelled() => Err(crate::fl!("unit-status-refresh-unavailable")),
+        result = tokio::time::timeout(timeout, operation) => {
+            result.unwrap_or_else(|_| Err(crate::fl!("unit-status-refresh-unavailable")))
+        }
     }
 }
 
-impl<R: CommandRunner> SystemdManager for CommandSystemdManager<R> {
+fn systemd_user_status_on_blocking_thread(unit: &UnitName) -> Result<UnitStatus, String> {
+    let connection = zbus::blocking::Connection::session().map_err(|error| {
+        crate::fl!(
+            "ui-services-systemd-user-d-bus-error",
+            error = (error).to_string()
+        )
+    })?;
+    let manager = zbus::blocking::Proxy::new(
+        &connection,
+        SYSTEMD_DESTINATION,
+        SYSTEMD_PATH,
+        SYSTEMD_MANAGER_INTERFACE,
+    )
+    .map_err(|error| {
+        crate::fl!(
+            "ui-services-systemd-user-d-bus-error",
+            error = (error).to_string()
+        )
+    })?;
+    let name = unit.file_name();
+    let path: OwnedObjectPath = manager
+        .call("LoadUnit", &(name.as_str(),))
+        .map_err(|error| {
+            crate::fl!(
+                "ui-services-systemd-unit-name-error",
+                name = (name).to_string(),
+                error = (error).to_string()
+            )
+        })?;
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        SYSTEMD_DESTINATION,
+        path.as_str(),
+        SYSTEMD_UNIT_INTERFACE,
+    )
+    .map_err(|error| {
+        crate::fl!(
+            "ui-services-systemd-user-d-bus-error",
+            error = (error).to_string()
+        )
+    })?;
+    let active: String = proxy
+        .get_property("ActiveState")
+        .map_err(|error| error.to_string())?;
+    let detail: String = proxy
+        .get_property("SubState")
+        .map_err(|error| error.to_string())?;
+    let enabled: String = manager
+        .call("GetUnitFileState", &(name.as_str(),))
+        .map_err(|error| error.to_string())?;
+    let result = if unit.kind == UnitKind::Service {
+        zbus::blocking::Proxy::new(
+            &connection,
+            SYSTEMD_DESTINATION,
+            path.as_str(),
+            SYSTEMD_SERVICE_INTERFACE,
+        )
+        .map_err(|error| error.to_string())?
+        .get_property("Result")
+        .map_err(|error| error.to_string())?
+    } else {
+        String::new()
+    };
+    Ok(UnitStatus {
+        active: parse_active_state(&active),
+        enabled: matches!(
+            enabled.as_str(),
+            "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
+        ),
+        detail,
+        result,
+    })
+}
+
+impl SystemdManager for DbusSystemdManager {
     fn action<'a>(
         &'a self,
         action: SystemdAction,
@@ -434,62 +1033,188 @@ impl<R: CommandRunner> SystemdManager for CommandSystemdManager<R> {
         cancellation: CancellationToken,
     ) -> ServiceFuture<'a, Option<UnitStatus>> {
         Box::pin(async move {
-            let command = match action {
-                SystemdAction::Verify => {
-                    let unit = unit.ok_or_else(|| {
-                        ServiceError::InvalidSpec("verify requires a unit".into())
-                    })?;
-                    CommandRequest::new(Executable::SystemdAnalyze)
-                        .arg("--user")?
-                        .arg("verify")?
-                        .arg(unit.file_name())?
+            let operation = async {
+                let connection = systemd_user_connection().await?;
+                let manager = systemd_user_manager(&connection).await?;
+                match action {
+                    SystemdAction::DaemonReload => {
+                        manager
+                            .call::<_, _, ()>("Reload", &())
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        Ok(None)
+                    }
+                    SystemdAction::ValidateLoaded => {
+                        let name = unit
+                            .ok_or_else(|| {
+                                ServiceError::InvalidSpec(crate::fl!(
+                                    "ui-services-load-validation-requires-a-unit"
+                                ))
+                            })?
+                            .file_name();
+                        let path: OwnedObjectPath = manager
+                            .call("LoadUnit", &(name.as_str(),))
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let proxy =
+                            systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE)
+                                .await?;
+                        let load_state: String = proxy
+                            .get_property("LoadState")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let load_error: (String, String) = proxy
+                            .get_property("LoadError")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let fragment_path: String = proxy
+                            .get_property("FragmentPath")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let needs_reload: bool = proxy
+                            .get_property("NeedDaemonReload")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let expected_fragment = std::env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .ok_or_else(|| {
+                                ServiceError::Runtime(crate::fl!(
+                                    "ui-services-home-is-unavailable-for-systemd-unit-validation"
+                                ))
+                            })?
+                            .join(".config/systemd/user")
+                            .join(&name);
+                        let fragment_matches = Path::new(&fragment_path) == expected_fragment;
+                        if load_state != "loaded"
+                            || !load_error.0.is_empty()
+                            || !load_error.1.is_empty()
+                            || !fragment_matches
+                            || needs_reload
+                        {
+                            let error_name = if load_error.0.is_empty() {
+                                "none"
+                            } else {
+                                load_error.0.as_str()
+                            };
+                            return Err(ServiceError::Validation(crate::fl!(
+                                "ui-services-systemd-rejected-name-load-state-load-state",
+                                name = (name).to_string(),
+                                load_state = (load_state).to_string(),
+                                error_name = (error_name).to_string()
+                            )));
+                        }
+                        Ok(None)
+                    }
+                    SystemdAction::Status => {
+                        let unit = unit.ok_or_else(|| {
+                            ServiceError::InvalidSpec(crate::fl!(
+                                "ui-services-status-requires-a-unit"
+                            ))
+                        })?;
+                        let name = unit.file_name();
+                        let path = systemd_user_unit_path(&connection, &name).await?;
+                        let proxy =
+                            systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE)
+                                .await?;
+                        let active: String = proxy
+                            .get_property("ActiveState")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let detail: String = proxy
+                            .get_property("SubState")
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let enabled: String = manager
+                            .call("GetUnitFileState", &(name.as_str(),))
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        let result = if unit.kind == UnitKind::Service {
+                            systemd_user_unit_proxy(&connection, &path, SYSTEMD_SERVICE_INTERFACE)
+                                .await?
+                                .get_property("Result")
+                                .await
+                                .map_err(|error| ServiceError::Runtime(error.to_string()))?
+                        } else {
+                            String::new()
+                        };
+                        Ok(Some(UnitStatus {
+                            active: parse_active_state(&active),
+                            enabled: matches!(
+                                enabled.as_str(),
+                                "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
+                            ),
+                            detail,
+                            result,
+                        }))
+                    }
+                    SystemdAction::Enable | SystemdAction::Disable => {
+                        let name = unit
+                            .ok_or_else(|| {
+                                ServiceError::InvalidSpec(crate::fl!(
+                                    "ui-services-systemd-action-requires-a-unit"
+                                ))
+                            })?
+                            .file_name();
+                        let files = vec![name.as_str()];
+                        if action == SystemdAction::Enable {
+                            let _: (bool, Vec<(String, String, String)>) = manager
+                                .call("EnableUnitFiles", &(files, false, false))
+                                .await
+                                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        } else {
+                            let _: Vec<(String, String, String)> = manager
+                                .call("DisableUnitFiles", &(files, false))
+                                .await
+                                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        }
+                        // EnableUnitFiles/DisableUnitFiles only update the unit-file
+                        // links. Reload the manager so GetUnitFileState and
+                        // NeedDaemonReload immediately reflect the accepted change,
+                        // matching systemctl enable/disable behavior.
+                        manager
+                            .call::<_, _, ()>("Reload", &())
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        Ok(None)
+                    }
+                    SystemdAction::Start | SystemdAction::Stop | SystemdAction::Restart => {
+                        let name = unit
+                            .ok_or_else(|| {
+                                ServiceError::InvalidSpec(crate::fl!(
+                                    "ui-services-systemd-action-requires-a-unit"
+                                ))
+                            })?
+                            .file_name();
+                        let method = match action {
+                            SystemdAction::Start => "StartUnit",
+                            SystemdAction::Stop => "StopUnit",
+                            SystemdAction::Restart => "RestartUnit",
+                            _ => unreachable!(),
+                        };
+                        systemd_user_run_job(&manager, method, &name).await?;
+                        Ok(None)
+                    }
+                    SystemdAction::ResetFailed => {
+                        let name = unit
+                            .ok_or_else(|| {
+                                ServiceError::InvalidSpec(crate::fl!(
+                                    "ui-services-systemd-action-requires-a-unit"
+                                ))
+                            })?
+                            .file_name();
+                        manager
+                            .call::<_, _, ()>("ResetFailedUnit", &(name.as_str(),))
+                            .await
+                            .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        Ok(None)
+                    }
                 }
-                SystemdAction::DaemonReload => CommandRequest::new(Executable::Systemctl)
-                    .arg("--user")?
-                    .arg("daemon-reload")?,
-                SystemdAction::Status => {
-                    let unit = unit.ok_or_else(|| {
-                        ServiceError::InvalidSpec("status requires a unit".into())
-                    })?;
-                    CommandRequest::new(Executable::Systemctl)
-                        .arg("--user")?
-                        .arg("show")?
-                        .arg("--property=ActiveState")?
-                        .arg("--property=UnitFileState")?
-                        .arg("--property=SubState")?
-                        .arg("--property=Result")?
-                        .arg(unit.file_name())?
-                }
-                _ => {
-                    let unit = unit.ok_or_else(|| {
-                        ServiceError::InvalidSpec("systemd action requires a unit".into())
-                    })?;
-                    CommandRequest::new(Executable::Systemctl)
-                        .arg("--user")?
-                        .arg(match action {
-                            SystemdAction::Enable => "enable",
-                            SystemdAction::Disable => "disable",
-                            SystemdAction::Start => "start",
-                            SystemdAction::Stop => "stop",
-                            SystemdAction::ResetFailed => "reset-failed",
-                            SystemdAction::Verify
-                            | SystemdAction::DaemonReload
-                            | SystemdAction::Status => unreachable!(),
-                        })?
-                        .arg(unit.file_name())?
-                }
-            }
-            .with_timeout(Duration::from_secs(15));
-
-            let output = self
-                .runner
-                .run(command, cancellation)
-                .await
-                .map_err(ServiceError::Command)?;
-            if action == SystemdAction::Status {
-                Ok(Some(parse_systemd_status(&output.stdout.text)))
-            } else {
-                Ok(None)
+            };
+            tokio::select! {
+                () = cancellation.cancelled() => Err(ServiceError::Runtime("systemd operation cancelled".into())),
+                result = tokio::time::timeout(Duration::from_secs(15), operation) => {
+                    result.map_err(|_| ServiceError::Runtime("systemd operation timed out".into()))?
+                },
             }
         })
     }
@@ -515,24 +1240,37 @@ impl<S: UnitStore, M: SystemdManager> UnitController<S, M> {
     ) -> Result<(), ServiceError> {
         let previous = self.store.read(&document.name)?;
         self.store.write(document)?;
-        if let Err(error) = self
-            .manager
-            .action(
-                SystemdAction::Verify,
-                Some(&document.name),
-                cancellation.child_token(),
-            )
-            .await
-        {
-            self.restore(&document.name, previous)?;
-            return Err(error);
+        let result = async {
+            self.manager
+                .action(
+                    SystemdAction::DaemonReload,
+                    None,
+                    cancellation.child_token(),
+                )
+                .await?;
+            self.manager
+                .action(
+                    SystemdAction::ValidateLoaded,
+                    Some(&document.name),
+                    cancellation,
+                )
+                .await?;
+            Ok::<(), ServiceError>(())
         }
-        if let Err(error) = self
-            .manager
-            .action(SystemdAction::DaemonReload, None, cancellation)
-            .await
-        {
+        .await;
+        if let Err(error) = result {
             self.restore(&document.name, previous)?;
+            if let Err(rollback_error) = self
+                .manager
+                .action(SystemdAction::DaemonReload, None, CancellationToken::new())
+                .await
+            {
+                return Err(ServiceError::Runtime(crate::fl!(
+                    "ui-services-error-unit-file-was-restored-but-systemd",
+                    error = (error).to_string(),
+                    rollback_error = (rollback_error).to_string()
+                )));
+            }
             return Err(error);
         }
         Ok(())
@@ -633,9 +1371,9 @@ impl SystemdManager for FakeSystemdManager {
 
 fn validate_text(value: &str) -> Result<(), ServiceError> {
     if value.trim().is_empty() || value.chars().any(char::is_control) {
-        Err(ServiceError::InvalidSpec(
-            "unit text is empty or contains control characters".into(),
-        ))
+        Err(ServiceError::InvalidSpec(crate::fl!(
+            "ui-services-unit-text-is-empty-or-contains-control"
+        )))
     } else {
         Ok(())
     }
@@ -643,12 +1381,13 @@ fn validate_text(value: &str) -> Result<(), ServiceError> {
 
 fn validate_absolute_executable(path: &Path) -> Result<&str, ServiceError> {
     if !path.is_absolute() {
-        return Err(ServiceError::InvalidSpec(
-            "unit executable must be absolute".into(),
-        ));
+        return Err(ServiceError::InvalidSpec(crate::fl!(
+            "ui-services-unit-executable-must-be-absolute"
+        )));
     }
-    path.to_str()
-        .ok_or_else(|| ServiceError::InvalidSpec("unit executable is not UTF-8".into()))
+    path.to_str().ok_or_else(|| {
+        ServiceError::InvalidSpec(crate::fl!("ui-services-unit-executable-is-not-utf-8"))
+    })
 }
 
 fn escape_systemd_argument(value: &str) -> Result<String, ServiceError> {
@@ -657,9 +1396,9 @@ fn escape_systemd_argument(value: &str) -> Result<String, ServiceError> {
             .chars()
             .any(|character| character == '\0' || character == '\n')
     {
-        return Err(ServiceError::InvalidSpec(
-            "unit argument is empty or contains unsafe characters".into(),
-        ));
+        return Err(ServiceError::InvalidSpec(crate::fl!(
+            "ui-services-unit-argument-is-empty-or-contains-unsafe"
+        )));
     }
     let escaped = value
         .replace('%', "%%")
@@ -679,29 +1418,13 @@ fn parse_owned_connection(content: &str) -> Option<ConnectionId> {
         .map(ConnectionId::from_uuid)
 }
 
-fn parse_systemd_status(output: &str) -> UnitStatus {
-    let property = |name: &str| {
-        output
-            .lines()
-            .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
-            .unwrap_or_default()
-    };
-    let active = match property("ActiveState") {
+fn parse_active_state(active: &str) -> ActiveState {
+    match active {
         "active" => ActiveState::Active,
         "activating" => ActiveState::Activating,
         "inactive" => ActiveState::Inactive,
         "failed" => ActiveState::Failed,
         _ => ActiveState::Unknown,
-    };
-    let enabled = matches!(
-        property("UnitFileState"),
-        "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
-    );
-    UnitStatus {
-        active,
-        enabled,
-        detail: property("SubState").to_owned(),
-        result: property("Result").to_owned(),
     }
 }
 
@@ -739,9 +1462,29 @@ pub async fn start_managed_online_service<M: SystemdManager>(
     let start_result = manager
         .action(SystemdAction::Start, Some(unit), cancellation.child_token())
         .await;
-    let after = manager
-        .action(SystemdAction::Status, Some(unit), cancellation)
-        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let after = loop {
+        let status = manager
+            .action(
+                SystemdAction::Status,
+                Some(unit),
+                cancellation.child_token(),
+            )
+            .await;
+        let transitional = matches!(status, Ok(Some(ref status)) if
+            status.active == ActiveState::Activating
+                || (status.active == ActiveState::Inactive
+                    && (status.result.is_empty() || status.result == "success")));
+        if !transitional || tokio::time::Instant::now() >= deadline {
+            break status;
+        }
+        tokio::select! {
+            () = cancellation.cancelled() => {
+                break Err(ServiceError::Runtime("systemd operation cancelled".into()));
+            }
+            () = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
+    };
     match after {
         Ok(Some(status))
             if matches!(status.active, ActiveState::Active | ActiveState::Activating) =>
@@ -791,11 +1534,53 @@ pub async fn start_managed_online_service<M: SystemdManager>(
 
 #[cfg(test)]
 mod tests {
-    use crate::process::{CapturedOutput, CommandOutput, FakeCommandRunner};
     use tempfile::TempDir;
     use uuid::Uuid;
 
     use super::*;
+
+    #[tokio::test]
+    async fn unit_observation_deadline_does_not_block_executor() {
+        let operation = async { std::future::pending::<Result<(), String>>().await };
+        let result = bounded_unit_observation(
+            operation,
+            Duration::from_millis(10),
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn unit_observation_cancellation_and_empty_batch_need_no_bus() {
+        assert!(
+            systemd_user_status_batch(&[], CancellationToken::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        assert!(
+            systemd_user_status_batch(
+                &[UnitName::new(ConnectionId::new(), UnitKind::Service)],
+                cancellation
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn unit_observation_success_is_preserved() {
+        let result = bounded_unit_observation(
+            async { Ok(42) },
+            Duration::from_secs(1),
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(result, Ok(42));
+    }
 
     fn id() -> ConnectionId {
         ConnectionId::from_uuid(
@@ -817,6 +1602,17 @@ mod tests {
     }
 
     #[test]
+    fn named_systemd_start_accepts_only_plain_service_units() {
+        assert!(valid_systemd_service_name(
+            "cosmic-mounter-openconnect-agent.service"
+        ));
+        assert!(!valid_systemd_service_name(""));
+        assert!(!valid_systemd_service_name("openconnect.timer"));
+        assert!(!valid_systemd_service_name("../openconnect.service"));
+        assert!(!valid_systemd_service_name("open connect.service"));
+    }
+
+    #[test]
     fn scheduled_mirror_condition_is_rendered_only_when_metered_sync_is_disabled() {
         let mut spec = ServiceSpec {
             connection_id: id(),
@@ -829,8 +1625,8 @@ mod tests {
         };
         let guarded = UnitDocument::service(&spec).unwrap();
         assert!(guarded.content.contains("ExecCondition="));
-        assert!(guarded.content.contains("GENERAL.METERED"));
-        assert!(guarded.content.contains("(yes|2)$$"));
+        assert!(guarded.content.contains(crate::vpn::METERED_GUARD_FLAG));
+        assert!(!guarded.content.contains("nmcli"));
         spec.skip_on_metered = false;
         assert!(
             !UnitDocument::service(&spec)
@@ -866,24 +1662,6 @@ mod tests {
         assert!(unit.content.contains("Shared%%20Documents"));
         spec.pre_start_condition.as_mut().unwrap().arguments[1] = "bad\nargument".into();
         assert!(UnitDocument::service(&spec).is_err());
-    }
-
-    fn command_output(stdout: &str) -> CommandOutput {
-        CommandOutput {
-            command: "fake".into(),
-            stdout: CapturedOutput {
-                text: stdout.into(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            stderr: CapturedOutput {
-                text: String::new(),
-                truncated: false,
-                invalid_utf8: false,
-            },
-            attempts: 1,
-            duration: Duration::ZERO,
-        }
     }
 
     #[test]
@@ -952,8 +1730,8 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
         let mut second = first.clone();
         second.content = second.content.replace("Example storage", "Updated storage");
         let manager = FakeSystemdManager::default();
-        manager.push(Ok(None));
         manager.push(Err(ServiceError::Runtime("reload failed".into())));
+        manager.push(Ok(None));
         let controller = UnitController::new(store.clone(), manager);
 
         assert!(
@@ -969,12 +1747,14 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
     }
 
     #[tokio::test]
-    async fn verification_failure_removes_new_unit() {
+    async fn load_validation_failure_removes_new_unit_and_reloads_rollback() {
         let temp = TempDir::new().expect("temp");
         let store = FileUnitStore::new(temp.path().into(), Arc::new(StructuralUnitValidator));
         let document = service();
         let manager = FakeSystemdManager::default();
-        manager.push(Err(ServiceError::Runtime("verification failed".into())));
+        manager.push(Ok(None));
+        manager.push(Err(ServiceError::Runtime("load validation failed".into())));
+        manager.push(Ok(None));
         let controller = UnitController::new(store.clone(), manager);
 
         assert!(
@@ -984,6 +1764,109 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
                 .is_err()
         );
         assert_eq!(store.read(&document.name).expect("read restored"), None);
+    }
+
+    #[tokio::test]
+    async fn installation_reloads_then_validates_systemd_load_state() {
+        let temp = TempDir::new().expect("temp");
+        let store = FileUnitStore::new(temp.path().into(), Arc::new(StructuralUnitValidator));
+        let document = service();
+        let manager = FakeSystemdManager::default();
+        let controller = UnitController::new(store, manager.clone());
+
+        controller
+            .install(&document, CancellationToken::new())
+            .await
+            .expect("install");
+        assert_eq!(
+            manager.actions(),
+            vec![
+                (SystemdAction::DaemonReload, None),
+                (
+                    SystemdAction::ValidateLoaded,
+                    Some(document.name.file_name())
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn structural_validator_rejects_unknown_duplicate_and_mismatched_directives() {
+        let validator = StructuralUnitValidator;
+        let mut unknown = service();
+        unknown.content = unknown
+            .content
+            .replace("Type=simple", "Mystery=true\nType=simple");
+        assert!(validator.validate(&unknown).is_err());
+
+        let mut duplicate = service();
+        duplicate.content = duplicate
+            .content
+            .replace("ExecStart=", "ExecStart=\"/usr/bin/true\"\nExecStart=");
+        assert!(validator.validate(&duplicate).is_err());
+
+        let timer = UnitDocument::timer(&TimerSpec {
+            connection_id: id(),
+            description: "Example timer".into(),
+            interval: Duration::from_secs(60),
+            persistent: true,
+        })
+        .unwrap();
+        let mut mismatched = timer.clone();
+        mismatched.content = mismatched
+            .content
+            .replace(&service().name.file_name(), "cosmic-mounter-other.service");
+        assert!(validator.validate(&mismatched).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn systemd_analyze_accepts_generated_templates_in_test_tooling() {
+        let available = std::process::Command::new("systemd-analyze")
+            .arg("--version")
+            .output()
+            .expect("systemd-analyze is a declared Linux build dependency");
+        assert!(
+            available.status.success(),
+            "systemd-analyze --version failed"
+        );
+        let temp = TempDir::new().expect("temp");
+        let service = UnitDocument::service(&ServiceSpec {
+            connection_id: id(),
+            description: "Generated verification service".into(),
+            executable: PathBuf::from("/usr/bin/true"),
+            arguments: vec!["--version".into()],
+            pre_start_condition: Some(ServiceCommand {
+                executable: PathBuf::from("/usr/bin/true"),
+                arguments: vec!["condition".into()],
+            }),
+            restart_on_failure: true,
+            skip_on_metered: false,
+        })
+        .unwrap();
+        let timer = UnitDocument::timer(&TimerSpec {
+            connection_id: id(),
+            description: "Generated verification timer".into(),
+            interval: Duration::from_secs(900),
+            persistent: true,
+        })
+        .unwrap();
+        let service_path = temp.path().join(service.name.file_name());
+        let timer_path = temp.path().join(timer.name.file_name());
+        fs::write(&service_path, service.content).unwrap();
+        fs::write(&timer_path, timer.content).unwrap();
+
+        let output = std::process::Command::new("systemd-analyze")
+            .args(["--user", "verify"])
+            .arg(&service_path)
+            .arg(&timer_path)
+            .output()
+            .expect("run systemd-analyze test verifier");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[tokio::test]
@@ -1030,70 +1913,99 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
         );
     }
 
+    #[test]
+    fn dbus_active_states_map_to_runtime_states() {
+        assert_eq!(parse_active_state("active"), ActiveState::Active);
+        assert_eq!(parse_active_state("activating"), ActiveState::Activating);
+        assert_eq!(parse_active_state("inactive"), ActiveState::Inactive);
+        assert_eq!(parse_active_state("failed"), ActiveState::Failed);
+        assert_eq!(parse_active_state("deactivating"), ActiveState::Unknown);
+    }
+
     #[tokio::test]
-    async fn command_manager_constructs_typed_actions_and_parses_status() {
-        let runner = FakeCommandRunner::default();
-        for _ in 0..7 {
-            runner.push(Ok(command_output("")));
-        }
-        runner.push(Ok(command_output(
-            "SubState=running\nUnitFileState=enabled\nActiveState=active\nResult=success\n",
-        )));
-        let manager = CommandSystemdManager::new(runner.clone());
-        let unit = service().name;
-
-        manager
-            .action(SystemdAction::Verify, Some(&unit), CancellationToken::new())
+    #[ignore = "requires the live systemd user bus"]
+    async fn live_systemd_user_dbus_smoke_test() {
+        systemd_user_available()
             .await
-            .expect("verify");
-        manager
-            .action(SystemdAction::DaemonReload, None, CancellationToken::new())
-            .await
-            .expect("reload");
-        for action in [
-            SystemdAction::Enable,
-            SystemdAction::Disable,
-            SystemdAction::Start,
-            SystemdAction::Stop,
-            SystemdAction::ResetFailed,
-        ] {
-            manager
-                .action(action, Some(&unit), CancellationToken::new())
+            .expect("connect to systemd user manager");
+        assert_eq!(
+            systemd_user_active_state("default.target")
                 .await
-                .expect("typed action");
-        }
-        let status = manager
-            .action(SystemdAction::Status, Some(&unit), CancellationToken::new())
+                .expect("read default target state"),
+            "active"
+        );
+        assert_eq!(
+            systemd_user_invocation_id("default.target")
+                .await
+                .expect("read default target invocation")
+                .len(),
+            32
+        );
+        let (_, timeout, mode, signal) = systemd_user_stop_policy("dbus.service")
             .await
-            .expect("status")
-            .expect("status value");
+            .expect("read a user service stop policy");
+        assert!(timeout > 0);
+        assert!(!mode.is_empty());
+        assert!(signal > 0);
 
+        if let Ok(store) = FileUnitStore::user(Arc::new(StructuralUnitValidator))
+            && let Ok(entries) = fs::read_dir(&store.root)
+            && let Some((name, content)) = entries.filter_map(Result::ok).find_map(|entry| {
+                let name = entry.file_name().to_str()?.to_owned();
+                let kind = if name.ends_with(".service") {
+                    UnitKind::Service
+                } else if name.ends_with(".timer") {
+                    UnitKind::Timer
+                } else {
+                    return None;
+                };
+                let content = fs::read_to_string(entry.path()).ok()?;
+                let id = parse_owned_connection(&content)?;
+                (name.starts_with("cosmic-mounter-")).then_some((UnitName::new(id, kind), content))
+            })
+        {
+            StructuralUnitValidator
+                .validate(&UnitDocument {
+                    name: name.clone(),
+                    content,
+                })
+                .expect("validate an installed managed unit structurally");
+            DbusSystemdManager
+                .action(
+                    SystemdAction::ValidateLoaded,
+                    Some(&name),
+                    CancellationToken::new(),
+                )
+                .await
+                .expect("validate an installed managed unit through systemd D-Bus");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the optional OpenConnect authentication-agent user service"]
+    async fn live_openconnect_agent_start_waits_for_active_service() {
+        let unit = "cosmic-mounter-openconnect-agent.service";
+        systemd_user_start_named_unit(unit)
+            .await
+            .expect("start OpenConnect authentication agent");
         assert_eq!(
-            status,
-            UnitStatus {
-                active: ActiveState::Active,
-                enabled: true,
-                detail: "running".into(),
-                result: "success".into(),
-            }
+            systemd_user_active_state(unit)
+                .await
+                .expect("read OpenConnect authentication-agent state"),
+            "active"
         );
-        assert_eq!(
-            runner
-                .requests()
-                .iter()
-                .map(CommandRequest::sanitized_command)
-                .collect::<Vec<_>>(),
-            vec![
-                "systemd-analyze --user verify cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user daemon-reload",
-                "systemctl --user enable cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user disable cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user start cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user stop cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user reset-failed cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-                "systemctl --user show --property=ActiveState --property=UnitFileState --property=SubState --property=Result cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service",
-            ]
-        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires COSMIC_MOUNTER_LIVE_CONNECTION_ID and its disposable managed service"]
+    async fn live_managed_online_service_start_uses_systemd_dbus() {
+        let id = std::env::var("COSMIC_MOUNTER_LIVE_CONNECTION_ID")
+            .expect("set COSMIC_MOUNTER_LIVE_CONNECTION_ID");
+        let id = ConnectionId::from_uuid(Uuid::parse_str(&id).expect("connection UUID"));
+        let unit = UnitName::new(id, UnitKind::Service);
+        start_managed_online_service(&DbusSystemdManager, &unit, CancellationToken::new())
+            .await
+            .expect("start managed service through systemd D-Bus");
     }
 
     fn online_status(active: ActiveState, detail: &str, result: &str) -> UnitStatus {
@@ -1134,6 +2046,51 @@ Unit=cosmic-mounter-2a3f5d45-e867-47e7-943f-66cf60e777ad.service\n\n\
                 SystemdAction::Status,
                 SystemdAction::Start,
                 SystemdAction::Status
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn online_start_waits_for_transitional_unit_state_to_become_active() {
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(Some(online_status(
+            ActiveState::Inactive,
+            "dead",
+            "success",
+        ))));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(online_status(
+            ActiveState::Inactive,
+            "dead",
+            "success",
+        ))));
+        manager.push(Ok(Some(online_status(
+            ActiveState::Activating,
+            "start",
+            "success",
+        ))));
+        manager.push(Ok(Some(online_status(
+            ActiveState::Active,
+            "running",
+            "success",
+        ))));
+        let unit = service().name;
+
+        start_managed_online_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect("transitional online start");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Status,
+                SystemdAction::Start,
+                SystemdAction::Status,
+                SystemdAction::Status,
+                SystemdAction::Status,
             ]
         );
     }

@@ -6,9 +6,11 @@ Build-Depends:
  debhelper-compat (= 13),
  cargo,
  rustc,
+ python3,
  pkg-config,
  desktop-file-utils,
- appstream
+ appstream,
+ systemd
 Standards-Version: 4.7.0
 Homepage: https://github.com/uutzinger/cosmic-ext-applet-mounter
 Rules-Requires-Root: no
@@ -19,12 +21,15 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends}
 Recommends:
- rclone,
+ rclone (>= 1.74.3),
  fuse3,
- psmisc,
  network-manager,
- onedriver,
- onedrive
+ onedriver (>= 0.15.0),
+ onedrive (>= 2.5.10),
+ python3,
+ python3-gi,
+ gir1.2-gtk-3.0,
+ gir1.2-webkit2-4.1
 Description: applet for COSMIC to manage cloud mounts and offline storage mirrors
  Cloud Mounter manages supported cloud and network storage connections from the
  COSMIC panel.

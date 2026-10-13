@@ -4,11 +4,14 @@ mod sftp;
 use sftp::{SftpAuth, SftpDraft, SftpField};
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -24,6 +27,7 @@ use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_p
 use cosmic::iced::{Alignment, Color, Length, Limits, Subscription, window::Id};
 use cosmic::prelude::*;
 use cosmic::widget;
+use cosmic_ext_applet_mounter::bisync_coordinator::{self, BisyncMode, BisyncOutcome};
 use cosmic_ext_applet_mounter::config::{
     APP_ID, AppConfigStorage, Config, ConfigDocument, MAX_PRELOAD_DEPTH, MAX_PRELOAD_SECONDS,
     MIN_PRELOAD_DEPTH, MIN_PRELOAD_SECONDS,
@@ -35,6 +39,7 @@ use cosmic_ext_applet_mounter::controller::{
 use cosmic_ext_applet_mounter::directory_preload::{
     self, DirectoryPreloadJob, DirectoryPreloadOutcome,
 };
+use cosmic_ext_applet_mounter::host_inspection::HostInspection;
 use cosmic_ext_applet_mounter::import::{
     ImportPreview, ImportReplacementPlan, default_scan_directory, parse_rclone_backends,
     preview_import, replacement_plan, scan_legacy_units,
@@ -42,17 +47,24 @@ use cosmic_ext_applet_mounter::import::{
 use cosmic_ext_applet_mounter::mirror_script;
 use cosmic_ext_applet_mounter::model::{
     AccessMode, Connection, ConnectionId, ConnectionMode, ConnectionStatus, OfflineMirrorConfig,
-    OnlineMountConfig, Operation, PreloadPolicy, PreloadSettings, Provider, SmbPreloadOverride,
-    TuningProfile, VpnKind, VpnProfile, VpnProfileId,
+    OnlineMountConfig, OnlineMountStatus, Operation, PreloadPolicy, PreloadSettings, Provider,
+    SmbPreloadOverride, TuningProfile, VpnKind, VpnProfile, VpnProfileId,
 };
 use cosmic_ext_applet_mounter::mount_guard;
+#[cfg(test)]
+use cosmic_ext_applet_mounter::mounts::ProcMountTable;
 use cosmic_ext_applet_mounter::mounts::{
-    MountEntry, MountTable, MountTableError, ProcMountTable, SyncRuntimeState,
+    MountEntry, MountTable, MountTableError, SyncRuntimeState,
+};
+use cosmic_ext_applet_mounter::offline_coordinator::{
+    ManualOperationControl, OfflineCoordinatorState, OfflineOperation, OfflineOperationState,
 };
 use cosmic_ext_applet_mounter::pending_count;
+#[cfg(test)]
+#[allow(dead_code)]
+use cosmic_ext_applet_mounter::process::redact_text;
 use cosmic_ext_applet_mounter::process::{
-    CommandError, CommandExecutionMode, CommandOutput, CommandRequest, CommandRunner, Executable,
-    RuntimeCommandRunner, redact_text,
+    CommandError, CommandOutput, CommandRequest, CommandRunner, Executable, RuntimeCommandRunner,
 };
 use cosmic_ext_applet_mounter::providers::{
     CommandRcloneProvider, OnedriverAuthState, ProviderError, clean_unmount_request,
@@ -60,23 +72,23 @@ use cosmic_ext_applet_mounter::providers::{
 };
 use cosmic_ext_applet_mounter::rclone_refresh::{self, RcloneRefreshJob, RcloneRefreshOutcome};
 use cosmic_ext_applet_mounter::services::{
-    ActiveState, CommandSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction,
-    SystemdManager, UnitController, UnitDocument, UnitKind, UnitName, UnitStatus,
-    start_managed_online_service,
+    ActiveState, DbusSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction,
+    SystemdManager, UnitController, UnitDocument, UnitFileState, UnitKind, UnitName, UnitStatus,
+    UnitStore, UnitValidator, start_managed_online_service, systemd_user_status_batch,
+    systemd_user_status_blocking,
 };
 use cosmic_ext_applet_mounter::sync::{
     OneDriveIsolationReport, SyncDecision, SyncDecisionRejection, SyncReadiness, SyncRequest,
     SyncTrigger, one_drive_auth_files_request, one_drive_auth_request,
     one_drive_initial_sync_request, one_drive_mirror_plan, one_drive_preview_request,
-    one_drive_sync_request, parse_preview, rclone_bisync_filter_file,
-    rclone_bisync_initial_preview_request, rclone_bisync_initial_sync_request, rclone_bisync_plan,
-    rclone_bisync_preview_request, rclone_bisync_sync_request, sync_now_request,
+    one_drive_sync_request, parse_preview, rclone_bisync_filter_file, rclone_bisync_plan,
+    sync_now_request,
 };
 use cosmic_ext_applet_mounter::teams;
 use cosmic_ext_applet_mounter::teams_oauth::{self, TeamsOAuthOutcome, TeamsOAuthSetup};
 use cosmic_ext_applet_mounter::vpn::{
-    CiscoTunnelState, CiscoVpn, CommandCiscoVpn, CommandNetworkManagerVpn, CommandReadinessProbe,
-    NetworkManagerVpn, VpnShutdownDecision, readiness_report, shutdown_decision,
+    DbusNetworkManagerVpn, InProcessReadinessProbe, NetworkManagerVpn, VpnShutdownDecision,
+    readiness_report, shutdown_decision,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -92,6 +104,48 @@ const POPUP_NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 const POPUP_HEALTHY_AGGREGATE_HIDE_AFTER: Duration = Duration::from_secs(5);
 const PENDING_COUNT_STALE_AFTER: Duration = Duration::from_secs(15);
 const CLEAN_UNMOUNT_SETTLE_TIMEOUT: Duration = Duration::from_secs(2);
+const REPAIR_CONFIRM_MIN_DELAY: Duration = Duration::from_secs(1);
+const REPAIR_CONFIRM_MAX_DELAY: Duration = Duration::from_secs(30);
+const RUNTIME_OPERATION_COMPLETION_LIMIT: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RepairConfirmationDecision {
+    Arm,
+    Wait,
+    Confirm,
+}
+
+fn repair_confirmation_decision(
+    pending: Option<(ConnectionId, Instant)>,
+    connection_id: ConnectionId,
+    now: Instant,
+) -> RepairConfirmationDecision {
+    let Some((pending_id, armed_at)) = pending else {
+        return RepairConfirmationDecision::Arm;
+    };
+    if pending_id != connection_id {
+        return RepairConfirmationDecision::Arm;
+    }
+    let elapsed = now.duration_since(armed_at);
+    if elapsed < REPAIR_CONFIRM_MIN_DELAY {
+        RepairConfirmationDecision::Wait
+    } else if elapsed <= REPAIR_CONFIRM_MAX_DELAY {
+        RepairConfirmationDecision::Confirm
+    } else {
+        RepairConfirmationDecision::Arm
+    }
+}
+
+fn popup_notice_expired(
+    notice_started_at: Instant,
+    popup_opened_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    let visible_since = popup_opened_at
+        .filter(|opened_at| *opened_at > notice_started_at)
+        .unwrap_or(notice_started_at);
+    now.duration_since(visible_since) >= POPUP_NOTICE_TIMEOUT
+}
 const CLEAN_UNMOUNT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SETTINGS_SECTION_TITLE_WIDTH: f32 = 150.0;
 const SETTINGS_SECTION_TITLE_TOP_PADDING: u16 = 8;
@@ -100,6 +154,10 @@ const SETTINGS_DISABLE_BUTTON_ACTIVE_LIGHTENING: f32 = 0.35;
 const SETTINGS_DISABLE_BUTTON_HOVER_LIGHTENING: f32 = 0.25;
 const SETTINGS_DISABLE_BUTTON_PRESSED_LIGHTENING: f32 = 0.15;
 const SETTINGS_DISABLE_BUTTON_DISABLED_LIGHTENING: f32 = 0.15;
+const DOCUMENTS_DESTINATION: &str = "org.freedesktop.portal.Documents";
+const DOCUMENTS_PATH: &str = "/org/freedesktop/portal/documents";
+const DOCUMENTS_INTERFACE: &str = "org.freedesktop.portal.Documents";
+const DOCUMENTS_GET_HOST_PATHS_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppLaunchMode {
@@ -276,7 +334,7 @@ struct ConnectionDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RcloneDraftRemote {
+pub struct RcloneDraftRemote {
     name: String,
     backend: String,
 }
@@ -292,6 +350,29 @@ struct SmbRemoteDetails {
     host: String,
     user: String,
     domain: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemotePrefillContext {
+    id: Option<ConnectionId>,
+    provider: Provider,
+    remote: String,
+    sftp_revision: u64,
+    smb: SmbRemoteDetails,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemotePrefillResult {
+    smb: Option<SmbRemoteDetails>,
+    sftp: Option<SftpDraft>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct UnitObservation {
+    services: BTreeMap<ConnectionId, UnitStatus>,
+    timers: BTreeMap<ConnectionId, UnitStatus>,
+    warnings: Option<BTreeMap<ConnectionId, Vec<String>>>,
+    failed: BTreeSet<ConnectionId>,
 }
 
 impl Default for ConnectionDraft {
@@ -340,7 +421,7 @@ pub struct AppModel {
     import_previews: Vec<ImportPreview>,
     rclone_remotes: Vec<RcloneDraftRemote>,
     pending_remove: Option<ConnectionId>,
-    pending_repair: Option<ConnectionId>,
+    pending_repair: Option<(ConnectionId, Instant)>,
     pending_shared_remote_ack: Option<ConnectionId>,
     pending_rclone_remote_remove: Option<String>,
     removing_connection: Option<ConnectionId>,
@@ -360,6 +441,7 @@ pub struct AppModel {
     vpn_ready: BTreeMap<VpnProfileId, bool>,
     network_ready: Option<bool>,
     sleep_status: Option<String>,
+    sleep_needs_attention: bool,
     sleep_notice: Option<String>,
     sleep_settings_pending: bool,
     preload_notice: Option<String>,
@@ -370,16 +452,39 @@ pub struct AppModel {
     runtime_poll_pending: bool,
     runtime_poll_obsolete: bool,
     runtime_error: Option<String>,
+    runtime_operation_revision: u64,
+    runtime_operation_completions: Vec<runtime_ipc::OperationCompletion>,
+    runtime_routed_operations: BTreeMap<ConnectionId, Operation>,
+    runtime_operation_wait: Option<RuntimeOperationWait>,
     rclone_refresh_starting: BTreeSet<ConnectionId>,
     rclone_refresh_jobs: BTreeMap<ConnectionId, u64>,
     preload_draft: PreloadSettingsDraft,
     preload_input_dirty: bool,
     directory_preload_jobs: BTreeMap<ConnectionId, u64>,
     unmount_pending: BTreeSet<ConnectionId>,
+    online_repair_required: BTreeSet<ConnectionId>,
+    repair_operations_pending: BTreeSet<ConnectionId>,
     pending_counts: BTreeMap<ConnectionId, PendingObservation>,
     pending_poll_inflight: BTreeSet<ConnectionId>,
     pending_poll_generation: u64,
     mirror_operations_pending: BTreeSet<ConnectionId>,
+    mirror_operation_controls: BTreeMap<ConnectionId, Arc<ManualOperationControl>>,
+    mount_entries: Vec<MountEntry>,
+    mount_inspection_pending: bool,
+    mount_inspection_obsolete: bool,
+    mount_inspection_error: Option<String>,
+    rclone_inspection_generation: u64,
+    prefill_generation: u64,
+    rclone_inspection_cancellation: CancellationToken,
+    prefill_cancellation: CancellationToken,
+    unit_observation: UnitObservation,
+    unit_observation_connections: Vec<Connection>,
+    unit_observed_at: Option<Instant>,
+    unit_observation_pending: bool,
+    unit_observation_invalidated: bool,
+    unit_observation_revision: u64,
+    unit_observation_cancellation: CancellationToken,
+    unit_operations_waiting: BTreeMap<ConnectionId, (Connection, Operation)>,
 }
 
 #[derive(Debug, Clone)]
@@ -390,16 +495,33 @@ struct PendingObservation {
     source: PendingSource,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeOperationWait {
+    connection_id: ConnectionId,
+    operation: Operation,
+    after_revision: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum PendingSource {
     RcloneOnline,
-    RcloneMirror,
     RcloneMirrorLive,
     OneDriveMirror,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    UnitObservationTick,
+    UnitObservationCompleted(u64, Vec<Connection>, UnitObservation),
+    MountInspectionTick,
+    MountInspectionCompleted(Result<Vec<MountEntry>, String>),
+    RcloneInspectionCompleted(u64, bool, Result<Vec<RcloneDraftRemote>, String>),
+    RemotePrefillCompleted(
+        u64,
+        RemotePrefillContext,
+        Result<RemotePrefillResult, String>,
+    ),
+    ImportInspectionCompleted(Result<BTreeMap<String, Provider>, String>),
     TogglePopup,
     OpenGeneralSettings,
     RuntimeEvent(runtime_ipc::Event),
@@ -421,7 +543,8 @@ pub enum Message {
     ReorderConnection(ConnectionId, usize),
     PopupClosed(Id),
     OperationRequested(ConnectionId, Operation),
-    OperationCompleted(String),
+    OnlineRepairCompleted(ConnectionId, String),
+    OfflineRepairCompleted(ConnectionId, String),
     MirrorOperationCompleted(ConnectionId, String),
     ManagedOnlineOperationCompleted(Connection, Operation, Result<(), String>),
     RcloneRefreshStarted(String, ConnectionId, Result<RcloneRefreshJob, String>),
@@ -561,6 +684,7 @@ impl cosmic::Application for AppModel {
             vpn_ready: BTreeMap::new(),
             network_ready: None,
             sleep_status: None,
+            sleep_needs_attention: false,
             sleep_notice: None,
             sleep_settings_pending: false,
             preload_notice: None,
@@ -571,25 +695,48 @@ impl cosmic::Application for AppModel {
             runtime_poll_pending: false,
             runtime_poll_obsolete: false,
             runtime_error: None,
+            runtime_operation_revision: 0,
+            runtime_operation_completions: Vec::new(),
+            runtime_routed_operations: BTreeMap::new(),
+            runtime_operation_wait: None,
             rclone_refresh_starting: BTreeSet::new(),
             rclone_refresh_jobs: BTreeMap::new(),
             preload_draft,
             preload_input_dirty: false,
             directory_preload_jobs: BTreeMap::new(),
             unmount_pending: BTreeSet::new(),
+            online_repair_required: BTreeSet::new(),
+            repair_operations_pending: BTreeSet::new(),
             pending_counts: BTreeMap::new(),
             pending_poll_inflight: BTreeSet::new(),
             pending_poll_generation: 0,
             mirror_operations_pending: BTreeSet::new(),
+            mirror_operation_controls: BTreeMap::new(),
+            mount_entries: Vec::new(),
+            mount_inspection_pending: false,
+            mount_inspection_obsolete: false,
+            mount_inspection_error: None,
+            rclone_inspection_generation: 0,
+            prefill_generation: 0,
+            rclone_inspection_cancellation: CancellationToken::new(),
+            prefill_cancellation: CancellationToken::new(),
+            unit_observation: UnitObservation::default(),
+            unit_observation_connections: Vec::new(),
+            unit_observed_at: None,
+            unit_observation_pending: false,
+            unit_observation_invalidated: false,
+            unit_observation_revision: 0,
+            unit_observation_cancellation: CancellationToken::new(),
+            unit_operations_waiting: BTreeMap::new(),
         };
-        match flags {
+        let inspection = match flags {
             AppLaunchMode::ModifyConnection(id) => app.load_draft(id),
             AppLaunchMode::ImportLegacy => app.scan_imports(),
             AppLaunchMode::Applet
             | AppLaunchMode::AddConnection
             | AppLaunchMode::GeneralSettings
-            | AppLaunchMode::ReorderConnections => {}
-        }
+            | AppLaunchMode::ReorderConnections => Task::none(),
+        };
         let window_title = window_title(window_mode);
         let title = if standalone {
             app.set_header_title(window_title.clone());
@@ -609,7 +756,12 @@ impl cosmic::Application for AppModel {
         } else {
             Task::none()
         };
-        (app, Task::batch([title, initial]))
+        let mounts = app.refresh_mount_inspection();
+        let units = app.refresh_unit_observation(false);
+        (
+            app,
+            Task::batch([title, initial, inspection, mounts, units]),
+        )
     }
 
     fn on_close_requested(&self, id: Id) -> Option<Message> {
@@ -640,15 +792,31 @@ impl cosmic::Application for AppModel {
 
     fn subscription(&self) -> Subscription<Self::Message> {
         let mut subscriptions = Vec::new();
-        if !self.standalone {
-            subscriptions.push(runtime_ipc::runtime_subscription().map(Message::RuntimeEvent));
-        } else if self.window_mode == WindowMode::GeneralSettings {
-            subscriptions.push(runtime_ipc::settings_subscription().map(Message::RuntimeEvent));
+        if self.standalone || self.popup.is_some() {
             subscriptions.push(
-                cosmic::iced::time::every(Duration::from_secs(2)).map(|_| Message::RuntimePoll),
+                cosmic::iced::time::every(Duration::from_secs(5))
+                    .map(|_| Message::MountInspectionTick),
             );
         }
+        if !self.standalone {
+            subscriptions.push(runtime_ipc::runtime_subscription().map(Message::RuntimeEvent));
+        } else {
+            if self.window_mode == WindowMode::GeneralSettings {
+                subscriptions.push(runtime_ipc::settings_subscription().map(Message::RuntimeEvent));
+            }
+            if self.window_mode == WindowMode::GeneralSettings
+                || self.runtime_operation_wait.is_some()
+            {
+                subscriptions.push(
+                    cosmic::iced::time::every(Duration::from_secs(2)).map(|_| Message::RuntimePoll),
+                );
+            }
+        }
         if !self.standalone && self.popup.is_some() {
+            subscriptions.push(
+                cosmic::iced::time::every(Duration::from_secs(5))
+                    .map(|_| Message::UnitObservationTick),
+            );
             subscriptions
                 .push(cosmic::iced::time::every(Duration::from_secs(1)).map(Message::NoticeTick));
         }
@@ -666,7 +834,125 @@ impl cosmic::Application for AppModel {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+        let force_unit_refresh = !matches!(&message, Message::TogglePopup);
+        let refresh_mounts = matches!(
+            &message,
+            Message::TogglePopup
+                | Message::ManagedOnlineOperationCompleted(..)
+                | Message::OnlineRepairCompleted(..)
+                | Message::OfflineRepairCompleted(..)
+                | Message::MirrorOperationCompleted(..)
+                | Message::RuntimeRefreshCompleted(..)
+        );
+        let task = self.update_message(message);
+
+        if refresh_mounts {
+            self.mount_inspection_obsolete |= self.mount_inspection_pending;
+            let units = if !force_unit_refresh && self.popup.is_none() {
+                Task::none()
+            } else {
+                self.refresh_unit_observation(force_unit_refresh)
+            };
+            Task::batch([task, self.refresh_mount_inspection(), units])
+        } else {
+            task
+        }
+    }
+
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
+        if self.standalone {
+            None
+        } else {
+            Some(cosmic::applet::style())
+        }
+    }
+}
+
+impl AppModel {
+    fn update_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        let mut inspection_tasks = Vec::new();
         match message {
+            Message::UnitObservationTick => return self.refresh_unit_observation(false),
+            Message::UnitObservationCompleted(revision, connections, observation) => {
+                if revision != self.unit_observation_revision {
+                    return Task::none();
+                }
+                self.unit_observation_pending = false;
+                if connections != self.config.document.connections {
+                    return self.refresh_unit_observation(true);
+                }
+                self.unit_observation.services.extend(observation.services);
+                self.unit_observation.timers.extend(observation.timers);
+                if let Some(warnings) = observation.warnings {
+                    self.unit_observation.warnings = Some(warnings);
+                }
+                self.unit_observation.failed = observation.failed;
+                let ids = connections
+                    .iter()
+                    .map(|connection| connection.id)
+                    .collect::<BTreeSet<_>>();
+                self.unit_observation
+                    .services
+                    .retain(|id, _| ids.contains(id));
+                self.unit_observation
+                    .timers
+                    .retain(|id, _| ids.contains(id));
+                self.unit_observation_connections = connections;
+                self.unit_observed_at = Some(Instant::now());
+                self.unit_observation_invalidated = false;
+                let waiting = std::mem::take(&mut self.unit_operations_waiting);
+                for (id, (connection, operation)) in waiting {
+                    if self.unit_status_fresh(id)
+                        && self
+                            .config
+                            .document
+                            .connections
+                            .iter()
+                            .any(|saved| saved == &connection)
+                    {
+                        inspection_tasks.push(self.record_operation_request(id, operation));
+                    } else {
+                        self.last_notice = Some(fl!("unit-status-refresh-unavailable"));
+                        self.last_notice_at = Some(Instant::now());
+                        self.complete_routed_operation(id, operation);
+                    }
+                }
+            }
+            Message::MountInspectionTick => return self.refresh_mount_inspection(),
+            Message::MountInspectionCompleted(result) => {
+                self.mount_inspection_pending = false;
+                if std::mem::take(&mut self.mount_inspection_obsolete) {
+                    return self.refresh_mount_inspection();
+                }
+                match result {
+                    Ok(entries) => {
+                        self.mount_entries = entries;
+                        self.mount_inspection_error = None;
+                    }
+                    Err(error) => {
+                        if self.mount_inspection_error.as_ref() != Some(&error) {
+                            self.last_notice = Some(fl!(
+                                "ui-app-read-host-mount-table-error",
+                                error = error.as_str()
+                            ));
+                            self.last_notice_at = Some(Instant::now());
+                        }
+                        self.mount_inspection_error = Some(error);
+                    }
+                }
+                // Failed inspection is not evidence that a mount disappeared.
+            }
+            Message::RcloneInspectionCompleted(generation, show_notice, result) => {
+                if generation == self.rclone_inspection_generation {
+                    self.finish_rclone_inspection(show_notice, result);
+                }
+            }
+            Message::RemotePrefillCompleted(generation, context, result) => {
+                if generation == self.prefill_generation && context == self.prefill_context() {
+                    self.finish_remote_prefill(result);
+                }
+            }
+            Message::ImportInspectionCompleted(result) => self.finish_import_scan(result),
             Message::OpenGeneralSettings => {
                 self.launch_settings_process(AppLaunchMode::GeneralSettings);
             }
@@ -718,7 +1004,27 @@ impl cosmic::Application for AppModel {
             }
             Message::RuntimeEvent(runtime_ipc::Event::Request(command, reply)) => {
                 if self.standalone {
-                    reply.complete(Err("This window is not the runtime owner".into()));
+                    reply.complete(Err(crate::fl!(
+                        "ui-app-this-window-is-not-the-runtime-owner"
+                    )));
+                } else if let RuntimeCommand::RunOperation(connection_id, operation) = command {
+                    if self.runtime_routed_operations.contains_key(&connection_id) {
+                        reply.complete(Err(crate::fl!(
+                            "ui-app-another-routed-operation-is-already-pending-for"
+                        )));
+                        return Task::none();
+                    }
+                    match load_runtime_config() {
+                        Ok(config) => self.config = config,
+                        Err(error) => {
+                            reply.complete(Err(error));
+                            return Task::none();
+                        }
+                    }
+                    self.runtime_routed_operations
+                        .insert(connection_id, operation);
+                    reply.complete(Ok(self.runtime_status()));
+                    return self.record_operation_request(connection_id, operation);
                 } else if matches!(
                     command,
                     RuntimeCommand::Refresh | RuntimeCommand::ConfigurationChanged
@@ -780,6 +1086,9 @@ impl cosmic::Application for AppModel {
                 }
                 match result {
                     Ok(status) => {
+                        if command == RuntimeCommand::Status {
+                            self.reconcile_runtime_operation_completion(&status);
+                        }
                         self.runtime_available = true;
                         self.runtime_error = None;
                         // Ignore a status poll that started before a setting write.
@@ -791,6 +1100,7 @@ impl cosmic::Application for AppModel {
                                 self.preload_draft = status.preload.into();
                             }
                             self.sleep_status = status.sleep_status;
+                            self.sleep_needs_attention = status.sleep_needs_attention;
                         }
                         match command {
                             RuntimeCommand::SetUnmount(_) | RuntimeCommand::SetRestore(_) => {
@@ -803,6 +1113,27 @@ impl cosmic::Application for AppModel {
                             }
                             RuntimeCommand::Refresh => {
                                 self.last_notice = Some(fl!("notice-refreshed"));
+                            }
+                            RuntimeCommand::RunOperation(connection_id, operation) => {
+                                if let Some(wait) = self.runtime_operation_wait.as_mut()
+                                    && wait.connection_id == connection_id
+                                    && wait.operation == operation
+                                {
+                                    wait.after_revision = Some(status.operation_revision);
+                                }
+                                let name = self
+                                    .config
+                                    .document
+                                    .connections
+                                    .iter()
+                                    .find(|connection| connection.id == connection_id)
+                                    .map(|connection| connection.name.clone())
+                                    .unwrap_or_else(|| fl!("access-offline"));
+                                self.last_notice = Some(fl!(
+                                    "notice-operation-requested",
+                                    operation = operation_label(operation),
+                                    name = name
+                                ));
                             }
                             _ => {}
                         }
@@ -817,6 +1148,15 @@ impl cosmic::Application for AppModel {
                                 self.preload_notice = Some(error);
                             }
                             RuntimeCommand::Status => self.runtime_error = Some(error),
+                            RuntimeCommand::RunOperation(connection_id, operation) => {
+                                if self.runtime_operation_wait.is_some_and(|wait| {
+                                    wait.connection_id == connection_id
+                                        && wait.operation == operation
+                                }) {
+                                    self.runtime_operation_wait = None;
+                                }
+                                self.last_notice = Some(error);
+                            }
                             _ => self.last_notice = Some(error),
                         }
                     }
@@ -878,8 +1218,12 @@ impl cosmic::Application for AppModel {
                 self.preload_notice = None;
                 return runtime_request_task(RuntimeCommand::SetPreload(value));
             }
-            Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status(status)) => {
-                self.sleep_status = Some(status);
+            Message::SleepEvent(cosmic_ext_applet_mounter::sleep::Event::Status {
+                text,
+                needs_attention,
+            }) => {
+                self.sleep_status = Some(text);
+                self.sleep_needs_attention = needs_attention;
                 self.pending_counts.clear();
                 self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
             }
@@ -993,28 +1337,60 @@ impl cosmic::Application for AppModel {
             Message::OperationRequested(connection_id, operation) => {
                 self.pending_counts.remove(&connection_id);
                 self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
+                if !self.runtime_owner {
+                    self.runtime_poll_obsolete = self.runtime_poll_pending;
+                    self.runtime_pending = true;
+                    self.runtime_operation_wait = Some(RuntimeOperationWait {
+                        connection_id,
+                        operation,
+                        after_revision: None,
+                    });
+                    return runtime_request_task(RuntimeCommand::RunOperation(
+                        connection_id,
+                        operation,
+                    ));
+                }
                 return self.record_operation_request(connection_id, operation);
             }
-            Message::OperationCompleted(notice) => {
+            Message::OnlineRepairCompleted(id, notice) => {
+                self.repair_operations_pending.remove(&id);
+                self.online_repair_required.remove(&id);
                 self.config = Config::load_runtime().config;
                 self.pending_repair = None;
-                self.pending_shared_remote_ack = None;
-                self.pending_rclone_remote_remove = None;
                 self.last_notice = Some(notice);
                 self.last_notice_at = Some(Instant::now());
+                self.complete_routed_operation(id, Operation::Repair);
+            }
+            Message::OfflineRepairCompleted(id, notice) => {
+                self.repair_operations_pending.remove(&id);
+                self.config = Config::load_runtime().config;
+                self.pending_repair = None;
+                self.last_notice = Some(notice);
+                self.last_notice_at = Some(Instant::now());
+                self.complete_routed_operation(id, Operation::Repair);
             }
             Message::MirrorOperationCompleted(id, notice) => {
                 self.mirror_operations_pending.remove(&id);
+                self.mirror_operation_controls.remove(&id);
                 self.pending_counts.remove(&id);
                 self.config = Config::load_runtime().config;
                 self.last_notice = Some(notice);
                 self.last_notice_at = Some(Instant::now());
+                if let Some(operation) = self.runtime_routed_operations.get(&id).copied() {
+                    self.complete_routed_operation(id, operation);
+                }
                 return Task::perform(async {}, |_| cosmic::Action::App(Message::PendingCountTick));
             }
             Message::ManagedOnlineOperationCompleted(connection, operation, result) => {
                 if operation == Operation::Unmount {
                     self.unmount_pending.remove(&connection.id);
                 }
+                update_online_repair_requirement(
+                    &mut self.online_repair_required,
+                    connection.id,
+                    operation,
+                    &result,
+                );
                 self.config = Config::load_runtime().config;
                 self.pending_repair = None;
                 let label = operation_label(operation);
@@ -1026,6 +1402,7 @@ impl cosmic::Application for AppModel {
                             name = connection.name.as_str()
                         ));
                         self.last_notice_at = Some(Instant::now());
+                        self.complete_routed_operation(connection.id, operation);
                         if operation == Operation::Mount
                             && connection.provider == Provider::GoogleDrive
                             && self.config.document.preload.google_drive.enabled
@@ -1113,6 +1490,7 @@ impl cosmic::Application for AppModel {
                             error = error
                         ));
                         self.last_notice_at = Some(Instant::now());
+                        self.complete_routed_operation(connection.id, operation);
                     }
                 }
             }
@@ -1283,7 +1661,7 @@ impl cosmic::Application for AppModel {
                 }
                 self.sftp_update_ack = None;
                 if self.draft.provider == Provider::Sftp {
-                    self.load_sftp_details();
+                    inspection_tasks.push(self.remote_prefill());
                 }
             }
             Message::DraftSubpath(value) => {
@@ -1324,7 +1702,7 @@ impl cosmic::Application for AppModel {
                 self.sftp_setup_pending = false;
                 self.sftp_update_ack = None;
                 self.validated_draft = None;
-                self.detect_rclone_remotes();
+                inspection_tasks.push(self.detect_rclone_remotes(false));
                 self.sftp_retry_secret_auth = if result.is_err()
                     && self.draft.provider == Provider::Sftp
                     && self.draft.remote_reference.trim() == name
@@ -1444,7 +1822,7 @@ impl cosmic::Application for AppModel {
                 self.detect_and_import_vpns();
             }
             Message::DetectRcloneRemotes => {
-                self.detect_rclone_remotes();
+                inspection_tasks.push(self.detect_rclone_remotes(true));
             }
             Message::ApplyGoogleDriveRcloneRemote => {
                 return self.apply_google_drive_rclone_remote();
@@ -1456,7 +1834,7 @@ impl cosmic::Application for AppModel {
                     Ok(result) => {
                         self.validated_draft = None;
                         self.draft.remote_reference = result.remote_name.clone();
-                        self.detect_rclone_remotes();
+                        inspection_tasks.push(self.detect_rclone_remotes(false));
                         self.last_notice = Some(if result.updated {
                             fl!("notice-google-updated", name = result.remote_name)
                         } else {
@@ -1475,7 +1853,7 @@ impl cosmic::Application for AppModel {
                 Ok(remote_name) => {
                     self.validated_draft = None;
                     self.draft.remote_reference = remote_name.clone();
-                    self.detect_rclone_remotes();
+                    inspection_tasks.push(self.detect_rclone_remotes(false));
                     self.last_notice = Some(fl!("notice-box-created", name = remote_name));
                 }
                 Err(error) => {
@@ -1489,7 +1867,7 @@ impl cosmic::Application for AppModel {
                 self.teams_oauth_pending = false;
                 match result {
                     Ok(outcome) => {
-                        self.detect_rclone_remotes();
+                        inspection_tasks.push(self.detect_rclone_remotes(false));
                         if self.draft.provider == Provider::Teams
                             && self.draft.remote_reference.trim() == outcome.remote_name
                             && teams::same_library_url(
@@ -1528,7 +1906,7 @@ impl cosmic::Application for AppModel {
                     self.validated_draft = None;
                     self.draft.remote_reference = result.remote_name.clone();
                     self.draft.smb_password.clear();
-                    self.detect_rclone_remotes();
+                    inspection_tasks.push(self.detect_rclone_remotes(false));
                     let password_status = if result.password_updated {
                         fl!("notice-smb-password-updated")
                     } else {
@@ -1555,7 +1933,7 @@ impl cosmic::Application for AppModel {
                     if self.draft.remote_reference == remote_name {
                         self.draft.remote_reference.clear();
                     }
-                    self.detect_rclone_remotes();
+                    inspection_tasks.push(self.detect_rclone_remotes(false));
                     self.last_notice = Some(fl!("notice-rclone-removed", name = remote_name));
                 }
                 Err(error) => {
@@ -1697,7 +2075,7 @@ impl cosmic::Application for AppModel {
             }
             Message::NoticeTick(now) => {
                 if let Some(started_at) = self.last_notice_at
-                    && now.duration_since(started_at) >= POPUP_NOTICE_TIMEOUT
+                    && popup_notice_expired(started_at, self.popup_opened_at, now)
                 {
                     self.last_notice = None;
                     self.last_notice_at = None;
@@ -1707,7 +2085,7 @@ impl cosmic::Application for AppModel {
                 if self.popup.is_none() || self.standalone || self.network_ready == Some(false) {
                     return Task::none();
                 }
-                let mounts = HostVisibleMountTable.entries().unwrap_or_default();
+                let mounts = self.mount_entries.clone();
                 let active = self
                     .config
                     .document
@@ -1780,28 +2158,9 @@ impl cosmic::Application for AppModel {
                     .collect::<Vec<_>>();
                 for connection in mirrors {
                     let live_rclone = is_rclone_offline_mirror(&connection)
-                        && runtime_offline_mirror_state(&connection) == SyncRuntimeState::Running;
-                    if !live_rclone
-                        && self
-                            .pending_counts
-                            .get(&connection.id)
-                            .is_some_and(|observation| {
-                                matches!(observation.source, PendingSource::RcloneMirrorLive)
-                            })
-                    {
+                        && self.cached_offline_state(&connection) == SyncRuntimeState::Running;
+                    if is_rclone_offline_mirror(&connection) && !live_rclone {
                         self.pending_counts.remove(&connection.id);
-                    }
-                    if is_rclone_offline_mirror(&connection)
-                        && !live_rclone
-                        && runtime_unit_status(connection.id, UnitKind::Timer).is_some_and(
-                            |status| {
-                                matches!(
-                                    status.active,
-                                    ActiveState::Active | ActiveState::Activating
-                                )
-                            },
-                        )
-                    {
                         continue;
                     }
                     if self.mirror_operations_pending.contains(&connection.id)
@@ -1823,19 +2182,15 @@ impl cosmic::Application for AppModel {
                     self.pending_poll_inflight.insert(connection.id);
                     let source = if live_rclone {
                         PendingSource::RcloneMirrorLive
-                    } else if is_onedrive_offline_mirror(&connection) {
-                        PendingSource::OneDriveMirror
                     } else {
-                        PendingSource::RcloneMirror
+                        PendingSource::OneDriveMirror
                     };
                     tasks.push(Task::perform(
                         async move {
                             let result = if live_rclone {
                                 rclone_mirror_live_pending_count(&connection).await
-                            } else if is_onedrive_offline_mirror(&connection) {
-                                onedrive_mirror_pending_count(&connection).await
                             } else {
-                                rclone_mirror_pending_count(&connection).await
+                                onedrive_mirror_pending_count(&connection).await
                             };
                             (connection, source, result)
                         },
@@ -1859,13 +2214,12 @@ impl cosmic::Application for AppModel {
                         .iter()
                         .any(|saved| saved == &connection)
                     || (is_rclone_online_mount(&connection)
-                        && !HostVisibleMountTable
-                            .entries()
-                            .unwrap_or_default()
+                        && !self
+                            .mount_entries
                             .iter()
                             .any(|entry| entry.target == connection.local_path))
                     || (matches!(source, PendingSource::RcloneMirrorLive)
-                        && runtime_offline_mirror_state(&connection) != SyncRuntimeState::Running)
+                        && self.cached_offline_state(&connection) != SyncRuntimeState::Running)
                 {
                     return Task::none();
                 }
@@ -1881,6 +2235,35 @@ impl cosmic::Application for AppModel {
             }
             Message::VpnStatusChecked(ready) => {
                 self.vpn_ready = ready;
+                let mounts = self.mount_entries.clone();
+                let degraded = self
+                    .config
+                    .document
+                    .connections
+                    .iter()
+                    .filter(|connection| {
+                        connection.enabled
+                            && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+                            && mounts
+                                .iter()
+                                .any(|entry| entry.target == connection.local_path)
+                            && connection.vpn_profile_id.is_some_and(|profile_id| {
+                                self.vpn_ready.get(&profile_id) == Some(&false)
+                            })
+                    })
+                    .map(|connection| {
+                        self.pending_counts.remove(&connection.id);
+                        connection.name.clone()
+                    })
+                    .collect::<Vec<_>>();
+                if !degraded.is_empty() {
+                    self.pending_poll_generation = self.pending_poll_generation.wrapping_add(1);
+                    self.last_notice = Some(fl!(
+                        "notice-mounted-vpn-unavailable",
+                        names = degraded.join(", ")
+                    ));
+                    self.last_notice_at = Some(Instant::now());
+                }
             }
             Message::NetworkStatusChecked(ready) => {
                 self.network_ready = Some(ready);
@@ -1891,26 +2274,66 @@ impl cosmic::Application for AppModel {
             }
         }
 
-        Task::none()
+        Task::batch(inspection_tasks)
     }
 
-    fn style(&self) -> Option<cosmic::iced::theme::Style> {
-        if self.standalone {
-            None
-        } else {
-            Some(cosmic::applet::style())
-        }
-    }
-}
-
-impl AppModel {
     fn runtime_status(&self) -> runtime_ipc::Status {
         runtime_ipc::Status {
             unmount_before_sleep: self.config.document.unmount_before_sleep,
             restore_after_wake: self.config.document.restore_after_wake,
             preload: self.config.document.preload,
             sleep_status: self.sleep_status.clone(),
+            sleep_needs_attention: self.sleep_needs_attention,
+            operation_revision: self.runtime_operation_revision,
+            operation_completions: self.runtime_operation_completions.clone(),
         }
+    }
+
+    fn complete_routed_operation(&mut self, connection_id: ConnectionId, operation: Operation) {
+        if self.runtime_routed_operations.get(&connection_id) != Some(&operation) {
+            return;
+        }
+        self.runtime_routed_operations.remove(&connection_id);
+        self.runtime_operation_revision = self.runtime_operation_revision.wrapping_add(1).max(1);
+        self.runtime_operation_completions
+            .push(runtime_ipc::OperationCompletion {
+                revision: self.runtime_operation_revision,
+                connection_id,
+                operation,
+                notice: self
+                    .last_notice
+                    .clone()
+                    .unwrap_or_else(|| crate::fl!("ui-app-operation-completed")),
+            });
+        if self.runtime_operation_completions.len() > RUNTIME_OPERATION_COMPLETION_LIMIT {
+            let excess =
+                self.runtime_operation_completions.len() - RUNTIME_OPERATION_COMPLETION_LIMIT;
+            self.runtime_operation_completions.drain(..excess);
+        }
+    }
+
+    fn reconcile_runtime_operation_completion(&mut self, status: &runtime_ipc::Status) {
+        let Some(wait) = self.runtime_operation_wait else {
+            return;
+        };
+        let Some(after_revision) = wait.after_revision else {
+            return;
+        };
+        let Some(completion) = status
+            .operation_completions
+            .iter()
+            .rev()
+            .find(|completion| {
+                completion.revision > after_revision
+                    && completion.connection_id == wait.connection_id
+                    && completion.operation == wait.operation
+            })
+        else {
+            return;
+        };
+        self.last_notice = Some(completion.notice.clone());
+        self.last_notice_at = Some(Instant::now());
+        self.runtime_operation_wait = None;
     }
 
     fn apply_runtime_command(
@@ -2132,7 +2555,21 @@ impl AppModel {
             || self
                 .popup_opened_at
                 .is_none_or(|opened_at| opened_at.elapsed() < POPUP_HEALTHY_AGGREGATE_HIDE_AFTER);
-        if show_aggregate {
+        if self
+            .config
+            .document
+            .connections
+            .iter()
+            .any(|connection| !self.unit_status_fresh(connection.id))
+        {
+            header = header.add(widget::text::body(
+                if self.unit_observation.failed.is_empty() {
+                    fl!("unit-status-refreshing")
+                } else {
+                    fl!("unit-status-refresh-unavailable")
+                },
+            ));
+        } else if show_aggregate {
             header = header.add(widget::text::body(aggregate_label(&state.aggregate)));
         }
 
@@ -2155,13 +2592,40 @@ impl AppModel {
             );
         }
 
+        let repair_rows = state
+            .rows
+            .iter()
+            .filter(|row| repair_visible(row, &self.repair_operations_pending))
+            .collect::<Vec<_>>();
+        for row in &repair_rows {
+            let armed = self
+                .pending_repair
+                .is_some_and(|(connection_id, _)| connection_id == row.id);
+            let label = if armed {
+                fl!(
+                    "operation-confirm-repair-connection",
+                    name = row.name.as_str()
+                )
+            } else {
+                fl!("operation-repair-connection", name = row.name.as_str())
+            };
+            content = content.push(
+                widget::container(
+                    widget::button::text(label)
+                        .on_press(Message::OperationRequested(row.id, Operation::Repair)),
+                )
+                .padding([4, POPUP_ACTION_HORIZONTAL_PADDING])
+                .width(Length::Fill),
+            );
+        }
+
         if let Some(error) = &self.runtime_error {
             content = content.push(field_with_help(
                 widget::text::caption(fl!("settings-unavailable")),
                 error.clone(),
             ));
         }
-        if sleep_needs_attention(self.sleep_status.as_deref()) {
+        if self.sleep_needs_attention {
             content = content.push(field_with_help(
                 widget::button::text(fl!("sleep-attention")).on_press(Message::OpenGeneralSettings),
                 self.sleep_status.clone().unwrap_or_default(),
@@ -2173,7 +2637,7 @@ impl AppModel {
             } else {
                 0.0
             }
-            - if sleep_needs_attention(self.sleep_status.as_deref()) {
+            - if self.sleep_needs_attention {
                 40.0
             } else {
                 0.0
@@ -2182,7 +2646,8 @@ impl AppModel {
                 40.0
             } else {
                 0.0
-            };
+            }
+            - repair_rows.len() as f32 * 40.0;
         content = content.push(widget::divider::horizontal::default());
         content = content.push(widget::scrollable(rows).height(Length::Fixed(
             popup_connection_scroll_height(state.rows.len(), state.rows.is_empty()).min(list_limit),
@@ -2223,13 +2688,20 @@ impl AppModel {
             },
         );
         let row_id = row.id;
-        let primary_control: Element<'static, Message> = if let Some(operation) = primary {
-            widget::toggler(primary_enabled)
-                .on_toggle(move |_| Message::OperationRequested(row_id, operation))
-                .into()
+        let fresh = self.unit_status_fresh(row.id);
+        let primary_help = if fresh {
+            primary_help
         } else {
-            widget::toggler(primary_enabled).into()
+            fl!("unit-status-wait")
         };
+        let primary_control: Element<'static, Message> =
+            if let Some(operation) = primary.filter(|_| fresh) {
+                widget::toggler(primary_enabled)
+                    .on_toggle(move |_| Message::OperationRequested(row_id, operation))
+                    .into()
+            } else {
+                widget::toggler(primary_enabled).into()
+            };
         let display_name = popup_connection_display_name(&row.name);
         let stale_after = if row.mode == AccessMode::OfflineMirror {
             Duration::from_secs(180)
@@ -2244,45 +2716,52 @@ impl AppModel {
                 fl!("pending-count-inactive-unknown", reason = reason)
             }
         };
-        let (pending_label, pending_help) = match self.pending_counts.get(&row.id) {
-            Some(observation) if observation.checked_at.elapsed() < stale_after => {
-                match observation.files {
-                    Some(files) => (
-                        files.to_string(),
-                        if matches!(observation.source, PendingSource::RcloneMirrorLive) {
-                            fl!("pending-count-mirror-live-help", count = files)
-                        } else if matches!(
-                            observation.source,
-                            PendingSource::RcloneMirror | PendingSource::OneDriveMirror
-                        ) {
-                            fl!(
-                                "pending-count-mirror-help",
-                                count = files,
-                                age = observation.checked_at.elapsed().as_secs()
-                            )
-                        } else {
-                            fl!("pending-count-online-help", count = files)
-                        },
-                    ),
-                    None => (
-                        unknown_label.to_owned(),
-                        unknown_help(
-                            observation
-                                .reason
-                                .clone()
-                                .unwrap_or_else(|| fl!("pending-count-unknown")),
+        let (pending_label, pending_help) = if matches!(
+            row.status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
+        ) {
+            (
+                "!".to_owned(),
+                fl!("pending-count-mounted-connection-unavailable"),
+            )
+        } else {
+            match self.pending_counts.get(&row.id) {
+                Some(observation) if observation.checked_at.elapsed() < stale_after => {
+                    match observation.files {
+                        Some(files) => (
+                            files.to_string(),
+                            if matches!(observation.source, PendingSource::RcloneMirrorLive) {
+                                fl!("pending-count-mirror-live-help", count = files)
+                            } else if matches!(observation.source, PendingSource::OneDriveMirror) {
+                                fl!(
+                                    "pending-count-mirror-help",
+                                    count = files,
+                                    age = observation.checked_at.elapsed().as_secs()
+                                )
+                            } else {
+                                fl!("pending-count-online-help", count = files)
+                            },
                         ),
-                    ),
+                        None => (
+                            unknown_label.to_owned(),
+                            unknown_help(
+                                observation
+                                    .reason
+                                    .clone()
+                                    .unwrap_or_else(|| fl!("pending-count-unknown")),
+                            ),
+                        ),
+                    }
                 }
+                _ if row.provider == Provider::OneDrive && row.mode == AccessMode::OnlineMount => (
+                    unknown_label.to_owned(),
+                    unknown_help(fl!("pending-count-onedriver-unavailable")),
+                ),
+                _ => (
+                    unknown_label.to_owned(),
+                    unknown_help(fl!("pending-count-unknown")),
+                ),
             }
-            _ if row.provider == Provider::OneDrive && row.mode == AccessMode::OnlineMount => (
-                unknown_label.to_owned(),
-                unknown_help(fl!("pending-count-onedriver-unavailable")),
-            ),
-            _ => (
-                unknown_label.to_owned(),
-                unknown_help(fl!("pending-count-unknown")),
-            ),
         };
         let name_button = widget::button::custom(
             widget::container(widget::text::body(display_name))
@@ -2767,7 +3246,7 @@ impl AppModel {
             .spacing(8)
             .align_y(Alignment::Center)
             .push(field_with_safety_help(
-                widget::text_input::text_input("/home/user/Cloud/Example", &self.draft.local_path)
+                widget::text_input::text_input(fl!("local-target-example"), &self.draft.local_path)
                     .on_input(Message::DraftLocalPath),
                 fl!("local-target-safety"),
                 fl!("local-target-help"),
@@ -2996,11 +3475,11 @@ impl AppModel {
         } else if provider == Provider::Teams {
             column = column.push(field_with_help(
                 widget::text_input::text_input(
-                    "https://tenant.sharepoint.com/sites/site/Shared%20Documents",
+                    fl!("sharepoint-library-url-example"),
                     &self.draft.teams_library_url,
                 )
                 .on_input(Message::DraftTeamsLibraryUrl),
-                "Paste the document library URL, not a Teams channel or local mountpoint. The library identity is checked with Microsoft before saving and mounting.",
+                fl!("sharepoint-library-url-help"),
             ));
         }
 
@@ -3008,11 +3487,11 @@ impl AppModel {
             .push(field_with_help(
                 widget::text_input::text_input(
                     if provider == Provider::Sftp {
-                        sftp_remote_directory_placeholder()
+                        sftp_remote_directory_placeholder().to_owned()
                     } else if provider == Provider::Teams {
-                        "optional folder within the library"
+                        fl!("sharepoint-library-folder-placeholder")
                     } else {
-                        rclone_remote_directory_placeholder()
+                        rclone_remote_directory_placeholder().to_owned()
                     },
                     &self.draft.remote_subpath,
                 )
@@ -3180,11 +3659,6 @@ impl AppModel {
             &self.config.document.vpn_profiles,
             self.draft.vpn_profile_id,
         ));
-        choices.extend(vpn_profile_choices(
-            VpnKind::Cisco,
-            &self.config.document.vpn_profiles,
-            self.draft.vpn_profile_id,
-        ));
         choices.push(field_with_help(
             widget::button::standard(fl!("detect-vpns")).on_press(Message::DetectVpns),
             fl!("detect-vpns-help"),
@@ -3198,9 +3672,24 @@ impl AppModel {
         connection_id: ConnectionId,
         operation: Operation,
     ) -> Task<cosmic::Action<Message>> {
+        if !self.unit_status_fresh(connection_id)
+            && let Some(connection) = self
+                .config
+                .document
+                .connections
+                .iter()
+                .find(|connection| connection.id == connection_id)
+                .cloned()
+        {
+            self.unit_operations_waiting
+                .insert(connection_id, (connection, operation));
+            self.last_notice = Some(fl!("unit-status-wait"));
+            return self.refresh_unit_observation(false);
+        }
         let state = self.view_state();
         let Some(row) = state.rows.iter().find(|row| row.id == connection_id) else {
             self.last_notice = Some(fl!("notice-connection-unavailable"));
+            self.complete_routed_operation(connection_id, operation);
             return Task::none();
         };
         let decision = decide_operation(row, operation);
@@ -3214,6 +3703,7 @@ impl AppModel {
                     .reason
                     .unwrap_or_else(|| fl!("operation-unavailable-state"))
             ));
+            self.complete_routed_operation(connection_id, operation);
             return Task::none();
         }
 
@@ -3226,29 +3716,52 @@ impl AppModel {
             .cloned()
         else {
             self.last_notice = Some(fl!("notice-connection-unavailable"));
+            self.complete_routed_operation(connection_id, operation);
             return Task::none();
         };
 
-        if operation == Operation::Repair
-            && matches!(connection.mode, ConnectionMode::OnlineMount(_))
-        {
-            if self.pending_repair != Some(connection_id) {
-                self.pending_repair = Some(connection_id);
-                self.last_notice = Some(fl!(
-                    "notice-repair-confirm",
-                    name = connection.name.as_str(),
-                    path = connection.local_path.display().to_string()
-                ));
-                return Task::none();
+        if self.repair_operations_pending.contains(&connection_id) {
+            self.last_notice = Some(fl!(
+                "notice-action-unavailable",
+                operation = label,
+                name = connection.name.as_str(),
+                reason = fl!("operation-unavailable-state")
+            ));
+            self.complete_routed_operation(connection_id, operation);
+            return Task::none();
+        }
+        if operation == Operation::Repair {
+            let now = Instant::now();
+            let confirmation =
+                repair_confirmation_decision(self.pending_repair, connection_id, now);
+            match confirmation {
+                RepairConfirmationDecision::Confirm => {}
+                RepairConfirmationDecision::Arm | RepairConfirmationDecision::Wait => {
+                    if confirmation == RepairConfirmationDecision::Arm {
+                        self.pending_repair = Some((connection_id, now));
+                    }
+                    self.last_notice = Some(match connection.mode {
+                        ConnectionMode::OnlineMount(_) => fl!(
+                            "notice-repair-confirm",
+                            name = connection.name.as_str(),
+                            path = connection.local_path.display().to_string()
+                        ),
+                        ConnectionMode::OfflineMirror(_) => fl!(
+                            "notice-offline-repair-confirm",
+                            name = connection.name.as_str()
+                        ),
+                    });
+                    self.last_notice_at = Some(now);
+                    self.complete_routed_operation(connection_id, operation);
+                    return Task::none();
+                }
             }
         } else {
             self.pending_repair = None;
         }
 
         match (&connection.mode, operation) {
-            (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount)
-                if is_rclone_online_mount(&connection) =>
-            {
+            (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount) => {
                 if operation == Operation::Unmount {
                     self.unmount_pending.insert(connection_id);
                     let preload_active = self.directory_preload_jobs.contains_key(&connection_id)
@@ -3280,65 +3793,39 @@ impl AppModel {
                     },
                 )
             }
-            (ConnectionMode::OnlineMount(_), Operation::Mount | Operation::Unmount)
-                if is_onedriver_online_mount(&connection) =>
-            {
-                if operation == Operation::Unmount {
-                    self.unmount_pending.insert(connection_id);
-                    let preload_active = self.directory_preload_jobs.contains_key(&connection_id)
-                        || self.rclone_refresh_jobs.contains_key(&connection_id)
-                        || self.rclone_refresh_starting.contains(&connection_id);
-                    self.last_notice = Some(if preload_active {
-                        fl!("notice-unmounting-preload", name = connection.name.as_str())
-                    } else {
-                        fl!("notice-unmounting", name = connection.name.as_str())
-                    });
-                } else {
-                    self.last_notice = Some(fl!(
-                        "notice-operation-requested",
-                        operation = label,
-                        name = connection.name.as_str()
-                    ));
-                }
-                self.last_notice_at = Some(Instant::now());
-                Task::perform(
-                    async move {
-                        let result = run_managed_onedriver_online_mount_operation_result(
-                            &connection,
-                            operation,
-                        )
-                        .await;
-                        (connection, result)
-                    },
-                    move |(connection, result)| {
-                        cosmic::Action::App(Message::ManagedOnlineOperationCompleted(
-                            connection, operation, result,
-                        ))
-                    },
-                )
-            }
             (ConnectionMode::OnlineMount(_), Operation::Repair) => {
+                self.pending_repair = None;
+                self.repair_operations_pending.insert(connection.id);
                 self.last_notice = Some(fl!(
                     "notice-repair-requested",
                     operation = label,
                     name = connection.name.as_str()
                 ));
+                let connection_id = connection.id;
                 Task::perform(
                     async move { run_online_mount_repair_operation(connection).await },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    move |notice| {
+                        cosmic::Action::App(Message::OnlineRepairCompleted(connection_id, notice))
+                    },
                 )
             }
-            (ConnectionMode::OfflineMirror(_), Operation::Repair)
-                if is_rclone_offline_mirror(&connection) =>
-            {
+            (ConnectionMode::OfflineMirror(_), Operation::Repair) => {
+                self.pending_repair = None;
+                self.repair_operations_pending.insert(connection.id);
                 self.last_notice = Some(fl!(
-                    "notice-mirror-repair-requested",
+                    "notice-offline-repair-requested",
                     operation = label,
                     name = connection.name.as_str()
                 ));
+                let connection_id = connection.id;
+                let manual_operation = self.mirror_operation_controls.get(&connection_id).cloned();
                 Task::perform(
-                    async move { run_offline_mirror_repair_operation(connection).await },
-                    |notice| cosmic::Action::App(Message::OperationCompleted(notice)),
+                    async move {
+                        run_offline_mirror_repair_operation(connection, manual_operation).await
+                    },
+                    move |notice| {
+                        cosmic::Action::App(Message::OfflineRepairCompleted(connection_id, notice))
+                    },
                 )
             }
             (
@@ -3354,8 +3841,13 @@ impl AppModel {
                     name = connection.name.as_str()
                 ));
                 self.mirror_operations_pending.insert(connection_id);
+                let control = Arc::new(ManualOperationControl::new());
+                self.mirror_operation_controls
+                    .insert(connection_id, Arc::clone(&control));
                 Task::perform(
-                    async move { run_managed_offline_mirror_operation(connection, operation).await },
+                    async move {
+                        run_managed_offline_mirror_operation(connection, operation, control).await
+                    },
                     move |notice| {
                         cosmic::Action::App(Message::MirrorOperationCompleted(
                             connection_id,
@@ -3377,9 +3869,15 @@ impl AppModel {
                     name = connection.name.as_str()
                 ));
                 self.mirror_operations_pending.insert(connection_id);
+                let control = Arc::new(ManualOperationControl::new());
+                self.mirror_operation_controls
+                    .insert(connection_id, Arc::clone(&control));
                 Task::perform(
                     async move {
-                        run_managed_onedrive_offline_mirror_operation(connection, operation).await
+                        run_managed_onedrive_offline_mirror_operation(
+                            connection, operation, control,
+                        )
+                        .await
                     },
                     move |notice| {
                         cosmic::Action::App(Message::MirrorOperationCompleted(
@@ -3395,13 +3893,14 @@ impl AppModel {
                     operation = label,
                     name = row.name.as_str()
                 ));
+                self.complete_routed_operation(connection_id, operation);
                 Task::none()
             }
         }
     }
 
     fn start_refresh_for_active_google_mounts(&mut self) -> Task<cosmic::Action<Message>> {
-        let mounts = HostVisibleMountTable.entries().unwrap_or_default();
+        let mounts = self.mount_entries.clone();
         if !self.config.document.preload.google_drive.enabled {
             return Task::none();
         }
@@ -3496,7 +3995,7 @@ impl AppModel {
     }
 
     fn start_preload_for_active_directory_mounts(&mut self) -> Task<cosmic::Action<Message>> {
-        let mounts = HostVisibleMountTable.entries().unwrap_or_default();
+        let mounts = self.mount_entries.clone();
         let connections = self
             .config
             .document
@@ -3538,54 +4037,112 @@ impl AppModel {
         Task::batch(tasks)
     }
 
-    fn load_draft(&mut self, connection_id: ConnectionId) {
+    fn load_draft(&mut self, connection_id: ConnectionId) -> Task<cosmic::Action<Message>> {
         let Some(connection) = self
             .config
             .document
             .connections
             .iter()
             .find(|connection| connection.id == connection_id)
+            .cloned()
         else {
             self.last_notice = Some(fl!("notice-connection-unavailable"));
-            return;
+            return Task::none();
         };
         self.pending_shared_remote_ack = None;
-        self.draft = draft_from_connection(connection);
-        if connection.provider == Provider::Sftp {
-            self.load_sftp_details();
+        self.draft = draft_from_connection(&connection);
+        self.last_notice = Some(fl!("notice-modify", name = connection.name.as_str()));
+        if matches!(connection.provider, Provider::Smb | Provider::Sftp) {
+            return self.remote_prefill();
+        }
+        Task::none()
+    }
+
+    fn prefill_context(&self) -> RemotePrefillContext {
+        RemotePrefillContext {
+            id: self.draft.id,
+            provider: self.draft.provider,
+            remote: self.draft.remote_reference.clone(),
+            sftp_revision: self.sftp_settings_revision,
+            smb: SmbRemoteDetails {
+                host: self.draft.smb_host.clone(),
+                user: self.draft.smb_user.clone(),
+                domain: self.draft.smb_domain.clone(),
+            },
+        }
+    }
+
+    fn remote_prefill(&mut self) -> Task<cosmic::Action<Message>> {
+        self.prefill_cancellation.cancel();
+        self.prefill_cancellation = CancellationToken::new();
+        let cancellation = self.prefill_cancellation.clone();
+        self.prefill_generation = self.prefill_generation.wrapping_add(1);
+        if self.draft.provider == Provider::Sftp {
+            self.reset_sftp_settings_tracking();
+            self.draft.sftp = SftpDraft::default();
+        }
+        let context = self.prefill_context();
+        let remote = context.remote.clone();
+        let provider = context.provider;
+        let generation = self.prefill_generation;
+        Task::perform(
+            async move {
+                let text = HostInspection::RcloneConfigDump
+                    .run_current(cancellation)
+                    .await?;
+                match provider {
+                    Provider::Sftp => Ok(RemotePrefillResult {
+                        smb: None,
+                        sftp: sftp::prefill_from_dump(&text, &remote)?,
+                    }),
+                    Provider::Smb => Ok(RemotePrefillResult {
+                        smb: parse_smb_remote_details(&text, &remote)?,
+                        sftp: None,
+                    }),
+                    _ => unreachable!("prefill is only requested for SMB/SFTP"),
+                }
+            },
+            move |result| {
+                cosmic::Action::App(Message::RemotePrefillCompleted(
+                    generation,
+                    context.clone(),
+                    result,
+                ))
+            },
+        )
+    }
+
+    fn finish_remote_prefill(&mut self, result: Result<RemotePrefillResult, String>) {
+        if self.draft.provider == Provider::Sftp {
+            self.finish_sftp_details(result.map(|prefill| prefill.sftp));
             return;
         }
-        if connection.provider == Provider::Smb {
-            match load_smb_remote_details(&connection.remote_reference) {
-                Ok(Some(details)) => {
-                    self.draft.smb_host = details.host;
-                    self.draft.smb_user = details.user;
-                    self.draft.smb_domain = details.domain;
-                    self.last_notice = Some(fl!(
-                        "notice-modify-smb-loaded",
-                        name = connection.name.as_str()
-                    ));
-                    return;
-                }
-                Ok(None) => {
-                    self.last_notice = Some(fl!(
-                        "notice-modify-smb-missing",
-                        name = connection.name.as_str(),
-                        remote = connection.remote_reference.as_str()
-                    ));
-                    return;
-                }
-                Err(error) => {
-                    self.last_notice = Some(fl!(
-                        "notice-modify-smb-failed",
-                        name = connection.name.as_str(),
-                        error = error
-                    ));
-                    return;
-                }
+        let result = result.map(|prefill| prefill.smb);
+        let name = self.draft.name.as_str();
+        self.last_notice = Some(match result {
+            Ok(Some(details)) => {
+                self.draft.smb_host = details.host;
+                self.draft.smb_user = details.user;
+                self.draft.smb_domain = details.domain;
+                fl!("notice-modify-smb-loaded", name = name)
             }
+            Ok(None) => fl!(
+                "notice-modify-smb-missing",
+                name = name,
+                remote = self.draft.remote_reference.as_str()
+            ),
+            Err(error) => fl!("notice-modify-smb-failed", name = name, error = error),
+        });
+    }
+
+    fn refresh_mount_inspection(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.mount_inspection_pending {
+            return Task::none();
         }
-        self.last_notice = Some(fl!("notice-modify", name = connection.name.as_str()));
+        self.mount_inspection_pending = true;
+        Task::perform(host_mount_entries(), |result| {
+            cosmic::Action::App(Message::MountInspectionCompleted(result))
+        })
     }
 
     fn save_draft(&mut self) -> Task<cosmic::Action<Message>> {
@@ -3658,12 +4215,15 @@ impl AppModel {
                     {
                         Ok(verified) => {
                             let account = verified.account.clone().unwrap_or_else(|| {
-                                "account unavailable from Microsoft Graph".into()
+                                crate::fl!("ui-app-account-unavailable-from-microsoft-graph")
                             });
                             let identity = verified.identity.clone();
-                            let summary = format!(
-                                "Verified account {account}, site {}, library {}, drive {}.",
-                                identity.site_url, identity.library_url, identity.drive_id
+                            let summary = crate::fl!(
+                                "ui-app-verified-account-account-site-value2-library-value3",
+                                account = (account).to_string(),
+                                value2 = (identity.site_url).to_string(),
+                                value3 = (identity.library_url).to_string(),
+                                value4 = (identity.drive_id).to_string()
                             );
                             connection.teams_identity = Some(identity);
                             verify_rclone_access_with_verified(&connection, Some(&verified))
@@ -3797,16 +4357,14 @@ impl AppModel {
             .find(|saved| saved.id == connection.id)
         {
             if saved.provider != connection.provider {
-                return Err(
-                    "Provider changes are disabled for existing connections. Create or duplicate a connection to use a different provider."
-                        .into(),
-                );
+                return Err(crate::fl!(
+                    "ui-app-provider-changes-are-disabled-for-existing-connections"
+                ));
             }
             if access_mode_for_connection(saved) != access_mode_for_connection(connection) {
-                return Err(
-                    "Access mode changes are disabled for existing connections. Create or duplicate a connection to switch between Online mount and Offline mirror."
-                        .into(),
-                );
+                return Err(crate::fl!(
+                    "ui-app-access-mode-changes-are-disabled-for-existing"
+                ));
             }
         }
 
@@ -3817,9 +4375,10 @@ impl AppModel {
                     .trim()
                     .eq_ignore_ascii_case(connection.name.trim())
         }) {
-            return Err(format!(
-                "Connection name `{}` is already used by `{}`. Choose a unique name.",
-                connection.name, other.name
+            return Err(crate::fl!(
+                "ui-app-connection-name-value1-is-already-used-by",
+                value1 = (connection.name).to_string(),
+                value2 = (other.name).to_string()
             ));
         }
 
@@ -3828,11 +4387,11 @@ impl AppModel {
                 && (paths_overlap(&saved.local_path, &connection.local_path)
                     || paths_overlap(&connection.local_path, &saved.local_path))
         }) {
-            return Err(format!(
-                "Local target `{}` overlaps `{}` used by `{}`. Choose a separate mountpoint or mirror directory.",
-                connection.local_path.display(),
-                other.local_path.display(),
-                other.name
+            return Err(crate::fl!(
+                "ui-app-local-target-value1-overlaps-value2-used-by",
+                value1 = (connection.local_path.display()).to_string(),
+                value2 = (other.local_path.display()).to_string(),
+                value3 = (other.name).to_string()
             ));
         }
 
@@ -3853,12 +4412,12 @@ impl AppModel {
                         .eq_ignore_ascii_case(connection.remote_reference.trim())
             })
             .map(|other| {
-                format!(
-                    "`{}` uses the same {} account/remote `{}` as `{}`.",
-                    connection.name,
-                    provider_label(connection.provider),
-                    connection.remote_reference,
-                    other.name
+                crate::fl!(
+                    "ui-app-value1-uses-the-same-value2-account-remote",
+                    value1 = (connection.name).to_string(),
+                    value2 = (provider_label(connection.provider)).to_string(),
+                    value3 = (connection.remote_reference).to_string(),
+                    value4 = (other.name).to_string()
                 )
             })
     }
@@ -3890,7 +4449,7 @@ impl AppModel {
                     .iter_mut()
                     .find(|profile| same_vpn_reference(profile, detected))
                 {
-                    existing.name = detected.name.clone();
+                    update_detected_vpn_profile(existing, detected);
                     selected.get_or_insert(existing.id);
                     updated += 1;
                 } else {
@@ -3912,55 +4471,69 @@ impl AppModel {
                 } else {
                     format!(" {}", detection.warnings.join(" "))
                 };
-                let notice = format!(
-                    "VPN detection complete: {imported} imported, {updated} already known/updated.{warning}"
+                let notice = crate::fl!(
+                    "ui-app-vpn-detection-complete-imported-imported-updated-already",
+                    imported = (imported).to_string(),
+                    updated = (updated).to_string(),
+                    warning = (warning).to_string()
                 );
                 self.last_notice = Some(notice);
             }
             Err(error) => {
-                let notice = format!("VPN detection could not be saved: {error}");
+                let notice = crate::fl!(
+                    "ui-app-vpn-detection-could-not-be-saved-error",
+                    error = (error).to_string()
+                );
                 self.last_notice = Some(notice);
             }
         }
     }
 
-    fn detect_rclone_remotes(&mut self) {
-        match run_sync_host_command("rclone", &["config", "dump"]) {
-            Ok(output) if output.status.success() => {
-                match parse_rclone_remotes_for_app(&String::from_utf8_lossy(&output.stdout)) {
-                    Ok(remotes) => {
-                        let total = remotes.len();
-                        let matching = self
-                            .matching_rclone_remotes_in(&remotes, self.draft.provider)
-                            .len();
-                        self.rclone_remotes = remotes;
-                        self.last_notice = Some(fl!(
-                            "notice-rclone-detected",
-                            total = total,
-                            matching = matching,
-                            provider = provider_label(self.draft.provider)
-                        ));
-                    }
-                    Err(error) => {
-                        self.last_notice = Some(fl!("notice-rclone-parse-failed", error = error));
-                    }
+    fn detect_rclone_remotes(&mut self, show_notice: bool) -> Task<cosmic::Action<Message>> {
+        self.rclone_inspection_cancellation.cancel();
+        self.rclone_inspection_cancellation = CancellationToken::new();
+        let cancellation = self.rclone_inspection_cancellation.clone();
+        self.rclone_inspection_generation = self.rclone_inspection_generation.wrapping_add(1);
+        let generation = self.rclone_inspection_generation;
+        Task::perform(
+            async move {
+                let text = HostInspection::RcloneConfigDump
+                    .run_current(cancellation)
+                    .await?;
+                parse_rclone_remotes_for_app(&text)
+            },
+            move |result| {
+                cosmic::Action::App(Message::RcloneInspectionCompleted(
+                    generation,
+                    show_notice,
+                    result,
+                ))
+            },
+        )
+    }
+
+    fn finish_rclone_inspection(
+        &mut self,
+        show_notice: bool,
+        result: Result<Vec<RcloneDraftRemote>, String>,
+    ) {
+        match result {
+            Ok(remotes) => {
+                let total = remotes.len();
+                let matching = self
+                    .matching_rclone_remotes_in(&remotes, self.draft.provider)
+                    .len();
+                self.rclone_remotes = remotes;
+                if show_notice {
+                    self.last_notice = Some(fl!(
+                        "notice-rclone-detected",
+                        total = total,
+                        matching = matching,
+                        provider = provider_label(self.draft.provider)
+                    ));
                 }
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let message = stderr.trim();
-                self.last_notice = Some(fl!(
-                    "notice-rclone-detect-failed",
-                    error = if message.is_empty() {
-                        fl!("notice-rclone-dump-failed")
-                    } else {
-                        message.to_owned()
-                    }
-                ));
-            }
-            Err(error) => {
-                self.last_notice = Some(fl!("notice-rclone-run-failed", error = error.to_string()));
-            }
+            Err(error) => self.last_notice = Some(fl!("notice-rclone-run-failed", error = error)),
         }
     }
 
@@ -4213,7 +4786,7 @@ impl AppModel {
         let auth_files = onedrive_auth_files_for_connection(connection_id);
         match open_onedrive_auth_url(&auth_files) {
             Ok(message) => {
-                self.last_notice = Some(message.into());
+                self.last_notice = Some(message);
             }
             Err(error) => {
                 self.last_notice = Some(fl!(
@@ -4328,14 +4901,14 @@ impl AppModel {
             }
         };
         self.last_notice = Some(if connection.provider == Provider::Teams {
-            format!(
-                "Checking the SharePoint library and selected folder for {}...",
-                connection.name
+            crate::fl!(
+                "ui-app-checking-the-sharepoint-library-and-selected-folder",
+                value1 = (connection.name).to_string()
             )
         } else {
-            format!(
-                "Testing {}. OneDrive mirror validation runs a dry-run preview and can take several minutes for a large drive or slow Microsoft response...",
-                connection.name
+            crate::fl!(
+                "ui-app-testing-value1-onedrive-mirror-validation-runs-a",
+                value1 = (connection.name).to_string()
             )
         });
         Task::perform(
@@ -4420,7 +4993,17 @@ impl AppModel {
         }
     }
 
-    fn scan_imports(&mut self) {
+    fn scan_imports(&mut self) -> Task<cosmic::Action<Message>> {
+        Task::perform(
+            async {
+                let text = HostInspection::RcloneConfigDump.run_owned().await?;
+                parse_rclone_backends(&text).map_err(|error| error.to_string())
+            },
+            |result| cosmic::Action::App(Message::ImportInspectionCompleted(result)),
+        )
+    }
+
+    fn finish_import_scan(&mut self, result: Result<BTreeMap<String, Provider>, String>) {
         let Some(home) = home_dir() else {
             self.import_previews.clear();
             self.last_notice = Some(fl!("notice-import-home-unavailable"));
@@ -4428,12 +5011,7 @@ impl AppModel {
         };
         let directory = default_scan_directory(&home);
         let active_units = BTreeSet::new();
-        let rclone_remotes = run_sync_host_command("rclone", &["config", "dump"])
-            .ok()
-            .filter(|output| output.status.success())
-            .and_then(|output| {
-                parse_rclone_backends(&String::from_utf8_lossy(&output.stdout)).ok()
-            });
+        let rclone_remotes = result.ok();
         let rclone_config_unavailable = rclone_remotes.is_none();
         let rclone_backends = rclone_remotes.unwrap_or_default();
         match scan_legacy_units(&directory) {
@@ -4455,15 +5033,20 @@ impl AppModel {
                 let count = previews.len();
                 self.import_previews = previews;
                 self.last_notice = Some(if rclone_config_unavailable {
-                    format!(
-                        "Import scan found {count} service preview(s). Could not read host rclone configuration; rclone mounts cannot be identified for import."
+                    crate::fl!(
+                        "ui-app-import-scan-found-count-service-preview-s",
+                        count = (count).to_string()
                     )
                 } else if errors.is_empty() {
-                    format!("Import scan found {count} compatible service preview(s).")
+                    crate::fl!(
+                        "ui-app-import-scan-found-count-compatible-service-preview",
+                        count = (count).to_string()
+                    )
                 } else {
-                    format!(
-                        "Import scan found {count} compatible service preview(s); {} unit(s) could not be previewed.",
-                        errors.len()
+                    crate::fl!(
+                        "ui-app-import-scan-found-count-compatible-service-preview-2",
+                        count = (count).to_string(),
+                        value2 = (errors.len()).to_string()
                     )
                 });
             }
@@ -4486,15 +5069,98 @@ impl AppModel {
         restore(&self.controller_snapshot())
     }
 
+    fn unit_status_fresh(&self, id: ConnectionId) -> bool {
+        !self.unit_observation_invalidated
+            && self.unit_observation_connections == self.config.document.connections
+            && self
+                .unit_observed_at
+                .is_some_and(|time| time.elapsed() < Duration::from_secs(15))
+            && !self.unit_observation.failed.contains(&id)
+            && self.unit_observation.services.contains_key(&id)
+    }
+
+    fn refresh_unit_observation(&mut self, force: bool) -> Task<cosmic::Action<Message>> {
+        if self.standalone || (self.unit_observation_pending && !force) {
+            return Task::none();
+        }
+        self.unit_observation_cancellation.cancel();
+        self.unit_observation_cancellation = CancellationToken::new();
+        self.unit_observation_revision = self.unit_observation_revision.wrapping_add(1);
+        self.unit_observation_pending = true;
+        self.unit_observation_invalidated |= force;
+        let revision = self.unit_observation_revision;
+        let connections = self.config.document.connections.clone();
+        let source = connections.clone();
+        let cancellation = self.unit_observation_cancellation.clone();
+        let work_root = default_work_root();
+        Task::perform(
+            observe_ui_units(source, work_root, cancellation),
+            move |observation| {
+                cosmic::Action::App(Message::UnitObservationCompleted(
+                    revision,
+                    connections.clone(),
+                    observation,
+                ))
+            },
+        )
+    }
+
+    fn cached_offline_state(&self, connection: &Connection) -> SyncRuntimeState {
+        let service = self.unit_observation.services.get(&connection.id);
+        let timer = self.unit_observation.timers.get(&connection.id);
+        if service.is_none()
+            || (connection.provider != Provider::OneDrive
+                && timer.is_none()
+                && !service.is_some_and(|status| {
+                    matches!(status.active, ActiveState::Active | ActiveState::Activating)
+                }))
+        {
+            return SyncRuntimeState::Unknown;
+        }
+        offline_mirror_state_from_status(connection.provider, service, timer)
+    }
+
+    fn cached_offline_mirror_states(&self) -> RuntimeOfflineMirrorStates {
+        let mut states = BTreeMap::new();
+        let mut paused = BTreeSet::new();
+        for connection in self
+            .config
+            .document
+            .connections
+            .iter()
+            .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
+        {
+            let state = self.cached_offline_state(connection);
+            if state == SyncRuntimeState::Paused {
+                paused.insert(connection.id);
+            }
+            states.insert(connection.id, state);
+        }
+        RuntimeOfflineMirrorStates {
+            sync_state: states,
+            paused_syncs: paused,
+            warnings: self.unit_observation.warnings.clone().unwrap_or_default(),
+        }
+    }
+
     fn controller_snapshot(&self) -> ControllerSnapshot {
-        let (sync_state, paused_syncs) =
-            runtime_offline_mirror_states(&self.config.document.connections);
+        let RuntimeOfflineMirrorStates {
+            mut sync_state,
+            mut paused_syncs,
+            warnings: offline_warnings,
+        } = self.cached_offline_mirror_states();
+        for connection_id in &self.mirror_operations_pending {
+            sync_state.insert(*connection_id, SyncRuntimeState::Running);
+            paused_syncs.remove(connection_id);
+        }
         ControllerSnapshot {
             config: self.config.document.clone(),
-            service_status: runtime_service_statuses(&self.config.document.connections),
+            service_status: self.unit_observation.services.clone(),
             sync_state,
             paused_syncs,
-            mount_entries: HostVisibleMountTable.entries().unwrap_or_default(),
+            offline_warnings,
+            mount_entries: self.mount_entries.clone(),
+            online_repair_required: self.online_repair_required.clone(),
             import_previews: self.import_previews.clone(),
             vpn_ready: self.vpn_ready.clone(),
             network_ready: self.network_ready.unwrap_or(true),
@@ -4503,29 +5169,87 @@ impl AppModel {
     }
 }
 
-fn runtime_offline_mirror_states(
-    connections: &[Connection],
-) -> (
-    BTreeMap<ConnectionId, SyncRuntimeState>,
-    BTreeSet<ConnectionId>,
-) {
-    let mut states = BTreeMap::new();
-    let mut paused = BTreeSet::new();
-    for connection in connections
-        .iter()
-        .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
-    {
-        let state = runtime_offline_mirror_state(connection);
-        if state == SyncRuntimeState::Paused {
-            paused.insert(connection.id);
+struct RuntimeOfflineMirrorStates {
+    sync_state: BTreeMap<ConnectionId, SyncRuntimeState>,
+    paused_syncs: BTreeSet<ConnectionId>,
+    warnings: BTreeMap<ConnectionId, Vec<String>>,
+}
+
+async fn observe_ui_units(
+    connections: Vec<Connection>,
+    work_root: PathBuf,
+    cancellation: CancellationToken,
+) -> UnitObservation {
+    let mut result = UnitObservation::default();
+    let mut keys = Vec::new();
+    let mut units = Vec::new();
+    for connection in &connections {
+        keys.push((connection.id, UnitKind::Service));
+        units.push(UnitName::new(connection.id, UnitKind::Service));
+        if matches!(connection.mode, ConnectionMode::OfflineMirror(_))
+            && connection.provider != Provider::OneDrive
+        {
+            keys.push((connection.id, UnitKind::Timer));
+            units.push(UnitName::new(connection.id, UnitKind::Timer));
         }
-        states.insert(connection.id, state);
     }
-    (states, paused)
+    match systemd_user_status_batch(&units, cancellation.clone()).await {
+        Ok(observations) => {
+            for ((id, kind), (_, status)) in keys.into_iter().zip(observations) {
+                if let Some(status) = status {
+                    match kind {
+                        UnitKind::Service => {
+                            result.services.insert(id, status);
+                        }
+                        UnitKind::Timer => {
+                            result.timers.insert(id, status);
+                        }
+                    }
+                } else {
+                    result.failed.insert(id);
+                }
+            }
+        }
+        Err(_) => result
+            .failed
+            .extend(connections.iter().map(|connection| connection.id)),
+    }
+    if cancellation.is_cancelled() {
+        return result;
+    }
+    let warnings = tokio::task::spawn_blocking(move || {
+        let mut warnings = BTreeMap::new();
+        for connection in connections
+            .iter()
+            .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
+        {
+            let path = cosmic_ext_applet_mounter::offline_coordinator::state_path(
+                &work_root,
+                connection.id,
+            );
+            match cosmic_ext_applet_mounter::offline_coordinator::read_state(&path) {
+                Ok(Some(state))
+                    if state.connection_id == connection.id && !state.warnings.is_empty() =>
+                {
+                    warnings.insert(connection.id, state.warnings);
+                }
+                Err(_) => {
+                    return None;
+                }
+                _ => {}
+            }
+        }
+        Some(warnings)
+    });
+    result.warnings = tokio::select! {
+        () = cancellation.cancelled() => None,
+        result = tokio::time::timeout(Duration::from_secs(1), warnings) => result.ok().and_then(Result::ok).flatten(),
+    };
+    result
 }
 
 async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfileId, bool> {
-    let mounts = HostVisibleMountTable.entries().unwrap_or_default();
+    let mounts = host_mount_entries().await.unwrap_or_default();
     let active_connection_ids = config
         .connections
         .iter()
@@ -4540,17 +5264,13 @@ async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfile
         .cloned()
         .collect::<Vec<_>>();
     let mut ready = BTreeMap::new();
-    let runner = app_command_runner();
     for profile in profiles {
         let is_ready = match profile.kind {
-            VpnKind::NetworkManager => CommandNetworkManagerVpn::new(runner)
+            VpnKind::NetworkManager => DbusNetworkManagerVpn
                 .state(&profile, CancellationToken::new())
                 .await
                 .is_ok_and(|state| state.ready()),
-            VpnKind::Cisco => CommandCiscoVpn::new(runner)
-                .components(CancellationToken::new())
-                .await
-                .is_ok_and(|components| components.tunnel == CiscoTunnelState::Connected),
+            VpnKind::LegacyCisco => false,
         };
         if !is_ready {
             unmark_vpn_applet_activated(profile.id);
@@ -4570,42 +5290,6 @@ fn referenced_active_vpn_profiles(
         .filter(|connection| active_connection_ids.contains(&connection.id))
         .filter_map(|connection| connection.vpn_profile_id)
         .collect()
-}
-
-#[cfg(test)]
-fn runtime_cisco_tunnel_state(output: &str) -> CiscoTunnelState {
-    let lower = output.to_ascii_lowercase();
-    if lower.contains("cannot contact the vpn service") {
-        return CiscoTunnelState::ServiceUnavailable;
-    }
-    for line in lower.lines() {
-        let Some((_, state)) = line.split_once("connection state:") else {
-            continue;
-        };
-        let state = state.trim();
-        if state.starts_with("connected") {
-            return CiscoTunnelState::Connected;
-        }
-        if state.starts_with("connecting") {
-            return CiscoTunnelState::Connecting;
-        }
-        if state.starts_with("disconnected") || state.starts_with("not available") {
-            return CiscoTunnelState::Disconnected;
-        }
-    }
-    CiscoTunnelState::Unknown
-}
-
-fn runtime_offline_mirror_state(connection: &Connection) -> SyncRuntimeState {
-    let service_status = runtime_unit_status(connection.id, UnitKind::Service);
-    let timer_status = (connection.provider != Provider::OneDrive)
-        .then(|| runtime_unit_status(connection.id, UnitKind::Timer))
-        .flatten();
-    offline_mirror_state_from_status(
-        connection.provider,
-        service_status.as_ref(),
-        timer_status.as_ref(),
-    )
 }
 
 fn offline_mirror_state_from_status(
@@ -4652,43 +5336,16 @@ fn offline_mirror_state_from_status(
     }
 }
 
-fn runtime_service_statuses(connections: &[Connection]) -> BTreeMap<ConnectionId, UnitStatus> {
-    connections
-        .iter()
-        .filter(|connection| matches!(connection.mode, ConnectionMode::OnlineMount(_)))
-        .filter_map(|connection| {
-            runtime_service_status(connection.id).map(|status| (connection.id, status))
-        })
-        .collect()
-}
-
 fn runtime_service_status(connection_id: ConnectionId) -> Option<UnitStatus> {
     runtime_unit_status(connection_id, UnitKind::Service)
 }
 
 fn runtime_unit_status(connection_id: ConnectionId, unit_kind: UnitKind) -> Option<UnitStatus> {
     let unit = UnitName::new(connection_id, unit_kind);
-    let output = run_sync_host_command(
-        "systemctl",
-        &[
-            "--user",
-            "show",
-            "--property=ActiveState",
-            "--property=UnitFileState",
-            "--property=SubState",
-            "--property=Result",
-            unit.file_name().as_str(),
-        ],
-    )
-    .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(parse_runtime_systemd_status(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    systemd_user_status_blocking(&unit).ok()
 }
 
+#[cfg(test)]
 fn parse_runtime_systemd_status(output: &str) -> UnitStatus {
     fn property<'a>(output: &'a str, name: &str) -> &'a str {
         output
@@ -4848,7 +5505,12 @@ fn save_runtime_preference(
             _ => {}
         })
         .map(|_| ())
-        .map_err(|error| format!("Could not save setting: {error}"))
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-save-setting-error",
+                error = (error).to_string()
+            )
+        })
 }
 
 fn load_runtime_config() -> Result<Config, String> {
@@ -4856,9 +5518,9 @@ fn load_runtime_config() -> Result<Config, String> {
     if report.warnings.is_empty() {
         Ok(report.config)
     } else {
-        Err(format!(
-            "Could not reload configuration: {}",
-            report.warnings.join("; ")
+        Err(crate::fl!(
+            "ui-app-could-not-reload-configuration-value1",
+            value1 = (report.warnings.join("; ")).to_string()
         ))
     }
 }
@@ -4875,11 +5537,13 @@ async fn persist_online_popup_state_with<M: SystemdManager>(
         .connections
         .iter()
         .find(|connection| connection.id == connection_id)
-        .ok_or_else(|| "Connection is no longer available.".to_owned())?
+        .ok_or_else(|| crate::fl!("ui-app-connection-is-no-longer-available"))?
         .mode
         .clone();
     let ConnectionMode::OnlineMount(previous_options) = previous else {
-        return Err("Persistent popup state applies only to Online mounts.".into());
+        return Err(crate::fl!(
+            "ui-app-persistent-popup-state-applies-only-to-online"
+        ));
     };
     let previous_on = previous_options.start_at_login;
     let unit = UnitName::new(connection_id, UnitKind::Service);
@@ -4891,7 +5555,12 @@ async fn persist_online_popup_state_with<M: SystemdManager>(
     manager
         .action(requested_action, Some(&unit), CancellationToken::new())
         .await
-        .map_err(|error| format!("Could not save popup startup state: {error}"))?;
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-save-popup-startup-state-error",
+                error = (error).to_string()
+            )
+        })?;
 
     let update = config.update_validated_with(storage, |document| {
         if let Some(connection) = document
@@ -4913,12 +5582,14 @@ async fn persist_online_popup_state_with<M: SystemdManager>(
             .action(rollback, Some(&unit), CancellationToken::new())
             .await;
         let rollback_note = if rollback_result.is_ok() {
-            " The previous startup policy was restored."
+            fl!("startup-policy-restored")
         } else {
-            " The previous startup policy could not be restored; inspect the unit state."
+            fl!("startup-policy-restore-failed")
         };
-        return Err(format!(
-            "Could not persist popup startup state: {error}.{rollback_note}"
+        return Err(crate::fl!(
+            "ui-app-could-not-persist-popup-startup-state-error",
+            error = (error).to_string(),
+            rollback_note = (rollback_note).to_string()
         ));
     }
     Ok(())
@@ -4930,17 +5601,9 @@ async fn persist_online_popup_state(
 ) -> Result<(), String> {
     let storage = AppConfigStorage::runtime()?;
     let mut config = load_runtime_config()?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     persist_online_popup_state_with(&mut config, &storage, &manager, connection_id, desired_on)
         .await
-}
-
-fn sleep_needs_attention(status: Option<&str>) -> bool {
-    status.is_some_and(|status| {
-        status.starts_with("Sleep cleanup unavailable")
-            || status.starts_with("Sleep cleanup incomplete")
-            || status.starts_with("Sleep already in progress")
-    })
 }
 
 fn runtime_request_task(command: RuntimeCommand) -> Task<cosmic::Action<Message>> {
@@ -4964,6 +5627,32 @@ fn primary_operation(row: &ConnectionRowState) -> Option<Operation> {
         (AccessMode::OfflineMirror, false) => Operation::ResumeSync,
     };
     Some(operation)
+}
+
+fn repair_available(row: &ConnectionRowState) -> bool {
+    row.actions
+        .iter()
+        .any(|action| action.operation == Operation::Repair && action.enabled)
+}
+
+fn repair_visible(
+    row: &ConnectionRowState,
+    repair_operations_pending: &BTreeSet<ConnectionId>,
+) -> bool {
+    repair_available(row) && !repair_operations_pending.contains(&row.id)
+}
+
+fn update_online_repair_requirement(
+    required: &mut BTreeSet<ConnectionId>,
+    connection_id: ConnectionId,
+    operation: Operation,
+    result: &Result<(), String>,
+) {
+    if result.is_ok() {
+        required.remove(&connection_id);
+    } else if operation == Operation::Unmount {
+        required.insert(connection_id);
+    }
 }
 
 fn popup_connection_display_name(name: &str) -> String {
@@ -5007,35 +5696,18 @@ fn app_command_runner() -> RuntimeCommandRunner {
     RuntimeCommandRunner::detect_current()
 }
 
-fn run_sync_host_command(executable: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
-    match CommandExecutionMode::detect_current() {
-        CommandExecutionMode::Native => Command::new(executable).args(args).output(),
-        CommandExecutionMode::FlatpakSpawnHost => Command::new("flatpak-spawn")
-            .arg("--host")
-            .arg(executable)
-            .args(args)
-            .output(),
+#[derive(Debug, Clone)]
+struct HostVisibleMountTable(Vec<MountEntry>);
+
+impl HostVisibleMountTable {
+    async fn observe() -> Result<Self, String> {
+        host_mount_entries().await.map(Self)
     }
 }
 
-struct HostVisibleMountTable;
-
 impl MountTable for HostVisibleMountTable {
     fn entries(&self) -> Result<Vec<MountEntry>, MountTableError> {
-        if !running_in_flatpak() {
-            return ProcMountTable::default().entries();
-        }
-        let output = run_sync_host_command("cat", &["/proc/self/mountinfo"])
-            .map_err(|error| MountTableError(format!("read host mount table: {error}")))?;
-        if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
-            return Err(MountTableError(
-                "host mount table is unavailable or too large".into(),
-            ));
-        }
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(cosmic_ext_applet_mounter::mounts::parse_mountinfo_line)
-            .collect()
+        Ok(self.0.clone())
     }
 }
 
@@ -5047,8 +5719,12 @@ fn row_operation_label(status: &ConnectionStatus, operation: Operation) -> Strin
     }
 }
 
-fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+fn yes_no(value: bool) -> String {
+    if value {
+        fl!("value-yes")
+    } else {
+        fl!("value-no")
+    }
 }
 
 fn window_title(mode: WindowMode) -> String {
@@ -5336,36 +6012,45 @@ fn recovery_directory_placeholder(draft: &ConnectionDraft) -> String {
     let id = draft.id.unwrap_or_default();
     let local_path = draft.local_path.trim();
     if local_path.is_empty() {
-        "auto: sibling .cosmic-mounter-recovery directory".into()
+        crate::fl!("ui-app-auto-sibling-cosmic-mounter-recovery-directory")
     } else {
-        format!(
-            "auto: {}",
-            default_recovery_directory_for(&expand_user_path(local_path), id).display()
+        crate::fl!(
+            "ui-app-auto-value1",
+            value1 = (default_recovery_directory_for(&expand_user_path(local_path), id).display())
+                .to_string()
         )
     }
 }
 
 fn draft_summary_text(draft: &ConnectionDraft) -> String {
     let engine = provider_engine_summary(draft.provider, draft.access_mode);
-    let mut parts = vec![format!("Engine: {engine}.")];
+    let mut parts = vec![crate::fl!(
+        "ui-app-engine-engine",
+        engine = (engine).to_string()
+    )];
     match connection_from_draft(draft) {
         Ok(connection) => match managed_plan_summary(&connection) {
             Ok(summary) => parts.push(summary),
-            Err(error) => parts.push(format!("Generated unit preview pending: {error}")),
+            Err(error) => parts.push(crate::fl!(
+                "ui-app-generated-unit-preview-pending-error",
+                error = (error).to_string()
+            )),
         },
         Err(_) => {
-            parts.push("Generated unit preview appears after required fields are complete.".into());
+            parts.push(crate::fl!(
+                "ui-app-generated-unit-preview-appears-after-required-fields"
+            ));
         }
     }
     parts.push(match draft.access_mode {
         AccessMode::OnlineMount => {
-            "Safety: Test Connection validates dependency, remote/subtree access, mountpoint, and generated unit before Save.".into()
+            crate::fl!("ui-app-safety-test-connection-validates-dependency-remote-subtree")
         }
         AccessMode::OfflineMirror => {
             if draft.provider == Provider::Teams {
                 fl!("sharepoint-schedule-help")
             } else {
-                "Safety: Preview is dry-run; initial synchronization requires Preview plus confirmed Sync Now before background Start.".into()
+                crate::fl!("ui-app-safety-preview-is-dry-run-initial-synchronization")
             }
         }
     });
@@ -5405,6 +6090,27 @@ struct VpnDetection {
 }
 
 fn detect_vpn_profiles() -> VpnDetection {
+    match std::thread::Builder::new()
+        .name("vpn-profile-detection".into())
+        .spawn(detect_vpn_profiles_on_worker)
+    {
+        Ok(worker) => worker.join().unwrap_or_else(|_| VpnDetection {
+            warnings: vec![crate::fl!(
+                "ui-app-vpn-detection-worker-stopped-unexpectedly"
+            )],
+            ..VpnDetection::default()
+        }),
+        Err(error) => VpnDetection {
+            warnings: vec![crate::fl!(
+                "ui-app-could-not-start-vpn-detection-worker-error",
+                error = (error).to_string()
+            )],
+            ..VpnDetection::default()
+        },
+    }
+}
+
+fn detect_vpn_profiles_on_worker() -> VpnDetection {
     let mut detection = VpnDetection::default();
     writeln!(
         detection.debug,
@@ -5424,19 +6130,17 @@ fn detect_vpn_profiles() -> VpnDetection {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            detection
-                .warnings
-                .push(format!("Could not start VPN detector: {error}."));
+            detection.warnings.push(crate::fl!(
+                "ui-app-could-not-start-vpn-detector-error",
+                error = (error).to_string()
+            ));
             return detection;
         }
     };
 
     runtime.block_on(async {
         let cancellation = CancellationToken::new();
-        let runner = app_command_runner();
-        detect_network_manager_vpns_with_debug(&runner, &mut detection, cancellation.clone()).await;
-
-        let network_manager = CommandNetworkManagerVpn::new(runner);
+        let network_manager = DbusNetworkManagerVpn;
         match network_manager.list_profiles(cancellation.clone()).await {
             Ok(profiles) => {
                 writeln!(
@@ -5455,26 +6159,10 @@ fn detect_vpn_profiles() -> VpnDetection {
             }
             Err(error) => {
                 writeln!(detection.debug, "adapter NetworkManager error: {error}").ok();
-                detection
-                    .warnings
-                    .push(format!("NetworkManager VPN detection failed: {error}."));
-            }
-        }
-
-        let cisco = CommandCiscoVpn::new(runner);
-        match cisco.components(cancellation).await {
-            Ok(components) if components.cli || components.gui || components.agent => {
-                writeln!(detection.debug, "Cisco detected: {components:?}").ok();
-                detection.profiles.push(cisco_profile());
-            }
-            Ok(components) => {
-                writeln!(detection.debug, "Cisco not available: {components:?}").ok();
-            }
-            Err(error) => {
-                writeln!(detection.debug, "Cisco error: {error}").ok();
-                detection
-                    .warnings
-                    .push(format!("Cisco Secure Client detection failed: {error}."));
+                detection.warnings.push(crate::fl!(
+                    "ui-app-networkmanager-vpn-detection-failed-error",
+                    error = (error).to_string()
+                ));
             }
         }
     });
@@ -5495,6 +6183,8 @@ fn detect_vpn_profiles() -> VpnDetection {
     detection
 }
 
+#[cfg(all(test, feature = "development-probes"))]
+#[allow(dead_code)]
 async fn detect_network_manager_vpns_with_debug(
     runner: &dyn CommandRunner,
     detection: &mut VpnDetection,
@@ -5535,6 +6225,8 @@ async fn detect_network_manager_vpns_with_debug(
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn log_nmcli_success(
     debug: &mut String,
     command: &str,
@@ -5562,10 +6254,13 @@ fn log_nmcli_success(
     profiles
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn log_nmcli_error(debug: &mut String, command: &str, error: &CommandError) {
     writeln!(debug, "command: {command}\n  error: {error}").ok();
 }
 
+#[cfg(test)]
 fn parse_nmcli_profiles_for_app(
     output: &str,
 ) -> Vec<cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile> {
@@ -5585,12 +6280,14 @@ fn parse_nmcli_profiles_for_app(
                     name: name.trim().to_owned(),
                     vpn_type: vpn_type.trim().to_owned(),
                     uuid: uuid.trim().to_owned(),
+                    service_type: None,
                 }
             })
         })
         .collect()
 }
 
+#[cfg(test)]
 fn valid_nmcli_profile_fields_for_app(name: &str, vpn_type: &str, uuid: &str) -> bool {
     !name.trim().is_empty()
         && looks_like_uuid_for_app(uuid.trim())
@@ -5598,6 +6295,7 @@ fn valid_nmcli_profile_fields_for_app(name: &str, vpn_type: &str, uuid: &str) ->
         && is_vpn_type_for_app(vpn_type)
 }
 
+#[cfg(test)]
 fn nmcli_profile_records_for_app(output: &str) -> Vec<String> {
     let line_records: Vec<_> = output
         .lines()
@@ -5615,6 +6313,7 @@ fn nmcli_profile_records_for_app(output: &str) -> Vec<String> {
     }
 }
 
+#[cfg(test)]
 fn flattened_nmcli_records_for_app(output: &str) -> impl Iterator<Item = String> + '_ {
     let mut records = Vec::new();
     let mut start = 0;
@@ -5640,6 +6339,7 @@ fn flattened_nmcli_records_for_app(output: &str) -> impl Iterator<Item = String>
     records.into_iter()
 }
 
+#[cfg(test)]
 fn find_uuid_range_for_app(value: &str) -> Option<(usize, usize)> {
     for (index, _) in value.char_indices() {
         let Some(candidate) = value.get(index..index + 36) else {
@@ -5652,6 +6352,7 @@ fn find_uuid_range_for_app(value: &str) -> Option<(usize, usize)> {
     None
 }
 
+#[cfg(test)]
 fn split_nmcli_for_app(line: &str) -> Vec<String> {
     let mut values = Vec::new();
     let mut current = String::new();
@@ -5673,6 +6374,7 @@ fn split_nmcli_for_app(line: &str) -> Vec<String> {
     values
 }
 
+#[cfg(test)]
 fn looks_like_uuid_for_app(value: &str) -> bool {
     value.len() == 36
         && value
@@ -5680,6 +6382,7 @@ fn looks_like_uuid_for_app(value: &str) -> bool {
             .all(|character| character.is_ascii_hexdigit() || character == '-')
 }
 
+#[cfg(test)]
 fn is_vpn_type_for_app(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.contains("vpn")
@@ -5714,6 +6417,7 @@ fn dedupe_detected_vpns(profiles: &mut Vec<VpnProfile>) {
 fn network_manager_profile(
     profile: cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile,
 ) -> VpnProfile {
+    let timeout_seconds = if profile.is_openconnect() { 90 } else { 30 };
     VpnProfile {
         id: VpnProfileId::new(),
         name: profile.name,
@@ -5722,18 +6426,7 @@ fn network_manager_profile(
         readiness_checks: vec![
             cosmic_ext_applet_mounter::model::ReadinessCheck::NetworkManagerState,
         ],
-        timeout_seconds: 30,
-    }
-}
-
-fn cisco_profile() -> VpnProfile {
-    VpnProfile {
-        id: VpnProfileId::new(),
-        name: "Cisco Secure Client".into(),
-        kind: VpnKind::Cisco,
-        external_profile_id: None,
-        readiness_checks: Vec::new(),
-        timeout_seconds: 90,
+        timeout_seconds,
     }
 }
 
@@ -5744,8 +6437,14 @@ fn same_vpn_reference(existing: &VpnProfile, detected: &VpnProfile) -> bool {
                 existing.external_profile_id == detected.external_profile_id
                     && detected.external_profile_id.is_some()
             }
-            VpnKind::Cisco => true,
+            VpnKind::LegacyCisco => false,
         }
+}
+
+fn update_detected_vpn_profile(existing: &mut VpnProfile, detected: &VpnProfile) {
+    existing.name = detected.name.clone();
+    existing.readiness_checks = detected.readiness_checks.clone();
+    existing.timeout_seconds = detected.timeout_seconds;
 }
 
 fn vpn_profile_choices(
@@ -5772,50 +6471,50 @@ fn vpn_profile_choices(
 fn vpn_profile_summary(profile: &VpnProfile) -> String {
     let external = profile
         .external_profile_id
-        .as_deref()
-        .unwrap_or("interactive/client-selected");
-    format!(
-        "{}: {}. External profile: {}. Readiness: {}. Timeout: {} seconds. The applet may request activation before mount/sync; authentication remains with the VPN client.",
-        vpn_kind_label(profile.kind),
-        profile.name,
-        external,
-        readiness_summary(profile),
-        profile.timeout_seconds
+        .clone()
+        .unwrap_or_else(|| fl!("vpn-external-client-selected"));
+    crate::fl!(
+        "ui-app-value1-value2-external-profile-value3-readiness-value4",
+        value1 = (vpn_kind_label(profile.kind)).to_string(),
+        value2 = (profile.name).to_string(),
+        value3 = (external).to_string(),
+        value4 = (readiness_summary(profile)).to_string(),
+        value5 = (profile.timeout_seconds).to_string()
     )
 }
 
 fn readiness_summary(profile: &VpnProfile) -> String {
     if profile.readiness_checks.is_empty() {
-        return "default tunnel readiness".into();
+        return crate::fl!("ui-app-default-tunnel-readiness");
     }
     profile
         .readiness_checks
         .iter()
         .map(|check| match check {
             cosmic_ext_applet_mounter::model::ReadinessCheck::NetworkManagerState => {
-                "NetworkManager state".to_owned()
+                crate::fl!("ui-app-networkmanager-state")
             }
             cosmic_ext_applet_mounter::model::ReadinessCheck::Interface(value) => {
-                format!("interface {value}")
+                crate::fl!("ui-app-interface-value", value = (value).to_string())
             }
             cosmic_ext_applet_mounter::model::ReadinessCheck::Route(value) => {
-                format!("route {value}")
+                crate::fl!("ui-app-route-value", value = (value).to_string())
             }
             cosmic_ext_applet_mounter::model::ReadinessCheck::DnsName(value) => {
-                format!("DNS {value}")
+                crate::fl!("ui-app-dns-value", value = (value).to_string())
             }
             cosmic_ext_applet_mounter::model::ReadinessCheck::Endpoint(value) => {
-                format!("endpoint {value}")
+                crate::fl!("ui-app-endpoint-value", value = (value).to_string())
             }
         })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-const fn vpn_kind_label(kind: VpnKind) -> &'static str {
+fn vpn_kind_label(kind: VpnKind) -> String {
     match kind {
-        VpnKind::NetworkManager => "NetworkManager VPN",
-        VpnKind::Cisco => "Cisco Secure Client",
+        VpnKind::NetworkManager => fl!("vpn-kind-network-manager"),
+        VpnKind::LegacyCisco => fl!("vpn-kind-legacy-cisco"),
     }
 }
 
@@ -6138,23 +6837,27 @@ fn lighten_color(color: Color, amount: f32) -> Color {
     }
 }
 
-fn local_target_label(mode: AccessMode) -> &'static str {
+fn local_target_label(mode: AccessMode) -> String {
     match mode {
-        AccessMode::OnlineMount => "Mountpoint",
-        AccessMode::OfflineMirror => "Mirror directory",
+        AccessMode::OnlineMount => fl!("local-target-mountpoint"),
+        AccessMode::OfflineMirror => fl!("local-target-mirror"),
     }
 }
 
 async fn pick_local_folder(mode: AccessMode) -> Result<Option<String>, String> {
-    let dialog =
-        file_chooser::open::Dialog::new().title(format!("Choose {}", local_target_label(mode)));
+    let dialog = file_chooser::open::Dialog::new().title(crate::fl!(
+        "ui-app-choose-value1",
+        value1 = (local_target_label(mode)).to_string()
+    ));
 
     match dialog.open_folder().await {
-        Ok(response) => response
-            .url()
-            .to_file_path()
-            .map_err(|()| "selected folder is not a local filesystem path".to_string())
-            .and_then(|path| host_visible_selected_folder_path(&path).map(Some)),
+        Ok(response) => {
+            let path = response
+                .url()
+                .to_file_path()
+                .map_err(|()| crate::fl!("ui-app-selected-folder-is-not-a-local-filesystem"))?;
+            host_visible_selected_folder_path(&path).await.map(Some)
+        }
         Err(file_chooser::Error::Cancelled) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
@@ -6164,8 +6867,8 @@ fn selected_folder_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn host_visible_selected_folder_path(path: &Path) -> Result<String, String> {
-    document_portal_origin_path(path).map(|origin| {
+async fn host_visible_selected_folder_path(path: &Path) -> Result<String, String> {
+    document_portal_origin_path(path).await.map(|origin| {
         origin
             .as_deref()
             .map(selected_folder_path)
@@ -6173,30 +6876,215 @@ fn host_visible_selected_folder_path(path: &Path) -> Result<String, String> {
     })
 }
 
-fn document_portal_origin_path(path: &Path) -> Result<Option<PathBuf>, String> {
+async fn document_portal_origin_path(path: &Path) -> Result<Option<PathBuf>, String> {
     if !is_document_portal_path(path) {
         return Ok(None);
     }
+    let sandboxed = running_in_flatpak();
+    let dbus_result = tokio::time::timeout(
+        Duration::from_secs(5),
+        document_portal_origin_path_dbus(path, sandboxed),
+    )
+    .await
+    .map_err(|_| crate::fl!("ui-app-selected-folder-is-a-document-portal-path"))?;
+    match dbus_result {
+        Ok(origin) => return Ok(Some(origin)),
+        Err(error)
+            if sandboxed && error.kind == DocumentPortalErrorKind::UnsupportedSandboxVersion =>
+        {
+            // Documents.GetHostPaths is the first host-path API available to
+            // sandboxed callers. Preserve compatibility with portal v4 hosts
+            // until the Flatpak runtime can require interface version 5.
+        }
+        Err(error) => {
+            return Err(crate::fl!(
+                "ui-app-selected-folder-is-a-document-portal-path-2",
+                value1 = (error.message).to_string()
+            ));
+        }
+    }
+
+    legacy_document_portal_origin_path(path).await.map(Some)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPortalErrorKind {
+    InvalidPath,
+    Dbus,
+    UnsupportedSandboxVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentPortalError {
+    kind: DocumentPortalErrorKind,
+    message: String,
+}
+
+async fn document_portal_origin_path_dbus(
+    path: &Path,
+    sandboxed: bool,
+) -> Result<PathBuf, DocumentPortalError> {
+    let connection = zbus::Connection::session()
+        .await
+        .map_err(|error| DocumentPortalError {
+            kind: DocumentPortalErrorKind::Dbus,
+            message: crate::fl!(
+                "ui-app-connect-to-documents-portal-error",
+                error = (error).to_string()
+            ),
+        })?;
+    let proxy = zbus::Proxy::new(
+        &connection,
+        DOCUMENTS_DESTINATION,
+        DOCUMENTS_PATH,
+        DOCUMENTS_INTERFACE,
+    )
+    .await
+    .map_err(|error| DocumentPortalError {
+        kind: DocumentPortalErrorKind::Dbus,
+        message: crate::fl!(
+            "ui-app-connect-to-documents-portal-error",
+            error = (error).to_string()
+        ),
+    })?;
+    let mount_point: Vec<u8> =
+        proxy
+            .call("GetMountPoint", &())
+            .await
+            .map_err(|error| DocumentPortalError {
+                kind: DocumentPortalErrorKind::Dbus,
+                message: crate::fl!(
+                    "ui-app-read-documents-portal-mount-point-error",
+                    error = (error).to_string()
+                ),
+            })?;
+    let mount_point = portal_file_path(mount_point)?;
+    let document_id =
+        portal_document_id(path, &mount_point).ok_or_else(|| DocumentPortalError {
+            kind: DocumentPortalErrorKind::InvalidPath,
+            message: crate::fl!("ui-app-selected-path-does-not-contain-a-valid"),
+        })?;
+    let version: u32 =
+        proxy
+            .get_property("version")
+            .await
+            .map_err(|error| DocumentPortalError {
+                kind: DocumentPortalErrorKind::Dbus,
+                message: crate::fl!(
+                    "ui-app-read-documents-portal-version-error",
+                    error = (error).to_string()
+                ),
+            })?;
+
+    let origin = if sandboxed {
+        if version < DOCUMENTS_GET_HOST_PATHS_VERSION {
+            return Err(DocumentPortalError {
+                kind: DocumentPortalErrorKind::UnsupportedSandboxVersion,
+                message: crate::fl!(
+                    "ui-app-documents-portal-version-version-does-not-provide",
+                    version = (version).to_string()
+                ),
+            });
+        }
+        let paths: HashMap<String, Vec<u8>> = proxy
+            .call("GetHostPaths", &(vec![document_id.as_str()],))
+            .await
+            .map_err(|error| DocumentPortalError {
+                kind: DocumentPortalErrorKind::Dbus,
+                message: crate::fl!(
+                    "ui-app-resolve-documents-portal-host-path-error",
+                    error = (error).to_string()
+                ),
+            })?;
+        paths
+            .get(&document_id)
+            .cloned()
+            .ok_or_else(|| DocumentPortalError {
+                kind: DocumentPortalErrorKind::InvalidPath,
+                message: crate::fl!("ui-app-documents-portal-did-not-return-the-selected"),
+            })?
+    } else {
+        let (origin, _permissions): (Vec<u8>, HashMap<String, Vec<String>>) = proxy
+            .call("Info", &(document_id.as_str(),))
+            .await
+            .map_err(|error| DocumentPortalError {
+                kind: DocumentPortalErrorKind::Dbus,
+                message: crate::fl!(
+                    "ui-app-resolve-documents-portal-host-path-error",
+                    error = (error).to_string()
+                ),
+            })?;
+        origin
+    };
+    portal_file_path(origin)
+}
+
+fn portal_file_path(mut bytes: Vec<u8>) -> Result<PathBuf, DocumentPortalError> {
+    if bytes.last() == Some(&0) {
+        bytes.pop();
+    }
+    if bytes.is_empty() || bytes.contains(&0) {
+        return Err(DocumentPortalError {
+            kind: DocumentPortalErrorKind::InvalidPath,
+            message: crate::fl!("ui-app-documents-portal-returned-an-invalid-filesystem-path"),
+        });
+    }
+    #[cfg(unix)]
+    let path = PathBuf::from(OsString::from_vec(bytes));
+    #[cfg(not(unix))]
+    let path = PathBuf::from(String::from_utf8(bytes).map_err(|_| DocumentPortalError {
+        kind: DocumentPortalErrorKind::InvalidPath,
+        message: crate::fl!("ui-app-documents-portal-returned-a-non-utf-8"),
+    })?);
+    if !path.is_absolute() {
+        return Err(DocumentPortalError {
+            kind: DocumentPortalErrorKind::InvalidPath,
+            message: crate::fl!("ui-app-documents-portal-returned-a-non-absolute-filesystem"),
+        });
+    }
+    Ok(path)
+}
+
+fn portal_document_id(path: &Path, mount_point: &Path) -> Option<String> {
+    let mut components = path.strip_prefix(mount_point).ok()?.components();
+    let first = components.next()?.as_os_str().to_str()?;
+    let id = if first == "by-app" {
+        components.next()?;
+        components.next()?.as_os_str().to_str()?
+    } else {
+        first
+    };
+    (!id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then(|| id.to_owned())
+}
+
+async fn legacy_document_portal_origin_path(path: &Path) -> Result<PathBuf, String> {
     let path_text = path.display().to_string();
-    let output = run_sync_host_command("flatpak", &["document-info", &path_text]).map_err(
-        |error| {
-            format!(
-                "selected folder is a document-portal path and could not be resolved to its original host path: {error}"
+    let request = CommandRequest::new(Executable::Flatpak)
+        .arg("document-info")
+        .and_then(|request| request.arg(path_text))
+        .map_err(|error| error.to_string())?
+        .with_timeout(Duration::from_secs(5))
+        .with_output_limit(64 * 1024);
+    let output = app_command_runner()
+        .run(request, CancellationToken::new())
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-flatpak-document-info-failed-error",
+                error = (error).to_string()
             )
-        },
-    )?;
-    if !output.status.success() {
-        return Err(format!(
-            "selected folder is a document-portal path and `flatpak document-info` failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+        })?;
+    if output.stdout.truncated || output.stdout.invalid_utf8 {
+        return Err(crate::fl!(
+            "ui-app-flatpak-document-info-returned-an-incomplete-response"
         ));
     }
-    parse_document_portal_origin(&String::from_utf8_lossy(&output.stdout))
-        .map(Some)
-        .ok_or_else(|| {
-            "selected folder is a document-portal path but its original host path was not reported"
-                .into()
-        })
+    parse_document_portal_origin(&output.stdout.text)
+        .ok_or_else(|| crate::fl!("ui-app-selected-folder-is-a-document-portal-path-3"))
 }
 
 fn is_document_portal_path(path: &Path) -> bool {
@@ -6305,6 +7193,7 @@ fn sftp_remote_directory_placeholder() -> &'static str {
 }
 
 fn rclone_remote_placeholder(provider: Provider) -> &'static str {
+    static REMOTE_LABEL: LazyLock<String> = LazyLock::new(|| fl!("remote-name-placeholder"));
     static GOOGLE_DRIVE_LABEL: LazyLock<String> = LazyLock::new(|| fl!("google-drive-remote-name"));
     static BOX_LABEL: LazyLock<String> = LazyLock::new(|| fl!("box-remote-name"));
     static SMB_LABEL: LazyLock<String> = LazyLock::new(|| fl!("smb-remote-name"));
@@ -6318,7 +7207,7 @@ fn rclone_remote_placeholder(provider: Provider) -> &'static str {
             static TEAMS_LABEL: LazyLock<String> = LazyLock::new(|| fl!("teams-remote-name"));
             &TEAMS_LABEL
         }
-        Provider::OneDrive => "remote name",
+        Provider::OneDrive => &REMOTE_LABEL,
     }
 }
 
@@ -6330,7 +7219,9 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> String {
             Provider::Smb => fl!("smb-remote-help-modify"),
             Provider::Sftp => fl!("sftp-remote-help-modify"),
             Provider::Teams => fl!("teams-remote-help-modify"),
-            Provider::OneDrive => "OneDrive uses its own authentication workflow.".into(),
+            Provider::OneDrive => {
+                crate::fl!("ui-app-onedrive-uses-its-own-authentication-workflow")
+            }
         };
     }
 
@@ -6341,7 +7232,7 @@ fn rclone_remote_help(provider: Provider, adding: bool) -> String {
         Provider::Sftp => fl!("sftp-remote-help-add"),
         Provider::Teams => fl!("teams-remote-help-add"),
         Provider::OneDrive => {
-            "OneDrive does not use rclone in the approved provider matrix.".into()
+            crate::fl!("ui-app-onedrive-does-not-use-rclone-in-the")
         }
     }
 }
@@ -6384,11 +7275,11 @@ fn onedrive_setup_guidance(mode: AccessMode) -> String {
 }
 
 fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(output)
+        .map_err(|error| crate::fl!("ui-app-invalid-json-error", error = (error).to_string()))?;
     let object = value
         .as_object()
-        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-rclone-config-dump-did-not-return-an"))?;
     let mut remotes = Vec::new();
     for (name, config) in object {
         let Some(remote_config) = config.as_object() else {
@@ -6418,28 +7309,15 @@ fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, 
     Ok(remotes)
 }
 
-fn load_smb_remote_details(remote_name: &str) -> Result<Option<SmbRemoteDetails>, String> {
-    match run_sync_host_command("rclone", &["config", "dump"]) {
-        Ok(output) if output.status.success() => {
-            parse_smb_remote_details(&String::from_utf8_lossy(&output.stdout), remote_name)
-        }
-        Ok(output) => Err(format!(
-            "rclone config dump failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )),
-        Err(error) => Err(format!("could not run rclone config dump: {error}")),
-    }
-}
-
 fn parse_smb_remote_details(
     output: &str,
     remote_name: &str,
 ) -> Result<Option<SmbRemoteDetails>, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(output)
+        .map_err(|error| crate::fl!("ui-app-invalid-json-error", error = (error).to_string()))?;
     let object = value
         .as_object()
-        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-rclone-config-dump-did-not-return-an"))?;
     let Some(remote_config) = object.get(remote_name).and_then(|value| value.as_object()) else {
         return Ok(None);
     };
@@ -6466,11 +7344,11 @@ fn parse_smb_remote_details(
 }
 
 fn rclone_config_has_section(output: &str, remote_name: &str) -> Result<bool, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(output)
+        .map_err(|error| crate::fl!("ui-app-invalid-json-error", error = (error).to_string()))?;
     let object = value
         .as_object()
-        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-rclone-config-dump-did-not-return-an"))?;
     Ok(object.contains_key(remote_name))
 }
 
@@ -6528,17 +7406,24 @@ enum OneDriveMirrorSetupMode {
 impl GoogleDriveRemoteSetup {
     fn from_draft(draft: &ConnectionDraft) -> Result<Self, String> {
         if draft.provider != Provider::GoogleDrive {
-            return Err("Google Drive remote setup requires the Google Drive provider.".into());
+            return Err(crate::fl!(
+                "ui-app-google-drive-remote-setup-requires-the-google"
+            ));
         }
         let name = draft.remote_reference.trim();
         validate_rclone_remote_create_name(name)?;
-        let client_id = optional_setup_value("Google OAuth client ID", &draft.google_client_id)?;
-        let client_secret =
-            optional_secret_value("Google OAuth client secret", &draft.google_client_secret)?;
+        let client_id = optional_setup_value(
+            &crate::fl!("ui-app-google-oauth-client-id"),
+            &draft.google_client_id,
+        )?;
+        let client_secret = optional_secret_value(
+            &crate::fl!("ui-app-google-oauth-client-secret"),
+            &draft.google_client_secret,
+        )?;
         if client_id.is_some() != client_secret.is_some() {
-            return Err(
-                "Google OAuth client ID and client secret must be entered together.".into(),
-            );
+            return Err(crate::fl!(
+                "ui-app-google-oauth-client-id-and-client-secret"
+            ));
         }
         Ok(Self {
             name: name.to_owned(),
@@ -6551,7 +7436,9 @@ impl GoogleDriveRemoteSetup {
 impl BoxRemoteSetup {
     fn from_draft(draft: &ConnectionDraft) -> Result<Self, String> {
         if draft.provider != Provider::Box {
-            return Err("Box remote setup requires the Box provider.".into());
+            return Err(crate::fl!(
+                "ui-app-box-remote-setup-requires-the-box-provider"
+            ));
         }
         let name = draft.remote_reference.trim();
         validate_rclone_remote_create_name(name)?;
@@ -6564,14 +7451,17 @@ impl BoxRemoteSetup {
 impl SmbRemoteSetup {
     fn from_draft(draft: &ConnectionDraft) -> Result<Self, String> {
         if draft.provider != Provider::Smb {
-            return Err("SMB remote setup requires the SMB provider.".into());
+            return Err(crate::fl!(
+                "ui-app-smb-remote-setup-requires-the-smb-provider"
+            ));
         }
         let name = draft.remote_reference.trim();
         validate_rclone_remote_create_name(name)?;
-        let host = optional_setup_value("SMB host", &draft.smb_host)?;
-        let user = optional_setup_value("SMB username", &draft.smb_user)?;
-        let domain = optional_setup_value("SMB domain", &draft.smb_domain)?;
-        let password = optional_secret_value("SMB password", &draft.smb_password)?;
+        let host = optional_setup_value(&crate::fl!("ui-app-smb-host"), &draft.smb_host)?;
+        let user = optional_setup_value(&crate::fl!("ui-app-smb-username"), &draft.smb_user)?;
+        let domain = optional_setup_value(&crate::fl!("ui-app-smb-domain"), &draft.smb_domain)?;
+        let password =
+            optional_secret_value(&crate::fl!("ui-app-smb-password"), &draft.smb_password)?;
         Ok(Self {
             name: name.to_owned(),
             host,
@@ -6606,24 +7496,22 @@ async fn apply_google_drive_rclone_remote_with(
             if let Err(error) = create_result {
                 cleanup_failed_rclone_remote_create(runner, &setup.name).await;
                 return Err(rclone_setup_command_error(
-                    "Google Drive OAuth setup",
+                    &crate::fl!("ui-app-google-drive-oauth-setup"),
                     error,
                 ));
             }
             false
         }
         (GoogleDriveRemoteAction::Create, Some(backend)) => {
-            return Err(format!(
-                "rclone remote `{}` already exists with backend `{backend}`. Select it without recreating it, or use Modify to update its Google OAuth client.",
-                setup.name
+            return Err(crate::fl!(
+                "ui-app-rclone-remote-value1-already-exists-with-backend",
+                value1 = (setup.name).to_string(),
+                backend = (backend).to_string()
             ));
         }
         (GoogleDriveRemoteAction::Update, Some(backend)) if backend == "drive" => {
             if setup.client_id.is_none() {
-                return Err(
-                    "Enter the Google OAuth client ID and matching client secret before updating this remote."
-                        .into(),
-                );
+                return Err(crate::fl!("ui-app-enter-the-google-oauth-client-id-and"));
             }
             let output = runner
                 .run(
@@ -6631,20 +7519,29 @@ async fn apply_google_drive_rclone_remote_with(
                     CancellationToken::new(),
                 )
                 .await
-                .map_err(|error| rclone_setup_command_error("Google Drive OAuth update", error))?;
-            ensure_rclone_config_completed("Google Drive OAuth update", &output)?;
+                .map_err(|error| {
+                    rclone_setup_command_error(
+                        &crate::fl!("ui-app-google-drive-oauth-update"),
+                        error,
+                    )
+                })?;
+            ensure_rclone_config_completed(
+                &crate::fl!("ui-app-google-drive-oauth-update"),
+                &output,
+            )?;
             true
         }
         (GoogleDriveRemoteAction::Update, Some(backend)) => {
-            return Err(format!(
-                "rclone remote `{}` uses backend `{backend}`, not Google Drive. Its OAuth client was not changed.",
-                setup.name
+            return Err(crate::fl!(
+                "ui-app-rclone-remote-value1-uses-backend-backend-not",
+                value1 = (setup.name).to_string(),
+                backend = (backend).to_string()
             ));
         }
         (GoogleDriveRemoteAction::Update, None) => {
-            return Err(format!(
-                "Google Drive rclone remote `{}` no longer exists. Detect remotes or create it again before updating its OAuth client.",
-                setup.name
+            return Err(crate::fl!(
+                "ui-app-google-drive-rclone-remote-value1-no-longer",
+                value1 = (setup.name).to_string()
             ));
         }
     };
@@ -6671,7 +7568,10 @@ async fn create_box_rclone_remote_with(
         .await;
     if let Err(error) = create_result {
         cleanup_failed_rclone_remote_create(runner, &setup.name).await;
-        return Err(rclone_setup_command_error("Box OAuth setup", error));
+        return Err(rclone_setup_command_error(
+            &crate::fl!("ui-app-box-oauth-setup"),
+            error,
+        ));
     }
     Ok(setup.name)
 }
@@ -6697,15 +7597,17 @@ async fn create_smb_rclone_remote_with(
                 .await;
             if let Err(error) = create_result {
                 cleanup_failed_rclone_remote_create(runner, &setup.name).await;
-                return Err(rclone_setup_command_error("config create", error));
+                return Err(rclone_setup_command_error(
+                    &crate::fl!("ui-app-config-create"),
+                    error,
+                ));
             }
         }
         Some(backend) if backend == "smb" => {
             if !metadata_updated && setup.password.is_none() {
-                return Err(
-                    "Enter SMB host, username, domain, or password before updating this remote."
-                        .into(),
-                );
+                return Err(crate::fl!(
+                    "ui-app-enter-smb-host-username-domain-or-password"
+                ));
             }
             if metadata_updated {
                 runner
@@ -6714,13 +7616,16 @@ async fn create_smb_rclone_remote_with(
                         CancellationToken::new(),
                     )
                     .await
-                    .map_err(|error| rclone_setup_command_error("config update", error))?;
+                    .map_err(|error| {
+                        rclone_setup_command_error(&crate::fl!("ui-app-config-update"), error)
+                    })?;
             }
         }
         Some(backend) => {
-            return Err(format!(
-                "rclone remote `{}` already exists with backend `{backend}`. Choose a different SMB remote name.",
-                setup.name
+            return Err(crate::fl!(
+                "ui-app-rclone-remote-value1-already-exists-with-backend-2",
+                value1 = (setup.name).to_string(),
+                backend = (backend).to_string()
             ));
         }
     }
@@ -6732,7 +7637,9 @@ async fn create_smb_rclone_remote_with(
                 CancellationToken::new(),
             )
             .await
-            .map_err(|error| rclone_setup_command_error("config password", error))?;
+            .map_err(|error| {
+                rclone_setup_command_error(&crate::fl!("ui-app-config-password"), error)
+            })?;
     }
     Ok(SmbRemoteApplyResult {
         remote_name: setup.name,
@@ -6756,9 +7663,7 @@ async fn remove_rclone_remote_with(
 ) -> Result<String, String> {
     validate_rclone_remote_create_name(&remote_name)?;
     if runner.resolve(Executable::Rclone).is_none() {
-        return Err(
-            "rclone is missing. Install rclone 1.74.3 or newer before removing remotes.".into(),
-        );
+        return Err(crate::fl!("ui-app-rclone-is-missing-install-rclone-1-74"));
     }
     runner
         .run(
@@ -6766,19 +7671,22 @@ async fn remove_rclone_remote_with(
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| rclone_setup_command_error("config delete", error))?;
+        .map_err(|error| rclone_setup_command_error(&crate::fl!("ui-app-config-delete"), error))?;
     Ok(remote_name)
 }
 
 async fn run_onedriver_online_setup_result(connection: Connection) -> Result<String, String> {
-    run_onedriver_online_setup_with(
+    let mounts = HostVisibleMountTable::observe().await?;
+    let summary = run_onedriver_online_setup_with(
         &app_command_runner(),
-        &HostVisibleMountTable,
+        &mounts,
         &connection,
         &default_cache_root(),
         &default_config_root(),
     )
-    .await
+    .await?;
+    verify_fresh_onedrive_mount_isolation(&connection).await?;
+    Ok(summary)
 }
 
 async fn run_onedriver_online_setup_with(
@@ -6789,25 +7697,33 @@ async fn run_onedriver_online_setup_with(
     config_root: &Path,
 ) -> Result<String, String> {
     if !is_onedriver_online_mount(connection) {
-        return Err("onedriver setup only applies to OneDrive Online Mount connections.".into());
+        return Err(crate::fl!(
+            "ui-app-onedriver-setup-only-applies-to-onedrive-online"
+        ));
     }
     if runner.resolve(Executable::Onedriver).is_none() {
-        return Err(
-            "onedriver is missing. Install jstaf/onedriver 0.15.0 or newer before starting OneDrive Online Mount setup."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedriver-is-missing-install-jstaf-onedriver-0"
+        ));
     }
     prepare_onedriver_online_mount_runtime_with(connection, cache_root, config_root)?;
-    let plan = onedriver_mount_plan(connection, cache_root, config_root)
-        .map_err(|error| format!("could not build onedriver plan: {error}"))?;
-    let mount_entries = mount_table
-        .entries()
-        .map_err(|error| format!("could not inspect active mounts: {error}"))?;
+    let plan = onedriver_mount_plan(connection, cache_root, config_root).map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-build-onedriver-plan-error",
+            error = (error).to_string()
+        )
+    })?;
+    let mount_entries = mount_table.entries().map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-inspect-active-mounts-error",
+            error = (error).to_string()
+        )
+    })?;
     if let Some(entry) = conflicting_onedriver_mount(&plan.mountpoint, &mount_entries) {
-        return Err(format!(
-            "mountpoint `{}` overlaps an active onedriver mount at `{}`. Unmount the existing OneDrive mount or choose a separate mountpoint.",
-            plan.mountpoint.display(),
-            entry.target.display()
+        return Err(crate::fl!(
+            "ui-app-mountpoint-value1-overlaps-an-active-onedriver-mount",
+            value1 = (plan.mountpoint.display()).to_string(),
+            value2 = (entry.target.display()).to_string()
         ));
     }
     runner
@@ -6826,27 +7742,68 @@ async fn run_onedriver_online_setup_with(
 async fn run_onedrive_mirror_interactive_setup_result(
     connection: Connection,
 ) -> Result<String, String> {
-    run_onedrive_mirror_interactive_setup_with(
+    let mounts = HostVisibleMountTable::observe().await?;
+    let summary = run_onedrive_mirror_interactive_setup_with(
         &app_command_runner(),
-        &HostVisibleMountTable,
+        &mounts,
         &connection,
         &default_config_root(),
     )
-    .await
+    .await?;
+    verify_fresh_onedrive_mount_isolation(&connection).await?;
+    Ok(summary)
 }
 
 async fn run_onedrive_mirror_manual_setup_result(
     connection: Connection,
     auth_files: OneDriveMirrorAuthFiles,
 ) -> Result<String, String> {
-    run_onedrive_mirror_manual_setup_with(
+    let mounts = HostVisibleMountTable::observe().await?;
+    let summary = run_onedrive_mirror_manual_setup_with(
         &app_command_runner(),
-        &HostVisibleMountTable,
+        &mounts,
         &connection,
         &default_config_root(),
         &auth_files,
     )
-    .await
+    .await?;
+    verify_fresh_onedrive_mount_isolation(&connection).await?;
+    Ok(summary)
+}
+
+async fn verify_fresh_onedrive_mount_isolation(connection: &Connection) -> Result<(), String> {
+    // Browser authentication can take minutes. Never certify its result using
+    // only the mount observation taken before the authentication dialog.
+    let entries = host_mount_entries().await?;
+    match connection.mode {
+        ConnectionMode::OnlineMount(_) => {
+            let plan =
+                onedriver_mount_plan(connection, &default_cache_root(), &default_config_root())
+                    .map_err(|error| error.to_string())?;
+            if let Some(entry) = conflicting_onedriver_mount(&plan.mountpoint, &entries) {
+                return Err(fl!(
+                    "ui-app-mountpoint-value1-overlaps-an-active-onedriver-mount",
+                    value1 = plan.mountpoint.display().to_string(),
+                    value2 = entry.target.display().to_string()
+                ));
+            }
+        }
+        ConnectionMode::OfflineMirror(_) => {
+            one_drive_mirror_plan(
+                connection,
+                &default_config_root(),
+                &OneDriveIsolationReport {
+                    active_onedriver_paths: entries
+                        .into_iter()
+                        .filter(|entry| entry.filesystem == "fuse.onedriver")
+                        .map(|entry| entry.target)
+                        .collect(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 async fn run_onedrive_mirror_interactive_setup_with(
@@ -6869,14 +7826,15 @@ async fn run_onedrive_mirror_interactive_setup_with(
                 None
             } else {
                 Some(onedrive_validation_command_error(
-                    "interactive authentication",
+                    &fl!("onedrive-stage-interactive-authentication"),
                     error,
                 ))
             }
         });
     if let Err(Some(error)) = auth_result {
-        return Err(format!(
-            "{error}. If the browser did not return to onedrive automatically, use Manual Auth Handoff."
+        return Err(crate::fl!(
+            "ui-app-error-if-the-browser-did-not-return",
+            error = (error).to_string()
         ));
     }
     let token_file = plan.config_directory.join("refresh_token");
@@ -6885,16 +7843,17 @@ async fn run_onedrive_mirror_interactive_setup_with(
         .map(|metadata| metadata.len() == 0)
         .unwrap_or(true)
     {
-        return Err(format!(
-            "OneDrive interactive authorization did not create `{}`. The browser may not have returned to onedrive in this applet session; use Manual Auth Handoff for this connection.",
-            token_file.display()
+        return Err(crate::fl!(
+            "ui-app-onedrive-interactive-authorization-did-not-create-value1",
+            value1 = (token_file.display()).to_string()
         ));
     }
     verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root)
         .await
         .map_err(|error| {
-            format!(
-                "OneDrive interactive authorization completed, but post-auth validation failed: {error}"
+            crate::fl!(
+                "ui-app-onedrive-interactive-authorization-completed-but-post-auth",
+                error = (error).to_string()
             )
         })
 }
@@ -6926,7 +7885,7 @@ async fn run_onedrive_mirror_manual_setup_with(
                 None
             } else {
                 Some(onedrive_validation_command_error(
-                    "manual authentication",
+                    &fl!("onedrive-stage-manual-authentication"),
                     error,
                 ))
             }
@@ -6938,8 +7897,9 @@ async fn run_onedrive_mirror_manual_setup_with(
     verify_onedrive_offline_mirror_setup_with(connection, runner, mount_table, config_root)
         .await
         .map_err(|error| {
-            format!(
-                "OneDrive manual/WebKit authorization completed, but post-auth validation failed: {error}"
+            crate::fl!(
+                "ui-app-onedrive-manual-webkit-authorization-completed-but-post",
+                error = (error).to_string()
             )
         })
 }
@@ -6951,20 +7911,24 @@ fn prepare_onedrive_mirror_setup_plan(
     config_root: &Path,
 ) -> Result<cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan, String> {
     if !is_onedrive_offline_mirror(connection) {
-        return Err(
-            "OneDrive mirror setup only applies to OneDrive Offline Mirror connections.".into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedrive-mirror-setup-only-applies-to-onedrive"
+        ));
     }
     if runner.resolve(Executable::OneDrive).is_none() {
-        return Err(
-            "onedrive is missing. Install abraunegg/onedrive 2.5.10 or newer before starting OneDrive Offline Mirror setup."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedrive-is-missing-install-abraunegg-onedrive-2"
+        ));
     }
     prepare_onedrive_offline_mirror_runtime_with(connection, config_root)?;
     let active_onedriver_paths = mount_table
         .entries()
-        .map_err(|error| format!("could not inspect active mounts: {error}"))?
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-inspect-active-mounts-error",
+                error = (error).to_string()
+            )
+        })?
         .into_iter()
         .filter(|entry| entry.filesystem == "fuse.onedriver")
         .map(|entry| entry.target)
@@ -6984,9 +7948,7 @@ async fn ensure_rclone_remote_name_available(
     remote_name: &str,
 ) -> Result<(), String> {
     if runner.resolve(Executable::Rclone).is_none() {
-        return Err(
-            "rclone is missing. Install rclone 1.74.3 or newer before creating remotes.".into(),
-        );
+        return Err(crate::fl!("ui-app-rclone-is-missing-install-rclone-1-74-2"));
     }
     let dump = runner
         .run(
@@ -6999,10 +7961,11 @@ async fn ensure_rclone_remote_name_available(
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| rclone_setup_command_error("config dump", error))?;
+        .map_err(|error| rclone_setup_command_error(&crate::fl!("ui-app-config-dump"), error))?;
     if rclone_config_has_section(&dump.stdout.text, remote_name)? {
-        return Err(format!(
-            "rclone remote `{remote_name}` already exists. Choose a different remote name or select the existing remote."
+        return Err(crate::fl!(
+            "ui-app-rclone-remote-remote-name-already-exists-choose",
+            remote_name = (remote_name).to_string()
         ));
     }
     Ok(())
@@ -7013,9 +7976,7 @@ async fn rclone_remote_backend(
     remote_name: &str,
 ) -> Result<Option<String>, String> {
     if runner.resolve(Executable::Rclone).is_none() {
-        return Err(
-            "rclone is missing. Install rclone 1.74.3 or newer before creating remotes.".into(),
-        );
+        return Err(crate::fl!("ui-app-rclone-is-missing-install-rclone-1-74-2"));
     }
     let dump = runner
         .run(
@@ -7028,7 +7989,7 @@ async fn rclone_remote_backend(
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| rclone_setup_command_error("config dump", error))?;
+        .map_err(|error| rclone_setup_command_error(&crate::fl!("ui-app-config-dump"), error))?;
     rclone_config_section_backend(&dump.stdout.text, remote_name)
 }
 
@@ -7036,11 +7997,11 @@ fn rclone_config_section_backend(
     output: &str,
     remote_name: &str,
 ) -> Result<Option<String>, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(output).map_err(|error| format!("invalid JSON: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(output)
+        .map_err(|error| crate::fl!("ui-app-invalid-json-error", error = (error).to_string()))?;
     let object = value
         .as_object()
-        .ok_or_else(|| "rclone config dump did not return an object".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-rclone-config-dump-did-not-return-an"))?;
     let Some(config) = object.get(remote_name) else {
         return Ok(None);
     };
@@ -7114,11 +8075,11 @@ fn google_drive_rclone_config_update_request(
     let client_id = setup
         .client_id
         .as_ref()
-        .ok_or_else(|| "Google OAuth client ID is required to update a remote.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-google-oauth-client-id-is-required-to"))?;
     let client_secret = setup
         .client_secret
         .as_ref()
-        .ok_or_else(|| "Google OAuth client secret is required to update a remote.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-google-oauth-client-secret-is-required-to"))?;
     CommandRequest::new(Executable::Rclone)
         .arg("config")
         .map_err(|error| error.to_string())?
@@ -7159,8 +8120,9 @@ fn ensure_rclone_config_completed(stage: &str, output: &CommandOutput) -> Result
         .get("Option")
         .is_some_and(|option| !option.is_null());
     if pending_state || pending_option {
-        return Err(format!(
-            "rclone {stage} requires another configuration response and did not complete OAuth"
+        return Err(crate::fl!(
+            "ui-app-rclone-stage-requires-another-configuration-response-and",
+            stage = (stage).to_string()
         ));
     }
     Ok(())
@@ -7189,7 +8151,7 @@ fn smb_rclone_config_create_request(setup: &SmbRemoteSetup) -> Result<CommandReq
     let host = setup
         .host
         .as_ref()
-        .ok_or_else(|| "SMB host is required to create a new SMB rclone remote.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-smb-host-is-required-to-create-a"))?;
     let mut request = CommandRequest::new(Executable::Rclone)
         .arg("config")
         .map_err(|error| error.to_string())?
@@ -7262,7 +8224,7 @@ fn smb_rclone_config_password_request(setup: &SmbRemoteSetup) -> Result<CommandR
     let password = setup
         .password
         .as_ref()
-        .ok_or_else(|| "SMB password is not set.".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-smb-password-is-not-set"))?;
     CommandRequest::new(Executable::Rclone)
         .arg("config")
         .map_err(|error| error.to_string())?
@@ -7354,19 +8316,29 @@ fn validate_setup_value(label: &str, value: &str, required: bool) -> Result<(), 
 fn rclone_setup_command_error(stage: &str, error: CommandError) -> String {
     match error {
         CommandError::MissingExecutable(executable) => {
-            format!("{} is missing.", executable.display_name())
-        }
-        CommandError::InvalidArgument => {
-            "rclone setup command argument contains unsupported characters".into()
-        }
-        CommandError::Timeout { timeout, .. } => {
-            format!(
-                "rclone {stage} timed out after {} seconds",
-                timeout.as_secs()
+            crate::fl!(
+                "ui-app-value1-is-missing",
+                value1 = (executable.display_name()).to_string()
             )
         }
-        CommandError::Cancelled { .. } => format!("rclone {stage} was cancelled"),
-        CommandError::Spawn { message, .. } => format!("could not start rclone: {message}"),
+        CommandError::InvalidArgument => {
+            crate::fl!("ui-app-rclone-setup-command-argument-contains-unsupported-characters")
+        }
+        CommandError::Timeout { timeout, .. } => {
+            crate::fl!(
+                "ui-app-rclone-stage-timed-out-after-value2-seconds",
+                stage = (stage).to_string(),
+                value2 = (timeout.as_secs()).to_string()
+            )
+        }
+        CommandError::Cancelled { .. } => crate::fl!(
+            "ui-app-rclone-stage-was-cancelled",
+            stage = (stage).to_string()
+        ),
+        CommandError::Spawn { message, .. } => crate::fl!(
+            "ui-app-could-not-start-rclone-message",
+            message = (message).to_string()
+        ),
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
                 stdout.text.trim()
@@ -7374,9 +8346,16 @@ fn rclone_setup_command_error(stage: &str, error: CommandError) -> String {
                 stderr.text.trim()
             };
             if detail.is_empty() {
-                format!("rclone {stage} failed without diagnostic output")
+                crate::fl!(
+                    "ui-app-rclone-stage-failed-without-diagnostic-output",
+                    stage = (stage).to_string()
+                )
             } else {
-                format!("rclone {stage} failed: {detail}")
+                crate::fl!(
+                    "ui-app-rclone-stage-failed-detail",
+                    stage = (stage).to_string(),
+                    detail = (detail).to_string()
+                )
             }
         }
     }
@@ -7385,19 +8364,27 @@ fn rclone_setup_command_error(stage: &str, error: CommandError) -> String {
 fn onedriver_setup_command_error(error: CommandError) -> String {
     match error {
         CommandError::MissingExecutable(executable) => {
-            format!("{} is missing.", executable.display_name())
-        }
-        CommandError::InvalidArgument => {
-            "onedriver setup command argument contains unsupported characters".into()
-        }
-        CommandError::Timeout { timeout, .. } => {
-            format!(
-                "onedriver authentication timed out after {} seconds",
-                timeout.as_secs()
+            crate::fl!(
+                "ui-app-value1-is-missing",
+                value1 = (executable.display_name()).to_string()
             )
         }
-        CommandError::Cancelled { .. } => "onedriver authentication was cancelled".into(),
-        CommandError::Spawn { message, .. } => format!("could not start onedriver: {message}"),
+        CommandError::InvalidArgument => {
+            crate::fl!("ui-app-onedriver-setup-command-argument-contains-unsupported-characters")
+        }
+        CommandError::Timeout { timeout, .. } => {
+            crate::fl!(
+                "ui-app-onedriver-authentication-timed-out-after-value1-seconds",
+                value1 = (timeout.as_secs()).to_string()
+            )
+        }
+        CommandError::Cancelled { .. } => {
+            crate::fl!("ui-app-onedriver-authentication-was-cancelled")
+        }
+        CommandError::Spawn { message, .. } => crate::fl!(
+            "ui-app-could-not-start-onedriver-message",
+            message = (message).to_string()
+        ),
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
                 stdout.text.trim()
@@ -7405,9 +8392,12 @@ fn onedriver_setup_command_error(error: CommandError) -> String {
                 stderr.text.trim()
             };
             if detail.is_empty() {
-                "onedriver authentication failed without diagnostic output".into()
+                crate::fl!("ui-app-onedriver-authentication-failed-without-diagnostic-output")
             } else {
-                format!("onedriver authentication failed: {detail}")
+                crate::fl!(
+                    "ui-app-onedriver-authentication-failed-detail",
+                    detail = (detail).to_string()
+                )
             }
         }
     }
@@ -7453,9 +8443,9 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     UnitDocument::service(&plan.service).map_err(|error| error.to_string())?
                 }
             };
-            Ok(format!(
-                "Managed online mount unit {} validates structurally.",
-                document.name.file_name()
+            Ok(crate::fl!(
+                "ui-app-managed-online-mount-unit-value1-validates-structurally",
+                value1 = (document.name.file_name()).to_string()
             ))
         }
         ConnectionMode::OfflineMirror(_) => match connection.provider {
@@ -7470,9 +8460,9 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                 .map_err(|error| error.to_string())?;
                 let document =
                     UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-                Ok(format!(
-                    "Managed OneDrive mirror unit {} validates structurally.",
-                    document.name.file_name()
+                Ok(crate::fl!(
+                    "ui-app-managed-onedrive-mirror-unit-value1-validates-structurally",
+                    value1 = (document.name.file_name()).to_string()
                 ))
             }
             Provider::Teams
@@ -7482,7 +8472,7 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
             | Provider::Sftp => {
                 let plan = rclone_bisync_plan(connection, &default_work_root())
                     .map_err(|error| error.to_string())?;
-                let service = UnitDocument::service(&mirror_script::service_spec(&plan))
+                let service = UnitDocument::service(&mirror_script::service_spec(&plan)?)
                     .map_err(|error| error.to_string())?;
                 let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
                 if connection.provider == Provider::Teams {
@@ -7491,27 +8481,68 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                         name = service.name.file_name()
                     ));
                 }
-                Ok(format!(
-                    "Managed bisync service {} and timer {} validate structurally.",
-                    service.name.file_name(),
-                    timer.name.file_name()
+                Ok(crate::fl!(
+                    "ui-app-managed-bisync-service-value1-and-timer-value2",
+                    value1 = (service.name.file_name()).to_string(),
+                    value2 = (timer.name.file_name()).to_string()
                 ))
             }
         },
     }
 }
 
-const fn is_rclone_online_mount(connection: &Connection) -> bool {
-    matches!(
-        (&connection.provider, &connection.mode),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnlineMountEngine {
+    Rclone,
+    Onedriver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OnlineRepairPlan {
+    engine: OnlineMountEngine,
+    cancel_rclone_refresh: bool,
+    cancel_directory_preload: bool,
+}
+
+impl OnlineRepairPlan {
+    const fn expected_filesystem(self) -> &'static str {
+        match self.engine {
+            OnlineMountEngine::Rclone => "fuse.rclone",
+            OnlineMountEngine::Onedriver => "fuse.onedriver",
+        }
+    }
+}
+
+const fn online_mount_engine(connection: &Connection) -> Option<OnlineMountEngine> {
+    match (&connection.provider, &connection.mode) {
+        (Provider::OneDrive, ConnectionMode::OnlineMount(_)) => Some(OnlineMountEngine::Onedriver),
         (
             Provider::Teams
-                | Provider::GoogleDrive
-                | Provider::Box
-                | Provider::Smb
-                | Provider::Sftp,
-            ConnectionMode::OnlineMount(_)
-        )
+            | Provider::GoogleDrive
+            | Provider::Box
+            | Provider::Smb
+            | Provider::Sftp,
+            ConnectionMode::OnlineMount(_),
+        ) => Some(OnlineMountEngine::Rclone),
+        (_, ConnectionMode::OfflineMirror(_)) => None,
+    }
+}
+
+const fn online_repair_plan(connection: &Connection) -> Option<OnlineRepairPlan> {
+    let Some(engine) = online_mount_engine(connection) else {
+        return None;
+    };
+    Some(OnlineRepairPlan {
+        engine,
+        cancel_rclone_refresh: matches!(connection.provider, Provider::GoogleDrive),
+        cancel_directory_preload: uses_directory_preload(connection),
+    })
+}
+
+const fn is_rclone_online_mount(connection: &Connection) -> bool {
+    matches!(
+        online_mount_engine(connection),
+        Some(OnlineMountEngine::Rclone)
     )
 }
 
@@ -7531,8 +8562,8 @@ const fn is_rclone_offline_mirror(connection: &Connection) -> bool {
 
 const fn is_onedriver_online_mount(connection: &Connection) -> bool {
     matches!(
-        (&connection.provider, &connection.mode),
-        (Provider::OneDrive, ConnectionMode::OnlineMount(_))
+        online_mount_engine(connection),
+        Some(OnlineMountEngine::Onedriver)
     )
 }
 
@@ -7568,17 +8599,23 @@ async fn install_rclone_online_mount_unit(connection: Connection) -> String {
     match install_rclone_online_mount_unit_result(&connection).await {
         Ok(enabled) => {
             if enabled {
-                format!(
-                    "{name} saved and managed mount unit installed. Its popup state is on, so it remains enabled for login; Save did not start it."
+                crate::fl!(
+                    "ui-app-name-saved-and-managed-mount-unit-installed",
+                    name = (name).to_string()
                 )
             } else {
-                format!(
-                    "{name} saved and managed mount unit installed. Its popup state is off, so it remains disabled at login; Save did not start it."
+                crate::fl!(
+                    "ui-app-name-saved-and-managed-mount-unit-installed-2",
+                    name = (name).to_string()
                 )
             }
         }
         Err(error) => {
-            format!("{name} was saved, but managed mount unit installation failed: {error}")
+            crate::fl!(
+                "ui-app-name-was-saved-but-managed-mount-unit",
+                name = (name).to_string(),
+                error = (error).to_string()
+            )
         }
     }
 }
@@ -7590,7 +8627,7 @@ async fn install_rclone_online_mount_unit_result(connection: &Connection) -> Res
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -7602,7 +8639,7 @@ async fn install_rclone_online_mount_unit_result(connection: &Connection) -> Res
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -7621,10 +8658,14 @@ async fn refresh_online_mount_guards(connections: Vec<Connection>) -> Vec<String
         if !matches!(connection.mode, ConnectionMode::OnlineMount(_)) {
             continue;
         }
-        let result = if connection.provider == Provider::OneDrive {
-            install_onedriver_online_mount_unit_result(&connection).await
-        } else {
-            install_rclone_online_mount_unit_result(&connection).await
+        let result = match online_mount_engine(&connection) {
+            Some(OnlineMountEngine::Onedriver) => {
+                install_onedriver_online_mount_unit_result(&connection).await
+            }
+            Some(OnlineMountEngine::Rclone) => {
+                install_rclone_online_mount_unit_result(&connection).await
+            }
+            None => continue,
         };
         if let Err(error) = result {
             failures.push(format!("{}: {error}", connection.name));
@@ -7636,16 +8677,17 @@ async fn refresh_online_mount_guards(connections: Vec<Connection>) -> Vec<String
 async fn install_rclone_offline_mirror_units(connection: Connection) -> String {
     let name = connection.name.clone();
     match install_rclone_offline_mirror_units_result(&connection).await {
-        Ok(()) => {
-            if connection.provider == Provider::Teams {
-                return fl!("sharepoint-mirror-saved", name = name);
-            }
-            format!(
-                "{name} saved and managed mirror service/timer installed. Automatic sync remains disabled until preview and initial sync are confirmed."
-            )
-        }
+        Ok(()) => offline_mirror_saved_notice(
+            &connection,
+            rclone_bisync_plan(&connection, &default_work_root())
+                .is_ok_and(|plan| initial_sync_marker(&plan).is_file()),
+        ),
         Err(error) => {
-            format!("{name} was saved, but managed mirror unit installation failed: {error}")
+            crate::fl!(
+                "ui-app-name-was-saved-but-managed-mirror-unit",
+                name = (name).to_string(),
+                error = (error).to_string()
+            )
         }
     }
 }
@@ -7655,12 +8697,12 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
     prepare_rclone_bisync_work_files(connection, &plan)?;
-    let service = UnitDocument::service(&mirror_script::service_spec(&plan))
+    let service = UnitDocument::service(&mirror_script::service_spec(&plan)?)
         .map_err(|error| error.to_string())?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -7674,7 +8716,7 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
         return Err(error.to_string());
     }
 
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     manager
         .action(
             SystemdAction::Disable,
@@ -7695,17 +8737,23 @@ async fn install_onedriver_online_mount_unit(connection: Connection) -> String {
     match install_onedriver_online_mount_unit_result(&connection).await {
         Ok(enabled) => {
             if enabled {
-                format!(
-                    "{name} saved and managed onedriver mount unit installed. Its popup state is on, so it remains enabled for login; Save did not start it."
+                crate::fl!(
+                    "ui-app-name-saved-and-managed-onedriver-mount-unit",
+                    name = (name).to_string()
                 )
             } else {
-                format!(
-                    "{name} saved and managed onedriver mount unit installed. Its popup state is off, so it remains disabled at login; Save did not start it."
+                crate::fl!(
+                    "ui-app-name-saved-and-managed-onedriver-mount-unit-2",
+                    name = (name).to_string()
                 )
             }
         }
         Err(error) => {
-            format!("{name} was saved, but managed onedriver unit installation failed: {error}")
+            crate::fl!(
+                "ui-app-name-was-saved-but-managed-onedriver-unit",
+                name = (name).to_string(),
+                error = (error).to_string()
+            )
         }
     }
 }
@@ -7719,7 +8767,7 @@ async fn install_onedriver_online_mount_unit_result(
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -7731,7 +8779,7 @@ async fn install_onedriver_online_mount_unit_result(
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -7747,16 +8795,39 @@ async fn install_onedriver_online_mount_unit_result(
 async fn install_onedrive_offline_mirror_unit(connection: Connection) -> String {
     let name = connection.name.clone();
     match install_onedrive_offline_mirror_unit_result(&connection).await {
-        Ok(()) => {
-            format!(
-                "{name} saved and managed OneDrive mirror unit installed. Synchronization was not started."
-            )
-        }
+        Ok(()) => offline_mirror_saved_notice(
+            &connection,
+            onedrive_mirror_plan_for_app(&connection)
+                .is_ok_and(|plan| onedrive_initial_sync_marker(&plan).is_file()),
+        ),
         Err(error) => {
-            format!(
-                "{name} was saved, but managed OneDrive mirror unit installation failed: {error}"
+            crate::fl!(
+                "ui-app-name-was-saved-but-managed-onedrive-mirror",
+                name = (name).to_string(),
+                error = (error).to_string()
             )
         }
+    }
+}
+
+fn offline_mirror_saved_notice(connection: &Connection, initialized: bool) -> String {
+    match (connection.provider, initialized) {
+        (Provider::OneDrive, true) => fl!(
+            "onedrive-mirror-saved-initialized",
+            name = connection.name.as_str()
+        ),
+        (Provider::OneDrive, false) => fl!(
+            "onedrive-mirror-saved-uninitialized",
+            name = connection.name.as_str()
+        ),
+        (_, true) => fl!(
+            "rclone-mirror-saved-initialized",
+            name = connection.name.as_str()
+        ),
+        (_, false) => fl!(
+            "rclone-mirror-saved-uninitialized",
+            name = connection.name.as_str()
+        ),
     }
 }
 
@@ -7768,14 +8839,14 @@ async fn install_onedrive_offline_mirror_unit_result(
     let document = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
         .install(&document, cancellation.child_token())
         .await
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     manager
         .action(SystemdAction::Disable, Some(&document.name), cancellation)
         .await
@@ -7787,19 +8858,28 @@ async fn install_import_replacement_unit(plan: ImportReplacementPlan) -> String 
     let name = plan.preview.connection.name.clone();
     match install_import_replacement_unit_result(&plan).await {
         Ok(enabled) => {
-            let login = if enabled { "enabled" } else { "disabled" };
-            let original = if plan.preserve_original {
-                " Original legacy service was preserved."
+            let login = if enabled {
+                fl!("value-enabled")
             } else {
-                ""
+                fl!("value-disabled")
             };
-            format!(
-                "{name} imported and applet-managed replacement unit installed. Its initial persistent popup state is {login}.{original}"
+            let original = if plan.preserve_original {
+                fl!("legacy-service-preserved")
+            } else {
+                String::new()
+            };
+            crate::fl!(
+                "ui-app-name-imported-and-applet-managed-replacement-unit",
+                name = (name).to_string(),
+                login = (login).to_string(),
+                original = (original).to_string()
             )
         }
         Err(error) => {
-            format!(
-                "{name} was imported into applet configuration, but managed replacement unit installation failed: {error}"
+            crate::fl!(
+                "ui-app-name-was-imported-into-applet-configuration-but",
+                name = (name).to_string(),
+                error = (error).to_string()
             )
         }
     }
@@ -7821,7 +8901,7 @@ async fn install_import_replacement_unit_result(
     }
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -7833,7 +8913,7 @@ async fn install_import_replacement_unit_result(
         ConnectionMode::OnlineMount(options) => options.start_at_login,
         ConnectionMode::OfflineMirror(_) => false,
     };
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let action = if start_at_login {
         SystemdAction::Enable
     } else {
@@ -7851,18 +8931,23 @@ async fn remove_generated_units_for_connection(connection: Connection) -> String
     match remove_generated_units_for_connection_result(&connection).await {
         Ok(removed) => {
             if removed == 0 {
-                format!(
-                    "{name} was removed. No applet-owned generated units were present. User data, credentials, cache, recovery data, and external services were preserved."
+                crate::fl!(
+                    "ui-app-name-was-removed-no-applet-owned-generated",
+                    name = (name).to_string()
                 )
             } else {
-                format!(
-                    "{name} was removed. Removed {removed} applet-owned generated unit(s). User data, credentials, cache, recovery data, and external services were preserved."
+                crate::fl!(
+                    "ui-app-name-was-removed-removed-removed-applet-owned",
+                    name = (name).to_string(),
+                    removed = (removed).to_string()
                 )
             }
         }
         Err(error) => {
-            format!(
-                "{name} was removed from applet configuration, but generated unit cleanup needs attention: {error}"
+            crate::fl!(
+                "ui-app-name-was-removed-from-applet-configuration-but",
+                name = (name).to_string(),
+                error = (error).to_string()
             )
         }
     }
@@ -7881,15 +8966,15 @@ async fn remove_generated_units_for_connection_result(
     }
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
-    let controller = UnitController::new(store, CommandSystemdManager::new(app_command_runner()));
+    let controller = UnitController::new(store, DbusSystemdManager);
     let cancellation = CancellationToken::new();
     let mut removed = 0usize;
     for unit in managed_unit_names_for_connection(connection) {
-        let manager = CommandSystemdManager::new(app_command_runner());
+        let manager = DbusSystemdManager;
         let _ = manager
             .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
             .await;
-        let manager = CommandSystemdManager::new(app_command_runner());
+        let manager = DbusSystemdManager;
         let _ = manager
             .action(
                 SystemdAction::Disable,
@@ -7922,7 +9007,10 @@ fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
 
 async fn restore_online_after_wake_result(connection: &Connection) -> Result<(), String> {
     let Ok(token) = cosmic_ext_applet_mounter::sleep::online_operation_token() else {
-        return Err(format!("Wake restoration canceled for {}", connection.name));
+        return Err(crate::fl!(
+            "ui-app-wake-restoration-canceled-for-value1",
+            value1 = (connection.name).to_string()
+        ));
     };
     let wait = async {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
@@ -7931,9 +9019,9 @@ async fn restore_online_after_wake_result(connection: &Connection) -> Result<(),
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(format!(
-                    "Wake restoration for {} is waiting for network; retry manually",
-                    connection.name
+                return Err(crate::fl!(
+                    "ui-app-wake-restoration-for-value1-is-waiting-for",
+                    value1 = (connection.name).to_string()
                 ));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -7941,24 +9029,26 @@ async fn restore_online_after_wake_result(connection: &Connection) -> Result<(),
         // Re-read after waiting: a removal or disable must override restoration.
         let config = Config::load_runtime().config;
         if !config.document.unmount_before_sleep || !config.document.restore_after_wake {
-            return Err(format!("Wake restoration disabled for {}", connection.name));
+            return Err(crate::fl!(
+                "ui-app-wake-restoration-disabled-for-value1",
+                value1 = (connection.name).to_string()
+            ));
         }
         let Some(current) = config.document.connections.into_iter().find(|item| {
             item.id == connection.id
                 && item.enabled
                 && matches!(item.mode, ConnectionMode::OnlineMount(_))
         }) else {
-            return Err(format!("Wake restoration skipped for {}", connection.name));
+            return Err(crate::fl!(
+                "ui-app-wake-restoration-skipped-for-value1",
+                value1 = (connection.name).to_string()
+            ));
         };
-        if current.provider == Provider::OneDrive {
-            run_managed_onedriver_online_mount_operation_result(&current, Operation::Mount).await
-        } else {
-            run_managed_online_mount_operation_result(&current, Operation::Mount).await
-        }
+        run_managed_online_mount_operation_result(&current, Operation::Mount).await
     };
     tokio::select! {
         biased;
-        () = token.cancelled() => Err(format!("Wake restoration canceled for {}", connection.name)),
+        () = token.cancelled() => Err(fl!("wake-restoration-cancelled", name = connection.name.as_str())),
         result = wait => result,
     }
 }
@@ -7967,15 +9057,34 @@ async fn run_managed_online_mount_operation_result(
     connection: &Connection,
     operation: Operation,
 ) -> Result<(), String> {
-    let token = cosmic_ext_applet_mounter::sleep::begin_online_operation()?;
-    tokio::select! {
-        biased;
-        () = token.cancelled() => Err("Online operation canceled for sleep; retry after wake".into()),
-        result = run_managed_online_mount_operation_result_inner(connection, operation) => result,
+    match online_mount_engine(connection).ok_or_else(|| {
+        crate::fl!(
+            "ui-app-value1-is-not-an-online-mount",
+            value1 = (connection.name).to_string()
+        )
+    })? {
+        OnlineMountEngine::Rclone => {
+            run_managed_rclone_online_mount_operation_result(connection, operation).await
+        }
+        OnlineMountEngine::Onedriver => {
+            run_managed_onedriver_online_mount_operation_result(connection, operation).await
+        }
     }
 }
 
-async fn run_managed_online_mount_operation_result_inner(
+async fn run_managed_rclone_online_mount_operation_result(
+    connection: &Connection,
+    operation: Operation,
+) -> Result<(), String> {
+    let token = cosmic_ext_applet_mounter::sleep::begin_online_operation()?;
+    tokio::select! {
+        biased;
+        () = token.cancelled() => Err(fl!("online-operation-cancelled-for-sleep")),
+        result = run_managed_rclone_online_mount_operation_result_inner(connection, operation) => result,
+    }
+}
+
+async fn run_managed_rclone_online_mount_operation_result_inner(
     connection: &Connection,
     operation: Operation,
 ) -> Result<(), String> {
@@ -7983,9 +9092,9 @@ async fn run_managed_online_mount_operation_result_inner(
         Operation::Mount => SystemdAction::Start,
         Operation::Unmount => SystemdAction::Stop,
         _ => {
-            return Err(format!(
-                "{} is not a managed mount operation",
-                operation_label(operation)
+            return Err(crate::fl!(
+                "ui-app-value1-is-not-a-managed-mount-operation",
+                value1 = (operation_label(operation)).to_string()
             ));
         }
     };
@@ -7994,9 +9103,12 @@ async fn run_managed_online_mount_operation_result_inner(
         prepare_online_mount_runtime(connection)?;
         mount_guard::check_empty_mountpoint(&app_command_runner(), &connection.local_path).await?;
         ensure_vpn_ready_for_connection(connection).await?;
-        verify_rclone_access(connection)
-            .await
-            .map_err(|error| format!("Remote access check failed before mounting: {error}"))?;
+        verify_rclone_access(connection).await.map_err(|error| {
+            crate::fl!(
+                "ui-app-remote-access-check-failed-before-mounting-error",
+                error = (error).to_string()
+            )
+        })?;
         let current = Config::load_runtime().config;
         if !current
             .document
@@ -8004,7 +9116,9 @@ async fn run_managed_online_mount_operation_result_inner(
             .iter()
             .any(|saved| saved == connection && saved.enabled)
         {
-            return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
+            return Err(crate::fl!(
+                "ui-app-connection-was-disabled-removed-or-changed-while"
+            ));
         }
         // Refresh applet-owned units so provider tuning added by an app update
         // applies to saved connections without requiring an edit-and-save cycle.
@@ -8014,17 +9128,9 @@ async fn run_managed_online_mount_operation_result_inner(
     } else {
         persist_online_popup_state(connection.id, false).await?;
     }
-    let manager = CommandSystemdManager::new(app_command_runner());
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
-        start_managed_online_service(&manager, &unit, cancellation).await?;
-        return persist_online_popup_state(connection.id, true)
-            .await
-            .map_err(|error| {
-                format!(
-                    "Mount is active for this session, but its popup on state was not saved: {error}"
-                )
-            });
+        return start_online_service_and_persist(connection, &unit, cancellation).await;
     } else {
         if connection.provider == Provider::GoogleDrive {
             // Stop cache warm-up while its RC socket is still available. A failed
@@ -8036,15 +9142,7 @@ async fn run_managed_online_mount_operation_result_inner(
         }
         clean_detach_before_service_stop(connection, cancellation.child_token()).await?;
     }
-    manager
-        .action(action, Some(&unit), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    if action == SystemdAction::Stop {
-        require_mount_disappearance_after_clean_stop(connection).await?;
-        maybe_shutdown_vpn_after_unmount(connection).await?;
-    }
-    Ok(())
+    stop_online_service_and_release_vpn(connection, &unit, cancellation).await
 }
 
 async fn run_managed_onedriver_online_mount_operation_result(
@@ -8054,7 +9152,7 @@ async fn run_managed_onedriver_online_mount_operation_result(
     let token = cosmic_ext_applet_mounter::sleep::begin_online_operation()?;
     tokio::select! {
         biased;
-        () = token.cancelled() => Err("Online operation canceled for sleep; retry after wake".into()),
+        () = token.cancelled() => Err(fl!("online-operation-cancelled-for-sleep")),
         result = run_managed_onedriver_online_mount_operation_result_inner(connection, operation) => result,
     }
 }
@@ -8067,9 +9165,9 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
         Operation::Mount => SystemdAction::Start,
         Operation::Unmount => SystemdAction::Stop,
         _ => {
-            return Err(format!(
-                "{} is not a managed onedriver mount operation",
-                operation_label(operation)
+            return Err(crate::fl!(
+                "ui-app-value1-is-not-a-managed-onedriver-mount",
+                value1 = (operation_label(operation)).to_string()
             ));
         }
     };
@@ -8085,7 +9183,9 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
             .iter()
             .any(|saved| saved == connection && saved.enabled)
         {
-            return Err("Connection was disabled, removed or changed while waiting; retry with its current settings".into());
+            return Err(crate::fl!(
+                "ui-app-connection-was-disabled-removed-or-changed-while"
+            ));
         }
         install_onedriver_online_mount_unit_result(connection)
             .await
@@ -8093,7 +9193,7 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
     } else {
         persist_online_popup_state(connection.id, false).await?;
     }
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let cancellation = CancellationToken::new();
     if action == SystemdAction::Start {
         manager
@@ -8104,27 +9204,41 @@ async fn run_managed_onedriver_online_mount_operation_result_inner(
             )
             .await
             .map_err(|error| error.to_string())?;
-        start_managed_online_service(&manager, &unit, cancellation).await?;
-        return persist_online_popup_state(connection.id, true)
-            .await
-            .map_err(|error| {
-                format!(
-                    "Mount is active for this session, but its popup on state was not saved: {error}"
-                )
-            });
+        return start_online_service_and_persist(connection, &unit, cancellation).await;
     } else {
         directory_preload::cancel_before_unmount(connection.id).await?;
         clean_detach_before_service_stop(connection, cancellation.child_token()).await?;
     }
-    manager
-        .action(action, Some(&unit), cancellation)
+    stop_online_service_and_release_vpn(connection, &unit, cancellation).await
+}
+
+async fn start_online_service_and_persist(
+    connection: &Connection,
+    unit: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    start_managed_online_service(&DbusSystemdManager, unit, cancellation).await?;
+    persist_online_popup_state(connection.id, true)
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-mount-is-active-for-this-session-but",
+                error = (error).to_string()
+            )
+        })
+}
+
+async fn stop_online_service_and_release_vpn(
+    connection: &Connection,
+    unit: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    DbusSystemdManager
+        .action(SystemdAction::Stop, Some(unit), cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    if action == SystemdAction::Stop {
-        require_mount_disappearance_after_clean_stop(connection).await?;
-        maybe_shutdown_vpn_after_unmount(connection).await?;
-    }
-    Ok(())
+    require_mount_disappearance_after_clean_stop(connection).await?;
+    maybe_shutdown_vpn_after_unmount(connection).await
 }
 
 async fn clean_detach_before_service_stop(
@@ -8136,9 +9250,14 @@ async fn clean_detach_before_service_stop(
     // retry a busy clean detach before reporting failure.
     let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
     loop {
-        let mounted = HostVisibleMountTable
-            .entries()
-            .map_err(|error| format!("could not check mount before unmount: {error}"))?
+        let mounted = host_mount_entries()
+            .await
+            .map_err(|error| {
+                crate::fl!(
+                    "ui-app-could-not-check-mount-before-unmount-error",
+                    error = (error).to_string()
+                )
+            })?
             .iter()
             .any(|entry| entry.target == connection.local_path);
         if !mounted {
@@ -8156,12 +9275,14 @@ async fn clean_detach_before_service_stop(
         let error = result.expect_err("checked unsuccessful clean unmount");
         // Reconcile the helper exit with the actual mount table. A helper can
         // report failure after another process has already detached the mount.
-        let still_mounted = HostVisibleMountTable
-            .entries()
+        let still_mounted = host_mount_entries()
+            .await
             .map_err(|check_error| {
-                format!(
-                    "Clean unmount failed for {}: {error}; could not verify mount: {check_error}",
-                    connection.local_path.display()
+                crate::fl!(
+                    "ui-app-clean-unmount-failed-for-value1-error-could",
+                    value1 = (connection.local_path.display()).to_string(),
+                    error = (error).to_string(),
+                    check_error = (check_error).to_string()
                 )
             })?
             .iter()
@@ -8171,9 +9292,10 @@ async fn clean_detach_before_service_stop(
         }
         if tokio::time::Instant::now() >= deadline || !matches!(error, CommandError::NonZero { .. })
         {
-            return Err(format!(
-                "Clean unmount could not detach {}: {error}. The mount service was left running; close processes using it and retry",
-                connection.local_path.display()
+            return Err(crate::fl!(
+                "ui-app-clean-unmount-could-not-detach-value1-error",
+                value1 = (connection.local_path.display()).to_string(),
+                error = (error).to_string()
             ));
         }
         tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
@@ -8185,18 +9307,23 @@ async fn require_mount_disappearance_after_clean_stop(
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
     loop {
-        let mounted = HostVisibleMountTable
-            .entries()
-            .map_err(|error| format!("could not verify unmount: {error}"))?
+        let mounted = host_mount_entries()
+            .await
+            .map_err(|error| {
+                crate::fl!(
+                    "ui-app-could-not-verify-unmount-error",
+                    error = (error).to_string()
+                )
+            })?
             .iter()
             .any(|entry| entry.target == connection.local_path);
         if !mounted {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err(format!(
-                "clean unmount left a busy FUSE endpoint at {}. Close file-browser windows and terminals using it, then select Repair and confirm the lazy unmount",
-                connection.local_path.display()
+            return Err(crate::fl!(
+                "ui-app-clean-unmount-left-a-busy-fuse-endpoint",
+                value1 = (connection.local_path.display()).to_string()
             ));
         }
         tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
@@ -8205,32 +9332,35 @@ async fn require_mount_disappearance_after_clean_stop(
 
 async fn run_online_mount_repair_operation(connection: Connection) -> String {
     match run_online_mount_repair_operation_result(&connection).await {
-        Ok(()) => format!(
-            "Repair completed for {}. The mountpoint is detached and the generated service is ready for the next mount.",
-            connection.name
+        Ok(()) => crate::fl!(
+            "ui-app-repair-completed-for-value1-the-mountpoint-is",
+            value1 = (connection.name).to_string()
         ),
-        Err(error) => format!("Repair failed for {}: {error}", connection.name),
+        Err(error) => crate::fl!(
+            "ui-app-repair-failed-for-value1-error",
+            value1 = (connection.name).to_string(),
+            error = (error).to_string()
+        ),
     }
 }
 
 async fn run_online_mount_repair_operation_result(connection: &Connection) -> Result<(), String> {
-    if !matches!(connection.mode, ConnectionMode::OnlineMount(_)) {
-        return Err("repair is only available for online mounts".into());
-    }
+    let plan = online_repair_plan(connection)
+        .ok_or_else(|| crate::fl!("ui-app-repair-is-only-available-for-online-mounts"))?;
 
     let unit = UnitName::new(connection.id, UnitKind::Service);
-    let manager = CommandSystemdManager::new(app_command_runner());
+    let manager = DbusSystemdManager;
     let cancellation = CancellationToken::new();
 
-    if connection.provider == Provider::GoogleDrive {
+    persist_online_popup_state(connection.id, false).await?;
+
+    if plan.cancel_rclone_refresh {
         let _ = rclone_refresh::cancel(connection.id).await;
     }
-    if uses_directory_preload(connection) {
+    if plan.cancel_directory_preload {
         directory_preload::cancel(connection.id).await;
     }
-    let _ = manager
-        .action(SystemdAction::Stop, Some(&unit), cancellation.child_token())
-        .await;
+    stop_online_repair_service(&manager, &unit, cancellation.child_token()).await;
 
     if repair_needs_lazy_detach(connection, &host_mount_entries().await?)? {
         app_command_runner()
@@ -8245,17 +9375,37 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
     let deadline = tokio::time::Instant::now() + CLEAN_UNMOUNT_SETTLE_TIMEOUT;
     while repair_needs_lazy_detach(connection, &host_mount_entries().await?)? {
         if tokio::time::Instant::now() >= deadline {
-            return Err(
-                "repair could not detach the mountpoint; inspect the mount before retrying".into(),
-            );
+            return Err(crate::fl!(
+                "ui-app-repair-could-not-detach-the-mountpoint-inspect"
+            ));
         }
         tokio::time::sleep(CLEAN_UNMOUNT_POLL_INTERVAL).await;
     }
 
+    reconcile_online_repair_service(&manager, &unit, cancellation).await
+}
+
+async fn stop_online_repair_service<M: SystemdManager>(
+    manager: &M,
+    unit: &UnitName,
+    cancellation: CancellationToken,
+) {
+    // Continue to ownership-checked detach even when a failed unit cannot be
+    // stopped; its final state is read and reset after the mount disappears.
+    let _ = manager
+        .action(SystemdAction::Stop, Some(unit), cancellation)
+        .await;
+}
+
+async fn reconcile_online_repair_service<M: SystemdManager>(
+    manager: &M,
+    unit: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
     let status = manager
         .action(
             SystemdAction::Status,
-            Some(&unit),
+            Some(unit),
             cancellation.child_token(),
         )
         .await
@@ -8268,7 +9418,7 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
         .ok_or_else(|| fl!("online-service-repair-unknown-state"))?;
     if repair_requires_failed_reset(Some(&status)) {
         manager
-            .action(SystemdAction::ResetFailed, Some(&unit), cancellation)
+            .action(SystemdAction::ResetFailed, Some(unit), cancellation)
             .await
             .map_err(|error| {
                 fl!(
@@ -8281,23 +9431,9 @@ async fn run_online_mount_repair_operation_result(connection: &Connection) -> Re
     Ok(())
 }
 
-async fn host_mount_entries() -> Result<Vec<cosmic_ext_applet_mounter::mounts::MountEntry>, String>
-{
-    let request = CommandRequest::new(Executable::Cat)
-        .arg("/proc/self/mountinfo")
-        .map_err(|error| error.to_string())?
-        .with_output_limit(4 * 1024 * 1024);
-    let output = app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-        .map_err(|error| error.to_string())?;
-    if output.stdout.truncated {
-        return Err("host mount table is truncated".into());
-    }
-    output
-        .stdout
-        .text
-        .lines()
+async fn host_mount_entries() -> Result<Vec<MountEntry>, String> {
+    let text = HostInspection::HostMountInfo.run_owned().await?;
+    text.lines()
         .map(|line| {
             cosmic_ext_applet_mounter::mounts::parse_mountinfo_line(line)
                 .map_err(|error| error.to_string())
@@ -8315,15 +9451,12 @@ fn repair_needs_lazy_detach(
     else {
         return Ok(false);
     };
-    let expected = if connection.provider == Provider::OneDrive {
-        "fuse.onedriver"
-    } else {
-        "fuse.rclone"
-    };
-    if mount.filesystem != expected {
-        return Err(
-            "repair found an unexpected filesystem at the mountpoint; left it untouched".into(),
-        );
+    let plan = online_repair_plan(connection)
+        .ok_or_else(|| crate::fl!("ui-app-repair-is-only-available-for-online-mounts"))?;
+    if mount.filesystem != plan.expected_filesystem() {
+        return Err(crate::fl!(
+            "ui-app-repair-found-an-unexpected-filesystem-at-the"
+        ));
     }
     Ok(true)
 }
@@ -8332,123 +9465,656 @@ fn repair_requires_failed_reset(status: Option<&UnitStatus>) -> bool {
     status.is_some_and(|status| status.active == ActiveState::Failed)
 }
 
-async fn run_managed_offline_mirror_operation(
-    connection: Connection,
-    operation: Operation,
-) -> String {
-    let label = operation_label(operation);
-    match run_managed_offline_mirror_operation_result(&connection, operation).await {
-        Ok(summary) => format!("{label} completed for {}. {summary}", connection.name),
-        Err(error) => format!("{label} failed for {}: {error}", connection.name),
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfflineRepairEngine {
+    RcloneBisync,
+    OneDriveMonitor,
 }
 
-async fn run_offline_mirror_repair_operation(connection: Connection) -> String {
-    match run_offline_mirror_repair_operation_result(&connection).await {
-        Ok(()) => format!(
-            "Repair completed for {}. Its schedule is paused and the failed service was reset. After an interrupted run, keep the bisync safety lock in place and wait up to two minutes before Start.",
-            connection.name
-        ),
-        Err(error) => format!("Repair failed for {}: {error}", connection.name),
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OfflineRepairPlan {
+    engine: OfflineRepairEngine,
+    service: UnitName,
+    timer: Option<UnitName>,
 }
 
-async fn run_offline_mirror_repair_operation_result(connection: &Connection) -> Result<(), String> {
-    if !is_rclone_offline_mirror(connection) {
-        return Err("repair is only available for rclone offline mirrors".into());
-    }
+fn offline_repair_plan(connection: &Connection) -> Result<OfflineRepairPlan, String> {
+    let engine = if is_rclone_offline_mirror(connection) {
+        OfflineRepairEngine::RcloneBisync
+    } else if is_onedrive_offline_mirror(connection) {
+        OfflineRepairEngine::OneDriveMonitor
+    } else {
+        return Err(crate::fl!(
+            "ui-app-repair-is-only-available-for-supported-offline"
+        ));
+    };
+    Ok(OfflineRepairPlan {
+        engine,
+        service: UnitName::new(connection.id, UnitKind::Service),
+        timer: (engine == OfflineRepairEngine::RcloneBisync)
+            .then(|| UnitName::new(connection.id, UnitKind::Timer)),
+    })
+}
 
-    let service = UnitName::new(connection.id, UnitKind::Service);
-    let timer = UnitName::new(connection.id, UnitKind::Timer);
-    let manager = CommandSystemdManager::new(app_command_runner());
-    let cancellation = CancellationToken::new();
+fn authoritative_offline_repair_connection(id: ConnectionId) -> Result<Connection, String> {
+    let report = Config::load_runtime();
+    let connection = report
+        .config
+        .document
+        .connections
+        .into_iter()
+        .find(|connection| connection.id == id)
+        .ok_or_else(|| crate::fl!("ui-app-offline-mirror-connection-is-no-longer-available"))?;
+    offline_repair_plan(&connection)?;
+    Ok(connection)
+}
 
-    let _ = manager
-        .action(
-            SystemdAction::Stop,
-            Some(&timer),
-            cancellation.child_token(),
-        )
-        .await;
-    manager
-        .action(
-            SystemdAction::Disable,
-            Some(&timer),
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    let _ = manager
-        .action(
-            SystemdAction::Stop,
-            Some(&service),
-            cancellation.child_token(),
-        )
-        .await;
-    let status = manager
-        .action(
-            SystemdAction::Status,
-            Some(&service),
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or("offline mirror service state is unavailable")?;
-    if repair_requires_failed_reset(Some(&status)) {
-        manager
-            .action(SystemdAction::ResetFailed, Some(&service), cancellation)
-            .await
-            .map_err(|error| error.to_string())?;
+fn verify_offline_repair_unit_ownership(plan: &OfflineRepairPlan) -> Result<(), String> {
+    let validator = StructuralUnitValidator;
+    let store = FileUnitStore::user(Arc::new(validator)).map_err(|error| error.to_string())?;
+    for unit in std::iter::once(&plan.service).chain(plan.timer.iter()) {
+        match store.state(unit).map_err(|error| error.to_string())? {
+            UnitFileState::Managed(owner) if owner == unit.connection_id() => {
+                let content = store
+                    .read(unit)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| {
+                        crate::fl!(
+                            "ui-app-managed-offline-mirror-unit-value1-is-missing",
+                            value1 = (unit.file_name()).to_string()
+                        )
+                    })?;
+                validator
+                    .validate(&UnitDocument {
+                        name: unit.clone(),
+                        content,
+                    })
+                    .map_err(|error| {
+                        crate::fl!(
+                            "ui-app-managed-offline-mirror-unit-value1-is-invalid",
+                            value1 = (unit.file_name()).to_string(),
+                            error = (error).to_string()
+                        )
+                    })?;
+            }
+            UnitFileState::Missing => {
+                return Err(crate::fl!(
+                    "ui-app-managed-offline-mirror-unit-value1-is-missing",
+                    value1 = (unit.file_name()).to_string()
+                ));
+            }
+            UnitFileState::External | UnitFileState::Managed(_) => {
+                return Err(crate::fl!(
+                    "ui-app-offline-mirror-unit-value1-is-not-owned",
+                    value1 = (unit.file_name()).to_string()
+                ));
+            }
+        }
     }
     Ok(())
 }
 
-async fn run_managed_offline_mirror_operation_result(
+async fn offline_repair_action<M: SystemdManager>(
+    manager: &M,
+    action: SystemdAction,
+    unit: &UnitName,
+    stage: &str,
+    cancellation: CancellationToken,
+) -> Result<Option<UnitStatus>, String> {
+    manager
+        .action(action, Some(unit), cancellation)
+        .await
+        .map_err(|error| format!("{stage}: {error}"))
+}
+
+async fn offline_repair_status<M: SystemdManager>(
+    manager: &M,
+    unit: &UnitName,
+    stage: &str,
+    cancellation: CancellationToken,
+) -> Result<UnitStatus, String> {
+    offline_repair_action(manager, SystemdAction::Status, unit, stage, cancellation)
+        .await?
+        .ok_or_else(|| {
+            crate::fl!(
+                "ui-app-stage-unit-state-is-unavailable",
+                stage = (stage).to_string()
+            )
+        })
+}
+
+fn require_repaired_unit(
+    status: &UnitStatus,
+    role: &str,
+    must_be_disabled: bool,
+) -> Result<(), String> {
+    if status.active != ActiveState::Inactive {
+        return Err(crate::fl!(
+            "ui-app-role-did-not-become-inactive-observed-value2",
+            role = (role).to_string(),
+            value2 = format!("{:?}", status.active)
+        ));
+    }
+    if must_be_disabled && status.enabled {
+        return Err(crate::fl!(
+            "ui-app-role-remains-enabled",
+            role = (role).to_string()
+        ));
+    }
+    Ok(())
+}
+
+async fn stop_disable_and_reconcile_offline_service<M: SystemdManager>(
+    manager: &M,
+    service: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    offline_repair_action(
+        manager,
+        SystemdAction::Stop,
+        service,
+        &crate::fl!("ui-app-could-not-stop-offline-mirror-service"),
+        cancellation.child_token(),
+    )
+    .await?;
+    offline_repair_action(
+        manager,
+        SystemdAction::Disable,
+        service,
+        &crate::fl!("ui-app-could-not-disable-offline-mirror-service"),
+        cancellation.child_token(),
+    )
+    .await?;
+    let mut status = offline_repair_status(
+        manager,
+        service,
+        &crate::fl!("ui-app-could-not-inspect-stopped-offline-mirror-service"),
+        cancellation.child_token(),
+    )
+    .await?;
+    if repair_requires_failed_reset(Some(&status)) {
+        offline_repair_action(
+            manager,
+            SystemdAction::ResetFailed,
+            service,
+            &crate::fl!("ui-app-could-not-reset-failed-offline-mirror-service"),
+            cancellation.child_token(),
+        )
+        .await?;
+        status = offline_repair_status(
+            manager,
+            service,
+            &crate::fl!("ui-app-could-not-verify-reset-offline-mirror-service"),
+            cancellation,
+        )
+        .await?;
+    }
+    require_repaired_unit(&status, &fl!("offline-service-role"), true)
+}
+
+#[cfg(test)]
+async fn execute_offline_repair_plan<M: SystemdManager>(
+    manager: &M,
+    plan: &OfflineRepairPlan,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    pause_offline_repair_trigger(manager, plan, cancellation.child_token()).await?;
+    stop_disable_and_reconcile_offline_service(manager, &plan.service, cancellation.child_token())
+        .await
+}
+
+async fn pause_offline_repair_trigger<M: SystemdManager>(
+    manager: &M,
+    plan: &OfflineRepairPlan,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    if let Some(timer) = &plan.timer {
+        offline_repair_action(
+            manager,
+            SystemdAction::Stop,
+            timer,
+            &crate::fl!("ui-app-could-not-stop-offline-mirror-timer"),
+            cancellation.child_token(),
+        )
+        .await?;
+        offline_repair_action(
+            manager,
+            SystemdAction::Disable,
+            timer,
+            &crate::fl!("ui-app-could-not-disable-offline-mirror-timer"),
+            cancellation.child_token(),
+        )
+        .await?;
+        let status = offline_repair_status(
+            manager,
+            timer,
+            &crate::fl!("ui-app-could-not-inspect-paused-offline-mirror-timer"),
+            cancellation.child_token(),
+        )
+        .await?;
+        require_repaired_unit(&status, &fl!("offline-timer-role"), true)?;
+    }
+    Ok(())
+}
+
+async fn run_managed_offline_mirror_operation(
+    connection: Connection,
+    operation: Operation,
+    control: Arc<ManualOperationControl>,
+) -> String {
+    let label = operation_label(operation);
+    let finite = matches!(
+        operation,
+        Operation::PreviewInitialSync | Operation::SyncNow
+    );
+    if finite && let Err(error) = begin_finite_offline_vpn_use(&connection).await {
+        control.finish();
+        return crate::fl!(
+            "ui-app-label-failed-for-value2-error",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            error = (error).to_string()
+        );
+    }
+    let mut result = if matches!(operation, Operation::PauseSync | Operation::ResumeSync) {
+        run_tracked_offline_operation(
+            &connection,
+            operation,
+            &control,
+            run_managed_offline_mirror_operation_result_with_cancellation(
+                &connection,
+                operation,
+                control.cancellation(),
+            ),
+        )
+        .await
+    } else {
+        let mode = rclone_bisync_mode(&connection, operation);
+        let result = match mode {
+            Ok(mode) => bisync_coordinator::run_saved(
+                connection.id,
+                mode,
+                &default_work_root(),
+                &app_command_runner(),
+                control.cancellation(),
+            )
+            .await
+            .map(|outcome| rclone_bisync_outcome_summary(mode, &outcome)),
+            Err(error) => Err(error),
+        };
+        control.finish();
+        result
+    };
+    if finite || (operation == Operation::PauseSync && result.is_ok()) {
+        result = merge_offline_vpn_release(result, finish_offline_vpn_use(&connection).await);
+    }
+    match result {
+        Ok(summary) => crate::fl!(
+            "ui-app-label-completed-for-value2-summary",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            summary = (summary).to_string()
+        ),
+        Err(error) => crate::fl!(
+            "ui-app-label-failed-for-value2-error",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            error = (error).to_string()
+        ),
+    }
+}
+
+async fn run_offline_mirror_repair_operation(
+    connection: Connection,
+    manual_operation: Option<Arc<ManualOperationControl>>,
+) -> String {
+    let path = offline_coordinator_state_path(connection.id);
+    let result = run_offline_mirror_repair_operation_result(&connection, manual_operation).await;
+    let state = if result.is_ok() {
+        OfflineOperationState::Paused
+    } else {
+        OfflineOperationState::Failed
+    };
+    let state_result = write_offline_coordinator_state(
+        &path,
+        OfflineCoordinatorState::new(connection.id, OfflineOperation::Repair, state),
+    );
+    let result = match (result, state_result) {
+        (Ok(engine), Ok(())) => Ok(engine),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    };
+    let release = if result.is_ok() {
+        finish_offline_vpn_use(&connection).await.err()
+    } else {
+        None
+    };
+    let mut notice = match result {
+        Ok(OfflineRepairEngine::RcloneBisync) => crate::fl!(
+            "ui-app-repair-completed-for-value1-its-timer-and",
+            value1 = (connection.name).to_string()
+        ),
+        Ok(OfflineRepairEngine::OneDriveMonitor) => crate::fl!(
+            "ui-app-repair-completed-for-value1-its-onedrive-monitor",
+            value1 = (connection.name).to_string()
+        ),
+        Err(error) => crate::fl!(
+            "ui-app-repair-failed-for-value1-error",
+            value1 = (connection.name).to_string(),
+            error = (error).to_string()
+        ),
+    };
+    if let Some(error) = release {
+        let _ = write!(
+            notice,
+            " VPN remains connected because automatic release failed: {error}"
+        );
+    }
+    notice
+}
+
+async fn run_offline_mirror_repair_operation_result(
+    connection: &Connection,
+    manual_operation: Option<Arc<ManualOperationControl>>,
+) -> Result<OfflineRepairEngine, String> {
+    let connection = authoritative_offline_repair_connection(connection.id)?;
+    let plan = offline_repair_plan(&connection)?;
+    verify_offline_repair_unit_ownership(&plan)?;
+    let manager = DbusSystemdManager;
+    execute_coordinated_offline_repair(
+        &manager,
+        &plan,
+        connection.id,
+        manual_operation.as_deref(),
+        &offline_coordinator_state_path(connection.id),
+        CancellationToken::new(),
+    )
+    .await?;
+    Ok(plan.engine)
+}
+
+async fn execute_coordinated_offline_repair<M: SystemdManager>(
+    manager: &M,
+    plan: &OfflineRepairPlan,
+    connection_id: ConnectionId,
+    manual_operation: Option<&ManualOperationControl>,
+    state_path: &Path,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    pause_offline_repair_trigger(manager, plan, cancellation.child_token()).await?;
+    cancel_manual_offline_operation(manual_operation, Duration::from_secs(5)).await?;
+    if plan.engine == OfflineRepairEngine::RcloneBisync {
+        // A scheduled worker is owned by this service rather than by the UI's
+        // in-process cancellation handle. Stop it first, then require its
+        // cross-process coordinator lock to be released. If another process
+        // still owns the lock, Repair must not overwrite its running state.
+        stop_disable_and_reconcile_offline_service(
+            manager,
+            &plan.service,
+            cancellation.child_token(),
+        )
+        .await?;
+        let _guard = bisync_coordinator::acquire_operation_guard_for_state(state_path)
+            .map_err(|_| crate::fl!("ui-app-another-process-still-owns-a-running-offline"))?;
+        write_offline_coordinator_state(
+            state_path,
+            OfflineCoordinatorState::new(
+                connection_id,
+                OfflineOperation::Repair,
+                OfflineOperationState::Running,
+            ),
+        )?;
+        return Ok(());
+    }
+    reject_unowned_running_operation(connection_id, state_path)?;
+    write_offline_coordinator_state(
+        state_path,
+        OfflineCoordinatorState::new(
+            connection_id,
+            OfflineOperation::Repair,
+            OfflineOperationState::Running,
+        ),
+    )?;
+    stop_disable_and_reconcile_offline_service(manager, &plan.service, cancellation.child_token())
+        .await
+}
+
+fn offline_coordinator_state_path(connection_id: ConnectionId) -> PathBuf {
+    cosmic_ext_applet_mounter::offline_coordinator::state_path(&default_work_root(), connection_id)
+}
+
+fn write_offline_coordinator_state(
+    path: &Path,
+    state: OfflineCoordinatorState,
+) -> Result<(), String> {
+    cosmic_ext_applet_mounter::offline_coordinator::write_state(path, &state)
+}
+
+async fn cancel_manual_offline_operation(
+    control: Option<&ManualOperationControl>,
+    timeout: Duration,
+) -> Result<(), String> {
+    if let Some(control) = control
+        && !control.cancel_and_wait(timeout).await
+    {
+        return Err(crate::fl!(
+            "ui-app-the-manual-offline-mirror-operation-did-not"
+        ));
+    }
+    Ok(())
+}
+
+fn reject_unowned_running_operation(
+    connection_id: ConnectionId,
+    state_path: &Path,
+) -> Result<(), String> {
+    if let Some(state) = cosmic_ext_applet_mounter::offline_coordinator::read_state(state_path)?
+        && state.connection_id == connection_id
+        && state.state == OfflineOperationState::Running
+    {
+        return Err(crate::fl!(
+            "ui-app-another-process-still-owns-a-running-offline-2"
+        ));
+    }
+    Ok(())
+}
+
+fn tracked_offline_operation(operation: Operation) -> OfflineOperation {
+    match operation {
+        Operation::PreviewInitialSync => OfflineOperation::Preview,
+        Operation::SyncNow => OfflineOperation::Sync,
+        Operation::ResumeSync => OfflineOperation::Resume,
+        Operation::PauseSync => OfflineOperation::Pause,
+        _ => OfflineOperation::Repair,
+    }
+}
+
+async fn run_tracked_offline_operation<F>(
     connection: &Connection,
     operation: Operation,
+    control: &ManualOperationControl,
+    future: F,
+) -> Result<String, String>
+where
+    F: std::future::Future<Output = Result<String, String>>,
+{
+    let path = offline_coordinator_state_path(connection.id);
+    let tracked_operation = tracked_offline_operation(operation);
+    let result = match write_offline_coordinator_state(
+        &path,
+        OfflineCoordinatorState::new(
+            connection.id,
+            tracked_operation,
+            OfflineOperationState::Running,
+        ),
+    ) {
+        Ok(()) => future.await,
+        Err(error) => Err(error),
+    };
+    let final_state = if result.is_ok() {
+        OfflineOperationState::Succeeded
+    } else if control.cancellation().is_cancelled() {
+        OfflineOperationState::Cancelled
+    } else {
+        OfflineOperationState::Failed
+    };
+    let state_result = write_offline_coordinator_state(
+        &path,
+        OfflineCoordinatorState::new(connection.id, tracked_operation, final_state),
+    );
+    control.finish();
+    match (result, state_result) {
+        (Ok(summary), Ok(())) => Ok(summary),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
+}
+
+async fn run_managed_offline_mirror_operation_result_with_cancellation(
+    connection: &Connection,
+    operation: Operation,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     prepare_offline_mirror_runtime(connection)?;
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
-    ensure_sharepoint_access_marker(connection, &plan)?;
-    prepare_rclone_bisync_work_files(connection, &plan)?;
     match operation {
-        Operation::PreviewInitialSync => preview_rclone_offline_mirror(&plan).await,
-        Operation::SyncNow => sync_rclone_offline_mirror(connection, &plan).await,
-        Operation::ResumeSync => start_rclone_offline_mirror_background(connection, &plan).await,
-        Operation::PauseSync => stop_rclone_offline_mirror_background(&plan).await,
-        _ => Err(format!(
-            "{} is not a managed offline mirror operation",
-            operation_label(operation)
+        Operation::PreviewInitialSync | Operation::SyncNow => {
+            let mode = rclone_bisync_mode(connection, operation)?;
+            bisync_coordinator::run(
+                connection,
+                mode,
+                &default_work_root(),
+                &app_command_runner(),
+                cancellation,
+            )
+            .await
+            .map(|outcome| rclone_bisync_outcome_summary(mode, &outcome))
+        }
+        Operation::ResumeSync => {
+            start_rclone_offline_mirror_background(connection, &plan, cancellation).await
+        }
+        Operation::PauseSync => stop_rclone_offline_mirror_background(&plan, cancellation).await,
+        _ => Err(crate::fl!(
+            "ui-app-value1-is-not-a-managed-offline-mirror",
+            value1 = (operation_label(operation)).to_string()
         )),
     }
+}
+
+fn rclone_bisync_mode(connection: &Connection, operation: Operation) -> Result<BisyncMode, String> {
+    let plan =
+        rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
+    let initialized = initial_sync_marker(&plan).is_file();
+    match operation {
+        Operation::PreviewInitialSync => Ok(if initialized {
+            BisyncMode::Preview
+        } else {
+            BisyncMode::InitialPreview
+        }),
+        Operation::SyncNow => Ok(if initialized {
+            BisyncMode::Sync
+        } else {
+            BisyncMode::InitialSync
+        }),
+        _ => Err(crate::fl!("ui-app-operation-is-not-a-finite-rclone-bisync")),
+    }
+}
+
+fn rclone_bisync_outcome_summary(mode: BisyncMode, outcome: &BisyncOutcome) -> String {
+    let mut summary = if matches!(mode, BisyncMode::InitialPreview | BisyncMode::Preview) {
+        let summary = preview_summary_text(&outcome.output);
+        if mode == BisyncMode::InitialPreview {
+            crate::fl!(
+                "ui-app-summary-initial-sync-has-not-run-yet",
+                summary = (summary).to_string()
+            )
+        } else {
+            summary
+        }
+    } else {
+        let summary = sync_output_summary(&outcome.output);
+        if mode == BisyncMode::InitialSync {
+            crate::fl!(
+                "ui-app-summary-initial-synchronization-is-now-recorded-as",
+                summary = (summary).to_string()
+            )
+        } else {
+            summary
+        }
+    };
+    if !outcome.warnings.is_empty() {
+        let _ = write!(summary, " Warning: {}", outcome.warnings.join(" "));
+    }
+    summary
 }
 
 async fn run_managed_onedrive_offline_mirror_operation(
     connection: Connection,
     operation: Operation,
+    control: Arc<ManualOperationControl>,
 ) -> String {
     let label = operation_label(operation);
-    match run_managed_onedrive_offline_mirror_operation_result(&connection, operation).await {
-        Ok(summary) => format!("{label} completed for {}. {summary}", connection.name),
-        Err(error) => format!("{label} failed for {}: {error}", connection.name),
+    let finite = matches!(
+        operation,
+        Operation::PreviewInitialSync | Operation::SyncNow
+    );
+    if finite && let Err(error) = begin_finite_offline_vpn_use(&connection).await {
+        control.finish();
+        return crate::fl!(
+            "ui-app-label-failed-for-value2-error",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            error = (error).to_string()
+        );
+    }
+    let mut result = run_tracked_offline_operation(
+        &connection,
+        operation,
+        &control,
+        run_managed_onedrive_offline_mirror_operation_result_with_cancellation(
+            &connection,
+            operation,
+            control.cancellation(),
+        ),
+    )
+    .await;
+    if finite || (operation == Operation::PauseSync && result.is_ok()) {
+        result = merge_offline_vpn_release(result, finish_offline_vpn_use(&connection).await);
+    }
+    match result {
+        Ok(summary) => crate::fl!(
+            "ui-app-label-completed-for-value2-summary",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            summary = (summary).to_string()
+        ),
+        Err(error) => crate::fl!(
+            "ui-app-label-failed-for-value2-error",
+            label = (label).to_string(),
+            value2 = (connection.name).to_string(),
+            error = (error).to_string()
+        ),
     }
 }
 
-async fn run_managed_onedrive_offline_mirror_operation_result(
+async fn run_managed_onedrive_offline_mirror_operation_result_with_cancellation(
     connection: &Connection,
     operation: Operation,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     prepare_onedrive_offline_mirror_runtime(connection)?;
     let plan = onedrive_mirror_plan_for_app(connection)?;
     match operation {
-        Operation::PreviewInitialSync => preview_onedrive_offline_mirror(&plan).await,
-        Operation::SyncNow => sync_onedrive_offline_mirror(connection, &plan).await,
-        Operation::ResumeSync => start_onedrive_offline_mirror_background(connection, &plan).await,
-        Operation::PauseSync => stop_onedrive_offline_mirror_background(&plan).await,
-        _ => Err(format!(
-            "{} is not a managed OneDrive mirror operation",
-            operation_label(operation)
+        Operation::PreviewInitialSync => preview_onedrive_offline_mirror(&plan, cancellation).await,
+        Operation::SyncNow => sync_onedrive_offline_mirror(connection, &plan, cancellation).await,
+        Operation::ResumeSync => {
+            start_onedrive_offline_mirror_background(connection, &plan, cancellation).await
+        }
+        Operation::PauseSync => stop_onedrive_offline_mirror_background(&plan, cancellation).await,
+        _ => Err(crate::fl!(
+            "ui-app-value1-is-not-a-managed-onedrive-mirror",
+            value1 = (operation_label(operation)).to_string()
         )),
     }
 }
@@ -8456,48 +10122,57 @@ async fn run_managed_onedrive_offline_mirror_operation_result(
 async fn start_rclone_offline_mirror_background(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     if !initial_sync_marker(plan).exists() {
-        return Err(
-            "background sync requires a successful Preview and confirmed initial Sync Now first"
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-background-sync-requires-a-successful-preview-and"
+        ));
     }
     ensure_background_sync_may_start(connection).await?;
-    install_rclone_offline_mirror_units_result(connection).await?;
-    let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
-    let cancellation = CancellationToken::new();
-    manager
-        .action(
-            SystemdAction::DaemonReload,
-            None,
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    manager
-        .action(
-            SystemdAction::Enable,
-            Some(&timer.name),
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    manager
-        .action(SystemdAction::Start, Some(&timer.name), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok("Background sync timer started. Use Sync Now for an immediate one-shot sync.".into())
+    let result = async {
+        install_rclone_offline_mirror_units_result(connection).await?;
+        let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
+        let manager = DbusSystemdManager;
+        manager
+            .action(
+                SystemdAction::DaemonReload,
+                None,
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        manager
+            .action(
+                SystemdAction::Enable,
+                Some(&timer.name),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        manager
+            .action(SystemdAction::Start, Some(&timer.name), cancellation)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(crate::fl!(
+            "ui-app-background-sync-timer-started-use-sync-now"
+        ))
+    }
+    .await;
+    if result.is_err() {
+        merge_offline_vpn_release(result, finish_offline_vpn_use(connection).await)
+    } else {
+        result
+    }
 }
 
 async fn stop_rclone_offline_mirror_background(
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
     let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
-    let cancellation = CancellationToken::new();
+    let manager = DbusSystemdManager;
     let _ = manager
         .action(
             SystemdAction::Stop,
@@ -8516,51 +10191,66 @@ async fn stop_rclone_offline_mirror_background(
         .action(SystemdAction::Disable, Some(&timer.name), cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    Ok("Background sync timer stopped. Manual Sync Now remains available.".into())
+    Ok(crate::fl!(
+        "ui-app-background-sync-timer-stopped-manual-sync-now"
+    ))
 }
 
 async fn start_onedrive_offline_mirror_background(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     if !onedrive_initial_sync_marker(plan).exists() {
-        return Err(
-            "background sync requires a successful Preview and confirmed initial Sync Now first"
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-background-sync-requires-a-successful-preview-and"
+        ));
     }
     ensure_background_sync_may_start(connection).await?;
-    let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
-    let cancellation = CancellationToken::new();
-    manager
-        .action(
-            SystemdAction::DaemonReload,
-            None,
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    manager
-        .action(
-            SystemdAction::Enable,
-            Some(&service.name),
-            cancellation.child_token(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    manager
-        .action(SystemdAction::Start, Some(&service.name), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok("OneDrive background monitor started. Use Sync Now for an immediate one-shot sync.".into())
+    let result = async {
+        install_onedrive_offline_mirror_unit_result(connection).await?;
+        let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
+        let manager = DbusSystemdManager;
+        manager
+            .action(
+                SystemdAction::DaemonReload,
+                None,
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        manager
+            .action(
+                SystemdAction::Enable,
+                Some(&service.name),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        manager
+            .action(SystemdAction::Start, Some(&service.name), cancellation)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(crate::fl!(
+            "ui-app-onedrive-background-monitor-started-use-sync-now"
+        ))
+    }
+    .await;
+    if result.is_err() {
+        merge_offline_vpn_release(result, finish_offline_vpn_use(connection).await)
+    } else {
+        result
+    }
 }
 
 async fn ensure_background_sync_may_start(connection: &Connection) -> Result<(), String> {
     let options = match &connection.mode {
         ConnectionMode::OfflineMirror(options) => options,
-        ConnectionMode::OnlineMount(_) => return Err("connection is not an offline mirror".into()),
+        ConnectionMode::OnlineMount(_) => {
+            return Err(crate::fl!("ui-app-connection-is-not-an-offline-mirror"));
+        }
     };
+    let network_ready = strict_network_ready().await?;
     let request = SyncRequest {
         trigger: SyncTrigger::Scheduled,
         preview_completed: true,
@@ -8568,123 +10258,186 @@ async fn ensure_background_sync_may_start(connection: &Connection) -> Result<(),
         metered_network: current_metered_network().await,
         running: false,
         readiness: SyncReadiness {
-            network_ready: current_network_ready().await,
-            vpn_ready: current_vpn_ready(connection).await?,
+            network_ready,
+            vpn_ready: true,
         },
     };
     match sync_now_request(request, options).map_err(|error| error.to_string())? {
-        SyncDecision::Run => Ok(()),
-        SyncDecision::WaitForNetwork => {
-            Err("background sync is waiting for network readiness".into())
-        }
-        SyncDecision::WaitForVpn => Err("background sync is waiting for VPN readiness".into()),
-        SyncDecision::PauseMetered => {
-            Err("background sync is paused on metered networks by policy".into())
-        }
-        SyncDecision::Reject(rejection) => Err(sync_rejection_message(rejection).into()),
+        SyncDecision::Run => ensure_vpn_ready_for_connection(connection).await,
+        SyncDecision::WaitForNetwork => Err(crate::fl!(
+            "ui-app-background-sync-is-waiting-for-network-readiness"
+        )),
+        SyncDecision::WaitForVpn => Err(crate::fl!(
+            "ui-app-background-sync-is-waiting-for-vpn-readiness"
+        )),
+        SyncDecision::PauseMetered => Err(crate::fl!(
+            "ui-app-background-sync-is-paused-on-metered-networks"
+        )),
+        SyncDecision::Reject(rejection) => Err(sync_rejection_message(rejection)),
+    }
+}
+
+async fn strict_network_ready() -> Result<bool, String> {
+    DbusNetworkManagerVpn::connected().await.map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-inspect-networkmanager-readiness-error",
+            error = (error).to_string()
+        )
+    })
+}
+
+async fn begin_finite_offline_vpn_use(connection: &Connection) -> Result<(), String> {
+    if !strict_network_ready().await? {
+        return Err(crate::fl!(
+            "ui-app-offline-synchronization-is-waiting-for-network-readiness"
+        ));
+    }
+    ensure_vpn_ready_for_connection(connection).await?;
+    if let Some(profile_id) = connection.vpn_profile_id {
+        register_finite_offline_vpn_user(profile_id, connection.id);
+    }
+    Ok(())
+}
+
+async fn finish_offline_vpn_use(connection: &Connection) -> Result<(), String> {
+    if let Some(profile_id) = connection.vpn_profile_id {
+        unregister_finite_offline_vpn_user(profile_id, connection.id);
+    }
+    maybe_shutdown_vpn_after_unmount(connection).await
+}
+
+fn merge_offline_vpn_release(
+    operation: Result<String, String>,
+    release: Result<(), String>,
+) -> Result<String, String> {
+    match (operation, release) {
+        (result, Ok(())) => result,
+        (Ok(summary), Err(error)) => Ok(crate::fl!(
+            "ui-app-summary-vpn-remains-connected-because-automatic-release",
+            summary = (summary).to_string(),
+            error = (error).to_string()
+        )),
+        (Err(operation_error), Err(release_error)) => Err(crate::fl!(
+            "ui-app-operation-error-vpn-remains-connected-because-automatic",
+            operation_error = (operation_error).to_string(),
+            release_error = (release_error).to_string()
+        )),
     }
 }
 
 async fn current_network_ready() -> bool {
-    let request = match CommandRequest::new(Executable::Nmcli)
-        .arg("-t")
-        .and_then(|request| request.arg("-f"))
-        .and_then(|request| request.arg("STATE"))
-        .and_then(|request| request.arg("general"))
-    {
-        Ok(request) => request.with_timeout(Duration::from_secs(5)),
-        Err(_) => return true,
+    DbusNetworkManagerVpn::connected().await.unwrap_or(true)
+}
+
+pub(crate) async fn run_offline_readiness_guard(arguments: &[String]) -> Result<(), String> {
+    let [connection_id] = arguments else {
+        return Err(crate::fl!(
+            "ui-app-offline-readiness-guard-requires-exactly-one-saved"
+        ));
     };
-    match app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-    {
-        Ok(output) => network_manager_connected(&output.stdout.text),
-        Err(_) => true,
+    let connection_id = Uuid::parse_str(connection_id)
+        .map(ConnectionId::from_uuid)
+        .map_err(|_| crate::fl!("ui-app-offline-readiness-guard-received-an-invalid-connection"))?;
+    let config = load_runtime_config()?;
+    let connection = config
+        .document
+        .connections
+        .iter()
+        .find(|connection| {
+            connection.id == connection_id
+                && connection.enabled
+                && matches!(connection.mode, ConnectionMode::OfflineMirror(_))
+        })
+        .ok_or_else(|| crate::fl!("ui-app-saved-enabled-offline-mirror-connection-was-not"))?;
+    match DbusNetworkManagerVpn::connected().await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(crate::fl!(
+                "ui-app-offline-synchronization-is-waiting-for-network-readiness"
+            ));
+        }
+        Err(error) => {
+            return Err(crate::fl!(
+                "ui-app-could-not-inspect-networkmanager-readiness-before-offline",
+                error = (error).to_string()
+            ));
+        }
+    }
+    let Some(profile_id) = connection.vpn_profile_id else {
+        return Ok(());
+    };
+    let profile = config
+        .document
+        .vpn_profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .ok_or_else(|| crate::fl!("ui-app-configured-vpn-profile-is-no-longer-available"))?;
+    if profile.kind != VpnKind::NetworkManager {
+        return Err(crate::fl!(
+            "ui-app-scheduled-offline-mirror-requires-a-saved-networkmanager"
+        ));
+    }
+    if vpn_profile_ready(profile).await? {
+        Ok(())
+    } else {
+        Err(crate::fl!(
+            "ui-app-scheduled-offline-mirror-is-waiting-for-vpn",
+            value1 = (profile.name).to_string()
+        ))
     }
 }
 
+#[cfg(test)]
 fn network_manager_connected(state: &str) -> bool {
     state.trim().to_ascii_lowercase().starts_with("connected")
 }
 
 async fn current_metered_network() -> bool {
-    let request = match CommandRequest::new(Executable::Nmcli)
-        .arg("-t")
-        .and_then(|request| request.arg("-f"))
-        .and_then(|request| request.arg("GENERAL.METERED"))
-        .and_then(|request| request.arg("device"))
-        .and_then(|request| request.arg("show"))
-    {
-        Ok(request) => request.with_timeout(Duration::from_secs(5)),
-        Err(_) => return false,
-    };
-    match app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-    {
-        Ok(output) => output.stdout.text.lines().any(|line| {
-            let value = line
-                .split_once(':')
-                .map(|(_, value)| value)
-                .unwrap_or(line)
-                .trim()
-                .to_ascii_lowercase();
-            matches!(value.as_str(), "yes" | "2")
-        }),
-        Err(_) => false,
-    }
-}
-
-async fn current_vpn_ready(connection: &Connection) -> Result<bool, String> {
-    let Some(profile_id) = connection.vpn_profile_id else {
-        return Ok(true);
-    };
-    let config = Config::load_runtime().config;
-    let Some(profile) = config
-        .document
-        .vpn_profiles
-        .iter()
-        .find(|profile| profile.id == profile_id)
-    else {
-        return Ok(false);
-    };
-    if profile.readiness_checks.is_empty() {
-        return Ok(true);
-    }
-    let probe = CommandReadinessProbe::new(app_command_runner());
-    let ready = readiness_report(&probe, &profile.readiness_checks, CancellationToken::new())
-        .await
-        .map(|report| report.ready)
-        .map_err(|error| error.to_string())?;
-    if !ready {
-        unmark_vpn_applet_activated(profile.id);
-    }
-    Ok(ready)
+    DbusNetworkManagerVpn::metered().await.unwrap_or(false)
 }
 
 async fn ensure_vpn_ready_for_connection(connection: &Connection) -> Result<(), String> {
     let Some(profile_id) = connection.vpn_profile_id else {
         return Ok(());
     };
-    let Some(profile) = Config::load_runtime()
+    let Some(mut profile) = Config::load_runtime()
         .config
         .document
         .vpn_profiles
         .into_iter()
         .find(|profile| profile.id == profile_id)
     else {
-        return Err("configured VPN profile is no longer available".into());
+        return Err(crate::fl!(
+            "ui-app-configured-vpn-profile-is-no-longer-available"
+        ));
     };
+    let is_openconnect = if profile.kind == VpnKind::NetworkManager {
+        if let Some(uuid) = profile.external_profile_id.as_deref() {
+            DbusNetworkManagerVpn::profile_is_openconnect(uuid)
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    apply_openconnect_timeout(&mut profile, is_openconnect);
     let deadline =
         tokio::time::Instant::now() + Duration::from_secs(u64::from(profile.timeout_seconds));
-    tokio::time::timeout_at(deadline, ensure_vpn_profile_ready(&profile, deadline))
-        .await.map_err(|_| format!("{} did not become ready within {} seconds; complete authentication and retry the mount", profile.name, profile.timeout_seconds))?
+    ensure_vpn_profile_ready(&profile, deadline, is_openconnect).await
+}
+
+fn apply_openconnect_timeout(profile: &mut VpnProfile, is_openconnect: bool) {
+    if is_openconnect {
+        profile.timeout_seconds = profile.timeout_seconds.max(90);
+    }
 }
 
 async fn ensure_vpn_profile_ready(
     profile: &VpnProfile,
     deadline: tokio::time::Instant,
+    is_openconnect: bool,
 ) -> Result<(), String> {
     // Serialize activation for each profile. Other waiting storage requests
     // recheck the tunnel before considering opening another authentication UI.
@@ -8703,65 +10456,89 @@ async fn ensure_vpn_profile_ready(
     if !already_connected {
         match profile.kind {
             VpnKind::NetworkManager => {
-                CommandNetworkManagerVpn::new(app_command_runner())
+                DbusNetworkManagerVpn
                     .activate(profile, CancellationToken::new())
                     .await
-                    .map_err(|error| format!("could not activate NetworkManager VPN: {error}"))?;
+                    .map_err(|error| {
+                        crate::fl!(
+                            "ui-app-could-not-activate-networkmanager-vpn-error",
+                            error = (error).to_string()
+                        )
+                    })?;
             }
-            VpnKind::Cisco => {
-                let cisco = CommandCiscoVpn::new(app_command_runner());
-                let components = cisco
-                    .components(CancellationToken::new())
-                    .await
-                    .map_err(|error| format!("could not inspect Cisco Secure Client: {error}"))?;
-                if matches!(components.tunnel, CiscoTunnelState::NotInstalled) {
-                    return Err("Cisco Secure Client is not installed".into());
-                }
-                if matches!(components.tunnel, CiscoTunnelState::ServiceUnavailable)
-                    && let Ok(request) = cisco.start_agent_request()
-                {
-                    let _ = app_command_runner()
-                        .run(request, CancellationToken::new())
-                        .await;
-                }
-                app_command_runner()
-                    .run(
-                        cisco
-                            .open_gui_request()
-                            .map_err(|error| error.to_string())?,
-                        CancellationToken::new(),
-                    )
-                    .await
-                    .map_err(|error| format!("could not open Cisco Secure Client: {error}"))?;
+            VpnKind::LegacyCisco => {
+                return Err(crate::fl!(
+                    "ui-app-this-connection-still-references-an-unsupported-legacy"
+                ));
             }
         }
     }
-    let ready = wait_for_vpn_ready(profile, deadline).await?;
-    if ready {
-        if !already_connected {
-            mark_vpn_applet_activated(profile.id);
+    match wait_for_vpn_ready(profile, deadline, !already_connected).await {
+        Ok(true) => {
+            if !already_connected {
+                mark_vpn_applet_activated(profile.id);
+            }
+            Ok(())
         }
-        Ok(())
-    } else {
-        Err(format!(
-            "{} did not become ready within {} seconds",
-            profile.name, profile.timeout_seconds
-        ))
+        Ok(false) => {
+            let cleanup = if already_connected {
+                Ok(())
+            } else {
+                cleanup_timed_out_vpn_activation(profile, is_openconnect).await
+            };
+            let mut error = crate::fl!(
+                "ui-app-value1-did-not-become-ready-within-value2",
+                value1 = (profile.name).to_string(),
+                value2 = (profile.timeout_seconds).to_string()
+            );
+            if let Err(cleanup_error) = cleanup {
+                error.push_str(&crate::fl!(
+                    "ui-app-timeout-cleanup-failed-cleanup-error",
+                    cleanup_error = (cleanup_error).to_string()
+                ));
+            }
+            Err(error)
+        }
+        Err(error) => Err(error),
     }
+}
+
+async fn cleanup_timed_out_vpn_activation(
+    profile: &VpnProfile,
+    is_openconnect: bool,
+) -> Result<(), String> {
+    DbusNetworkManagerVpn
+        .deactivate(profile, CancellationToken::new())
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-deactivate-timed-out-vpn-error",
+                error = (error).to_string()
+            )
+        })?;
+    if is_openconnect {
+        DbusNetworkManagerVpn::restart_openconnect_agent()
+            .await
+            .map_err(|error| {
+                crate::fl!(
+                    "ui-app-could-not-close-the-timed-out-authentication",
+                    error = (error).to_string()
+                )
+            })?;
+    }
+    Ok(())
 }
 
 async fn vpn_tunnel_ready(profile: &VpnProfile) -> Result<bool, String> {
     match profile.kind {
-        VpnKind::NetworkManager => CommandNetworkManagerVpn::new(app_command_runner())
+        VpnKind::NetworkManager => DbusNetworkManagerVpn
             .state(profile, CancellationToken::new())
             .await
             .map(|state| state.ready())
             .map_err(|error| error.to_string()),
-        VpnKind::Cisco => CommandCiscoVpn::new(app_command_runner())
-            .components(CancellationToken::new())
-            .await
-            .map(|components| components.tunnel == CiscoTunnelState::Connected)
-            .map_err(|error| error.to_string()),
+        VpnKind::LegacyCisco => Err(crate::fl!(
+            "ui-app-legacy-cisco-profiles-are-unsupported-select-a"
+        )),
     }
 }
 
@@ -8772,7 +10549,7 @@ async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
         return Ok(false);
     }
     readiness_report(
-        &CommandReadinessProbe::new(app_command_runner()),
+        &InProcessReadinessProbe,
         &profile.readiness_checks,
         CancellationToken::new(),
     )
@@ -8784,13 +10561,59 @@ async fn vpn_profile_ready(profile: &VpnProfile) -> Result<bool, String> {
 async fn wait_for_vpn_ready(
     profile: &VpnProfile,
     deadline: tokio::time::Instant,
+    activation_requested: bool,
 ) -> Result<bool, String> {
-    Ok(cosmic_ext_applet_mounter::vpn::poll_readiness_until(
-        deadline,
-        Duration::from_secs(2),
-        || vpn_profile_ready(profile),
-    )
-    .await)
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        match profile.kind {
+            VpnKind::NetworkManager => {
+                match DbusNetworkManagerVpn
+                    .state(profile, CancellationToken::new())
+                    .await
+                {
+                    Ok(state) => {
+                        if let Some(error) =
+                            vpn_activation_terminal_error(state, activation_requested)
+                        {
+                            return Err(error);
+                        }
+                        if state.ready() && vpn_profile_ready(profile).await.unwrap_or(false) {
+                            return Ok(true);
+                        }
+                    }
+                    Err(_) => {
+                        // Retain the existing tolerance for transient D-Bus inspection
+                        // failures while the overall authentication deadline remains.
+                    }
+                }
+            }
+            VpnKind::LegacyCisco => return vpn_profile_ready(profile).await,
+        }
+        tokio::time::sleep_until(
+            (tokio::time::Instant::now() + Duration::from_secs(2)).min(deadline),
+        )
+        .await;
+    }
+}
+
+fn vpn_activation_terminal_error(
+    state: cosmic_ext_applet_mounter::vpn::VpnConnectionState,
+    activation_requested: bool,
+) -> Option<String> {
+    use cosmic_ext_applet_mounter::vpn::VpnConnectionState;
+
+    match state {
+        VpnConnectionState::Failed => Some(fl!("vpn-activation-failed")),
+        VpnConnectionState::Disconnected if activation_requested => {
+            Some(fl!("vpn-activation-cancelled"))
+        }
+        VpnConnectionState::Unknown
+        | VpnConnectionState::Disconnected
+        | VpnConnectionState::Activating
+        | VpnConnectionState::Activated => None,
+    }
 }
 
 async fn maybe_shutdown_vpn_after_unmount(connection: &Connection) -> Result<(), String> {
@@ -8804,7 +10627,8 @@ async fn maybe_shutdown_vpn_after_unmount(connection: &Connection) -> Result<(),
     let snapshot = cosmic_ext_applet_mounter::vpn::VpnUsageSnapshot {
         profile_id,
         applet_activated: activated.contains(&profile_id),
-        active_connection_ids: active_connections_using_vpn(profile_id, Some(connection.id)),
+        active_connection_ids: active_connections_using_vpn(profile_id, Some(connection.id))
+            .await?,
     };
     match shutdown_decision(&snapshot) {
         VpnShutdownDecision::Disconnect => {
@@ -8829,39 +10653,76 @@ async fn disconnect_vpn_profile(profile_id: VpnProfileId) -> Result<(), String> 
         return Ok(());
     };
     match profile.kind {
-        VpnKind::NetworkManager => CommandNetworkManagerVpn::new(app_command_runner())
+        VpnKind::NetworkManager => DbusNetworkManagerVpn
             .deactivate(&profile, CancellationToken::new())
             .await
-            .map_err(|error| format!("could not disconnect NetworkManager VPN: {error}")),
-        VpnKind::Cisco => {
-            let request = CommandRequest::new(Executable::CiscoVpn)
-                .arg("disconnect")
-                .map_err(|error| error.to_string())?
-                .with_timeout(Duration::from_secs(20));
-            app_command_runner()
-                .run(request, CancellationToken::new())
-                .await
-                .map(|_| ())
-                .map_err(|error| format!("could not disconnect Cisco Secure Client: {error}"))
-        }
+            .map_err(|error| {
+                crate::fl!(
+                    "ui-app-could-not-disconnect-networkmanager-vpn-error",
+                    error = (error).to_string()
+                )
+            }),
+        VpnKind::LegacyCisco => Err(crate::fl!(
+            "ui-app-legacy-cisco-profiles-are-unsupported-no-proprietary"
+        )),
     }
 }
 
-fn active_connections_using_vpn(
+async fn active_connections_using_vpn(
     profile_id: VpnProfileId,
     exclude_connection: Option<ConnectionId>,
-) -> BTreeSet<ConnectionId> {
+) -> Result<BTreeSet<ConnectionId>, String> {
     let config = Config::load_runtime().config.document;
-    let mount_entries = HostVisibleMountTable.entries().unwrap_or_default();
-    config
+    let mount_entries = host_mount_entries().await?;
+    let mut active = config
         .connections
         .iter()
-        .filter(|connection| connection.enabled)
         .filter(|connection| connection.vpn_profile_id == Some(profile_id))
         .filter(|connection| Some(connection.id) != exclude_connection)
         .filter(|connection| connection_appears_active(connection, &mount_entries))
         .map(|connection| connection.id)
-        .collect()
+        .collect::<BTreeSet<_>>();
+    if let Some(finite_users) = active_finite_offline_vpn_users()
+        .lock()
+        .expect("finite Offline Mirror VPN users")
+        .get(&profile_id)
+    {
+        active.extend(
+            finite_users
+                .iter()
+                .copied()
+                .filter(|connection_id| Some(*connection_id) != exclude_connection),
+        );
+    }
+    Ok(active)
+}
+
+fn active_finite_offline_vpn_users()
+-> &'static std::sync::Mutex<BTreeMap<VpnProfileId, BTreeSet<ConnectionId>>> {
+    static USERS: LazyLock<std::sync::Mutex<BTreeMap<VpnProfileId, BTreeSet<ConnectionId>>>> =
+        LazyLock::new(Default::default);
+    &USERS
+}
+
+fn register_finite_offline_vpn_user(profile_id: VpnProfileId, connection_id: ConnectionId) {
+    active_finite_offline_vpn_users()
+        .lock()
+        .expect("finite Offline Mirror VPN users")
+        .entry(profile_id)
+        .or_default()
+        .insert(connection_id);
+}
+
+fn unregister_finite_offline_vpn_user(profile_id: VpnProfileId, connection_id: ConnectionId) {
+    let mut users = active_finite_offline_vpn_users()
+        .lock()
+        .expect("finite Offline Mirror VPN users");
+    if let Some(connection_ids) = users.get_mut(&profile_id) {
+        connection_ids.remove(&connection_id);
+        if connection_ids.is_empty() {
+            users.remove(&profile_id);
+        }
+    }
 }
 
 fn connection_appears_active(connection: &Connection, mount_entries: &[MountEntry]) -> bool {
@@ -8922,10 +10783,10 @@ fn unmark_vpn_applet_activated(profile_id: VpnProfileId) {
 
 async fn stop_onedrive_offline_mirror_background(
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-    let manager = CommandSystemdManager::new(app_command_runner());
-    let cancellation = CancellationToken::new();
+    let manager = DbusSystemdManager;
     let _ = manager
         .action(
             SystemdAction::Stop,
@@ -8937,152 +10798,44 @@ async fn stop_onedrive_offline_mirror_background(
         .action(SystemdAction::Disable, Some(&service.name), cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    Ok("OneDrive background monitor stopped. Manual Sync Now remains available.".into())
-}
-
-async fn preview_rclone_offline_mirror(
-    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
-) -> Result<String, String> {
-    let initialized = initial_sync_marker(plan).exists();
-    let request = if initialized {
-        rclone_bisync_preview_request(plan).map_err(|error| error.to_string())?
-    } else {
-        rclone_bisync_initial_preview_request(plan).map_err(|error| error.to_string())?
-    };
-    let request = managed_rclone_bisync_request(
-        plan,
-        if initialized {
-            "preview"
-        } else {
-            "initial-preview"
-        },
-        request,
-    )?;
-    let output = app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-        .map_err(|error| offline_mirror_command_error("preview", error))?;
-    let summary = preview_summary_text(&output);
-    if !initialized {
-        write_initial_preview_marker(plan, &summary)?;
-        Ok(format!(
-            "{summary} Initial sync has not run yet; press Sync Now to confirm and run the initial synchronization."
-        ))
-    } else {
-        Ok(summary)
-    }
+    Ok(crate::fl!(
+        "ui-app-onedrive-background-monitor-stopped-manual-sync-now"
+    ))
 }
 
 async fn preview_onedrive_offline_mirror(
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     let output = app_command_runner()
         .run(
             one_drive_preview_request(plan).map_err(|error| error.to_string())?,
-            CancellationToken::new(),
+            cancellation,
         )
         .await
         .map_err(|error| onedrive_runtime_command_error("preview", error))?;
-    let summary = onedrive_output_summary("Preview", &output);
+    let summary = onedrive_output_summary(&fl!("operation-preview"), &output);
     if !onedrive_initial_sync_marker(plan).exists() {
         write_onedrive_initial_preview_marker(plan, &summary)?;
-        Ok(format!(
-            "{summary} Initial sync has not run yet; press Sync Now to confirm and run the initial synchronization."
+        Ok(crate::fl!(
+            "ui-app-summary-initial-sync-has-not-run-yet",
+            summary = (summary).to_string()
         ))
     } else {
         Ok(summary)
     }
-}
-
-async fn sync_rclone_offline_mirror(
-    connection: &Connection,
-    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
-) -> Result<String, String> {
-    let options = match &connection.mode {
-        ConnectionMode::OfflineMirror(options) => options,
-        ConnectionMode::OnlineMount(_) => return Err("connection is not an offline mirror".into()),
-    };
-    let initialized = initial_sync_marker(plan).exists();
-    let preview_completed = initialized || initial_preview_marker(plan).exists();
-    let decision = sync_now_request(
-        SyncRequest {
-            trigger: if initialized {
-                SyncTrigger::Manual
-            } else {
-                SyncTrigger::Initial
-            },
-            preview_completed,
-            user_confirmed: preview_completed,
-            metered_network: false,
-            running: false,
-            readiness: SyncReadiness {
-                network_ready: true,
-                vpn_ready: true,
-            },
-        },
-        options,
-    )
-    .map_err(|error| error.to_string())?;
-    match decision {
-        SyncDecision::Run => {}
-        SyncDecision::WaitForNetwork => return Err("waiting for network readiness".into()),
-        SyncDecision::WaitForVpn => return Err("waiting for VPN readiness".into()),
-        SyncDecision::PauseMetered => {
-            return Err("automatic synchronization is paused on metered networks".into());
-        }
-        SyncDecision::Reject(rejection) => return Err(sync_rejection_message(rejection).into()),
-    }
-
-    let request = if initialized {
-        rclone_bisync_sync_request(plan).map_err(|error| error.to_string())?
-    } else {
-        rclone_bisync_initial_sync_request(plan).map_err(|error| error.to_string())?
-    };
-    let request = managed_rclone_bisync_request(
-        plan,
-        if initialized { "sync" } else { "initial-sync" },
-        request,
-    )?;
-    let output = app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-        .map_err(|error| offline_mirror_command_error("sync", error))?;
-    if initialized {
-        Ok(sync_output_summary(&output))
-    } else {
-        write_initial_sync_marker(plan)?;
-        let _ = fs::remove_file(initial_preview_marker(plan));
-        Ok(format!(
-            "{} Initial synchronization is now recorded as complete; future Sync Now runs use normal bisync.",
-            sync_output_summary(&output)
-        ))
-    }
-}
-
-fn managed_rclone_bisync_request(
-    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
-    mode: &str,
-    original: CommandRequest,
-) -> Result<CommandRequest, String> {
-    CommandRequest::new(Executable::Sh)
-        .arg(mirror_script::script_path(plan))
-        .and_then(|request| request.arg(mode))
-        .map(|request| {
-            request
-                .with_timeout(original.timeout)
-                .with_retry(original.retry)
-                .with_output_limit(original.output_limit)
-        })
-        .map_err(|error| error.to_string())
 }
 
 async fn sync_onedrive_offline_mirror(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan,
+    cancellation: CancellationToken,
 ) -> Result<String, String> {
     let options = match &connection.mode {
         ConnectionMode::OfflineMirror(options) => options,
-        ConnectionMode::OnlineMount(_) => return Err("connection is not an offline mirror".into()),
+        ConnectionMode::OnlineMount(_) => {
+            return Err(crate::fl!("ui-app-connection-is-not-an-offline-mirror"));
+        }
     };
     let initialized = onedrive_initial_sync_marker(plan).exists();
     let preview_completed = initialized || onedrive_initial_preview_marker(plan).exists();
@@ -9107,12 +10860,16 @@ async fn sync_onedrive_offline_mirror(
     .map_err(|error| error.to_string())?;
     match decision {
         SyncDecision::Run => {}
-        SyncDecision::WaitForNetwork => return Err("waiting for network readiness".into()),
-        SyncDecision::WaitForVpn => return Err("waiting for VPN readiness".into()),
-        SyncDecision::PauseMetered => {
-            return Err("automatic synchronization is paused on metered networks".into());
+        SyncDecision::WaitForNetwork => {
+            return Err(crate::fl!("ui-app-waiting-for-network-readiness"));
         }
-        SyncDecision::Reject(rejection) => return Err(sync_rejection_message(rejection).into()),
+        SyncDecision::WaitForVpn => return Err(crate::fl!("ui-app-waiting-for-vpn-readiness")),
+        SyncDecision::PauseMetered => {
+            return Err(crate::fl!(
+                "ui-app-automatic-synchronization-is-paused-on-metered-networks"
+            ));
+        }
+        SyncDecision::Reject(rejection) => return Err(sync_rejection_message(rejection)),
     }
 
     let request = if initialized {
@@ -9121,32 +10878,34 @@ async fn sync_onedrive_offline_mirror(
         one_drive_initial_sync_request(plan).map_err(|error| error.to_string())?
     };
     let output = app_command_runner()
-        .run(request, CancellationToken::new())
+        .run(request, cancellation)
         .await
         .map_err(|error| onedrive_runtime_command_error("sync", error))?;
     if initialized {
-        Ok(onedrive_output_summary("Sync", &output))
+        Ok(onedrive_output_summary(&fl!("sync-stage-sync"), &output))
     } else {
         write_onedrive_initial_sync_marker(plan)?;
         let _ = fs::remove_file(onedrive_initial_preview_marker(plan));
-        Ok(format!(
-            "{} Initial synchronization is now recorded as complete; future Sync Now runs normal OneDrive sync.",
-            onedrive_output_summary("Sync", &output)
+        Ok(crate::fl!(
+            "ui-app-value1-initial-synchronization-is-now-recorded-as",
+            value1 = onedrive_output_summary(&fl!("sync-stage-sync"), &output)
         ))
     }
 }
 
 fn prepare_online_mount_runtime(connection: &Connection) -> Result<(), String> {
     fs::create_dir_all(&connection.local_path).map_err(|error| {
-        format!(
-            "failed to create mountpoint {}: {error}",
-            connection.local_path.display()
+        crate::fl!(
+            "ui-app-failed-to-create-mountpoint-value1-error",
+            value1 = (connection.local_path.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(default_runtime_root()).map_err(|error| {
-        format!(
-            "failed to create runtime directory {}: {error}",
-            default_runtime_root().display()
+        crate::fl!(
+            "ui-app-failed-to-create-runtime-directory-value1-error",
+            value1 = (default_runtime_root().display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(
@@ -9154,7 +10913,12 @@ fn prepare_online_mount_runtime(connection: &Connection) -> Result<(), String> {
             .join("rclone")
             .join(connection.id.to_string()),
     )
-    .map_err(|error| format!("failed to create rclone cache directory: {error}"))?;
+    .map_err(|error| {
+        crate::fl!(
+            "ui-app-failed-to-create-rclone-cache-directory-error",
+            error = (error).to_string()
+        )
+    })?;
     Ok(())
 }
 
@@ -9174,22 +10938,25 @@ fn prepare_onedriver_online_mount_runtime_with(
     let plan = onedriver_mount_plan(connection, cache_root, config_root)
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&plan.mountpoint).map_err(|error| {
-        format!(
-            "failed to create mountpoint {}: {error}",
-            plan.mountpoint.display()
+        crate::fl!(
+            "ui-app-failed-to-create-mountpoint-value1-error",
+            value1 = (plan.mountpoint.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(&plan.cache_directory).map_err(|error| {
-        format!(
-            "failed to create onedriver cache directory {}: {error}",
-            plan.cache_directory.display()
+        crate::fl!(
+            "ui-app-failed-to-create-onedriver-cache-directory-value1",
+            value1 = (plan.cache_directory.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     if let Some(config_directory) = plan.config_file.parent() {
         fs::create_dir_all(config_directory).map_err(|error| {
-            format!(
-                "failed to create onedriver config directory {}: {error}",
-                config_directory.display()
+            crate::fl!(
+                "ui-app-failed-to-create-onedriver-config-directory-value1",
+                value1 = (config_directory.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     }
@@ -9198,28 +10965,32 @@ fn prepare_onedriver_online_mount_runtime_with(
 
 fn prepare_offline_mirror_runtime(connection: &Connection) -> Result<(), String> {
     fs::create_dir_all(&connection.local_path).map_err(|error| {
-        format!(
-            "failed to create mirror directory {}: {error}",
-            connection.local_path.display()
+        crate::fl!(
+            "ui-app-failed-to-create-mirror-directory-value1-error",
+            value1 = (connection.local_path.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(default_work_root()).map_err(|error| {
-        format!(
-            "failed to create work directory {}: {error}",
-            default_work_root().display()
+        crate::fl!(
+            "ui-app-failed-to-create-work-directory-value1-error",
+            value1 = (default_work_root().display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     if let ConnectionMode::OfflineMirror(options) = &connection.mode {
         fs::create_dir_all(&options.recovery_directory).map_err(|error| {
-            format!(
-                "failed to create recovery directory {}: {error}",
-                options.recovery_directory.display()
+            crate::fl!(
+                "ui-app-failed-to-create-recovery-directory-value1-error",
+                value1 = (options.recovery_directory.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn ensure_sharepoint_access_marker(
     connection: &Connection,
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
@@ -9273,21 +11044,24 @@ fn prepare_onedrive_offline_mirror_runtime_with(
     )
     .map_err(|error| error.to_string())?;
     fs::create_dir_all(&plan.sync_directory).map_err(|error| {
-        format!(
-            "failed to create OneDrive sync directory {}: {error}",
-            plan.sync_directory.display()
+        crate::fl!(
+            "ui-app-failed-to-create-onedrive-sync-directory-value1",
+            value1 = (plan.sync_directory.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(&plan.config_directory).map_err(|error| {
-        format!(
-            "failed to create OneDrive config directory {}: {error}",
-            plan.config_directory.display()
+        crate::fl!(
+            "ui-app-failed-to-create-onedrive-config-directory-value1",
+            value1 = (plan.config_directory.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     fs::create_dir_all(&plan.recovery_directory).map_err(|error| {
-        format!(
-            "failed to create OneDrive recovery directory {}: {error}",
-            plan.recovery_directory.display()
+        crate::fl!(
+            "ui-app-failed-to-create-onedrive-recovery-directory-value1",
+            value1 = (plan.recovery_directory.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     Ok(())
@@ -9307,47 +11081,57 @@ fn onedrive_auth_open_command(auth_files: &OneDriveMirrorAuthFiles) -> String {
 }
 
 fn validate_onedrive_auth_url(value: &str) -> Result<(), String> {
-    validate_setup_value("OneDrive auth URL", value, true)?;
+    validate_setup_value(&crate::fl!("ui-app-onedrive-auth-url"), value, true)?;
     if value.starts_with("https://login.microsoftonline.com/")
         || value.starts_with("https://login.live.com/")
     {
         Ok(())
     } else {
-        Err("The generated OneDrive auth URL is not a recognized Microsoft login URL.".into())
+        Err(crate::fl!("ui-app-the-generated-onedrive-auth-url-is-not"))
     }
 }
 
-fn open_onedrive_auth_url(auth_files: &OneDriveMirrorAuthFiles) -> Result<&'static str, String> {
+fn open_onedrive_auth_url(auth_files: &OneDriveMirrorAuthFiles) -> Result<String, String> {
     let url = fs::read_to_string(&auth_files.auth_url_file).map_err(|error| {
-        format!(
-            "auth URL file is not ready yet at {}: {error}",
-            auth_files.auth_url_file.display()
+        crate::fl!(
+            "ui-app-auth-url-file-is-not-ready-yet",
+            value1 = (auth_files.auth_url_file.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     let url = url.trim();
     validate_onedrive_auth_url(url)?;
     if let Some(helper) = onedrive_auth_helper_path() {
         Command::new(&helper)
+            .env(
+                "COSMIC_MOUNTER_AUTH_UI",
+                serde_json::json!({
+                    "auth-helper-title": fl!("auth-helper-title"),
+                    "auth-helper-intro": fl!("auth-helper-intro"),
+                    "auth-helper-captured": fl!("auth-helper-captured"),
+                    "auth-helper-completed": fl!("auth-helper-completed"),
+                })
+                .to_string(),
+            )
             .arg(&auth_files.auth_url_file)
             .arg(&auth_files.response_url_file)
             .spawn()
             .map_err(|error| {
-                format!(
-                    "failed to start OneDrive auth helper `{}`: {error}",
-                    helper.display()
+                crate::fl!(
+                    "ui-app-failed-to-start-onedrive-auth-helper-value1",
+                    value1 = (helper.display()).to_string(),
+                    error = (error).to_string()
                 )
             })?;
-        return Ok(
-            "Opened the OneDrive WebKit auth helper. Complete Microsoft sign-in there; the helper will capture the final redirect automatically if WebKit permits it.",
-        );
+        return Ok(fl!("onedrive-auth-helper-opened"));
     }
-    Command::new("xdg-open")
-        .arg(url)
-        .spawn()
-        .map_err(|error| format!("failed to start xdg-open: {error}"))?;
-    Ok(
-        "Opened the OneDrive authentication page in your browser. If the WebKit helper is unavailable, paste the final native-client URL into the response field.",
-    )
+    Command::new("xdg-open").arg(url).spawn().map_err(|error| {
+        crate::fl!(
+            "ui-app-failed-to-start-xdg-open-error",
+            error = (error).to_string()
+        )
+    })?;
+    Ok(fl!("onedrive-auth-browser-opened"))
 }
 
 fn onedrive_auth_helper_path() -> Option<PathBuf> {
@@ -9373,7 +11157,7 @@ fn onedrive_auth_helper_path() -> Option<PathBuf> {
 }
 
 fn validate_onedrive_auth_response_url(value: &str) -> Result<(), String> {
-    validate_setup_value("OneDrive response URL", value, true)?;
+    validate_setup_value(&crate::fl!("ui-app-onedrive-response-url"), value, true)?;
     if value.starts_with("https://login.microsoftonline.com/") && value.contains("code=") {
         Ok(())
     } else {
@@ -9390,9 +11174,10 @@ fn write_onedrive_auth_response(
 ) -> Result<(), String> {
     if let Some(parent) = auth_files.response_url_file.parent() {
         fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create OneDrive response handoff directory {}: {error}",
-                parent.display()
+            crate::fl!(
+                "ui-app-failed-to-create-onedrive-response-handoff-directory",
+                value1 = (parent.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     }
@@ -9402,23 +11187,26 @@ fn write_onedrive_auth_response(
         .truncate(true)
         .open(&auth_files.response_url_file)
         .map_err(|error| {
-            format!(
-                "failed to open response file {}: {error}",
-                auth_files.response_url_file.display()
+            crate::fl!(
+                "ui-app-failed-to-open-response-file-value1-error",
+                value1 = (auth_files.response_url_file.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|error| {
-            format!(
-                "failed to restrict response file permissions {}: {error}",
-                auth_files.response_url_file.display()
+            crate::fl!(
+                "ui-app-failed-to-restrict-response-file-permissions-value1",
+                value1 = (auth_files.response_url_file.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     file.write_all(response_url.as_bytes()).map_err(|error| {
-        format!(
-            "failed to write response file {}: {error}",
-            auth_files.response_url_file.display()
+        crate::fl!(
+            "ui-app-failed-to-write-response-file-value1-error",
+            value1 = (auth_files.response_url_file.display()).to_string(),
+            error = (error).to_string()
         )
     })
 }
@@ -9427,9 +11215,10 @@ fn write_onedrive_auth_response(
 fn prepare_onedrive_auth_files(auth_files: &OneDriveMirrorAuthFiles) -> Result<(), String> {
     if let Some(parent) = auth_files.auth_url_file.parent() {
         fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create OneDrive auth handoff directory {}: {error}",
-                parent.display()
+            crate::fl!(
+                "ui-app-failed-to-create-onedrive-auth-handoff-directory",
+                value1 = (parent.display()).to_string(),
+                error = (error).to_string()
             )
         })?;
     }
@@ -9489,43 +11278,11 @@ async fn onedrive_mirror_pending_count(connection: &Connection) -> Result<u64, S
     pending_count::parse_onedrive_mirror_status(&output.stdout.text)
 }
 
-async fn rclone_mirror_pending_count(connection: &Connection) -> Result<u64, String> {
+async fn rclone_mirror_live_pending_count(connection: &Connection) -> Result<u64, String> {
     let plan = rclone_bisync_plan(connection, &default_work_root())
         .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
-    if !plan.filters_file.is_file() {
-        return Err(fl!("pending-count-rclone-mirror-unavailable"));
-    }
-    let initialized = initial_sync_marker(&plan).exists();
-    let request = if initialized {
-        rclone_bisync_preview_request(&plan)
-    } else {
-        rclone_bisync_initial_preview_request(&plan)
-    }
-    .map_err(|_| fl!("pending-count-request-failed"))?;
-    let request = request
-        .arg("--color")
-        .and_then(|request| request.arg("NEVER"))
-        .map_err(|_| fl!("pending-count-request-failed"))?;
-    let output = app_command_runner()
-        .run(request, CancellationToken::new())
-        .await
-        .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
-    if output.stdout.truncated
-        || output.stderr.truncated
-        || output.stdout.invalid_utf8
-        || output.stderr.invalid_utf8
-    {
-        return Err(fl!("pending-count-response-incomplete"));
-    }
-    pending_count::parse_rclone_mirror_status(&format!(
-        "{}\n{}",
-        output.stdout.text, output.stderr.text
-    ))
-}
-
-async fn rclone_mirror_live_pending_count(connection: &Connection) -> Result<u64, String> {
     let service = UnitName::new(connection.id, UnitKind::Service).file_name();
-    pending_count::rclone_mirror_live_pending(&app_command_runner(), &service).await
+    pending_count::rclone_mirror_live_pending(&plan.work_directory, &service).await
 }
 
 fn prepare_rclone_bisync_work_files(
@@ -9533,43 +11290,52 @@ fn prepare_rclone_bisync_work_files(
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
 ) -> Result<(), String> {
     fs::create_dir_all(&plan.work_directory).map_err(|error| {
-        format!(
-            "failed to create rclone bisync work directory {}: {error}",
-            plan.work_directory.display()
+        crate::fl!(
+            "ui-app-failed-to-create-rclone-bisync-work-directory",
+            value1 = (plan.work_directory.display()).to_string(),
+            error = (error).to_string()
         )
     })?;
     let filter_content = rclone_bisync_filter_file(connection.provider);
-    fs::write(&plan.filters_file, filter_content).map_err(|error| {
-        format!(
-            "failed to write rclone bisync filter file {}: {error}",
-            plan.filters_file.display()
-        )
-    })?;
-    let script_path = mirror_script::script_path(plan);
-    if script_path.exists() {
-        let existing = fs::read_to_string(&script_path)
-            .map_err(|error| format!("could not inspect managed mirror script: {error}"))?;
-        let owner_line = format!("# Cloud Mounter managed bisync script: '{}'", connection.id);
-        if !existing.lines().any(|line| line == owner_line) {
-            return Err("mirror script path contains an unowned file".into());
-        }
-    }
-    let content = mirror_script::render(plan).map_err(|error| error.to_string())?;
-    let staging = script_path.with_extension(format!("sh.tmp.{}", Uuid::new_v4()));
+    let staging = plan
+        .filters_file
+        .with_extension(format!("txt.tmp.{}", Uuid::new_v4()));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&staging)
-        .map_err(|error| format!("could not stage managed mirror script: {error}"))?;
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-stage-managed-mirror-filter-error",
+                error = (error).to_string()
+            )
+        })?;
     #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("could not restrict managed mirror script: {error}"))?;
-    file.write_all(content.as_bytes())
-        .map_err(|error| format!("could not write managed mirror script: {error}"))?;
-    file.sync_all()
-        .map_err(|error| format!("could not sync managed mirror script: {error}"))?;
-    fs::rename(&staging, &script_path)
-        .map_err(|error| format!("could not install managed mirror script: {error}"))?;
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-could-not-restrict-managed-mirror-filter-error",
+                error = (error).to_string()
+            )
+        })?;
+    file.write_all(filter_content.as_bytes()).map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-write-managed-mirror-filter-error",
+            error = (error).to_string()
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-sync-managed-mirror-filter-error",
+            error = (error).to_string()
+        )
+    })?;
+    fs::rename(&staging, &plan.filters_file).map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-install-managed-mirror-filter-error",
+            error = (error).to_string()
+        )
+    })?;
     Ok(())
 }
 
@@ -9628,6 +11394,7 @@ fn onedrive_initial_sync_marker(
     plan.config_directory.join("initial-sync-complete")
 }
 
+#[cfg(test)]
 fn write_initial_preview_marker(
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
     summary: &str,
@@ -9639,6 +11406,7 @@ fn write_initial_preview_marker(
     .map_err(|error| format!("failed to record initial preview completion: {error}"))
 }
 
+#[cfg(test)]
 fn write_initial_sync_marker(
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
 ) -> Result<(), String> {
@@ -9657,7 +11425,12 @@ fn write_onedrive_initial_preview_marker(
         onedrive_initial_preview_marker(plan),
         format!("Cloud Mounter OneDrive initial preview completed.\n{summary}\n"),
     )
-    .map_err(|error| format!("failed to record OneDrive initial preview completion: {error}"))
+    .map_err(|error| {
+        crate::fl!(
+            "ui-app-failed-to-record-onedrive-initial-preview-completion",
+            error = (error).to_string()
+        )
+    })
 }
 
 fn write_onedrive_initial_sync_marker(
@@ -9667,28 +11440,35 @@ fn write_onedrive_initial_sync_marker(
         onedrive_initial_sync_marker(plan),
         "Cloud Mounter OneDrive initial sync completed.\n",
     )
-    .map_err(|error| format!("failed to record OneDrive initial sync completion: {error}"))
+    .map_err(|error| {
+        crate::fl!(
+            "ui-app-failed-to-record-onedrive-initial-sync-completion",
+            error = (error).to_string()
+        )
+    })
 }
 
 fn preview_summary_text(output: &CommandOutput) -> String {
     let combined = format!("{}\n{}", output.stdout.text, output.stderr.text);
     let summary = parse_preview(&combined);
-    format!(
-        "Preview: uploads {}, downloads {}, deletes {}, conflicts {}, skipped {}{}{}.",
-        summary.uploads,
-        summary.downloads,
-        summary.deletes,
-        summary.conflicts,
-        summary.skipped,
-        summary
+    crate::fl!(
+        "ui-app-preview-uploads-value1-downloads-value2-deletes-value3",
+        value1 = (summary.uploads).to_string(),
+        value2 = (summary.downloads).to_string(),
+        value3 = (summary.deletes).to_string(),
+        value4 = (summary.conflicts).to_string(),
+        value5 = (summary.skipped).to_string(),
+        value6 = (summary
             .transfer_bytes
-            .map(|bytes| format!(", transfer estimate {}", human_bytes(bytes)))
-            .unwrap_or_default(),
-        if summary.destructive {
-            " (destructive changes detected)"
+            .map(|bytes| fl!("preview-transfer-estimate", bytes = human_bytes(bytes)))
+            .unwrap_or_default())
+        .to_string(),
+        value7 = (if summary.destructive {
+            fl!("preview-destructive-changes")
         } else {
-            ""
-        }
+            String::new()
+        })
+        .to_string()
     )
 }
 
@@ -9708,9 +11488,16 @@ fn onedrive_output_summary(stage: &str, output: &CommandOutput) -> String {
         })
         .count();
     if changed_lines == 0 {
-        format!("{stage} completed; onedrive did not report file-change counts.")
+        crate::fl!(
+            "ui-app-stage-completed-onedrive-did-not-report-file",
+            stage = (stage).to_string()
+        )
     } else {
-        format!("{stage} completed; onedrive reported {changed_lines} notable file-change line(s).")
+        crate::fl!(
+            "ui-app-stage-completed-onedrive-reported-changed-lines-notable",
+            stage = (stage).to_string(),
+            changed_lines = (changed_lines).to_string()
+        )
     }
 }
 
@@ -9720,12 +11507,16 @@ fn sync_output_summary(output: &CommandOutput) -> String {
     if summary.uploads + summary.downloads + summary.deletes + summary.conflicts + summary.skipped
         > 0
     {
-        format!(
-            "Sync summary: uploads {}, downloads {}, deletes {}, conflicts {}, skipped {}.",
-            summary.uploads, summary.downloads, summary.deletes, summary.conflicts, summary.skipped
+        crate::fl!(
+            "ui-app-sync-summary-uploads-value1-downloads-value2-deletes",
+            value1 = (summary.uploads).to_string(),
+            value2 = (summary.downloads).to_string(),
+            value3 = (summary.deletes).to_string(),
+            value4 = (summary.conflicts).to_string(),
+            value5 = (summary.skipped).to_string()
         )
     } else {
-        "Sync completed; rclone did not report transfer counts.".into()
+        crate::fl!("ui-app-sync-completed-rclone-did-not-report-transfer")
     }
 }
 
@@ -9733,29 +11524,36 @@ fn human_bytes(bytes: u64) -> String {
     const GIB: u64 = 1024 * 1024 * 1024;
     const MIB: u64 = 1024 * 1024;
     if bytes >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+        crate::fl!(
+            "ui-app-value1-gib",
+            value1 = format!("{:.1}", bytes as f64 / GIB as f64)
+        )
     } else if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+        crate::fl!(
+            "ui-app-value1-mib",
+            value1 = format!("{:.1}", bytes as f64 / MIB as f64)
+        )
     } else {
-        format!("{bytes} bytes")
+        crate::fl!("ui-app-bytes-bytes", bytes = (bytes).to_string())
     }
 }
 
-fn sync_rejection_message(rejection: SyncDecisionRejection) -> &'static str {
+fn sync_rejection_message(rejection: SyncDecisionRejection) -> String {
     match rejection {
-        SyncDecisionRejection::ConcurrentRun => "a synchronization is already running",
+        SyncDecisionRejection::ConcurrentRun => fl!("sync-rejection-concurrent"),
         SyncDecisionRejection::PreviewRequired => {
-            "initial synchronization requires Preview first; then press Sync Now to confirm"
+            fl!("sync-rejection-preview")
         }
         SyncDecisionRejection::ConfirmationRequired => {
-            "initial synchronization requires explicit confirmation through Sync Now"
+            fl!("sync-rejection-confirmation")
         }
         SyncDecisionRejection::ResyncPreviewRequired => {
-            "state rebuild or resync requires preview and confirmation"
+            fl!("sync-rejection-resync")
         }
     }
 }
 
+#[cfg(test)]
 fn offline_mirror_command_error(stage: &str, error: CommandError) -> String {
     match error {
         CommandError::MissingExecutable(executable) => {
@@ -9776,12 +11574,34 @@ fn offline_mirror_command_error(stage: &str, error: CommandError) -> String {
             } else {
                 stderr.text.trim()
             };
-            if detail.contains("prior lock file found") {
+            let lower = detail.to_ascii_lowercase();
+            if lower.contains("prior lock file found") {
                 "Sync is locked. Retry after the active run or two minutes; older locks may need manual recovery.".into()
             } else if detail.is_empty() {
                 format!("rclone {stage} failed without diagnostic output")
+            } else if lower.contains("unauthorized")
+                || lower.contains("forbidden")
+                || lower.contains("authentication")
+                || lower.contains("token")
+            {
+                format!(
+                    "rclone {stage} failed because storage authentication or access was rejected"
+                )
+            } else if lower.contains("quota")
+                || lower.contains("insufficient storage")
+                || lower.contains("no space left")
+            {
+                format!(
+                    "rclone {stage} failed because local or remote storage capacity is unavailable"
+                )
+            } else if lower.contains("checksum") || lower.contains("verification failed") {
+                format!(
+                    "rclone {stage} failed post-sync verification; review the app-owned mirror log before retrying"
+                )
             } else {
-                format!("rclone {stage} failed: {detail}")
+                format!(
+                    "rclone {stage} failed; review the app-owned mirror log and use Repair before retrying if the operation was interrupted"
+                )
             }
         }
     }
@@ -9798,7 +11618,7 @@ async fn test_teams_draft_connection(connection: &mut Connection) -> Result<Stri
         connection
             .teams_identity
             .as_ref()
-            .ok_or("SharePoint library URL is missing.")?,
+            .ok_or(crate::fl!("ui-app-sharepoint-library-url-is-missing"))?,
     )
     .await?;
     connection.teams_identity = Some(verified.identity.clone());
@@ -9829,7 +11649,7 @@ async fn test_connection_plan_and_access(
         }
         Provider::OneDrive => match connection.mode {
             ConnectionMode::OnlineMount(_) => {
-                match verify_onedriver_online_mount_setup(connection) {
+                match verify_onedriver_online_mount_setup(connection).await {
                     Ok(access_summary) => Ok(format!("{plan_summary} {access_summary}")),
                     Err(error) => Err(error),
                 }
@@ -9846,23 +11666,28 @@ async fn test_connection_plan_and_access(
 
 async fn validate_onedrive_connection_for_save(connection: &Connection) -> Result<String, String> {
     match connection.mode {
-        ConnectionMode::OnlineMount(_) => verify_onedriver_online_mount_setup(connection),
+        ConnectionMode::OnlineMount(_) => verify_onedriver_online_mount_setup(connection).await,
         ConnectionMode::OfflineMirror(_) => verify_onedrive_offline_mirror_setup(connection).await,
     }
 }
 
 fn save_notice_name(name: &str, validation_summary: Option<&str>) -> String {
     match validation_summary {
-        Some(summary) => format!("{name} passed validation ({summary}) and"),
+        Some(summary) => crate::fl!(
+            "ui-app-name-passed-validation-summary-and",
+            name = (name).to_string(),
+            summary = (summary).to_string()
+        ),
         None => name.to_owned(),
     }
 }
 
-fn verify_onedriver_online_mount_setup(connection: &Connection) -> Result<String, String> {
+async fn verify_onedriver_online_mount_setup(connection: &Connection) -> Result<String, String> {
+    let mounts = HostVisibleMountTable::observe().await?;
     verify_onedriver_online_mount_setup_with(
         connection,
         &app_command_runner(),
-        &HostVisibleMountTable,
+        &mounts,
         &default_cache_root(),
         &default_config_root(),
     )
@@ -9876,52 +11701,58 @@ fn verify_onedriver_online_mount_setup_with(
     config_root: &std::path::Path,
 ) -> Result<String, String> {
     if !is_onedriver_online_mount(connection) {
-        return Err(
-            "OneDrive Online Mount validation only applies to onedriver connections".into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedrive-online-mount-validation-only-applies-to"
+        ));
     }
     if runner.resolve(Executable::Onedriver).is_none() {
-        return Err(
-            "onedriver is missing. Install jstaf/onedriver 0.15.0 or newer before testing this OneDrive Online Mount."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedriver-is-missing-install-jstaf-onedriver-0-2"
+        ));
     }
 
-    let plan = onedriver_mount_plan(connection, cache_root, config_root)
-        .map_err(|error| format!("could not build onedriver plan: {error}"))?;
+    let plan = onedriver_mount_plan(connection, cache_root, config_root).map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-build-onedriver-plan-error",
+            error = (error).to_string()
+        )
+    })?;
     if let Some(parent) = plan.mountpoint.parent()
         && parent.exists()
         && !parent.is_dir()
     {
-        return Err(format!(
-            "mountpoint parent `{}` is not a directory.",
-            parent.display()
+        return Err(crate::fl!(
+            "ui-app-mountpoint-parent-value1-is-not-a-directory",
+            value1 = (parent.display()).to_string()
         ));
     }
     if plan.mountpoint.exists() && !plan.mountpoint.is_dir() {
-        return Err(format!(
-            "mountpoint `{}` exists but is not a directory. Choose an empty directory or remove the file first.",
-            plan.mountpoint.display()
+        return Err(crate::fl!(
+            "ui-app-mountpoint-value1-exists-but-is-not-a",
+            value1 = (plan.mountpoint.display()).to_string()
         ));
     }
 
-    let mount_entries = mount_table
-        .entries()
-        .map_err(|error| format!("could not inspect active mounts: {error}"))?;
+    let mount_entries = mount_table.entries().map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-inspect-active-mounts-error",
+            error = (error).to_string()
+        )
+    })?;
     if let Some(entry) = conflicting_onedriver_mount(&plan.mountpoint, &mount_entries) {
-        return Err(format!(
-            "mountpoint `{}` overlaps an active onedriver mount at `{}`. Unmount the existing OneDrive mount or choose a separate mountpoint.",
-            plan.mountpoint.display(),
-            entry.target.display()
+        return Err(crate::fl!(
+            "ui-app-mountpoint-value1-overlaps-an-active-onedriver-mount",
+            value1 = (plan.mountpoint.display()).to_string(),
+            value2 = (entry.target.display()).to_string()
         ));
     }
 
     match onedriver_auth_state_for_plan(&plan) {
         OnedriverAuthState::Unauthenticated => {
-            return Err(format!(
-                "onedriver is not authenticated for this applet-owned connection. Start OneDrive setup for `{}` so onedriver can create app-owned auth metadata under `{}`.",
-                connection.name,
-                plan.cache_directory.display()
+            return Err(crate::fl!(
+                "ui-app-onedriver-is-not-authenticated-for-this-applet",
+                value1 = (connection.name).to_string(),
+                value2 = (plan.cache_directory.display()).to_string()
             ));
         }
         OnedriverAuthState::Authenticated { config_file } => {
@@ -9930,18 +11761,18 @@ fn verify_onedriver_online_mount_setup_with(
                 .map(|metadata| metadata.len() == 0)
                 .unwrap_or(true)
             {
-                return Err(format!(
-                    "onedriver account metadata at `{}` is unavailable or empty. Reauthorize this OneDrive setup before mounting.",
-                    config_file.display()
+                return Err(crate::fl!(
+                    "ui-app-onedriver-account-metadata-at-value1-is-unavailable",
+                    value1 = (config_file.display()).to_string()
                 ));
             }
         }
     }
 
-    Ok(format!(
-        "onedriver setup is present for mountpoint `{}`. Cache directory `{}` will be created if needed.",
-        plan.mountpoint.display(),
-        plan.cache_directory.display()
+    Ok(crate::fl!(
+        "ui-app-onedriver-setup-is-present-for-mountpoint-value1",
+        value1 = (plan.mountpoint.display()).to_string(),
+        value2 = (plan.cache_directory.display()).to_string()
     ))
 }
 
@@ -9961,10 +11792,11 @@ fn paths_overlap(left: &std::path::Path, right: &std::path::Path) -> bool {
 }
 
 async fn verify_onedrive_offline_mirror_setup(connection: &Connection) -> Result<String, String> {
+    let mounts = HostVisibleMountTable::observe().await?;
     verify_onedrive_offline_mirror_setup_with(
         connection,
         &app_command_runner(),
-        &HostVisibleMountTable,
+        &mounts,
         &default_config_root(),
     )
     .await
@@ -9977,21 +11809,22 @@ async fn verify_onedrive_offline_mirror_setup_with(
     config_root: &std::path::Path,
 ) -> Result<String, String> {
     if !is_onedrive_offline_mirror(connection) {
-        return Err(
-            "OneDrive Offline Mirror validation only applies to abraunegg/onedrive connections."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedrive-offline-mirror-validation-only-applies-to"
+        ));
     }
     if runner.resolve(Executable::OneDrive).is_none() {
-        return Err(
-            "onedrive is missing. Install abraunegg/onedrive 2.5.10 or newer before testing this OneDrive Offline Mirror."
-                .into(),
-        );
+        return Err(crate::fl!(
+            "ui-app-onedrive-is-missing-install-abraunegg-onedrive-2-2"
+        ));
     }
 
-    let mount_entries = mount_table
-        .entries()
-        .map_err(|error| format!("could not inspect active mounts: {error}"))?;
+    let mount_entries = mount_table.entries().map_err(|error| {
+        crate::fl!(
+            "ui-app-could-not-inspect-active-mounts-error",
+            error = (error).to_string()
+        )
+    })?;
     let active_onedriver_paths = mount_entries
         .iter()
         .filter(|entry| entry.filesystem == "fuse.onedriver")
@@ -10006,9 +11839,15 @@ async fn verify_onedrive_offline_mirror_setup_with(
     )
     .map_err(onedrive_mirror_plan_validation_error)?;
 
-    validate_directory_available("sync directory", &plan.sync_directory)?;
-    validate_directory_available("OneDrive config directory", &plan.config_directory)?;
-    validate_directory_available("recovery directory", &plan.recovery_directory)?;
+    validate_directory_available(&crate::fl!("ui-app-sync-directory"), &plan.sync_directory)?;
+    validate_directory_available(
+        &crate::fl!("ui-app-onedrive-config-directory"),
+        &plan.config_directory,
+    )?;
+    validate_directory_available(
+        &crate::fl!("ui-app-recovery-directory"),
+        &plan.recovery_directory,
+    )?;
 
     let token_file = plan.config_directory.join("refresh_token");
     if token_file
@@ -10016,9 +11855,9 @@ async fn verify_onedrive_offline_mirror_setup_with(
         .map(|metadata| metadata.len() == 0)
         .unwrap_or(true)
     {
-        return Err(format!(
-            "abraunegg/onedrive is not authenticated for this applet-owned mirror. Authorize this connection so onedrive can create `{}`.",
-            token_file.display()
+        return Err(crate::fl!(
+            "ui-app-abraunegg-onedrive-is-not-authenticated-for-this",
+            value1 = (token_file.display()).to_string()
         ));
     }
 
@@ -10028,12 +11867,14 @@ async fn verify_onedrive_offline_mirror_setup_with(
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| onedrive_validation_command_error("dry-run preview", error))?;
+        .map_err(|error| {
+            onedrive_validation_command_error(&fl!("onedrive-stage-dry-preview"), error)
+        })?;
 
-    Ok(format!(
-        "abraunegg/onedrive setup is authenticated for sync directory `{}`. {}",
-        plan.sync_directory.display(),
-        onedrive_output_summary("Validation preview", &output)
+    Ok(crate::fl!(
+        "ui-app-abraunegg-onedrive-setup-is-authenticated-for-sync",
+        value1 = (plan.sync_directory.display()).to_string(),
+        value2 = onedrive_output_summary(&fl!("onedrive-stage-validation-preview"), &output)
     ))
 }
 
@@ -10042,15 +11883,17 @@ fn validate_directory_available(label: &str, path: &std::path::Path) -> Result<(
         && parent.exists()
         && !parent.is_dir()
     {
-        return Err(format!(
-            "{label} parent `{}` is not a directory.",
-            parent.display()
+        return Err(crate::fl!(
+            "ui-app-label-parent-value2-is-not-a-directory",
+            label = (label).to_string(),
+            value2 = (parent.display()).to_string()
         ));
     }
     if path.exists() && !path.is_dir() {
-        return Err(format!(
-            "{label} `{}` exists but is not a directory.",
-            path.display()
+        return Err(crate::fl!(
+            "ui-app-label-value2-exists-but-is-not-a",
+            label = (label).to_string(),
+            value2 = (path.display()).to_string()
         ));
     }
     Ok(())
@@ -10060,18 +11903,18 @@ fn onedrive_mirror_plan_validation_error(
     error: cosmic_ext_applet_mounter::sync::SyncError,
 ) -> String {
     match error {
-        cosmic_ext_applet_mounter::sync::SyncError::OverlapsOnedriverPath(path) => format!(
-            "OneDrive Offline Mirror overlaps active onedriver mount `{}`. Unmount the Online Mount or choose a separate local mirror directory.",
-            path.display()
+        cosmic_ext_applet_mounter::sync::SyncError::OverlapsOnedriverPath(path) => crate::fl!(
+            "ui-app-onedrive-offline-mirror-overlaps-active-onedriver-mount",
+            value1 = (path.display()).to_string()
         ),
         cosmic_ext_applet_mounter::sync::SyncError::InvalidWorkDirectory => {
-            "OneDrive config/work directory must be absolute and separate from the local mirror directory.".into()
+            crate::fl!("ui-app-onedrive-config-work-directory-must-be-absolute")
         }
         cosmic_ext_applet_mounter::sync::SyncError::InvalidRecoveryDirectory => {
-            "recovery directory must be absolute and separate from both the local mirror and applet config/work directories.".into()
+            crate::fl!("ui-app-recovery-directory-must-be-absolute-and-separate")
         }
         cosmic_ext_applet_mounter::sync::SyncError::InvalidRemoteSubpath => {
-            "remote subtree contains unsupported characters.".into()
+            crate::fl!("ui-app-remote-subtree-contains-unsupported-characters")
         }
         other => other.to_string(),
     }
@@ -10080,17 +11923,27 @@ fn onedrive_mirror_plan_validation_error(
 fn onedrive_validation_command_error(stage: &str, error: CommandError) -> String {
     match error {
         CommandError::MissingExecutable(executable) => {
-            format!("{} is missing.", executable.display_name())
+            crate::fl!(
+                "ui-app-value1-is-missing",
+                value1 = (executable.display_name()).to_string()
+            )
         }
         CommandError::InvalidArgument => {
-            "onedrive command argument contains unsupported characters".into()
+            crate::fl!("ui-app-onedrive-command-argument-contains-unsupported-characters")
         }
-        CommandError::Timeout { timeout, .. } => format!(
-            "onedrive {stage} timed out after {} seconds. Authentication may still be valid, but the initial dry-run can take several minutes for a whole drive. Check network/VPN readiness, Microsoft OneDrive responsiveness, and consider selecting a smaller remote subtree for first validation.",
-            timeout.as_secs()
+        CommandError::Timeout { timeout, .. } => crate::fl!(
+            "ui-app-onedrive-stage-timed-out-after-value2-seconds",
+            stage = (stage).to_string(),
+            value2 = (timeout.as_secs()).to_string()
         ),
-        CommandError::Cancelled { .. } => format!("onedrive {stage} was cancelled"),
-        CommandError::Spawn { message, .. } => format!("could not start onedrive: {message}"),
+        CommandError::Cancelled { .. } => crate::fl!(
+            "ui-app-onedrive-stage-was-cancelled",
+            stage = (stage).to_string()
+        ),
+        CommandError::Spawn { message, .. } => crate::fl!(
+            "ui-app-could-not-start-onedrive-message",
+            message = (message).to_string()
+        ),
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
                 stdout.text.trim()
@@ -10099,7 +11952,10 @@ fn onedrive_validation_command_error(stage: &str, error: CommandError) -> String
             };
             let lower = detail.to_ascii_lowercase();
             if detail.is_empty() {
-                format!("onedrive {stage} failed without diagnostic output")
+                crate::fl!(
+                    "ui-app-onedrive-stage-failed-without-diagnostic-output",
+                    stage = (stage).to_string()
+                )
             } else if lower.contains("authorization is required")
                 || lower.contains("authorisation is required")
                 || lower.contains("requires authorisation")
@@ -10110,45 +11966,61 @@ fn onedrive_validation_command_error(stage: &str, error: CommandError) -> String
                 || lower.contains("reauth")
                 || lower.contains("refresh_token")
             {
-                format!("abraunegg/onedrive is not authenticated for this mirror: {detail}")
+                crate::fl!(
+                    "ui-app-abraunegg-onedrive-is-not-authenticated-for-this-2",
+                    detail = (detail).to_string()
+                )
             } else if lower.contains("code has expired")
                 || lower.contains("code is not valid")
                 || lower.contains("invalid_grant")
                 || lower.contains("invalid_request")
                 || lower.contains("auth-response")
             {
-                format!(
-                    "OneDrive OAuth response is expired or invalid. Restart authorization and submit the final nativeclient URL immediately: {detail}"
+                crate::fl!(
+                    "ui-app-onedrive-oauth-response-is-expired-or-invalid",
+                    detail = (detail).to_string()
                 )
             } else if lower.contains("aadsts")
                 || lower.contains("admin consent")
                 || lower.contains("tenant")
                 || lower.contains("consent")
             {
-                format!(
-                    "Microsoft tenant or admin-consent policy blocked OneDrive authorization: {detail}"
+                crate::fl!(
+                    "ui-app-microsoft-tenant-or-admin-consent-policy-blocked",
+                    detail = (detail).to_string()
                 )
             } else if lower.contains("resync")
                 || lower.contains("application configuration change")
                 || lower.contains("sync state")
             {
-                format!(
-                    "abraunegg/onedrive requires a preview and explicit resync/state rebuild before syncing: {detail}"
+                crate::fl!(
+                    "ui-app-abraunegg-onedrive-requires-a-preview-and-explicit",
+                    detail = (detail).to_string()
                 )
             } else if lower.contains("does not exist online")
                 || lower.contains("requested path")
                 || lower.contains("single-directory")
             {
-                format!("selected OneDrive remote subtree is not accessible: {detail}")
+                crate::fl!(
+                    "ui-app-selected-onedrive-remote-subtree-is-not-accessible",
+                    detail = (detail).to_string()
+                )
             } else if lower.contains("network")
                 || lower.contains("timeout")
                 || lower.contains("connection")
                 || lower.contains("dns")
                 || lower.contains("host")
             {
-                format!("network or VPN readiness failed while checking OneDrive: {detail}")
+                crate::fl!(
+                    "ui-app-network-or-vpn-readiness-failed-while-checking",
+                    detail = (detail).to_string()
+                )
             } else {
-                format!("onedrive {stage} failed: {detail}")
+                crate::fl!(
+                    "ui-app-onedrive-stage-failed-detail",
+                    stage = (stage).to_string(),
+                    detail = (detail).to_string()
+                )
             }
         }
     }
@@ -10179,21 +12051,26 @@ async fn verify_rclone_access_with_verified(
     let teams_summary = if connection.provider == Provider::Teams {
         let verified = match teams_verified {
             Some(verified) => verified.clone(),
-            None => teams::verify_remote(
-                &app_command_runner(),
-                &connection.remote_reference,
-                connection.teams_identity.as_ref().ok_or(
-                    "SharePoint library identity is missing; edit and save the connection again.",
-                )?,
-            )
-            .await?,
+            None => {
+                teams::verify_remote(
+                    &app_command_runner(),
+                    &connection.remote_reference,
+                    connection.teams_identity.as_ref().ok_or(crate::fl!(
+                        "ui-app-sharepoint-library-identity-is-missing-edit-and"
+                    ))?,
+                )
+                .await?
+            }
         };
         let account = verified
             .account
-            .unwrap_or_else(|| "account unavailable from Microsoft Graph".into());
-        Some(format!(
-            "SharePoint library {} at site {} and drive {} matches the saved identity. Signed-in account: {account}.",
-            verified.identity.library_url, verified.identity.site_url, verified.identity.drive_id
+            .unwrap_or_else(|| crate::fl!("ui-app-account-unavailable-from-microsoft-graph"));
+        Some(crate::fl!(
+            "ui-app-sharepoint-library-value1-at-site-value2-and",
+            value1 = (verified.identity.library_url).to_string(),
+            value2 = (verified.identity.site_url).to_string(),
+            value3 = (verified.identity.drive_id).to_string(),
+            account = (account).to_string()
         ))
     } else {
         None
@@ -10202,7 +12079,7 @@ async fn verify_rclone_access_with_verified(
         sftp::verify_host_verification(&app_command_runner(), &connection.remote_reference).await?;
     }
     let expected_backend = rclone_backend_name(connection.provider)
-        .ok_or_else(|| "selected provider does not use rclone".to_owned())?;
+        .ok_or_else(|| crate::fl!("ui-app-selected-provider-does-not-use-rclone"))?;
     let provider = CommandRcloneProvider::new(app_command_runner());
     provider
         .validate_remote(connection, CancellationToken::new())
@@ -10236,10 +12113,13 @@ async fn verify_rclone_access_with_verified(
             }
         })?;
     let visible_items = output.stdout.text.lines().count();
-    Ok(format!(
-        "Rclone remote `{}` exists, backend `{expected_backend}` matches {}, and `{target}` is accessible with {visible_items} visible item(s) at depth 1.",
-        connection.remote_reference,
-        provider_label(connection.provider)
+    Ok(crate::fl!(
+        "ui-app-rclone-remote-value1-exists-backend-expected-backend",
+        value1 = (connection.remote_reference).to_string(),
+        expected_backend = (expected_backend).to_string(),
+        value3 = (provider_label(connection.provider)).to_string(),
+        target = (target).to_string(),
+        visible_items = (visible_items).to_string()
     ) + &teams_summary.unwrap_or_default())
 }
 
@@ -10254,31 +12134,43 @@ fn rclone_access_target(connection: &Connection) -> String {
 
 fn rclone_remote_validation_error(connection: &Connection, error: ProviderError) -> String {
     match error {
-        ProviderError::InvalidRemoteReference => format!(
-            "rclone remote `{}` was not found. Run Detect rclone remotes, choose a listed remote, or create the remote before testing.",
-            connection.remote_reference
+        ProviderError::InvalidRemoteReference => crate::fl!(
+            "ui-app-rclone-remote-value1-was-not-found-run",
+            value1 = (connection.remote_reference).to_string()
         ),
-        ProviderError::UnsupportedProvider(_) => format!(
-            "rclone remote `{}` exists but does not use the expected `{}` backend for {}.",
-            connection.remote_reference,
-            rclone_backend_name(connection.provider).unwrap_or("unknown"),
-            provider_label(connection.provider)
+        ProviderError::UnsupportedProvider(_) => crate::fl!(
+            "ui-app-rclone-remote-value1-exists-but-does-not",
+            value1 = (connection.remote_reference).to_string(),
+            value2 = rclone_backend_name(connection.provider)
+                .map(str::to_owned)
+                .unwrap_or_else(|| fl!("value-unknown")),
+            value3 = (provider_label(connection.provider)).to_string()
         ),
         ProviderError::MissingExecutable(executable) => {
-            format!("{} is missing.", executable.display_name())
+            crate::fl!(
+                "ui-app-value1-is-missing",
+                value1 = (executable.display_name()).to_string()
+            )
         }
-        ProviderError::Command(error) => rclone_access_error("rclone config dump", error),
+        ProviderError::Command(error) => {
+            rclone_access_error(&fl!("rclone-stage-config-dump"), error)
+        }
         ProviderError::InvalidResponse(message) => {
-            format!("rclone config dump returned an unexpected response: {message}")
+            crate::fl!(
+                "ui-app-rclone-config-dump-returned-an-unexpected-response",
+                message = (message).to_string()
+            )
         }
-        ProviderError::InvalidMode => "selected connection mode is invalid for rclone".into(),
+        ProviderError::InvalidMode => {
+            crate::fl!("ui-app-selected-connection-mode-is-invalid-for-rclone")
+        }
         ProviderError::InvalidRemoteSubpath => {
-            "remote subtree contains unsupported characters".into()
+            crate::fl!("ui-app-remote-subtree-contains-unsupported-characters-2")
         }
         ProviderError::InvalidTeamsIdentity(message) => message,
         ProviderError::InvalidMountpointGuard(message) => message,
         ProviderError::Unauthenticated => {
-            "rclone remote is not authenticated. Reauthorize it before testing.".into()
+            crate::fl!("ui-app-rclone-remote-is-not-authenticated-reauthorize-it")
         }
     }
 }
@@ -10286,17 +12178,24 @@ fn rclone_remote_validation_error(connection: &Connection, error: ProviderError)
 fn rclone_access_error(target: &str, error: CommandError) -> String {
     match error {
         CommandError::MissingExecutable(executable) => {
-            format!("{} is missing.", executable.display_name())
+            crate::fl!(
+                "ui-app-value1-is-missing",
+                value1 = (executable.display_name()).to_string()
+            )
         }
         CommandError::InvalidArgument => {
-            "rclone command argument contains unsupported characters".into()
+            crate::fl!("ui-app-rclone-command-argument-contains-unsupported-characters")
         }
-        CommandError::Timeout { timeout, .. } => format!(
-            "read-only rclone access check for `{target}` timed out after {} seconds. Check network/VPN readiness and provider responsiveness.",
-            timeout.as_secs()
+        CommandError::Timeout { timeout, .. } => crate::fl!(
+            "ui-app-read-only-rclone-access-check-for-target",
+            target = (target).to_string(),
+            value2 = (timeout.as_secs()).to_string()
         ),
-        CommandError::Cancelled { .. } => "rclone access check was cancelled".into(),
-        CommandError::Spawn { message, .. } => format!("could not start rclone: {message}"),
+        CommandError::Cancelled { .. } => crate::fl!("ui-app-rclone-access-check-was-cancelled"),
+        CommandError::Spawn { message, .. } => crate::fl!(
+            "ui-app-could-not-start-rclone-message",
+            message = (message).to_string()
+        ),
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
                 stdout.text.trim()
@@ -10309,14 +12208,22 @@ fn rclone_access_error(target: &str, error: CommandError) -> String {
                 || lower.contains("not found")
                 || lower.contains("doesn't exist")
             {
-                format!("remote subtree `{target}` is not accessible or does not exist: {detail}")
+                crate::fl!(
+                    "ui-app-remote-subtree-target-is-not-accessible-or",
+                    target = (target).to_string(),
+                    detail = (detail).to_string()
+                )
             } else if lower.contains("auth")
                 || lower.contains("token")
                 || lower.contains("unauthorized")
                 || lower.contains("forbidden")
                 || lower.contains("permission")
             {
-                format!("rclone remote for `{target}` is not authorized for this access: {detail}")
+                crate::fl!(
+                    "ui-app-rclone-remote-for-target-is-not-authorized",
+                    target = (target).to_string(),
+                    detail = (detail).to_string()
+                )
             } else if lower.contains("network")
                 || lower.contains("connection")
                 || lower.contains("timeout")
@@ -10324,9 +12231,17 @@ fn rclone_access_error(target: &str, error: CommandError) -> String {
                 || lower.contains("host")
                 || lower.contains("dns")
             {
-                format!("network or VPN readiness failed while checking `{target}`: {detail}")
+                crate::fl!(
+                    "ui-app-network-or-vpn-readiness-failed-while-checking-2",
+                    target = (target).to_string(),
+                    detail = (detail).to_string()
+                )
             } else {
-                format!("read-only rclone access check failed for `{target}`: {detail}")
+                crate::fl!(
+                    "ui-app-read-only-rclone-access-check-failed-for",
+                    target = (target).to_string(),
+                    detail = (detail).to_string()
+                )
             }
         }
     }
@@ -10337,16 +12252,16 @@ fn sftp_access_error(error: CommandError) -> String {
     // Match known signatures, but never display the raw command output.
     match error {
         CommandError::MissingExecutable(_) => {
-            "rclone is missing; install it before testing SFTP access.".into()
+            crate::fl!("ui-app-rclone-is-missing-install-it-before-testing")
         }
         CommandError::InvalidArgument => {
-            "SFTP access request contains unsupported characters.".into()
+            crate::fl!("ui-app-sftp-access-request-contains-unsupported-characters")
         }
         CommandError::Timeout { .. } => {
-            "SFTP access timed out. Check the server address, port, network, and VPN.".into()
+            crate::fl!("ui-app-sftp-access-timed-out-check-the-server")
         }
-        CommandError::Cancelled { .. } => "SFTP access check was cancelled.".into(),
-        CommandError::Spawn { .. } => "Could not start rclone for the SFTP access check.".into(),
+        CommandError::Cancelled { .. } => crate::fl!("ui-app-sftp-access-check-was-cancelled"),
+        CommandError::Spawn { .. } => crate::fl!("ui-app-could-not-start-rclone-for-the-sftp"),
         CommandError::NonZero { stderr, stdout, .. } => {
             let detail = if stderr.text.trim().is_empty() {
                 stdout.text.as_str()
@@ -10360,44 +12275,43 @@ fn sftp_access_error(error: CommandError) -> String {
                     || lower.contains("couldn't parse")
                     || lower.contains("cannot read"))
             {
-                "SFTP known-hosts file is missing, unreadable, or invalid. Check its host path and permissions.".into()
+                crate::fl!("ui-app-sftp-known-hosts-file-is-missing-unreadable")
             } else if lower.contains("knownhosts:")
                 || lower.contains("host key")
                 || lower.contains("hostkey")
                 || lower.contains("remote host identification has changed")
                 || lower.contains("no authorities for hostname")
             {
-                "SFTP host-key verification failed. Verify the server identity and its entry in the known-hosts file; do not accept an unexpected key.".into()
+                crate::fl!("ui-app-sftp-host-key-verification-failed-verify-the")
             } else if (lower.contains("key_file") || lower.contains("private key"))
                 && (lower.contains("no such file")
                     || lower.contains("permission denied")
                     || lower.contains("cannot read")
                     || lower.contains("failed to load"))
             {
-                "SFTP private-key file is missing or unreadable. Check its host path and permissions.".into()
+                crate::fl!("ui-app-sftp-private-key-file-is-missing-or")
             } else if lower.contains("ssh_auth_sock")
                 || lower.contains("ssh agent")
                 || lower.contains("ssh-agent")
             {
-                "SFTP SSH agent is unavailable or has no usable unlocked key. Check SSH_AUTH_SOCK and loaded identities.".into()
+                crate::fl!("ui-app-sftp-ssh-agent-is-unavailable-or-has")
             } else if lower.contains("i/o timeout")
                 || lower.contains("connection timed out")
                 || lower.contains("context deadline exceeded")
             {
-                "SFTP connection timed out. Check the server response, port, network, and VPN."
-                    .into()
+                crate::fl!("ui-app-sftp-connection-timed-out-check-the-server")
             } else if lower.contains("unable to authenticate")
                 || lower.contains("authentication failed")
                 || lower.contains("no supported methods remain")
                 || lower.contains("too many authentication failures")
                 || (lower.contains("handshake") && lower.contains("permission denied"))
             {
-                "SFTP authentication failed. Check the username and password, private key, or SSH-agent identity.".into()
+                crate::fl!("ui-app-sftp-authentication-failed-check-the-username-and")
             } else if lower.contains("permission denied")
                 || lower.contains("access denied")
                 || lower.contains("operation not permitted")
             {
-                "SFTP login succeeded, but the selected directory is not readable. Check server permissions.".into()
+                crate::fl!("ui-app-sftp-login-succeeded-but-the-selected-directory")
             } else if lower.contains("directory not found")
                 || lower.contains("object not found")
                 || lower.contains("path not found")
@@ -10405,17 +12319,16 @@ fn sftp_access_error(error: CommandError) -> String {
                 || lower.contains("not a directory")
                 || lower.contains("doesn't exist")
             {
-                "SFTP directory was not found. Check the remote directory and whether it is relative to the login directory or starts at server root.".into()
+                crate::fl!("ui-app-sftp-directory-was-not-found-check-the")
             } else if lower.contains("connection refused")
                 || lower.contains("no route to host")
                 || lower.contains("network is unreachable")
                 || lower.contains("no such host")
                 || lower.contains("dial tcp")
             {
-                "SFTP server could not be reached. Check its address, port, network, and VPN."
-                    .into()
+                crate::fl!("ui-app-sftp-server-could-not-be-reached-check")
             } else {
-                "SFTP access check failed. Check the server settings and rclone diagnostics.".into()
+                crate::fl!("ui-app-sftp-access-check-failed-check-the-server")
             }
         }
     }
@@ -10423,31 +12336,31 @@ fn sftp_access_error(error: CommandError) -> String {
 
 fn import_preview_summary(preview: &ImportPreview) -> String {
     let status = if preview.active_conflict || preview.local_target_conflict {
-        "blocked"
+        fl!("import-state-blocked")
     } else {
-        "ready"
+        fl!("import-state-ready")
     };
     let unsupported = if preview.unsupported_options.is_empty() {
-        "none".into()
+        fl!("value-none")
     } else {
         preview.unsupported_options.join(", ")
     };
-    let subtree =
-        preview
-            .remote_subpath
-            .as_deref()
-            .unwrap_or(if preview.provider == Provider::Sftp {
-                "SFTP login directory"
-            } else {
-                "Whole remote"
-            });
-    format!(
-        "{} {} -> {}\nRemote subtree: {}\nStart at login: {}\nUnsupported options: {unsupported}\nStatus: {status}. Import replacement still requires explicit confirmation.",
-        provider_label(preview.provider),
-        preview.remote_reference,
-        preview.local_target.display(),
-        subtree,
-        yes_no(preview.start_at_login),
+    let subtree = preview.remote_subpath.clone().unwrap_or_else(|| {
+        if preview.provider == Provider::Sftp {
+            fl!("import-sftp-login-directory")
+        } else {
+            fl!("import-whole-remote")
+        }
+    });
+    crate::fl!(
+        "ui-app-value1-value2-value3-remote-subtree-value4-start",
+        value1 = (provider_label(preview.provider)).to_string(),
+        value2 = (preview.remote_reference).to_string(),
+        value3 = (preview.local_target.display()).to_string(),
+        value4 = (subtree).to_string(),
+        value5 = (yes_no(preview.start_at_login)).to_string(),
+        unsupported = (unsupported).to_string(),
+        status = (status).to_string()
     )
 }
 
@@ -10537,6 +12450,294 @@ fn provider_engine_summary(provider: Provider, mode: AccessMode) -> &'static str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cached_status_app(connection: Connection) -> AppModel {
+        let mut config = Config::default();
+        config.document.connections.push(connection.clone());
+        AppModel {
+            config,
+            unit_observation_connections: vec![connection.clone()],
+            unit_observed_at: Some(Instant::now()),
+            unit_observation: UnitObservation {
+                services: [(connection.id, repair_unit_status(ActiveState::Active, true))].into(),
+                ..UnitObservation::default()
+            },
+            ..AppModel::default()
+        }
+    }
+
+    #[test]
+    fn popup_snapshot_uses_cached_units_and_warnings_without_backend_io() {
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let id = connection.id;
+        let mut app = cached_status_app(connection);
+        app.unit_observation.warnings = Some([(id, vec!["cached warning".into()])].into());
+        let snapshot = app.controller_snapshot();
+        assert_eq!(snapshot.service_status[&id].active, ActiveState::Active);
+        assert_eq!(snapshot.sync_state[&id], SyncRuntimeState::Idle);
+        assert_eq!(snapshot.offline_warnings[&id], vec!["cached warning"]);
+        assert!(app.unit_status_fresh(id));
+    }
+
+    #[test]
+    fn failed_observation_keeps_last_state_but_cannot_authorize_controls() {
+        let connection = test_connection(Provider::Sftp);
+        let id = connection.id;
+        let mut app = cached_status_app(connection.clone());
+        let failed = UnitObservation {
+            failed: [id].into(),
+            ..UnitObservation::default()
+        };
+        let _ = app.update_message(Message::UnitObservationCompleted(
+            0,
+            vec![connection],
+            failed,
+        ));
+        assert_eq!(
+            app.unit_observation.services[&id].active,
+            ActiveState::Active
+        );
+        assert!(!app.unit_status_fresh(id));
+        assert!(!app.unit_observation_pending);
+    }
+
+    #[test]
+    fn cached_timer_and_finite_service_keep_offline_control_semantics() {
+        let mut connection = test_connection(Provider::Teams);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let id = connection.id;
+        let mut app = cached_status_app(connection);
+        app.unit_observation
+            .services
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        app.unit_observation
+            .timers
+            .insert(id, repair_unit_status(ActiveState::Active, true));
+        assert_eq!(
+            app.controller_snapshot().sync_state[&id],
+            SyncRuntimeState::Idle
+        );
+        app.unit_observation
+            .timers
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        assert!(app.controller_snapshot().paused_syncs.contains(&id));
+        app.unit_observation
+            .services
+            .insert(id, repair_unit_status(ActiveState::Active, false));
+        assert_eq!(
+            app.controller_snapshot().sync_state[&id],
+            SyncRuntimeState::Running
+        );
+        assert!(!app.controller_snapshot().paused_syncs.contains(&id));
+        app.mirror_operations_pending.insert(id);
+        app.unit_observation
+            .services
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        assert_eq!(
+            app.controller_snapshot().sync_state[&id],
+            SyncRuntimeState::Running
+        );
+    }
+
+    #[test]
+    fn unobserved_offline_units_are_unknown_not_paused() {
+        let mut connection = test_connection(Provider::Teams);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let id = connection.id;
+        let mut app = cached_status_app(connection.clone());
+        app.unit_observation.services.clear();
+        assert_eq!(
+            app.cached_offline_state(&connection),
+            SyncRuntimeState::Unknown
+        );
+        assert!(!app.controller_snapshot().paused_syncs.contains(&id));
+        app.unit_observation
+            .services
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        assert_eq!(
+            app.cached_offline_state(&connection),
+            SyncRuntimeState::Unknown
+        );
+    }
+
+    #[test]
+    fn stale_generation_does_not_clear_new_pending_refresh() {
+        let connection = test_connection(Provider::Sftp);
+        let mut app = cached_status_app(connection.clone());
+        app.unit_observation_revision = 2;
+        app.unit_observation_pending = true;
+        let _ = app.update_message(Message::UnitObservationCompleted(
+            1,
+            vec![connection],
+            UnitObservation::default(),
+        ));
+        assert!(app.unit_observation_pending);
+        assert_eq!(app.unit_observation_revision, 2);
+    }
+
+    #[test]
+    fn stale_configuration_and_expired_observations_require_refresh() {
+        let connection = test_connection(Provider::Sftp);
+        let id = connection.id;
+        let mut app = cached_status_app(connection.clone());
+        app.unit_observed_at = Some(Instant::now() - Duration::from_secs(16));
+        assert!(!app.unit_status_fresh(id));
+        app.config.document.connections[0].local_path = PathBuf::from("/tmp/new-target");
+        let _ = app.update_message(Message::UnitObservationCompleted(
+            0,
+            vec![connection],
+            UnitObservation::default(),
+        ));
+        assert!(app.unit_observation_invalidated);
+        assert!(app.unit_observation_pending);
+        assert_eq!(app.unit_observation_revision, 1);
+    }
+
+    #[test]
+    fn controls_wait_for_fresh_state_and_reject_changed_identity() {
+        let connection = test_connection(Provider::Sftp);
+        let id = connection.id;
+        let mut app = cached_status_app(connection.clone());
+        app.unit_observed_at = None;
+        let _ = app.record_operation_request(id, Operation::Mount);
+        assert!(app.unit_operations_waiting.contains_key(&id));
+        assert!(app.unit_observation_pending);
+        app.config.document.connections[0].remote_reference = "edited".into();
+        let current = app.config.document.connections.clone();
+        let observation = UnitObservation {
+            services: [(id, repair_unit_status(ActiveState::Inactive, false))].into(),
+            ..UnitObservation::default()
+        };
+        let _ = app.update_message(Message::UnitObservationCompleted(1, current, observation));
+        assert!(app.unit_operations_waiting.is_empty());
+        assert_eq!(
+            app.last_notice,
+            Some(fl!("unit-status-refresh-unavailable"))
+        );
+        assert!(app.mirror_operations_pending.is_empty());
+    }
+
+    #[test]
+    fn force_refresh_cancels_old_work_and_retains_cached_data() {
+        let connection = test_connection(Provider::Sftp);
+        let id = connection.id;
+        let mut app = cached_status_app(connection);
+        let old = app.unit_observation_cancellation.clone();
+        let _ = app.refresh_unit_observation(true);
+        assert!(old.is_cancelled());
+        assert!(!app.unit_status_fresh(id));
+        assert_eq!(
+            app.unit_observation.services[&id].active,
+            ActiveState::Active
+        );
+        let revision = app.unit_observation_revision;
+        let _ = app.refresh_unit_observation(false);
+        assert_eq!(revision, app.unit_observation_revision);
+    }
+
+    #[test]
+    fn inspection_late_discovery_cannot_replace_newer_list_or_notice() {
+        let mut app = AppModel {
+            rclone_inspection_generation: 2,
+            rclone_remotes: vec![RcloneDraftRemote {
+                name: "new".into(),
+                backend: "smb".into(),
+            }],
+            last_notice: Some("new notice".into()),
+            ..AppModel::default()
+        };
+        let _ = app.update_message(Message::RcloneInspectionCompleted(
+            1,
+            true,
+            Err("old failure".into()),
+        ));
+        assert_eq!(app.rclone_remotes[0].name, "new");
+        assert_eq!(app.last_notice.as_deref(), Some("new notice"));
+        let _ = app.update_message(Message::RcloneInspectionCompleted(2, false, Ok(Vec::new())));
+        assert!(app.rclone_remotes.is_empty());
+        assert_eq!(app.last_notice.as_deref(), Some("new notice"));
+    }
+
+    #[test]
+    fn inspection_prefill_preserves_user_edits_and_remote_identity() {
+        let mut app = AppModel::default();
+        app.draft.provider = Provider::Smb;
+        app.draft.remote_reference = "first".into();
+        app.prefill_generation = 1;
+        let context = app.prefill_context();
+        app.draft.smb_host = "edited".into();
+        let result = RemotePrefillResult {
+            smb: Some(SmbRemoteDetails {
+                host: "old".into(),
+                user: "user".into(),
+                domain: "domain".into(),
+            }),
+            sftp: None,
+        };
+        let _ = app.update_message(Message::RemotePrefillCompleted(
+            1,
+            context.clone(),
+            Ok(result.clone()),
+        ));
+        assert_eq!(app.draft.smb_host, "edited");
+        app.draft.smb_host.clear();
+        app.draft.remote_reference = "second".into();
+        let _ = app.update_message(Message::RemotePrefillCompleted(1, context, Ok(result)));
+        assert!(app.draft.smb_host.is_empty());
+    }
+
+    #[test]
+    fn inspection_sftp_prefill_preserves_newer_settings_revision() {
+        let mut app = AppModel::default();
+        app.draft.provider = Provider::Sftp;
+        app.prefill_generation = 1;
+        let context = app.prefill_context();
+        app.mark_sftp_settings_changed();
+        let _ = app.update_message(Message::RemotePrefillCompleted(
+            1,
+            context,
+            Err("old failure".into()),
+        ));
+        assert!(app.sftp_settings_dirty);
+        assert!(app.last_notice.is_none());
+    }
+
+    #[test]
+    fn inspection_mount_failure_and_obsolete_result_preserve_last_observation() {
+        let mut app = AppModel::default();
+        let entry = MountEntry {
+            target: PathBuf::from("/tmp/test"),
+            source: "remote:".into(),
+            filesystem: "fuse.rclone".into(),
+            options: vec![],
+        };
+        app.mount_entries = vec![entry.clone()];
+        let _ = app.update_message(Message::MountInspectionCompleted(Err("timeout".into())));
+        assert_eq!(app.mount_entries, vec![entry.clone()]);
+        app.mount_inspection_obsolete = true;
+        let _ = app.update_message(Message::MountInspectionCompleted(Ok(vec![])));
+        assert_eq!(app.mount_entries, vec![entry]);
+        assert!(app.mount_inspection_pending);
+        let _ = app.update_message(Message::MountInspectionCompleted(Ok(vec![])));
+        assert!(app.mount_entries.is_empty());
+        assert!(app.mount_inspection_error.is_none());
+    }
+
+    #[test]
+    fn inspection_new_requests_cancel_superseded_work_without_running_on_gui() {
+        let mut app = AppModel::default();
+        let first = app.rclone_inspection_cancellation.clone();
+        let _ = app.detect_rclone_remotes(true);
+        assert!(first.is_cancelled());
+        assert!(!app.rclone_inspection_cancellation.is_cancelled());
+        app.draft.provider = Provider::Smb;
+        let first = app.prefill_cancellation.clone();
+        let _ = app.remote_prefill();
+        assert!(first.is_cancelled());
+        assert!(!app.prefill_cancellation.is_cancelled());
+        // No executor/process/D-Bus is required to prepare these GUI tasks.
+    }
     use cosmic_ext_applet_mounter::config::HostVisibleConfigStorage;
     use cosmic_ext_applet_mounter::model::{OfflineMirrorStatus, OnlineMountStatus};
     use cosmic_ext_applet_mounter::vpn::NetworkManagerVpnProfile;
@@ -10547,7 +12748,7 @@ mod tests {
         let connection_id = ConnectionId::from_uuid(Uuid::new_v4());
         let mut app = AppModel {
             last_notice: Some("Mount failed: access denied".into()),
-            pending_repair: Some(connection_id),
+            pending_repair: Some((connection_id, Instant::now())),
             ..AppModel::default()
         };
         let (reply, receiver) = runtime_ipc::Reply::channel();
@@ -10557,7 +12758,54 @@ mod tests {
             app.last_notice.as_deref(),
             Some("Mount failed: access denied")
         );
-        assert_eq!(app.pending_repair, Some(connection_id));
+        assert_eq!(
+            app.pending_repair.map(|(pending_id, _)| pending_id),
+            Some(connection_id)
+        );
+    }
+
+    #[test]
+    fn repair_confirmation_rejects_duplicate_first_click_and_expires() {
+        let connection_id = ConnectionId::from_uuid(Uuid::new_v4());
+        let other_id = ConnectionId::from_uuid(Uuid::new_v4());
+        let armed_at = Instant::now();
+
+        assert_eq!(
+            repair_confirmation_decision(None, connection_id, armed_at),
+            RepairConfirmationDecision::Arm
+        );
+        assert_eq!(
+            repair_confirmation_decision(
+                Some((connection_id, armed_at)),
+                connection_id,
+                armed_at + Duration::from_millis(100)
+            ),
+            RepairConfirmationDecision::Wait
+        );
+        assert_eq!(
+            repair_confirmation_decision(
+                Some((connection_id, armed_at)),
+                connection_id,
+                armed_at + REPAIR_CONFIRM_MIN_DELAY
+            ),
+            RepairConfirmationDecision::Confirm
+        );
+        assert_eq!(
+            repair_confirmation_decision(
+                Some((connection_id, armed_at)),
+                connection_id,
+                armed_at + REPAIR_CONFIRM_MAX_DELAY + Duration::from_millis(1)
+            ),
+            RepairConfirmationDecision::Arm
+        );
+        assert_eq!(
+            repair_confirmation_decision(
+                Some((other_id, armed_at)),
+                connection_id,
+                armed_at + REPAIR_CONFIRM_MIN_DELAY
+            ),
+            RepairConfirmationDecision::Arm
+        );
     }
 
     #[test]
@@ -10767,6 +13015,122 @@ mod tests {
     }
 
     #[test]
+    fn routed_operation_completion_is_revisioned_and_bounded() {
+        let mut app = AppModel::default();
+        let operation = Operation::PreviewInitialSync;
+        for revision in 1..=(RUNTIME_OPERATION_COMPLETION_LIMIT + 2) {
+            let connection_id = ConnectionId::new();
+            app.runtime_routed_operations
+                .insert(connection_id, operation);
+            app.last_notice = Some(format!("completion {revision}"));
+            app.complete_routed_operation(connection_id, operation);
+        }
+
+        assert_eq!(
+            app.runtime_operation_revision,
+            (RUNTIME_OPERATION_COMPLETION_LIMIT + 2) as u64
+        );
+        assert_eq!(
+            app.runtime_operation_completions.len(),
+            RUNTIME_OPERATION_COMPLETION_LIMIT
+        );
+        assert_eq!(
+            app.runtime_operation_completions
+                .first()
+                .map(|completion| completion.revision),
+            Some(3)
+        );
+        let expected_last_notice = format!("completion {}", RUNTIME_OPERATION_COMPLETION_LIMIT + 2);
+        assert_eq!(
+            app.runtime_operation_completions
+                .last()
+                .map(|completion| completion.notice.as_str()),
+            Some(expected_last_notice.as_str())
+        );
+        assert!(app.runtime_routed_operations.is_empty());
+    }
+
+    #[test]
+    fn routed_operation_wait_ignores_stale_and_unrelated_completions() {
+        use cosmic::Application;
+        let connection_id = ConnectionId::new();
+        let unrelated_id = ConnectionId::new();
+        let operation = Operation::PreviewInitialSync;
+        let command = RuntimeCommand::RunOperation(connection_id, operation);
+        let mut app = AppModel {
+            standalone: true,
+            runtime_pending: true,
+            runtime_operation_wait: Some(RuntimeOperationWait {
+                connection_id,
+                operation,
+                after_revision: None,
+            }),
+            ..AppModel::default()
+        };
+
+        let _ = app.update(Message::RuntimeResult(
+            command,
+            Ok(runtime_ipc::Status {
+                operation_revision: 7,
+                ..runtime_ipc::Status::default()
+            }),
+        ));
+        let requested_notice = app.last_notice.clone();
+        assert_eq!(
+            app.runtime_operation_wait
+                .and_then(|wait| wait.after_revision),
+            Some(7)
+        );
+
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Status,
+            Ok(runtime_ipc::Status {
+                operation_revision: 9,
+                operation_completions: vec![
+                    runtime_ipc::OperationCompletion {
+                        revision: 7,
+                        connection_id,
+                        operation,
+                        notice: "stale matching completion".into(),
+                    },
+                    runtime_ipc::OperationCompletion {
+                        revision: 8,
+                        connection_id: unrelated_id,
+                        operation,
+                        notice: "unrelated connection completion".into(),
+                    },
+                    runtime_ipc::OperationCompletion {
+                        revision: 9,
+                        connection_id,
+                        operation: Operation::SyncNow,
+                        notice: "unrelated operation completion".into(),
+                    },
+                ],
+                ..runtime_ipc::Status::default()
+            }),
+        ));
+        assert!(app.runtime_operation_wait.is_some());
+        assert_eq!(app.last_notice, requested_notice);
+
+        let completion_notice = "Preview completed with no changes.";
+        let _ = app.update(Message::RuntimeResult(
+            RuntimeCommand::Status,
+            Ok(runtime_ipc::Status {
+                operation_revision: 10,
+                operation_completions: vec![runtime_ipc::OperationCompletion {
+                    revision: 10,
+                    connection_id,
+                    operation,
+                    notice: completion_notice.into(),
+                }],
+                ..runtime_ipc::Status::default()
+            }),
+        ));
+        assert!(app.runtime_operation_wait.is_none());
+        assert_eq!(app.last_notice.as_deref(), Some(completion_notice));
+    }
+
+    #[test]
     fn late_poll_cannot_undo_a_completed_user_action() {
         use cosmic::Application;
         for command in [
@@ -10792,6 +13156,7 @@ mod tests {
                     restore_after_wake: true,
                     preload: PreloadSettings::default(),
                     sleep_status: Some("Current cleanup status".into()),
+                    ..runtime_ipc::Status::default()
                 };
                 let _ = app.update(Message::RuntimeResult(command, Ok(updated.clone())));
                 let stale = if poll_fails {
@@ -10892,6 +13257,7 @@ mod tests {
                 restore_after_wake: true,
                 preload: PreloadSettings::default(),
                 sleep_status: Some("ready".into()),
+                ..runtime_ipc::Status::default()
             }),
         ));
         assert!(app.config.document.unmount_before_sleep);
@@ -10918,16 +13284,23 @@ mod tests {
 
     #[test]
     fn sleep_warning_stays_visible_while_normal_status_is_only_in_settings() {
-        assert!(!sleep_needs_attention(None));
-        assert!(!sleep_needs_attention(Some(
-            "Online mount cleanup before sleep is ready"
-        )));
-        assert!(sleep_needs_attention(Some(
-            "Sleep cleanup unavailable: no inhibitor"
-        )));
-        assert!(sleep_needs_attention(Some(
-            "Sleep cleanup incomplete (0 unmounted): busy"
-        )));
+        use cosmic::Application;
+        let mut app = AppModel::default();
+        let _ = app.update(Message::SleepEvent(
+            cosmic_ext_applet_mounter::sleep::Event::Status {
+                text: "睡眠前のクリーンアップに注意が必要です".into(),
+                needs_attention: true,
+            },
+        ));
+        assert!(app.sleep_needs_attention);
+        assert!(app.runtime_status().sleep_needs_attention);
+        let _ = app.update(Message::SleepEvent(
+            cosmic_ext_applet_mounter::sleep::Event::Status {
+                text: "準備完了".into(),
+                needs_attention: false,
+            },
+        ));
+        assert!(!app.sleep_needs_attention);
     }
 
     #[test]
@@ -10984,24 +13357,115 @@ mod tests {
     }
 
     #[test]
-    fn runtime_cisco_tunnel_state_reads_exact_connection_state() {
+    fn popup_notice_timeout_starts_when_a_closed_popup_is_reopened() {
+        let notice_started_at = Instant::now();
+        let popup_opened_at = notice_started_at + Duration::from_secs(30);
+
+        assert!(!popup_notice_expired(
+            notice_started_at,
+            Some(popup_opened_at),
+            popup_opened_at + Duration::from_secs(9),
+        ));
+        assert!(popup_notice_expired(
+            notice_started_at,
+            Some(popup_opened_at),
+            popup_opened_at + POPUP_NOTICE_TIMEOUT,
+        ));
+        assert!(popup_notice_expired(
+            notice_started_at,
+            None,
+            notice_started_at + POPUP_NOTICE_TIMEOUT,
+        ));
+    }
+
+    #[test]
+    fn requested_vpn_activation_stops_waiting_after_terminal_state() {
+        use cosmic_ext_applet_mounter::vpn::VpnConnectionState;
+
         assert_eq!(
-            runtime_cisco_tunnel_state("Connection State:            Connected\n"),
-            CiscoTunnelState::Connected
+            vpn_activation_terminal_error(VpnConnectionState::Disconnected, true).as_deref(),
+            Some("VPN authentication was canceled or activation failed")
         );
         assert_eq!(
-            runtime_cisco_tunnel_state("Connection State:            Disconnected\n"),
-            CiscoTunnelState::Disconnected
+            vpn_activation_terminal_error(VpnConnectionState::Failed, true).as_deref(),
+            Some("VPN authentication or activation failed")
         );
         assert_eq!(
-            runtime_cisco_tunnel_state("Connection State:            Not Available\n"),
-            CiscoTunnelState::Disconnected
+            vpn_activation_terminal_error(VpnConnectionState::Activating, true),
+            None
         );
         assert_eq!(
-            runtime_cisco_tunnel_state(
-                "Cannot contact the VPN service.\nConnection State:            Not Available\n"
-            ),
-            CiscoTunnelState::ServiceUnavailable
+            vpn_activation_terminal_error(VpnConnectionState::Activated, true),
+            None
+        );
+        assert_eq!(
+            vpn_activation_terminal_error(VpnConnectionState::Disconnected, false),
+            None
+        );
+    }
+
+    #[test]
+    fn finite_offline_vpn_users_are_reference_counted_and_release_is_non_destructive() {
+        let profile_id = VpnProfileId::new();
+        let first = ConnectionId::new();
+        let second = ConnectionId::new();
+        unregister_finite_offline_vpn_user(profile_id, first);
+        unregister_finite_offline_vpn_user(profile_id, second);
+
+        register_finite_offline_vpn_user(profile_id, first);
+        register_finite_offline_vpn_user(profile_id, second);
+        {
+            let users = active_finite_offline_vpn_users()
+                .lock()
+                .expect("finite Offline Mirror VPN users");
+            assert_eq!(
+                users.get(&profile_id),
+                Some(&BTreeSet::from([first, second]))
+            );
+        }
+        unregister_finite_offline_vpn_user(profile_id, first);
+        {
+            let users = active_finite_offline_vpn_users()
+                .lock()
+                .expect("finite Offline Mirror VPN users");
+            assert_eq!(users.get(&profile_id), Some(&BTreeSet::from([second])));
+        }
+        unregister_finite_offline_vpn_user(profile_id, second);
+        assert!(
+            !active_finite_offline_vpn_users()
+                .lock()
+                .expect("finite Offline Mirror VPN users")
+                .contains_key(&profile_id)
+        );
+
+        let completed = merge_offline_vpn_release(
+            Ok("Synchronization succeeded.".into()),
+            Err("deactivation refused".into()),
+        )
+        .expect("successful storage operation remains successful");
+        assert!(completed.contains("Synchronization succeeded"));
+        assert!(completed.contains("VPN remains connected"));
+        let failed = merge_offline_vpn_release(
+            Err("Synchronization failed".into()),
+            Err("deactivation refused".into()),
+        )
+        .expect_err("storage failure remains a failure");
+        assert!(failed.contains("Synchronization failed"));
+        assert!(failed.contains("VPN remains connected"));
+    }
+
+    #[tokio::test]
+    async fn offline_readiness_guard_rejects_malformed_requests_before_dbus() {
+        assert!(run_offline_readiness_guard(&[]).await.is_err());
+        assert!(
+            run_offline_readiness_guard(&["not-a-uuid".into()])
+                .await
+                .is_err()
+        );
+        assert!(
+            run_offline_readiness_guard(&[ConnectionId::new().to_string(), "extra".into()])
+                .await
+                .is_err()
         );
     }
 
@@ -11044,7 +13508,7 @@ mod tests {
     }
 
     #[test]
-    fn popup_error_online_mount_uses_persistent_switch_state() {
+    fn popup_repair_uses_controller_eligibility_and_pending_state_for_both_modes() {
         let mut row = ConnectionRowState {
             id: ConnectionId::from_uuid(
                 Uuid::parse_str("2a3f5d45-e867-47e7-943f-66cf60e777ad").expect("UUID"),
@@ -11077,8 +13541,59 @@ mod tests {
         };
 
         assert_eq!(primary_operation(&row), Some(Operation::Mount));
+        assert!(repair_available(&row));
+        let mut pending_repairs = BTreeSet::new();
+        assert!(repair_visible(&row, &pending_repairs));
+
         row.persistent_active = true;
         assert_eq!(primary_operation(&row), Some(Operation::Unmount));
+        row.status = ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded);
+        assert!(repair_available(&row));
+
+        pending_repairs.insert(row.id);
+        assert!(!repair_visible(&row, &pending_repairs));
+
+        pending_repairs.clear();
+        row.actions
+            .iter_mut()
+            .find(|action| action.operation == Operation::Repair)
+            .expect("repair action")
+            .enabled = false;
+        assert!(!repair_available(&row));
+
+        row.actions
+            .iter_mut()
+            .find(|action| action.operation == Operation::Repair)
+            .expect("repair action")
+            .enabled = true;
+        row.mode = AccessMode::OfflineMirror;
+        assert!(repair_available(&row));
+        assert!(repair_visible(&row, &pending_repairs));
+    }
+
+    #[test]
+    fn failed_unmount_requires_repair_until_an_online_operation_succeeds() {
+        let connection_id = ConnectionId::new();
+        let mut required = BTreeSet::new();
+
+        update_online_repair_requirement(
+            &mut required,
+            connection_id,
+            Operation::Mount,
+            &Err("mount failed".into()),
+        );
+        assert!(required.is_empty());
+
+        update_online_repair_requirement(
+            &mut required,
+            connection_id,
+            Operation::Unmount,
+            &Err("clean detach remained busy".into()),
+        );
+        assert!(required.contains(&connection_id));
+
+        update_online_repair_requirement(&mut required, connection_id, Operation::Mount, &Ok(()));
+        assert!(required.is_empty());
     }
 
     #[test]
@@ -11165,18 +13680,454 @@ mod tests {
     }
 
     #[test]
-    fn repair_skips_an_already_detached_mount_and_rejects_foreign_filesystems() {
-        let connection = test_connection(Provider::Sftp);
-        assert!(!repair_needs_lazy_detach(&connection, &[]).unwrap());
-        let mut mount = cosmic_ext_applet_mounter::mounts::MountEntry {
-            target: connection.local_path.clone(),
-            source: "rclone".into(),
-            filesystem: "fuse.rclone".into(),
-            options: Vec::new(),
+    fn online_repair_provider_matrix_owns_only_the_expected_fuse_engine() {
+        let cases = [
+            (
+                Provider::OneDrive,
+                OnlineMountEngine::Onedriver,
+                "fuse.onedriver",
+                false,
+                true,
+            ),
+            (
+                Provider::Teams,
+                OnlineMountEngine::Rclone,
+                "fuse.rclone",
+                false,
+                true,
+            ),
+            (
+                Provider::GoogleDrive,
+                OnlineMountEngine::Rclone,
+                "fuse.rclone",
+                true,
+                false,
+            ),
+            (
+                Provider::Box,
+                OnlineMountEngine::Rclone,
+                "fuse.rclone",
+                false,
+                true,
+            ),
+            (
+                Provider::Smb,
+                OnlineMountEngine::Rclone,
+                "fuse.rclone",
+                false,
+                true,
+            ),
+            (
+                Provider::Sftp,
+                OnlineMountEngine::Rclone,
+                "fuse.rclone",
+                false,
+                true,
+            ),
+        ];
+
+        for (provider, engine, filesystem, cancel_refresh, cancel_preload) in cases {
+            let connection = test_connection(provider);
+            assert_eq!(
+                online_repair_plan(&connection),
+                Some(OnlineRepairPlan {
+                    engine,
+                    cancel_rclone_refresh: cancel_refresh,
+                    cancel_directory_preload: cancel_preload,
+                })
+            );
+            assert_eq!(
+                online_repair_plan(&connection)
+                    .expect("online repair plan")
+                    .expected_filesystem(),
+                filesystem
+            );
+            assert!(!repair_needs_lazy_detach(&connection, &[]).unwrap());
+
+            let mount = cosmic_ext_applet_mounter::mounts::MountEntry {
+                target: connection.local_path.clone(),
+                source: "managed online engine".into(),
+                filesystem: filesystem.into(),
+                options: Vec::new(),
+            };
+            assert!(repair_needs_lazy_detach(&connection, std::slice::from_ref(&mount)).unwrap());
+
+            let mut foreign_mount = mount;
+            foreign_mount.filesystem = "ext4".into();
+            assert!(repair_needs_lazy_detach(&connection, &[foreign_mount]).is_err());
+
+            let mut offline = connection;
+            offline.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+            assert_eq!(online_repair_plan(&offline), None);
+        }
+
+        assert_eq!(CLEAN_UNMOUNT_SETTLE_TIMEOUT, Duration::from_secs(2));
+        assert!(CLEAN_UNMOUNT_POLL_INTERVAL < CLEAN_UNMOUNT_SETTLE_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn online_repair_stops_service_and_resets_only_failed_state() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let connection = test_connection(Provider::GoogleDrive);
+        let unit = UnitName::new(connection.id, UnitKind::Service);
+        let failed = UnitStatus {
+            active: ActiveState::Failed,
+            enabled: false,
+            detail: "failed".into(),
+            result: "exit-code".into(),
         };
-        assert!(repair_needs_lazy_detach(&connection, &[mount.clone()]).unwrap());
-        mount.filesystem = "ext4".into();
-        assert!(repair_needs_lazy_detach(&connection, &[mount]).is_err());
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(Some(failed)));
+        manager.push(Ok(None));
+
+        stop_online_repair_service(&manager, &unit, CancellationToken::new()).await;
+        reconcile_online_repair_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect("reconcile failed service");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Stop,
+                SystemdAction::Status,
+                SystemdAction::ResetFailed
+            ]
+        );
+
+        let inactive = UnitStatus {
+            active: ActiveState::Inactive,
+            enabled: false,
+            detail: "stopped".into(),
+            result: "success".into(),
+        };
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(Some(inactive)));
+        stop_online_repair_service(&manager, &unit, CancellationToken::new()).await;
+        reconcile_online_repair_service(&manager, &unit, CancellationToken::new())
+            .await
+            .expect("reconcile inactive service");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [SystemdAction::Stop, SystemdAction::Status]
+        );
+    }
+
+    fn repair_unit_status(active: ActiveState, enabled: bool) -> UnitStatus {
+        UnitStatus {
+            active,
+            enabled,
+            detail: format!("{active:?}"),
+            result: if active == ActiveState::Failed {
+                "exit-code".into()
+            } else {
+                "success".into()
+            },
+        }
+    }
+
+    #[test]
+    fn offline_repair_plan_separates_rclone_timer_from_onedrive_monitor() {
+        for provider in [
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut connection = test_connection(provider);
+            connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+            connection.enabled = false;
+            let plan = offline_repair_plan(&connection).expect("rclone repair plan");
+            assert_eq!(plan.engine, OfflineRepairEngine::RcloneBisync);
+            assert!(plan.timer.is_some());
+        }
+
+        let mut onedrive = test_connection(Provider::OneDrive);
+        onedrive.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        onedrive.enabled = false;
+        let plan = offline_repair_plan(&onedrive).expect("OneDrive repair plan");
+        assert_eq!(plan.engine, OfflineRepairEngine::OneDriveMonitor);
+        assert!(plan.timer.is_none());
+
+        onedrive.mode = ConnectionMode::OnlineMount(OnlineMountConfig::default());
+        assert!(offline_repair_plan(&onedrive).is_err());
+    }
+
+    #[tokio::test]
+    async fn rclone_offline_repair_pauses_timer_then_resets_failed_service() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::Smb);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Failed, false))));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+
+        execute_offline_repair_plan(&manager, &plan, CancellationToken::new())
+            .await
+            .expect("rclone repair");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Stop,
+                SystemdAction::Disable,
+                SystemdAction::Status,
+                SystemdAction::Stop,
+                SystemdAction::Disable,
+                SystemdAction::Status,
+                SystemdAction::ResetFailed,
+                SystemdAction::Status,
+            ]
+        );
+        let units = manager
+            .actions()
+            .iter()
+            .map(|(_, unit)| unit.clone().unwrap())
+            .collect::<Vec<_>>();
+        assert!(units[..3].iter().all(|unit| unit.ends_with(".timer")));
+        assert!(units[3..].iter().all(|unit| unit.ends_with(".service")));
+    }
+
+    #[tokio::test]
+    async fn coordinated_repair_pauses_trigger_then_waits_for_manual_cancellation() {
+        use cosmic_ext_applet_mounter::offline_coordinator::{read_state, write_state};
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::Smb);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        for response in [
+            Ok(None),
+            Ok(None),
+            Ok(Some(repair_unit_status(ActiveState::Inactive, false))),
+            Ok(None),
+            Ok(None),
+            Ok(Some(repair_unit_status(ActiveState::Inactive, false))),
+        ] {
+            manager.push(response);
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let state_path = directory.path().join("state.json");
+        write_state(
+            &state_path,
+            &OfflineCoordinatorState::new(
+                connection.id,
+                OfflineOperation::Sync,
+                OfflineOperationState::Running,
+            ),
+        )
+        .unwrap();
+        let control = Arc::new(ManualOperationControl::new());
+        let operation = Arc::clone(&control);
+        let completed_path = state_path.clone();
+        let id = connection.id;
+        let operation_task = tokio::spawn(async move {
+            operation.cancellation().cancelled().await;
+            write_state(
+                &completed_path,
+                &OfflineCoordinatorState::new(
+                    id,
+                    OfflineOperation::Sync,
+                    OfflineOperationState::Cancelled,
+                ),
+            )
+            .unwrap();
+            operation.finish();
+        });
+
+        execute_coordinated_offline_repair(
+            &manager,
+            &plan,
+            connection.id,
+            Some(&control),
+            &state_path,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("coordinated repair");
+        operation_task.await.unwrap();
+
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Stop,
+                SystemdAction::Disable,
+                SystemdAction::Status,
+                SystemdAction::Stop,
+                SystemdAction::Disable,
+                SystemdAction::Status,
+            ]
+        );
+        let state = read_state(&state_path).unwrap().unwrap();
+        assert_eq!(state.operation, OfflineOperation::Repair);
+        assert_eq!(state.state, OfflineOperationState::Running);
+    }
+
+    #[tokio::test]
+    async fn coordinated_repair_rejects_unowned_running_state_before_service_stop() {
+        use cosmic_ext_applet_mounter::offline_coordinator::write_state;
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        let directory = tempfile::tempdir().unwrap();
+        let state_path = directory.path().join("state.json");
+        write_state(
+            &state_path,
+            &OfflineCoordinatorState::new(
+                connection.id,
+                OfflineOperation::Sync,
+                OfflineOperationState::Running,
+            ),
+        )
+        .unwrap();
+
+        let error = execute_coordinated_offline_repair(
+            &manager,
+            &plan,
+            connection.id,
+            None,
+            &state_path,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("unowned operation must not be guessed stopped");
+        assert!(error.contains("another process"));
+        assert!(manager.actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rclone_repair_stops_scheduled_service_then_replaces_stale_running_state() {
+        use cosmic_ext_applet_mounter::offline_coordinator::{read_state, write_state};
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::Smb);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        for response in [
+            Ok(None),
+            Ok(None),
+            Ok(Some(repair_unit_status(ActiveState::Inactive, false))),
+            Ok(None),
+            Ok(None),
+            Ok(Some(repair_unit_status(ActiveState::Inactive, false))),
+        ] {
+            manager.push(response);
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let state_path = directory.path().join("state.json");
+        write_state(
+            &state_path,
+            &OfflineCoordinatorState::new(
+                connection.id,
+                OfflineOperation::Scheduled,
+                OfflineOperationState::Running,
+            ),
+        )
+        .unwrap();
+
+        execute_coordinated_offline_repair(
+            &manager,
+            &plan,
+            connection.id,
+            None,
+            &state_path,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        let state = read_state(&state_path).unwrap().unwrap();
+        assert_eq!(state.operation, OfflineOperation::Repair);
+        assert_eq!(state.state, OfflineOperationState::Running);
+        assert_eq!(manager.actions().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn onedrive_offline_repair_touches_only_its_monitor_service() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+
+        execute_offline_repair_plan(&manager, &plan, CancellationToken::new())
+            .await
+            .expect("OneDrive repair");
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Stop,
+                SystemdAction::Disable,
+                SystemdAction::Status,
+            ]
+        );
+        assert!(manager.actions().iter().all(|(_, unit)| {
+            unit.as_deref()
+                .is_some_and(|unit| unit.ends_with(".service"))
+        }));
+    }
+
+    #[tokio::test]
+    async fn offline_repair_rejects_a_still_running_service_without_reset() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        let plan = offline_repair_plan(&connection).unwrap();
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Active, false))));
+
+        let error = execute_offline_repair_plan(&manager, &plan, CancellationToken::new())
+            .await
+            .expect_err("running service must not be reported repaired");
+        assert!(error.contains("did not become inactive"));
+        assert!(
+            !manager
+                .actions()
+                .iter()
+                .any(|(action, _)| *action == SystemdAction::ResetFailed)
+        );
     }
 
     #[test]
@@ -11296,13 +14247,13 @@ mod tests {
         )
         .unwrap();
         let store = FileUnitStore::user(Arc::new(StructuralUnitValidator)).unwrap();
-        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let manager = DbusSystemdManager;
         let controller = UnitController::new(store, manager);
         controller
             .install(&document, CancellationToken::new())
             .await
             .unwrap();
-        let manager = CommandSystemdManager::new(SystemCommandRunner);
+        let manager = DbusSystemdManager;
         let start = || async {
             manager
                 .action(
@@ -11384,7 +14335,7 @@ mod tests {
             String::from_utf8_lossy(&host_mounts.stdout)
                 .contains(&connection.local_path.display().to_string())
         );
-        run_managed_online_mount_operation_result_inner(&connection, Operation::Unmount)
+        run_managed_rclone_online_mount_operation_result_inner(&connection, Operation::Unmount)
             .await
             .unwrap();
         assert!(
@@ -11489,308 +14440,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[ignore = "requires disposable localhost SFTP, host rclone, and user systemd"]
-    async fn live_sftp_offline_mirror_controls_and_recovery() {
-        let root = PathBuf::from(std::env::var("COSMIC_SFTP_MIRROR_ROOT").expect("probe root"));
-        let remote_data = root.join("data");
-        let mut connection = test_connection(Provider::Sftp);
-        connection.id = ConnectionId::new();
-        connection.name = "Disposable SFTP mirror".into();
-        connection.remote_reference = "probe".into();
-        connection.remote_subpath = Some("share".into());
-        connection.local_path = root.join("local");
-        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
-            recovery_directory: root.join("recovery"),
-            sync_interval_minutes: 15,
-            sync_on_metered: true,
-        });
-        let plan = rclone_bisync_plan(&connection, &default_work_root()).unwrap();
-
-        let missing_preview =
-            run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
-                .await
-                .expect_err("initial sync needs a preview");
-        assert!(missing_preview.contains("Preview first"));
-        let preview =
-            run_managed_offline_mirror_operation_result(&connection, Operation::PreviewInitialSync)
-                .await
-                .unwrap();
-        assert!(preview.contains("press Sync Now"));
-        assert!(initial_preview_marker(&plan).exists());
-        assert!(!connection.local_path.join("remote-only.txt").exists());
-        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
-            .await
-            .unwrap();
-        assert!(initial_sync_marker(&plan).exists());
-        assert!(!initial_preview_marker(&plan).exists());
-        assert_eq!(
-            fs::read_to_string(connection.local_path.join("remote-only.txt")).unwrap(),
-            "remote\n"
-        );
-        fs::write(connection.local_path.join("local-only.txt"), "local\n").unwrap();
-        run_managed_offline_mirror_operation_result(&connection, Operation::PreviewInitialSync)
-            .await
-            .unwrap();
-        assert!(!remote_data.join("share/local-only.txt").exists());
-        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
-            .await
-            .unwrap();
-        assert_eq!(
-            fs::read_to_string(remote_data.join("share/local-only.txt")).unwrap(),
-            "local\n"
-        );
-
-        let copy_remote = |source: &Path, destination: &str| {
-            let output = Command::new("rclone")
-                .arg("copyto")
-                .arg(source)
-                .arg(destination)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        };
-        let remote_recovery = remote_data
-            .join(".cosmic-mounter-recovery")
-            .join(connection.id.to_string());
-        let old_remote = remote_recovery.join("2000-01-01");
-        let unowned_remote = remote_recovery.join("2000-01-02");
-        let old_local = root.join("recovery/2000-01-01");
-        let unowned_local = root.join("recovery/2000-01-02");
-        for directory in [&old_local, &unowned_local] {
-            fs::create_dir_all(directory).unwrap();
-            fs::write(directory.join("old.txt"), "old\n").unwrap();
-        }
-        fs::write(
-            old_local.join(".cosmic-mounter-owner"),
-            connection.id.to_string(),
-        )
-        .unwrap();
-        for day in ["2000-01-01", "2000-01-02"] {
-            copy_remote(
-                &root.join("recovery").join(day).join("old.txt"),
-                &format!("{}/{day}/old.txt", plan.remote_recovery_path),
-            );
-        }
-        copy_remote(
-            &old_local.join(".cosmic-mounter-owner"),
-            &format!(
-                "{}/2000-01-01/.cosmic-mounter-owner",
-                plan.remote_recovery_path
-            ),
-        );
-        let delete_source = root.join("delete-source.txt");
-        fs::write(&delete_source, "delete\n").unwrap();
-        copy_remote(&delete_source, "probe:share/delete-me.txt");
-        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
-            .await
-            .unwrap();
-        assert!(connection.local_path.join("delete-me.txt").exists());
-        let delete = Command::new("rclone")
-            .args(["deletefile", "probe:share/delete-me.txt"])
-            .output()
-            .unwrap();
-        assert!(delete.status.success());
-        run_managed_offline_mirror_operation_result(&connection, Operation::SyncNow)
-            .await
-            .unwrap();
-        assert!(!connection.local_path.join("delete-me.txt").exists());
-        assert!(!old_remote.exists());
-        assert!(!old_local.exists());
-        assert!(unowned_remote.exists());
-        assert!(unowned_local.exists());
-        assert!(
-            fs::read_dir(root.join("recovery"))
-                .unwrap()
-                .filter_map(Result::ok)
-                .any(|entry| entry.path().is_dir() && entry.path() != unowned_local)
-        );
-
-        use cosmic_ext_applet_mounter::services::UnitStore;
-        use std::os::unix::fs::PermissionsExt;
-
-        struct MirrorProbeGuard {
-            service: UnitName,
-            timer: UnitName,
-            service_dropin: PathBuf,
-            timer_dropin: PathBuf,
-        }
-        impl Drop for MirrorProbeGuard {
-            fn drop(&mut self) {
-                let timer = self.timer.file_name();
-                let service = self.service.file_name();
-                let _ = Command::new("systemctl")
-                    .args(["--user", "disable", "--now", &timer])
-                    .output();
-                let _ = Command::new("systemctl")
-                    .args(["--user", "stop", &service])
-                    .output();
-                for path in [&self.service_dropin, &self.timer_dropin] {
-                    let _ = fs::remove_file(path);
-                    if let Some(parent) = path.parent() {
-                        let _ = fs::remove_dir(parent);
-                    }
-                }
-                if let Ok(store) = FileUnitStore::user(Arc::new(StructuralUnitValidator)) {
-                    let _ = store.remove(&self.timer);
-                    let _ = store.remove(&self.service);
-                }
-                let _ = Command::new("systemctl")
-                    .args(["--user", "daemon-reload"])
-                    .output();
-            }
-        }
-
-        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
-            recovery_directory: root.join("recovery"),
-            sync_interval_minutes: 15,
-            sync_on_metered: false,
-        });
-        let runtime = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap());
-        let service = UnitName::new(connection.id, UnitKind::Service);
-        let timer = UnitName::new(connection.id, UnitKind::Timer);
-        let service_dropin = runtime
-            .join("systemd/user")
-            .join(format!("{}.d/90-mirror-probe.conf", service.file_name()));
-        let timer_dropin = runtime
-            .join("systemd/user")
-            .join(format!("{}.d/90-mirror-probe.conf", timer.file_name()));
-        let _guard = MirrorProbeGuard {
-            service: service.clone(),
-            timer: timer.clone(),
-            service_dropin: service_dropin.clone(),
-            timer_dropin: timer_dropin.clone(),
-        };
-        install_rclone_offline_mirror_units_result(&connection)
-            .await
-            .unwrap();
-        let store = FileUnitStore::user(Arc::new(StructuralUnitValidator)).unwrap();
-        let service_content = store.read(&service).unwrap().unwrap();
-        let timer_content = store.read(&timer).unwrap().unwrap();
-        assert!(service_content.contains("ExecCondition="));
-        assert!(service_content.contains("managed-bisync.sh"));
-        assert!(timer_content.contains("OnActiveSec=900s"));
-        assert!(timer_content.contains("OnUnitInactiveSec=900s"));
-        for unit in [service.file_name(), timer.file_name()] {
-            let host_unit = Command::new("flatpak-builder")
-                .args([
-                    "--run",
-                    "target/flatpak-gui-prototype",
-                    "packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json",
-                    "flatpak-spawn",
-                    "--host",
-                    "/usr/bin/systemctl",
-                    "--user",
-                    "cat",
-                    &unit,
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                host_unit.status.success(),
-                "{}",
-                String::from_utf8_lossy(&host_unit.stderr)
-            );
-            assert!(String::from_utf8_lossy(&host_unit.stdout).contains(&unit));
-        }
-
-        let fake_bin = root.join("fake-bin");
-        fs::create_dir_all(&fake_bin).unwrap();
-        let fake_nmcli = fake_bin.join("nmcli");
-        let metered_flag = root.join("metered-state");
-        fs::write(&metered_flag, "no\n").unwrap();
-        fs::write(
-            &fake_nmcli,
-            format!(
-                "#!/bin/sh\nprintf 'GENERAL.METERED:'\ncat '{}'\n",
-                metered_flag.display()
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(&fake_nmcli, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::create_dir_all(service_dropin.parent().unwrap()).unwrap();
-        fs::create_dir_all(timer_dropin.parent().unwrap()).unwrap();
-        let rclone_config = std::env::var("RCLONE_CONFIG").unwrap();
-        fs::write(
-            &service_dropin,
-            format!(
-                "[Service]\nEnvironment=RCLONE_CONFIG={rclone_config}\nEnvironment=PATH={}:{}\n",
-                fake_bin.display(),
-                std::env::var("PATH").unwrap()
-            ),
-        )
-        .unwrap();
-        fs::write(
-            &timer_dropin,
-            "[Timer]\nOnUnitInactiveSec=\nOnActiveSec=3s\n",
-        )
-        .unwrap();
-        let reload = Command::new("systemctl")
-            .args(["--user", "daemon-reload"])
-            .output()
-            .unwrap();
-        assert!(reload.status.success());
-
-        fs::write(connection.local_path.join("timer-only.txt"), "timer\n").unwrap();
-        run_managed_offline_mirror_operation_result(&connection, Operation::ResumeSync)
-            .await
-            .unwrap();
-        for _ in 0..600 {
-            if remote_data.join("share/timer-only.txt").exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        if !remote_data.join("share/timer-only.txt").exists() {
-            for unit in [timer.file_name(), service.file_name()] {
-                let status = Command::new("systemctl")
-                    .args(["--user", "status", &unit, "--no-pager"])
-                    .output()
-                    .unwrap();
-                println!("{}", String::from_utf8_lossy(&status.stdout));
-                let journal = Command::new("journalctl")
-                    .args(["--user", "-u", &unit, "-n", "25", "--no-pager"])
-                    .output()
-                    .unwrap();
-                println!("{}", String::from_utf8_lossy(&journal.stdout));
-            }
-        }
-        assert_eq!(
-            fs::read_to_string(remote_data.join("share/timer-only.txt")).unwrap(),
-            "timer\n"
-        );
-        run_managed_offline_mirror_operation_result(&connection, Operation::PauseSync)
-            .await
-            .unwrap();
-        fs::write(&metered_flag, "yes\n").unwrap();
-        fs::write(connection.local_path.join("metered-only.txt"), "metered\n").unwrap();
-        let guarded_start = Command::new("systemctl")
-            .args(["--user", "start", &service.file_name()])
-            .output()
-            .unwrap();
-        assert!(guarded_start.status.success());
-        let journal = Command::new("journalctl")
-            .args([
-                "--user",
-                "-u",
-                &service.file_name(),
-                "-n",
-                "8",
-                "--no-pager",
-            ])
-            .output()
-            .unwrap();
-        assert!(journal.status.success());
-        assert!(
-            String::from_utf8_lossy(&journal.stdout).contains("Skipped due to 'exec-condition'")
-        );
-        assert!(!remote_data.join("share/metered-only.txt").exists());
-    }
-
     #[test]
     fn runtime_systemd_status_parser_recognizes_active_disabled_units() {
         let status = parse_runtime_systemd_status(
@@ -11851,6 +14500,7 @@ mod tests {
             name: "Work".into(),
             uuid: "91a601dd-2df4-4b32-bc66-25a16a7612fe".into(),
             vpn_type: "wireguard".into(),
+            service_type: None,
         });
 
         assert_eq!(profile.name, "Work");
@@ -11860,6 +14510,36 @@ mod tests {
             Some("91a601dd-2df4-4b32-bc66-25a16a7612fe")
         );
         assert!(same_vpn_reference(&profile, &profile));
+    }
+
+    #[test]
+    fn detected_openconnect_profiles_allow_interactive_authentication_time() {
+        let detected = network_manager_profile(NetworkManagerVpnProfile {
+            name: "UA Engineering OpenConnect".into(),
+            uuid: "02af3f27-a55b-48e5-9ffd-518b37e02b6d".into(),
+            vpn_type: "vpn".into(),
+            service_type: Some("org.freedesktop.NetworkManager.openconnect".into()),
+        });
+        assert_eq!(detected.timeout_seconds, 90);
+
+        let mut existing = detected.clone();
+        existing.name = "Old name".into();
+        existing.timeout_seconds = 30;
+        existing.readiness_checks.clear();
+        update_detected_vpn_profile(&mut existing, &detected);
+        assert_eq!(existing.name, "UA Engineering OpenConnect");
+        assert_eq!(existing.timeout_seconds, 90);
+        assert_eq!(
+            existing.readiness_checks,
+            vec![cosmic_ext_applet_mounter::model::ReadinessCheck::NetworkManagerState]
+        );
+
+        existing.timeout_seconds = 30;
+        apply_openconnect_timeout(&mut existing, true);
+        assert_eq!(existing.timeout_seconds, 90);
+        existing.timeout_seconds = 30;
+        apply_openconnect_timeout(&mut existing, false);
+        assert_eq!(existing.timeout_seconds, 30);
     }
 
     #[test]
@@ -11877,6 +14557,7 @@ mod tests {
                 name: "SalterLab".into(),
                 uuid: "51424a59-495c-4483-ad44-a0bf49327d5e".into(),
                 vpn_type: "wireguard".into(),
+                service_type: None,
             }]
         );
         let fallback_profiles = parse_nmcli_profiles_for_app(
@@ -11898,24 +14579,26 @@ mod tests {
             name: "Work".into(),
             uuid: "91a601dd-2df4-4b32-bc66-25a16a7612fe".into(),
             vpn_type: "wireguard".into(),
+            service_type: None,
         });
         let second = network_manager_profile(NetworkManagerVpnProfile {
             name: "Renamed Work".into(),
             uuid: "91a601dd-2df4-4b32-bc66-25a16a7612fe".into(),
             vpn_type: "wireguard".into(),
+            service_type: None,
         });
         let other = network_manager_profile(NetworkManagerVpnProfile {
             name: "Other".into(),
             uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into(),
             vpn_type: "wireguard".into(),
+            service_type: None,
         });
 
         assert!(same_vpn_reference(&first, &second));
         assert!(!same_vpn_reference(&first, &other));
 
-        first.kind = VpnKind::Cisco;
+        first.kind = VpnKind::LegacyCisco;
         assert!(!same_vpn_reference(&first, &second));
-        assert!(same_vpn_reference(&cisco_profile(), &cisco_profile()));
     }
 
     #[test]
@@ -12074,7 +14757,7 @@ mod tests {
         });
         let plan = rclone_bisync_plan(&connection, &temporary.path().join("work")).unwrap();
         assert!(
-            start_rclone_offline_mirror_background(&connection, &plan)
+            start_rclone_offline_mirror_background(&connection, &plan, CancellationToken::new(),)
                 .await
                 .unwrap_err()
                 .contains("requires a successful Preview")
@@ -12182,6 +14865,30 @@ mod tests {
         assert!(unit.content.contains("b!verified"));
         assert!(unit.content.contains("WantedBy=default.target"));
         assert!(unit.content.find("ExecCondition=") < unit.content.find("ExecStart="));
+    }
+
+    #[test]
+    fn every_online_provider_routes_through_a_managed_mount_engine() {
+        for provider in [
+            Provider::OneDrive,
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let connection = test_connection(provider);
+            let expected = if provider == Provider::OneDrive {
+                OnlineMountEngine::Onedriver
+            } else {
+                OnlineMountEngine::Rclone
+            };
+            assert_eq!(online_mount_engine(&connection), Some(expected));
+
+            let mut offline = connection;
+            offline.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+            assert_eq!(online_mount_engine(&offline), None);
+        }
     }
 
     #[test]
@@ -12860,6 +15567,31 @@ mod tests {
     }
 
     #[test]
+    fn offline_mirror_save_notice_reflects_preserved_initialization_state() {
+        let mut rclone = test_connection(Provider::Teams);
+        rclone.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        rclone.name = "SharePoint mirror".into();
+        let uninitialized = offline_mirror_saved_notice(&rclone, false);
+        assert!(uninitialized.contains("confirmed initial Sync Now"));
+        assert!(!uninitialized.contains("normal bisync"));
+        let initialized = offline_mirror_saved_notice(&rclone, true);
+        assert!(initialized.contains("Existing initialization state was preserved"));
+        assert!(initialized.contains("normal bisync"));
+        assert!(!initialized.contains("confirmed initial Sync Now"));
+
+        let mut onedrive = test_connection(Provider::OneDrive);
+        onedrive.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+        onedrive.name = "OneDrive mirror".into();
+        let uninitialized = offline_mirror_saved_notice(&onedrive, false);
+        assert!(uninitialized.contains("confirmed initial Sync Now"));
+        assert!(!uninitialized.contains("normal OneDrive synchronization"));
+        let initialized = offline_mirror_saved_notice(&onedrive, true);
+        assert!(initialized.contains("Existing initialization state was preserved"));
+        assert!(initialized.contains("normal OneDrive synchronization"));
+        assert!(!initialized.contains("confirmed initial Sync Now"));
+    }
+
+    #[test]
     fn offline_mirror_markers_and_filters_stay_in_work_directory() {
         let temp = tempfile::TempDir::new().expect("temp");
         let mirror = temp.path().join("mirror");
@@ -12883,32 +15615,12 @@ mod tests {
         assert!(plan.filters_file.starts_with(&plan.work_directory));
         assert!(initial_preview_marker(&plan).starts_with(&plan.work_directory));
         assert!(initial_sync_marker(&plan).starts_with(&plan.work_directory));
-        assert!(mirror_script::script_path(&plan).starts_with(&plan.work_directory));
         assert!(!initial_preview_marker(&plan).starts_with(&mirror));
         assert!(!initial_sync_marker(&plan).starts_with(&mirror));
-        assert!(
-            fs::read_to_string(mirror_script::script_path(&plan))
-                .expect("managed script")
-                .contains("Cloud Mounter managed bisync script")
-        );
-        let managed = managed_rclone_bisync_request(
-            &plan,
-            "preview",
-            rclone_bisync_preview_request(&plan).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(managed.executable, Executable::Sh);
-        assert!(managed.sanitized_command().contains("managed-bisync.sh"));
         assert!(
             fs::read_to_string(&plan.filters_file)
                 .expect("filters")
                 .contains("Google cloud-native documents")
-        );
-        fs::write(mirror_script::script_path(&plan), "unowned script").unwrap();
-        assert!(
-            prepare_rclone_bisync_work_files(&connection, &plan)
-                .unwrap_err()
-                .contains("unowned")
         );
     }
 
@@ -13616,6 +16328,65 @@ mod tests {
     }
 
     #[test]
+    fn document_portal_ids_are_extracted_from_direct_and_app_scoped_paths() {
+        let mount = Path::new("/run/user/1000/doc");
+        assert_eq!(
+            portal_document_id(Path::new("/run/user/1000/doc/edc79c37/box_test"), mount),
+            Some("edc79c37".into())
+        );
+        assert_eq!(
+            portal_document_id(
+                Path::new(
+                    "/run/user/1000/doc/by-app/io.github.uutzinger.cosmic-ext-applet-mounter/edc79c37/box_test"
+                ),
+                mount
+            ),
+            Some("edc79c37".into())
+        );
+        assert_eq!(
+            portal_document_id(Path::new("/run/user/1000/doc/../secret"), mount),
+            None
+        );
+    }
+
+    #[test]
+    fn document_portal_file_paths_accept_one_terminal_nul_only() {
+        assert_eq!(
+            portal_file_path(b"/home/example/Cloud\0".to_vec()).unwrap(),
+            PathBuf::from("/home/example/Cloud")
+        );
+        assert!(portal_file_path(b"relative/path\0".to_vec()).is_err());
+        assert!(portal_file_path(b"/home/example\0/Cloud".to_vec()).is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the live Documents portal and an existing exported document"]
+    async fn live_documents_portal_dbus_resolves_existing_entry() {
+        let connection = zbus::Connection::session().await.expect("session bus");
+        let proxy = zbus::Proxy::new(
+            &connection,
+            DOCUMENTS_DESTINATION,
+            DOCUMENTS_PATH,
+            DOCUMENTS_INTERFACE,
+        )
+        .await
+        .expect("Documents portal");
+        let mount = portal_file_path(proxy.call("GetMountPoint", &()).await.expect("mount point"))
+            .expect("valid mount point");
+        let documents: HashMap<String, Vec<u8>> =
+            proxy.call("List", &("",)).await.expect("document list");
+        let (document_id, expected) = documents.iter().next().expect("an exported document");
+        let expected = portal_file_path(expected.clone()).expect("valid host path");
+        let portal_path = mount.join(document_id);
+        assert_eq!(
+            document_portal_origin_path_dbus(&portal_path, false)
+                .await
+                .expect("resolve document"),
+            expected
+        );
+    }
+
+    #[test]
     fn modify_validation_rejects_provider_and_mode_changes() {
         let mut app = AppModel::default();
         let saved = test_connection(Provider::Box);
@@ -13723,6 +16494,88 @@ mod tests {
                 .map(|(action, _)| *action)
                 .collect::<Vec<_>>(),
             [SystemdAction::Enable, SystemdAction::Disable]
+        );
+    }
+
+    #[tokio::test]
+    async fn online_repair_state_reconciliation_disables_every_provider() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let document_path = temporary.path().join("document");
+        let storage =
+            AppConfigStorage::HostVisible(HostVisibleConfigStorage::new(document_path.clone()));
+        let providers = [
+            Provider::OneDrive,
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ];
+        let connections = providers
+            .into_iter()
+            .enumerate()
+            .map(|(index, provider)| {
+                let mut connection = test_connection(provider);
+                connection.name = format!("Repair matrix {index}");
+                connection.local_path = PathBuf::from(format!("/tmp/cosmic-repair-{index}"));
+                if provider == Provider::Teams {
+                    connection.teams_identity =
+                        Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
+                            site_url: "https://example.sharepoint.com/sites/Work".into(),
+                            library_url: "https://example.sharepoint.com/sites/Work/Documents"
+                                .into(),
+                            drive_id: "b!repair-matrix".into(),
+                        });
+                }
+                let ConnectionMode::OnlineMount(options) = &mut connection.mode else {
+                    unreachable!("test connection is online")
+                };
+                options.start_at_login = true;
+                connection
+            })
+            .collect::<Vec<_>>();
+        let ids = connections
+            .iter()
+            .map(|connection| connection.id)
+            .collect::<Vec<_>>();
+        let mut config = Config {
+            document: ConfigDocument {
+                connections,
+                ..ConfigDocument::default()
+            },
+        };
+        let manager = FakeSystemdManager::default();
+
+        for connection_id in &ids {
+            persist_online_popup_state_with(&mut config, &storage, &manager, *connection_id, false)
+                .await
+                .expect("persist repaired connection off state");
+        }
+
+        assert!(config.document.connections.iter().all(|connection| {
+            matches!(
+                &connection.mode,
+                ConnectionMode::OnlineMount(options) if !options.start_at_login
+            )
+        }));
+        let persisted: ConfigDocument =
+            ron::from_str(&fs::read_to_string(&document_path).expect("read persisted document"))
+                .expect("parse persisted document");
+        assert!(persisted.connections.iter().all(|connection| {
+            matches!(
+                &connection.mode,
+                ConnectionMode::OnlineMount(options) if !options.start_at_login
+            )
+        }));
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            vec![SystemdAction::Disable; providers.len()]
         );
     }
 
@@ -13847,6 +16700,22 @@ mod tests {
     }
 
     #[test]
+    fn bisync_failure_is_short_and_does_not_echo_logs_or_paths() {
+        let message = offline_mirror_command_error(
+            "sync",
+            nonzero_command_error(
+                "INFO: syncing /home/user/private/mirror with secret_remote:folder\n"
+                    .repeat(200)
+                    .as_str(),
+            ),
+        );
+        assert!(message.contains("app-owned mirror log"));
+        assert!(message.len() < 200);
+        assert!(!message.contains("/home/user/private"));
+        assert!(!message.contains("secret_remote"));
+    }
+
+    #[test]
     fn reorder_connection_moves_item_to_selected_position() {
         let mut first = test_connection(Provider::Box);
         first.id = ConnectionId::new();
@@ -13931,5 +16800,18 @@ mod tests {
             attempts: 1,
             duration: Duration::ZERO,
         }
+    }
+
+    #[test]
+    fn successful_bisync_summary_keeps_retention_warning_actionable() {
+        let outcome = BisyncOutcome {
+            output: command_output(""),
+            warnings: vec!["Remote retention cleanup was incomplete; run Sync Now again.".into()],
+        };
+
+        let summary = rclone_bisync_outcome_summary(BisyncMode::Sync, &outcome);
+        assert!(summary.contains("Sync completed"));
+        assert!(summary.contains("Warning:"));
+        assert!(summary.contains("run Sync Now again"));
     }
 }

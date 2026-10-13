@@ -1,3 +1,14 @@
+cosmic-ext-applet-mounter (0.5.3) unstable; urgency=medium
+
+  * Migrate desktop host control to typed D-Bus adapters and a restricted
+    Rust offline synchronization coordinator.
+  * Improve online/offline recovery, OpenConnect authentication integration,
+    and asynchronous panel state observation.
+  * Declare optional OneDrive authentication helper runtime recommendations.
+  * Separate tag package builds from explicitly approved release publication.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Mon, 12 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.5.2) unstable; urgency=medium
 
   * Add native amd64 and arm64 Debian package builds for Ubuntu 22.04, 24.04,

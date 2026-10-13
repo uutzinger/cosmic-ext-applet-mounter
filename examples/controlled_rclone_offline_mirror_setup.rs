@@ -9,9 +9,8 @@ use cosmic_ext_applet_mounter::config::{APP_ID, Config};
 use cosmic_ext_applet_mounter::model::{
     Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, Provider, TuningProfile,
 };
-use cosmic_ext_applet_mounter::process::SystemCommandRunner;
 use cosmic_ext_applet_mounter::services::{
-    CommandSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction, SystemdManager,
+    DbusSystemdManager, FileUnitStore, StructuralUnitValidator, SystemdAction, SystemdManager,
     UnitController, UnitDocument,
 };
 use cosmic_ext_applet_mounter::sync::rclone_bisync_plan;
@@ -176,7 +175,7 @@ async fn run() -> Result<(), String> {
 
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| format!("failed to open user unit store: {error}"))?;
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = DbusSystemdManager;
     let controller = UnitController::new(store, manager);
     let cancellation = CancellationToken::new();
     controller
@@ -188,7 +187,7 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|error| format!("failed to install timer unit: {error}"))?;
 
-    let manager = CommandSystemdManager::new(SystemCommandRunner);
+    let manager = DbusSystemdManager;
     manager
         .action(
             SystemdAction::Disable,

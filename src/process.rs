@@ -23,34 +23,34 @@ pub type CommandFuture<'a> =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Executable {
     FlatpakSpawn,
+    Flatpak,
     Rclone,
-    Sh,
     Onedriver,
     OneDrive,
     Fusermount3,
     Mountpoint,
+    #[cfg(any(test, feature = "development-probes"))]
     Findmnt,
     Find,
+    #[cfg(any(test, feature = "development-probes"))]
     Nmcli,
-    Ip,
-    Getent,
-    Nc,
+    #[cfg(any(test, feature = "development-probes"))]
     Systemctl,
-    SystemdAnalyze,
-    Journalctl,
-    Fuser,
     Cat,
+    #[cfg(any(test, feature = "development-probes"))]
     False,
+    #[cfg(any(test, feature = "development-probes"))]
     Ls,
+    #[cfg(any(test, feature = "development-probes"))]
     Mkdir,
-    Printf,
+    #[cfg(any(test, feature = "development-probes"))]
     Rm,
+    #[cfg(any(test, feature = "development-probes"))]
     Sleep,
+    #[cfg(any(test, feature = "development-probes"))]
     SystemdRun,
+    #[cfg(any(test, feature = "development-probes"))]
     Touch,
-    CiscoVpn,
-    CiscoVpnUi,
-    CiscoAgent,
     #[cfg(test)]
     TestOnly(&'static str),
 }
@@ -60,34 +60,34 @@ impl Executable {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::FlatpakSpawn => "flatpak-spawn",
+            Self::Flatpak => "flatpak",
             Self::Rclone => "rclone",
-            Self::Sh => "sh",
             Self::Onedriver => "onedriver",
             Self::OneDrive => "onedrive",
             Self::Fusermount3 => "fusermount3",
             Self::Mountpoint => "mountpoint",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Findmnt => "findmnt",
             Self::Find => "find",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Nmcli => "nmcli",
-            Self::Ip => "ip",
-            Self::Getent => "getent",
-            Self::Nc => "nc",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Systemctl => "systemctl",
-            Self::SystemdAnalyze => "systemd-analyze",
-            Self::Journalctl => "journalctl",
-            Self::Fuser => "fuser",
             Self::Cat => "cat",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::False => "false",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Ls => "ls",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Mkdir => "mkdir",
-            Self::Printf => "printf",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Rm => "rm",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Sleep => "sleep",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::SystemdRun => "systemd-run",
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Touch => "touch",
-            Self::CiscoVpn => "Cisco Secure Client VPN CLI",
-            Self::CiscoVpnUi => "Cisco Secure Client VPN UI",
-            Self::CiscoAgent => "Cisco Secure Client agent",
             #[cfg(test)]
             Self::TestOnly(path) => path,
         }
@@ -96,43 +96,34 @@ impl Executable {
     fn path_candidates(self) -> Vec<&'static str> {
         match self {
             Self::FlatpakSpawn => vec!["flatpak-spawn"],
+            Self::Flatpak => vec!["flatpak", "/usr/bin/flatpak"],
             Self::Rclone => vec!["rclone"],
-            Self::Sh => vec!["/usr/bin/sh"],
             Self::Onedriver => vec!["onedriver"],
             Self::OneDrive => vec!["onedrive"],
             Self::Fusermount3 => vec!["fusermount3"],
             Self::Mountpoint => vec!["mountpoint"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Findmnt => vec!["findmnt", "/usr/bin/findmnt"],
             Self::Find => vec!["find", "/usr/bin/find"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Nmcli => vec!["nmcli", "/usr/bin/nmcli", "/bin/nmcli"],
-            Self::Ip => vec!["ip"],
-            Self::Getent => vec!["getent"],
-            Self::Nc => vec!["nc"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Systemctl => vec!["systemctl"],
-            Self::SystemdAnalyze => vec!["systemd-analyze"],
-            Self::Journalctl => vec!["journalctl"],
-            Self::Fuser => vec!["fuser"],
             Self::Cat => vec!["cat", "/usr/bin/cat"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::False => vec!["false", "/usr/bin/false"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Ls => vec!["ls", "/usr/bin/ls"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Mkdir => vec!["mkdir", "/usr/bin/mkdir"],
-            Self::Printf => vec!["printf", "/usr/bin/printf"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Rm => vec!["rm", "/usr/bin/rm"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Sleep => vec!["sleep", "/usr/bin/sleep"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::SystemdRun => vec!["systemd-run", "/usr/bin/systemd-run"],
+            #[cfg(any(test, feature = "development-probes"))]
             Self::Touch => vec!["touch", "/usr/bin/touch"],
-            Self::CiscoVpn => vec![
-                "/opt/cisco/secureclient/bin/vpn",
-                "/opt/cisco/anyconnect/bin/vpn",
-            ],
-            Self::CiscoVpnUi => vec![
-                "/opt/cisco/secureclient/bin/vpnui",
-                "/opt/cisco/anyconnect/bin/vpnui",
-            ],
-            Self::CiscoAgent => vec![
-                "/opt/cisco/secureclient/bin/vpnagentd",
-                "/opt/cisco/anyconnect/bin/vpnagentd",
-            ],
             #[cfg(test)]
             Self::TestOnly(path) => vec![path],
         }
@@ -200,6 +191,8 @@ pub struct CommandRequest {
     pub retry: RetryPolicy,
     /// Return once spawned; the interactive application owns its lifetime.
     pub launch_only: bool,
+    /// Terminate a read-only host child if its Flatpak transport disappears.
+    pub watch_host_bus: bool,
 }
 
 impl CommandRequest {
@@ -212,12 +205,19 @@ impl CommandRequest {
             output_limit: 64 * 1024,
             retry: RetryPolicy::default(),
             launch_only: false,
+            watch_host_bus: false,
         }
     }
 
     #[must_use]
     pub fn launch_only(mut self) -> Self {
         self.launch_only = true;
+        self
+    }
+
+    #[must_use]
+    pub fn watch_host_bus(mut self) -> Self {
+        self.watch_host_bus = true;
         self
     }
 
@@ -301,18 +301,28 @@ pub enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingExecutable(executable) => {
-                write!(formatter, "{} was not found", executable.display_name())
-            }
-            Self::InvalidArgument => write!(formatter, "command argument contains unsafe bytes"),
+            Self::MissingExecutable(executable) => formatter.write_str(&crate::fl!(
+                "ui-process-value1-was-not-found",
+                value1 = (executable.display_name()).to_string()
+            )),
+            Self::InvalidArgument => formatter.write_str(&crate::fl!(
+                "ui-process-command-argument-contains-unsafe-bytes"
+            )),
             Self::Spawn { command, message } => write!(formatter, "{command}: {message}"),
-            Self::Timeout { command, timeout } => {
-                write!(formatter, "{command} timed out after {timeout:?}")
-            }
-            Self::Cancelled { command } => write!(formatter, "{command} was cancelled"),
-            Self::NonZero { command, code, .. } => {
-                write!(formatter, "{command} exited with status {code:?}")
-            }
+            Self::Timeout { command, timeout } => formatter.write_str(&crate::fl!(
+                "ui-process-command-timed-out-after-timeout",
+                command = (command).to_string(),
+                timeout = format!("{:?}", timeout)
+            )),
+            Self::Cancelled { command } => formatter.write_str(&crate::fl!(
+                "ui-process-command-was-cancelled",
+                command = (command).to_string()
+            )),
+            Self::NonZero { command, code, .. } => formatter.write_str(&crate::fl!(
+                "ui-process-command-exited-with-status-code",
+                command = (command).to_string(),
+                code = format!("{:?}", code)
+            )),
         }
     }
 }
@@ -370,10 +380,13 @@ impl FlatpakHostCommandRunner {
         let host_executable = Self::host_executable_arg(request.executable)?;
         let mut host_request = CommandRequest::new(Executable::FlatpakSpawn)
             .arg("--host")?
-            .arg(host_executable)?
             .with_timeout(request.timeout)
             .with_output_limit(request.output_limit)
             .with_retry(request.retry);
+        if request.watch_host_bus {
+            host_request = host_request.arg("--watch-bus")?;
+        }
+        host_request = host_request.arg(host_executable)?;
         host_request.launch_only = request.launch_only;
         host_request.args.extend(request.args);
         Ok(host_request)
@@ -542,50 +555,105 @@ async fn run_once(
     cancellation: &CancellationToken,
 ) -> Result<(std::process::ExitStatus, CapturedOutput, CapturedOutput), CommandError> {
     let command = request.sanitized_command();
-    let mut child = Command::new(path)
+    let mut command_builder = Command::new(path);
+    command_builder
         .args(request.args.iter().map(|argument| &argument.value))
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(unix)]
+    command_builder.process_group(0);
+    let mut child = command_builder
         .spawn()
         .map_err(|error| CommandError::Spawn {
             command: command.clone(),
             message: redact_text(&error.to_string()),
         })?;
 
+    let process_group = child.id();
+
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
-    let stdout_task = tokio::spawn(read_bounded(stdout, request.output_limit));
-    let stderr_task = tokio::spawn(read_bounded(stderr, request.output_limit));
+    let mut stdout_task = tokio::spawn(read_bounded(stdout, request.output_limit));
+    let mut stderr_task = tokio::spawn(read_bounded(stderr, request.output_limit));
 
-    let status = tokio::select! {
-        result = child.wait() => result.map_err(|error| CommandError::Spawn {
+    // The deadline covers pipe draining too: a descendant can hold a pipe open
+    // after the direct child exits. Save its process group before wait reaps it.
+    tokio::select! {
+        result = async {
+            let status = child.wait().await.map_err(|error| CommandError::Spawn {
             command: command.clone(),
             message: redact_text(&error.to_string()),
-        })?,
+            })?;
+            let stdout = (&mut stdout_task).await.unwrap_or_else(|_| empty_output());
+            let stderr = (&mut stderr_task).await.unwrap_or_else(|_| empty_output());
+            Ok((status, stdout, stderr))
+        } => result,
         () = cancellation.cancelled() => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            terminate_command_tree(&mut child, process_group).await;
             stdout_task.abort();
             stderr_task.abort();
-            return Err(CommandError::Cancelled { command });
+            Err(CommandError::Cancelled { command })
         }
         () = time::sleep(request.timeout) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            terminate_command_tree(&mut child, process_group).await;
             stdout_task.abort();
             stderr_task.abort();
-            return Err(CommandError::Timeout {
+            Err(CommandError::Timeout {
                 command,
                 timeout: request.timeout,
-            });
+            })
         }
-    };
+    }
+}
 
-    let stdout = stdout_task.await.unwrap_or_else(|_| empty_output());
-    let stderr = stderr_task.await.unwrap_or_else(|_| empty_output());
-    Ok((status, stdout, stderr))
+#[cfg(unix)]
+fn signal_process_group(process_group: u32, signal: i32) -> bool {
+    let Ok(process_group) = i32::try_from(process_group) else {
+        return false;
+    };
+    // SAFETY: the child was placed in a new process group whose positive ID is
+    // returned by Child::id. A negative PID addresses only that group. The
+    // signal values are libc constants and no pointers cross the FFI boundary.
+    let result = unsafe { libc::kill(-process_group, signal) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(unix)]
+fn process_group_exists(process_group: u32) -> bool {
+    let Ok(process_group) = i32::try_from(process_group) else {
+        return false;
+    };
+    // SAFETY: signal 0 performs an existence/permission check and the negative
+    // PID is the isolated child process group created above.
+    let result = unsafe { libc::kill(-process_group, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+async fn terminate_command_tree(child: &mut tokio::process::Child, process_group: Option<u32>) {
+    #[cfg(unix)]
+    {
+        if let Some(process_group) = process_group {
+            let _ = signal_process_group(process_group, libc::SIGTERM);
+            let _ = time::timeout(Duration::from_millis(500), child.wait()).await;
+            let graceful_deadline = time::Instant::now() + Duration::from_millis(500);
+            while process_group_exists(process_group) && time::Instant::now() < graceful_deadline {
+                time::sleep(Duration::from_millis(20)).await;
+            }
+            if process_group_exists(process_group) {
+                let _ = signal_process_group(process_group, libc::SIGKILL);
+            }
+            let kill_deadline = time::Instant::now() + Duration::from_secs(1);
+            while process_group_exists(process_group) && time::Instant::now() < kill_deadline {
+                time::sleep(Duration::from_millis(20)).await;
+            }
+            let _ = time::timeout(Duration::from_millis(500), child.wait()).await;
+            return;
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> CapturedOutput {
@@ -884,6 +952,26 @@ mod tests {
         assert!(matches!(error, CommandError::NonZero { attempts: 3, .. }));
     }
 
+    #[test]
+    fn host_inspection_transport_owns_child_lifetime_without_changing_other_launches() {
+        let request = CommandRequest::new(Executable::Cat)
+            .arg("/proc/self/mountinfo")
+            .unwrap()
+            .watch_host_bus()
+            .with_timeout(Duration::from_secs(10))
+            .with_output_limit(4 * 1024 * 1024);
+        let wrapped = FlatpakHostCommandRunner::host_request(request).unwrap();
+        assert!(wrapped.sanitized_command().contains("--host --watch-bus"));
+        assert_eq!(wrapped.timeout, Duration::from_secs(10));
+        assert_eq!(wrapped.output_limit, 4 * 1024 * 1024);
+        let unrelated = FlatpakHostCommandRunner::host_request(
+            CommandRequest::new(Executable::Onedriver).launch_only(),
+        )
+        .unwrap();
+        assert!(!unrelated.sanitized_command().contains("--watch-bus"));
+        assert!(unrelated.launch_only);
+    }
+
     #[tokio::test]
     async fn interactive_launch_outlives_command_timeout() {
         let temp = tempfile::tempdir().expect("temporary directory");
@@ -910,17 +998,6 @@ mod tests {
             time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(std::fs::read_to_string(marker).unwrap(), "done");
-    }
-
-    #[test]
-    fn host_interactive_launch_preserves_lifecycle() {
-        let request = CommandRequest::new(Executable::CiscoVpnUi).launch_only();
-        let host = FlatpakHostCommandRunner::host_request(request).unwrap();
-        assert!(host.launch_only);
-        assert!(
-            host.sanitized_command()
-                .starts_with("flatpak-spawn --host ")
-        );
     }
 
     #[tokio::test]
@@ -950,6 +1027,64 @@ mod tests {
             .await
             .expect_err("sleep must be cancelled");
         assert!(matches!(error, CommandError::Cancelled { .. }));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn deadline_covers_pipes_held_by_descendant_after_parent_exit() {
+        let request = request("/usr/bin/sh")
+            .arg("-c")
+            .unwrap()
+            .arg("sleep 30 & exit 0")
+            .unwrap()
+            .with_timeout(Duration::from_millis(50));
+        let started = Instant::now();
+        let result = SystemCommandRunner
+            .run(request, CancellationToken::new())
+            .await;
+        assert!(matches!(result, Err(CommandError::Timeout { .. })));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_kills_shell_descendants_before_returning() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let marker = temp.path().join("descendant-pid");
+        let cancellation = CancellationToken::new();
+        let operation = cancellation.clone();
+        let request = request("/usr/bin/sh")
+            .arg("-c")
+            .unwrap()
+            .arg("sleep 30 & child=$!; printf '%s' \"$child\" > \"$1\"; wait")
+            .unwrap()
+            .arg("test-shell")
+            .unwrap()
+            .arg(marker.as_os_str())
+            .unwrap();
+        let running =
+            tokio::spawn(async move { SystemCommandRunner.run(request, operation).await });
+        let marker_deadline = time::Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && time::Instant::now() < marker_deadline {
+            time::sleep(Duration::from_millis(10)).await;
+        }
+        let descendant = std::fs::read_to_string(&marker)
+            .expect("shell recorded descendant")
+            .trim()
+            .parse::<u32>()
+            .expect("descendant PID");
+        assert!(Path::new(&format!("/proc/{descendant}")).exists());
+
+        cancellation.cancel();
+        let error = running
+            .await
+            .expect("runner task")
+            .expect_err("shell command must be cancelled");
+        assert!(matches!(error, CommandError::Cancelled { .. }));
+        assert!(
+            !Path::new(&format!("/proc/{descendant}")).exists(),
+            "descendant survived command cancellation"
+        );
     }
 
     #[tokio::test]

@@ -10,6 +10,9 @@ override_dh_auto_build:
 
 override_dh_auto_test:
 	cargo test --locked --all-targets
+	python3 tests/dependency_installer_test.py
+	python3 tests/auth_helper_localization_test.py
+	python3 tests/release_publication_test.py
 	# Strict freedesktop validators currently reject official COSMIC applet
 	# template fields such as Categories=COSMIC and AppStream provides/binaries.
 	# Keep these metadata checks visible but non-fatal for Debian builds.
@@ -17,8 +20,9 @@ override_dh_auto_test:
 	-appstreamcli validate --pedantic --no-net resources/app.metainfo.xml
 
 override_dh_auto_install:
-	install -Dm0755 target/debian/release/cosmic-ext-applet-mounter debian/cosmic-ext-applet-mounter/usr/bin/cosmic-ext-applet-mounter
+	install -Dm0755 "$(CARGO_TARGET_DIR)/release/cosmic-ext-applet-mounter" debian/cosmic-ext-applet-mounter/usr/bin/cosmic-ext-applet-mounter
 	install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper debian/cosmic-ext-applet-mounter/usr/bin/cosmic-ext-applet-mounter-onedrive-auth-helper
+	install -Dm0644 i18n/en/cosmic_ext_applet_mounter.ftl debian/cosmic-ext-applet-mounter/usr/share/io.github.uutzinger.cosmic-ext-applet-mounter/i18n/en/cosmic_ext_applet_mounter.ftl
 	install -Dm0644 resources/app.desktop debian/cosmic-ext-applet-mounter/usr/share/applications/io.github.uutzinger.cosmic-ext-applet-mounter.desktop
 	install -Dm0644 resources/app.metainfo.xml debian/cosmic-ext-applet-mounter/usr/share/metainfo/io.github.uutzinger.cosmic-ext-applet-mounter.metainfo.xml
 	install -Dm0644 resources/icon.svg debian/cosmic-ext-applet-mounter/usr/share/icons/hicolor/scalable/apps/io.github.uutzinger.cosmic-ext-applet-mounter.svg

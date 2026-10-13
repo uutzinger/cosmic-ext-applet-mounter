@@ -13,8 +13,11 @@ usage() {
 Usage: scripts/build_release.sh [--dry-run] [--remote <name>]
 
 Validate a release, create and push its v<version> tag, then wait for the
-GitHub Actions Debian builds and download their artifacts. The tag workflow
-creates the GitHub release after all six Ubuntu/architecture builds succeed.
+GitHub Actions Debian builds and download their artifacts. Tag builds NEVER
+publish a GitHub release. After native and final Flatpak acceptance, finalize
+docs/releases/v<version>.md, then explicitly dispatch Build Debian packages on
+that tag with publish_after_acceptance=true. This rebuilds all six packages
+from the tag before publication. That dispatch requires separate approval.
 
 Before running, update Cargo.toml, Cargo.lock, debian/changelog, release notes,
 and commit and push the release commit.
@@ -30,11 +33,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for command in cargo dpkg-parsechangelog gh git; do
+for command in cargo dpkg-parsechangelog gh git python3; do
   command -v "$command" >/dev/null 2>&1 || { echo "Missing command: $command" >&2; exit 2; }
 done
 
-VERSION="$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+VERSION="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "cosmic-ext-applet-mounter"))')"
 DEBIAN_VERSION="$(dpkg-parsechangelog -S Version)"
 TAG="v${VERSION}"
 BRANCH="$(git branch --show-current)"
@@ -63,6 +66,6 @@ fi
 git tag -a "$TAG" -m "Release ${TAG}"
 git push "$REMOTE" "refs/tags/${TAG}"
 bash scripts/run_github_linux_build.sh --ref "$TAG" --wait-for-existing \
-  --download-dir "artifacts/${TAG}"
+  --download-dir "target/artifacts/${TAG}"
 
-echo "Release ${TAG} completed and artifacts were downloaded to artifacts/${TAG}"
+echo "Tag build ${TAG} completed; artifacts are in target/artifacts/${TAG}. No release was published."

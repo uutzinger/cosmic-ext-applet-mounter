@@ -537,7 +537,7 @@ fn first_line(value: &str) -> String {
 
 fn print_help() {
     println!(
-        "Usage: cargo run --example flatpak_host_runner_probe -- [--flatpak-host|--native] [--fuse]"
+        "Usage: cargo run --features development-probes --example flatpak_host_runner_probe -- [--flatpak-host|--native] [--fuse]"
     );
     println!();
     println!("  --flatpak-host  Run commands through flatpak-spawn --host. Default.");

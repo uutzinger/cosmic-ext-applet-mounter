@@ -41,37 +41,47 @@ pub enum SyncError {
 impl fmt::Display for SyncError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidMode => write!(formatter, "connection is not an offline mirror"),
-            Self::UnsupportedProvider(provider) => {
-                write!(formatter, "unsupported provider {provider:?}")
+            Self::InvalidMode => {
+                formatter.write_str(&crate::fl!("ui-sync-connection-is-not-an-offline-mirror"))
             }
-            Self::InvalidRemoteReference => write!(formatter, "invalid remote reference"),
-            Self::InvalidRemoteSubpath => write!(formatter, "invalid remote subpath"),
-            Self::InvalidTeamsIdentity => write!(formatter, "invalid SharePoint library identity"),
-            Self::InvalidWorkDirectory => write!(formatter, "invalid work directory"),
-            Self::InvalidRecoveryDirectory => write!(formatter, "invalid recovery directory"),
-            Self::InitialPreviewRequired => {
-                write!(formatter, "initial synchronization requires a preview")
+            Self::UnsupportedProvider(provider) => formatter.write_str(&crate::fl!(
+                "ui-sync-unsupported-provider-provider",
+                provider = format!("{:?}", provider)
+            )),
+            Self::InvalidRemoteReference => {
+                formatter.write_str(&crate::fl!("ui-sync-invalid-remote-reference"))
             }
-            Self::ExplicitConfirmationRequired => {
-                write!(formatter, "synchronization requires explicit confirmation")
+            Self::InvalidRemoteSubpath => {
+                formatter.write_str(&crate::fl!("ui-sync-invalid-remote-subpath"))
             }
-            Self::ResyncPreviewRequired => write!(
-                formatter,
-                "state rebuild or resync requires preview and confirmation"
-            ),
-            Self::MeteredNetworkPaused => write!(
-                formatter,
-                "automatic synchronization is paused on metered networks"
-            ),
-            Self::ConcurrentRun => write!(formatter, "a synchronization is already running"),
-            Self::OverlapsOnedriverPath(path) => {
-                write!(
-                    formatter,
-                    "OneDrive mirror overlaps active onedriver path {}",
-                    path.display()
-                )
+            Self::InvalidTeamsIdentity => {
+                formatter.write_str(&crate::fl!("ui-sync-invalid-sharepoint-library-identity"))
             }
+            Self::InvalidWorkDirectory => {
+                formatter.write_str(&crate::fl!("ui-sync-invalid-work-directory"))
+            }
+            Self::InvalidRecoveryDirectory => {
+                formatter.write_str(&crate::fl!("ui-sync-invalid-recovery-directory"))
+            }
+            Self::InitialPreviewRequired => formatter.write_str(&crate::fl!(
+                "ui-sync-initial-synchronization-requires-a-preview"
+            )),
+            Self::ExplicitConfirmationRequired => formatter.write_str(&crate::fl!(
+                "ui-sync-synchronization-requires-explicit-confirmation"
+            )),
+            Self::ResyncPreviewRequired => formatter.write_str(&crate::fl!(
+                "ui-sync-state-rebuild-or-resync-requires-preview-and"
+            )),
+            Self::MeteredNetworkPaused => formatter.write_str(&crate::fl!(
+                "ui-sync-automatic-synchronization-is-paused-on-metered-networks"
+            )),
+            Self::ConcurrentRun => {
+                formatter.write_str(&crate::fl!("ui-sync-a-synchronization-is-already-running"))
+            }
+            Self::OverlapsOnedriverPath(path) => formatter.write_str(&crate::fl!(
+                "ui-sync-onedrive-mirror-overlaps-active-onedriver-path-value1",
+                value1 = (path.display()).to_string()
+            )),
             Self::Command(error) => error.fmt(formatter),
         }
     }
@@ -339,22 +349,32 @@ pub fn rclone_bisync_plan(
             .then(|| format!(".cloud-mounter-sharepoint-anchor-{}", connection.id)),
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("Cloud Mounter sync: {}", connection.name),
+            description: crate::fl!(
+                "ui-sync-cloud-mounter-sync-value1",
+                value1 = (connection.name).to_string()
+            ),
             executable: PathBuf::from(DEFAULT_RCLONE),
             arguments,
-            pre_start_condition: None,
+            pre_start_condition: Some(
+                crate::vpn::offline_readiness_guard_command(connection.id)
+                    .map_err(|_| SyncError::InvalidRemoteReference)?,
+            ),
             restart_on_failure: false,
             skip_on_metered: !options.sync_on_metered,
         },
         timer: TimerSpec {
             connection_id: connection.id,
-            description: format!("Cloud Mounter sync schedule: {}", connection.name),
+            description: crate::fl!(
+                "ui-sync-cloud-mounter-sync-schedule-value1",
+                value1 = (connection.name).to_string()
+            ),
             interval: Duration::from_secs(u64::from(options.sync_interval_minutes) * 60),
             persistent: true,
         },
     })
 }
 
+#[cfg(test)]
 pub fn rclone_bisync_preview_request(
     plan: &RcloneBisyncPlan,
 ) -> Result<CommandRequest, CommandError> {
@@ -375,6 +395,7 @@ pub fn rclone_bisync_preview_request(
         .pipe(Ok)
 }
 
+#[cfg(test)]
 pub fn rclone_bisync_initial_preview_request(
     plan: &RcloneBisyncPlan,
 ) -> Result<CommandRequest, CommandError> {
@@ -396,6 +417,7 @@ pub fn rclone_bisync_initial_preview_request(
         .pipe(Ok)
 }
 
+#[cfg(test)]
 pub fn rclone_bisync_initial_sync_request(
     plan: &RcloneBisyncPlan,
 ) -> Result<CommandRequest, CommandError> {
@@ -416,6 +438,7 @@ pub fn rclone_bisync_initial_sync_request(
         .pipe(Ok)
 }
 
+#[cfg(test)]
 pub fn rclone_bisync_sync_request(plan: &RcloneBisyncPlan) -> Result<CommandRequest, CommandError> {
     plan.service
         .arguments
@@ -480,10 +503,16 @@ pub fn one_drive_mirror_plan(
         single_directory: connection.remote_subpath.clone(),
         service: ServiceSpec {
             connection_id: connection.id,
-            description: format!("Cloud Mounter OneDrive mirror: {}", connection.name),
+            description: crate::fl!(
+                "ui-sync-cloud-mounter-onedrive-mirror-value1",
+                value1 = (connection.name).to_string()
+            ),
             executable: PathBuf::from(DEFAULT_ONEDRIVE),
             arguments,
-            pre_start_condition: None,
+            pre_start_condition: Some(
+                crate::vpn::offline_readiness_guard_command(connection.id)
+                    .map_err(|_| SyncError::InvalidRemoteReference)?,
+            ),
             restart_on_failure: true,
             skip_on_metered: false,
         },
@@ -1053,6 +1082,61 @@ mod tests {
     }
 
     #[test]
+    fn every_offline_provider_service_requires_saved_connection_readiness() {
+        for provider in [
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut connection = offline(provider);
+            if provider == Provider::Teams {
+                connection.teams_identity = Some(TeamsLibraryIdentity {
+                    site_url: "https://example.sharepoint.com/sites/Engineering".into(),
+                    library_url:
+                        "https://example.sharepoint.com/sites/Engineering/Shared%20Documents".into(),
+                    drive_id: "b!test-drive".into(),
+                });
+            }
+            let plan = rclone_bisync_plan(&connection, Path::new("/state")).expect("plan");
+            assert_eq!(
+                plan.service
+                    .pre_start_condition
+                    .as_ref()
+                    .expect("offline readiness condition")
+                    .arguments,
+                vec![
+                    crate::vpn::OFFLINE_READINESS_GUARD_FLAG.to_owned(),
+                    connection.id.to_string(),
+                ],
+                "{provider:?}"
+            );
+        }
+
+        let connection = offline(Provider::OneDrive);
+        let plan = one_drive_mirror_plan(
+            &connection,
+            Path::new("/config"),
+            &OneDriveIsolationReport {
+                active_onedriver_paths: Vec::new(),
+            },
+        )
+        .expect("OneDrive plan");
+        assert_eq!(
+            plan.service
+                .pre_start_condition
+                .as_ref()
+                .expect("offline readiness condition")
+                .arguments,
+            vec![
+                crate::vpn::OFFLINE_READINESS_GUARD_FLAG.to_owned(),
+                connection.id.to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn sftp_mirror_preserves_absolute_path_and_recovery_stays_outside_subtree() {
         let mut connection = offline(Provider::Sftp);
         connection.remote_subpath = Some("/srv/files".into());
@@ -1161,27 +1245,7 @@ mod tests {
         assert!(arguments.contains(&"--ignore-size".to_owned()));
         assert!(arguments.contains(&"--ignore-checksum".to_owned()));
         assert!(plan.verify_after_sync);
-        let script = crate::mirror_script::render(&plan).unwrap();
-        assert!(script.find("--verify-teams-mirror").unwrap() < script.find("rclone=").unwrap());
-        assert!(
-            script.contains(
-                "rclone_remote check 'test_teams:CloudMounter-TeamsMirror-Test-20261002'"
-            )
-        );
-        assert!(script.contains("'--checksum' '--filter-from'"));
-        assert!(script.contains("'--contimeout' '10s' '--timeout' '30s'"));
-        assert_eq!(script.matches("rclone_remote \"$@\"").count(), 3);
-        let temporary = tempfile::tempdir().unwrap();
-        let script_path = temporary.path().join("sharepoint-bisync.sh");
-        std::fs::write(&script_path, script).unwrap();
-        assert!(
-            std::process::Command::new("/usr/bin/sh")
-                .arg("-n")
-                .arg(script_path)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(plan.preflight_command.is_some());
         assert_eq!(
             plan.remote_recovery_path,
             format!(
@@ -1243,11 +1307,6 @@ mod tests {
             }
             let next = rclone_bisync_plan(&edited, root).unwrap();
             assert_ne!(next.work_directory, original.work_directory, "{changed}");
-            assert_ne!(
-                crate::mirror_script::script_path(&next),
-                crate::mirror_script::script_path(&original),
-                "{changed} reused the old service script"
-            );
         }
     }
 

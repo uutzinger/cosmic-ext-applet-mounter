@@ -18,5 +18,33 @@ online mount or offline mirror, and when a connection is active. Access can be
 revoked through the user's Google Account or by removing the corresponding
 rclone remote.
 
+## Documentation
+
+### Setup and installation
+
+- [Dependency installation](dependency-installation.md): supported engine
+  versions and automated/manual dependency setup.
+- [Build from source](build-from-source.md): development, verification, native
+  installation, and package-building commands.
+- [OpenConnect setup](openconnect.md): NetworkManager VPN profiles and the
+  on-demand authentication agent.
+- [Google Cloud authentication setup](google-cloud-auth-setup.md): private
+  Google OAuth clients for rclone.
+
+Run commands that refer to repository files from the checkout's root directory.
+
+### Release and engineering records
+
+- [Release notes](releases/README.md): versioned changes, compatibility,
+  limitations, and delivery information.
+- [Engineering records](engineering/README.md): baseline inventories, accepted
+  safety contracts, and implementation/verification audits.
+
+The [GitHub documentation entry](README.md) links to the central project
+description, specifications, task records, and Flatpak packaging guide retained
+elsewhere in the repository.
+
+### Project and privacy
+
 - [Project source and documentation](https://github.com/uutzinger/cosmic-ext-applet-mounter)
 - [Privacy Policy](privacy/)

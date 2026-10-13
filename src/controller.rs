@@ -24,8 +24,10 @@ pub struct ControllerSnapshot {
     pub vpn_ready: BTreeMap<VpnProfileId, bool>,
     pub service_status: BTreeMap<ConnectionId, UnitStatus>,
     pub mount_entries: Vec<MountEntry>,
+    pub online_repair_required: BTreeSet<ConnectionId>,
     pub sync_state: BTreeMap<ConnectionId, SyncRuntimeState>,
     pub paused_syncs: BTreeSet<ConnectionId>,
+    pub offline_warnings: BTreeMap<ConnectionId, Vec<String>>,
     pub conflicts: Vec<ConflictRecord>,
     pub recoveries: Vec<RecoveryRecord>,
     pub dependencies: Option<DependencyInventory>,
@@ -42,8 +44,10 @@ impl Default for ControllerSnapshot {
             vpn_ready: BTreeMap::new(),
             service_status: BTreeMap::new(),
             mount_entries: Vec::new(),
+            online_repair_required: BTreeSet::new(),
             sync_state: BTreeMap::new(),
             paused_syncs: BTreeSet::new(),
+            offline_warnings: BTreeMap::new(),
             conflicts: Vec::new(),
             recoveries: Vec::new(),
             dependencies: None,
@@ -229,6 +233,9 @@ pub fn status_label(status: &ConnectionStatus) -> String {
         }
         ConnectionStatus::OnlineMount(OnlineMountStatus::Mounting) => fl!("status-mounting"),
         ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted) => fl!("status-mounted"),
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded) => {
+            fl!("status-mounted-connection-unavailable")
+        }
         ConnectionStatus::OnlineMount(OnlineMountStatus::PendingWrites) => {
             fl!("status-pending-writes")
         }
@@ -362,10 +369,6 @@ fn restore_connection(
     snapshot: &ControllerSnapshot,
     connection: &Connection,
 ) -> ConnectionRowState {
-    let persistent_active = match &connection.mode {
-        ConnectionMode::OnlineMount(options) => options.start_at_login,
-        ConnectionMode::OfflineMirror(_) => !snapshot.paused_syncs.contains(&connection.id),
-    };
     let status = match &connection.mode {
         ConnectionMode::OnlineMount(_) => {
             ConnectionStatus::OnlineMount(online_status(snapshot, connection))
@@ -373,6 +376,21 @@ fn restore_connection(
         ConnectionMode::OfflineMirror(_) => {
             ConnectionStatus::OfflineMirror(offline_status(snapshot, connection))
         }
+    };
+    let persistent_active = match (&connection.mode, &status) {
+        (ConnectionMode::OnlineMount(options), ConnectionStatus::OnlineMount(status)) => {
+            options.start_at_login
+                || matches!(
+                    status,
+                    OnlineMountStatus::Mounting
+                        | OnlineMountStatus::Mounted
+                        | OnlineMountStatus::Degraded
+                        | OnlineMountStatus::PendingWrites
+                        | OnlineMountStatus::Detaching
+                )
+        }
+        (ConnectionMode::OfflineMirror(_), _) => !snapshot.paused_syncs.contains(&connection.id),
+        _ => false,
     };
     let warnings = warnings(snapshot, connection, &status);
     ConnectionRowState {
@@ -398,6 +416,9 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
         .mount_entries
         .iter()
         .any(|entry| entry.target == connection.local_path);
+    if snapshot.online_repair_required.contains(&connection.id) {
+        return OnlineMountStatus::Error;
+    }
     if mount_present
         && snapshot
             .service_status
@@ -408,6 +429,13 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
     {
         return OnlineMountStatus::Error;
     }
+    if mount_present && (!snapshot.network_ready || !vpn_ready(snapshot, connection.vpn_profile_id))
+    {
+        return OnlineMountStatus::Degraded;
+    }
+    if mount_present {
+        return OnlineMountStatus::Mounted;
+    }
     if !snapshot.network_ready {
         return OnlineMountStatus::WaitingForNetwork;
     }
@@ -416,7 +444,6 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
     }
     match snapshot.service_status.get(&connection.id) {
         Some(status) if status.active == ActiveState::Failed => OnlineMountStatus::Error,
-        _ if mount_present => OnlineMountStatus::Mounted,
         Some(status) if matches!(status.active, ActiveState::Active | ActiveState::Activating) => {
             OnlineMountStatus::Mounting
         }
@@ -425,7 +452,17 @@ fn online_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Onli
 }
 
 fn offline_status(snapshot: &ControllerSnapshot, connection: &Connection) -> OfflineMirrorStatus {
-    if !connection.enabled {
+    let runtime_state = snapshot.sync_state.get(&connection.id).copied();
+    // Live work must remain controllable even when saved UI state is stale or
+    // its last persistence attempt failed. In particular, do not let Disabled
+    // or a pre-existing conflict hide Stop and Repair for a running worker.
+    match runtime_state {
+        Some(SyncRuntimeState::Running) => return OfflineMirrorStatus::Syncing,
+        Some(SyncRuntimeState::Failed) => return OfflineMirrorStatus::Error,
+        _ => {}
+    }
+    let observed_active = runtime_state == Some(SyncRuntimeState::Idle);
+    if !connection.enabled && !observed_active {
         return OfflineMirrorStatus::Unavailable;
     }
     if snapshot
@@ -437,11 +474,6 @@ fn offline_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Off
     }
     if snapshot.paused_syncs.contains(&connection.id) {
         return OfflineMirrorStatus::Paused;
-    }
-    match snapshot.sync_state.get(&connection.id).copied() {
-        Some(SyncRuntimeState::Running) => return OfflineMirrorStatus::Syncing,
-        Some(SyncRuntimeState::Failed) => return OfflineMirrorStatus::Error,
-        _ => {}
     }
     if !snapshot.network_ready {
         return OfflineMirrorStatus::Offline;
@@ -469,14 +501,20 @@ fn actions(status: &ConnectionStatus) -> Vec<OperationAction> {
     use OnlineMountStatus as Online;
 
     match status {
-        ConnectionStatus::OnlineMount(Online::Mounted) => vec![
+        ConnectionStatus::OnlineMount(Online::Degraded) => vec![
             action(Operation::Unmount, true),
             action(Operation::Repair, true),
         ],
-        ConnectionStatus::OnlineMount(Online::Unmounted | Online::Error) => vec![
+        ConnectionStatus::OnlineMount(Online::Error) => vec![
             action(Operation::Mount, true),
             action(Operation::Repair, true),
         ],
+        ConnectionStatus::OnlineMount(Online::Mounted) => {
+            vec![action(Operation::Unmount, true)]
+        }
+        ConnectionStatus::OnlineMount(Online::Unmounted) => {
+            vec![action(Operation::Mount, true)]
+        }
         ConnectionStatus::OnlineMount(Online::Mounting) => vec![
             action(Operation::Unmount, true),
             action(Operation::Repair, false),
@@ -484,16 +522,10 @@ fn actions(status: &ConnectionStatus) -> Vec<OperationAction> {
         ConnectionStatus::OnlineMount(Online::PendingWrites | Online::Detaching) => {
             vec![action(Operation::Repair, false)]
         }
-        ConnectionStatus::OnlineMount(Online::WaitingForVpn) => vec![
-            action(Operation::Mount, true),
-            action(Operation::Repair, true),
-        ],
-        ConnectionStatus::OnlineMount(_) => {
-            vec![
-                action(Operation::Mount, false),
-                action(Operation::Repair, true),
-            ]
+        ConnectionStatus::OnlineMount(Online::WaitingForVpn) => {
+            vec![action(Operation::Mount, true)]
         }
+        ConnectionStatus::OnlineMount(_) => vec![action(Operation::Mount, false)],
         ConnectionStatus::OfflineMirror(
             Offline::Idle | Offline::Offline | Offline::MeteredPaused,
         ) => {
@@ -511,7 +543,7 @@ fn actions(status: &ConnectionStatus) -> Vec<OperationAction> {
         ConnectionStatus::OfflineMirror(Offline::Syncing) => vec![
             action(Operation::PauseSync, true),
             action(Operation::SyncNow, false),
-            action(Operation::Repair, false),
+            action(Operation::Repair, true),
         ],
         ConnectionStatus::OfflineMirror(Offline::Previewing) => vec![
             action(Operation::PauseSync, false),
@@ -557,12 +589,25 @@ fn warnings(
     status: &ConnectionStatus,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
+    if let Some(offline_warnings) = snapshot.offline_warnings.get(&connection.id) {
+        warnings.extend(offline_warnings.iter().cloned());
+    }
     if matches!(
         status,
         ConnectionStatus::OnlineMount(OnlineMountStatus::Error)
             | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Error)
     ) {
         warnings.push(fl!("warning-runtime-error"));
+    }
+    if matches!(
+        status,
+        ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
+    ) {
+        if !snapshot.network_ready {
+            warnings.push(fl!("warning-mounted-network-unavailable"));
+        } else if !vpn_ready(snapshot, connection.vpn_profile_id) {
+            warnings.push(fl!("warning-mounted-vpn-unavailable"));
+        }
     }
     if snapshot
         .recoveries
@@ -589,6 +634,7 @@ fn aggregate(rows: &[ConnectionRowState], dependency_warning_count: usize) -> Ag
             matches!(
                 row.status,
                 ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted)
+                    | ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
                     | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Idle)
             )
         })
@@ -621,6 +667,7 @@ fn aggregate(rows: &[ConnectionRowState], dependency_warning_count: usize) -> Ag
                 row.status,
                 ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForNetwork)
                     | ConnectionStatus::OnlineMount(OnlineMountStatus::WaitingForVpn)
+                    | ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
                     | ConnectionStatus::OnlineMount(OnlineMountStatus::Unavailable)
                     | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Offline)
                     | ConnectionStatus::OfflineMirror(OfflineMirrorStatus::WaitingForVpn)
@@ -647,7 +694,22 @@ fn dependency_warnings(inventory: Option<&DependencyInventory>) -> Vec<String> {
         .into_iter()
         .flat_map(|inventory| &inventory.reports)
         .filter(|report| report.required && report.state != DependencyState::Available)
-        .map(|report| format!("{:?}: {}", report.kind, report.summary))
+        .map(|report| {
+            use crate::diagnostics::DependencyKind;
+            let dependency = match report.kind {
+                DependencyKind::Rclone => "rclone".to_owned(),
+                DependencyKind::Onedriver => "onedriver".to_owned(),
+                DependencyKind::OneDriveSync => "onedrive".to_owned(),
+                DependencyKind::Fuse3 => fl!("dependency-fuse3"),
+                DependencyKind::NetworkManager => "NetworkManager".to_owned(),
+                DependencyKind::SystemdUser => fl!("dependency-systemd-user"),
+            };
+            fl!(
+                "dependency-warning",
+                dependency = dependency,
+                summary = report.summary.as_str()
+            )
+        })
         .collect()
 }
 
@@ -738,6 +800,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn online_repair_action_is_enabled_only_for_recovery_states() {
+        use OnlineMountStatus as Online;
+
+        for status in [Online::Degraded, Online::Error] {
+            assert!(
+                actions(&ConnectionStatus::OnlineMount(status))
+                    .iter()
+                    .any(|action| action.operation == Operation::Repair && action.enabled),
+                "Repair should be enabled for {status:?}"
+            );
+        }
+
+        for status in [
+            Online::Unmounted,
+            Online::WaitingForNetwork,
+            Online::WaitingForVpn,
+            Online::Mounting,
+            Online::Mounted,
+            Online::PendingWrites,
+            Online::Detaching,
+            Online::Unavailable,
+        ] {
+            assert!(
+                !actions(&ConnectionStatus::OnlineMount(status))
+                    .iter()
+                    .any(|action| action.operation == Operation::Repair && action.enabled),
+                "Repair should not be enabled for {status:?}"
+            );
+        }
+    }
+
     fn offline(connection_id: ConnectionId) -> Connection {
         Connection {
             id: connection_id,
@@ -762,13 +856,45 @@ mod tests {
     }
 
     #[test]
+    fn offline_retention_warning_is_visible_without_turning_success_into_error() {
+        let connection = offline(id("f661c5e3-25bd-4910-b0b9-d49c49fa6294"));
+        let warning = "Remote retention cleanup was incomplete; run Sync Now again.".to_owned();
+        let state = restore(&ControllerSnapshot {
+            config: ConfigDocument {
+                connections: vec![connection.clone()],
+                ..ConfigDocument::default()
+            },
+            sync_state: [(connection.id, SyncRuntimeState::Idle)]
+                .into_iter()
+                .collect(),
+            offline_warnings: [(connection.id, vec![warning.clone()])]
+                .into_iter()
+                .collect(),
+            ..ControllerSnapshot::default()
+        });
+
+        assert_eq!(
+            state.rows[0].status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Idle)
+        );
+        assert_eq!(state.rows[0].warnings, vec![warning]);
+        assert_eq!(state.aggregate.kind, AggregateKind::Attention);
+    }
+
+    #[test]
     fn restores_online_mount_from_actual_mount_table() {
-        let connection = online(id("2a3f5d45-e867-47e7-943f-66cf60e777ad"));
+        let mut connection = online(id("2a3f5d45-e867-47e7-943f-66cf60e777ad"));
+        let vpn_id = VpnProfileId::from_uuid(
+            Uuid::parse_str("17ea4cc5-f4f0-405b-b112-dad6f855bb77").expect("UUID"),
+        );
+        connection.vpn_profile_id = Some(vpn_id);
         let snapshot = ControllerSnapshot {
             config: ConfigDocument {
                 connections: vec![connection.clone()],
                 ..ConfigDocument::default()
             },
+            network_ready: false,
+            vpn_ready: [(vpn_id, false)].into_iter().collect(),
             mount_entries: vec![MountEntry {
                 target: connection.local_path.clone(),
                 source: "remote:".into(),
@@ -778,11 +904,52 @@ mod tests {
             ..ControllerSnapshot::default()
         };
         let state = restore(&snapshot);
-        assert_eq!(state.aggregate.kind, AggregateKind::Healthy);
+        assert_eq!(state.aggregate.kind, AggregateKind::Attention);
         assert_eq!(
             state.rows[0].status,
-            ConnectionStatus::OnlineMount(OnlineMountStatus::Mounted)
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
         );
+        assert!(state.rows[0].persistent_active);
+        assert_eq!(
+            state.rows[0].warnings,
+            vec![fl!("warning-mounted-network-unavailable")]
+        );
+        assert!(decide_operation(&state.rows[0], Operation::Unmount).allowed);
+    }
+
+    #[test]
+    fn mounted_vpn_loss_is_degraded_and_unmountable() {
+        let mut connection = online(id("1f30d7a5-59fb-41dc-820e-9610a43b2cb8"));
+        let vpn_id = VpnProfileId::from_uuid(
+            Uuid::parse_str("f9a794d9-89ad-45cf-a345-8726a3297c7e").expect("UUID"),
+        );
+        connection.vpn_profile_id = Some(vpn_id);
+        let state = restore(&ControllerSnapshot {
+            config: ConfigDocument {
+                connections: vec![connection.clone()],
+                ..ConfigDocument::default()
+            },
+            network_ready: true,
+            vpn_ready: [(vpn_id, false)].into_iter().collect(),
+            mount_entries: vec![MountEntry {
+                target: connection.local_path.clone(),
+                source: "remote:".into(),
+                filesystem: "fuse.rclone".into(),
+                options: vec![],
+            }],
+            ..ControllerSnapshot::default()
+        });
+
+        assert_eq!(state.aggregate.kind, AggregateKind::Attention);
+        assert_eq!(
+            state.rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Degraded)
+        );
+        assert_eq!(
+            state.rows[0].warnings,
+            vec![fl!("warning-mounted-vpn-unavailable")]
+        );
+        assert!(state.rows[0].persistent_active);
         assert!(decide_operation(&state.rows[0], Operation::Unmount).allowed);
     }
 
@@ -862,6 +1029,43 @@ mod tests {
     }
 
     #[test]
+    fn failed_clean_unmount_latch_exposes_repair_while_service_remains_active() {
+        let connection = online(id("ec03f03a-500c-47ae-ad2b-fc22efe895aa"));
+        let snapshot = ControllerSnapshot {
+            config: ConfigDocument {
+                connections: vec![connection.clone()],
+                ..ConfigDocument::default()
+            },
+            service_status: [(
+                connection.id,
+                UnitStatus {
+                    active: ActiveState::Active,
+                    enabled: true,
+                    detail: "running".into(),
+                    result: "success".into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            mount_entries: vec![MountEntry {
+                target: connection.local_path.clone(),
+                source: "onedriver".into(),
+                filesystem: "fuse.onedriver".into(),
+                options: vec![],
+            }],
+            online_repair_required: BTreeSet::from([connection.id]),
+            ..ControllerSnapshot::default()
+        };
+
+        let state = restore(&snapshot);
+        assert_eq!(
+            state.rows[0].status,
+            ConnectionStatus::OnlineMount(OnlineMountStatus::Error)
+        );
+        assert!(decide_operation(&state.rows[0], Operation::Repair).allowed);
+    }
+
+    #[test]
     fn restores_offline_sync_and_metered_states() {
         let connection = offline(id("3815551b-93f0-4731-ac61-b303bbff3260"));
         let mut snapshot = ControllerSnapshot {
@@ -899,6 +1103,76 @@ mod tests {
             ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Paused)
         );
         assert!(!state.rows[0].persistent_active);
+    }
+
+    #[test]
+    fn observed_offline_work_overrides_stale_disabled_state_and_remains_repairable() {
+        let mut connection = offline(id("948cb90d-6340-4832-80f9-2693466ba380"));
+        connection.enabled = false;
+        let mut snapshot = ControllerSnapshot {
+            config: ConfigDocument {
+                connections: vec![connection.clone()],
+                ..ConfigDocument::default()
+            },
+            sync_state: [(connection.id, SyncRuntimeState::Running)]
+                .into_iter()
+                .collect(),
+            conflicts: vec![ConflictRecord {
+                connection_id: connection.id,
+                relative_path: "still-running.txt".into(),
+                preserved_local_path: "/recovery/local".into(),
+                preserved_remote_path: "/recovery/remote".into(),
+            }],
+            ..ControllerSnapshot::default()
+        };
+
+        let state = restore(&snapshot);
+        let row = &state.rows[0];
+        assert_eq!(
+            row.status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Syncing)
+        );
+        assert!(row.persistent_active);
+        assert!(decide_operation(row, Operation::PauseSync).allowed);
+        assert!(decide_operation(row, Operation::Repair).allowed);
+
+        // A start that reached systemd before saved-state persistence failed
+        // is still shown as active and can be stopped.
+        snapshot.conflicts.clear();
+        snapshot
+            .sync_state
+            .insert(connection.id, SyncRuntimeState::Idle);
+        let state = restore(&snapshot);
+        let row = &state.rows[0];
+        assert_eq!(
+            row.status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Idle)
+        );
+        assert!(row.persistent_active);
+        assert!(decide_operation(row, Operation::PauseSync).allowed);
+
+        snapshot
+            .sync_state
+            .insert(connection.id, SyncRuntimeState::Failed);
+        let state = restore(&snapshot);
+        let row = &state.rows[0];
+        assert_eq!(
+            row.status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Error)
+        );
+        assert!(decide_operation(row, Operation::Repair).allowed);
+
+        snapshot
+            .sync_state
+            .insert(connection.id, SyncRuntimeState::Paused);
+        snapshot.paused_syncs.insert(connection.id);
+        let state = restore(&snapshot);
+        let row = &state.rows[0];
+        assert_eq!(
+            row.status,
+            ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable)
+        );
+        assert!(!row.persistent_active);
     }
 
     #[test]

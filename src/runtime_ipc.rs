@@ -8,7 +8,7 @@ use cosmic::iced::{Subscription, futures::SinkExt, stream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
-use cosmic_ext_applet_mounter::model::PreloadSettings;
+use cosmic_ext_applet_mounter::model::{ConnectionId, Operation, PreloadSettings};
 
 pub const RUNTIME_NAME: &str = "io.github.uutzinger.cosmic-ext-applet-mounter.Runtime";
 const SETTINGS_NAME: &str = "io.github.uutzinger.cosmic-ext-applet-mounter.Settings";
@@ -24,6 +24,7 @@ pub enum Command {
     SetRestore(bool),
     SetPreload(PreloadSettings),
     ConfigurationChanged,
+    RunOperation(ConnectionId, Operation),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,6 +33,20 @@ pub struct Status {
     pub restore_after_wake: bool,
     pub preload: PreloadSettings,
     pub sleep_status: Option<String>,
+    #[serde(default)]
+    pub sleep_needs_attention: bool,
+    #[serde(default)]
+    pub operation_revision: u64,
+    #[serde(default)]
+    pub operation_completions: Vec<OperationCompletion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OperationCompletion {
+    pub revision: u64,
+    pub connection_id: ConnectionId,
+    pub operation: Operation,
+    pub notice: String,
 }
 
 type Response = Result<Status, String>;
@@ -72,15 +87,17 @@ impl RuntimeInterface {
         self.0
             .send(Event::Request(command, reply))
             .await
-            .map_err(|_| zbus::fdo::Error::Failed("Applet closed".into()))?;
+            .map_err(|_| zbus::fdo::Error::Failed(crate::fl!("ui-runtime-ipc-applet-closed")))?;
         let status = tokio::time::timeout(Duration::from_secs(120), receiver)
             .await
             .map_err(|_| {
-                zbus::fdo::Error::Failed(
-                    "Applet request timed out; check current status before retrying".into(),
-                )
+                zbus::fdo::Error::Failed(crate::fl!(
+                    "ui-runtime-ipc-applet-request-timed-out-check-current-status"
+                ))
             })?
-            .map_err(|_| zbus::fdo::Error::Failed("Applet closed before replying".into()))?
+            .map_err(|_| {
+                zbus::fdo::Error::Failed(crate::fl!("ui-runtime-ipc-applet-closed-before-replying"))
+            })?
             .map_err(zbus::fdo::Error::Failed)?;
         serde_json::to_string(&status).map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
@@ -90,10 +107,9 @@ struct SettingsInterface(mpsc::Sender<Event>);
 #[zbus::interface(name = "io.github.uutzinger.CloudMounter.Settings")]
 impl SettingsInterface {
     async fn activate(&self) -> zbus::fdo::Result<()> {
-        self.0
-            .send(Event::Activate)
-            .await
-            .map_err(|_| zbus::fdo::Error::Failed("Settings window closed".into()))
+        self.0.send(Event::Activate).await.map_err(|_| {
+            zbus::fdo::Error::Failed(crate::fl!("ui-runtime-ipc-settings-window-closed"))
+        })
     }
 }
 
@@ -117,8 +133,13 @@ pub async fn request(command: Command) -> Response {
         serde_json::from_str(&response).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|_| "Applet request timed out; check current status before retrying".to_string())?
-    .map_err(|e| format!("Could not contact or update the running applet: {e}"))
+    .map_err(|_| crate::fl!("ui-runtime-ipc-applet-request-timed-out-check-current-status"))?
+    .map_err(|e| {
+        crate::fl!(
+            "ui-runtime-ipc-could-not-contact-or-update-the-running",
+            e = (e).to_string()
+        )
+    })
 }
 
 pub async fn activate_settings() -> bool {
@@ -182,8 +203,9 @@ async fn serve(settings: bool, mut output: cosmic::iced::futures::channel::mpsc:
                 let _ = output.send(Event::ClientReady).await;
             } else {
                 let _ = output
-                    .send(Event::Error(format!(
-                        "Window communication unavailable: {error}"
+                    .send(Event::Error(crate::fl!(
+                        "ui-runtime-ipc-window-communication-unavailable-error",
+                        error = (error).to_string()
                     )))
                     .await;
             }
@@ -205,6 +227,21 @@ mod tests {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+    }
+
+    #[test]
+    fn status_accepts_payloads_without_operation_completion_fields() {
+        let mut value = serde_json::to_value(Status::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("operation_revision");
+        object.remove("operation_completions");
+        object.remove("sleep_needs_attention");
+
+        let status: Status = serde_json::from_value(value).unwrap();
+
+        assert_eq!(status.operation_revision, 0);
+        assert!(status.operation_completions.is_empty());
+        assert!(!status.sleep_needs_attention);
     }
 
     // Never uses the desktop's bus, configuration, mounts, or sleep service.
@@ -257,12 +294,19 @@ mod tests {
             Command::SetPreload(PreloadSettings::default()),
             Command::Refresh,
             Command::ConfigurationChanged,
+            Command::RunOperation(
+                ConnectionId::from_uuid(
+                    uuid::Uuid::parse_str("2a3f5d45-e867-47e7-943f-66cf60e777ad").unwrap(),
+                ),
+                Operation::SyncNow,
+            ),
         ] {
             let expected = Status {
                 unmount_before_sleep: true,
                 restore_after_wake: true,
                 preload: PreloadSettings::default(),
                 sleep_status: Some("ready".into()),
+                ..Status::default()
             };
             let json = serde_json::to_string(&command).unwrap();
             let args = (json,);

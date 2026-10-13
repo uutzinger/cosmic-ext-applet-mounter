@@ -3,6 +3,14 @@
 This directory contains Flatpak packaging experiments. These files are not the
 final COSMIC repository submission.
 
+The permission review below targets the pending 0.5.3 working tree. The source
+manifest still pins `v0.5.2`; it does not build the newly migrated coordinator or
+inspection adapter until the release gate advances it to an accepted 0.5.3 tag.
+The GUI prototype copies local artifacts and is not reproducible release proof.
+Both manifests use the same application ID: installing either replaces that
+user's existing Flatpak installation, not the native/Debian package. Do not run
+native and Flatpak runtime owners together against shared configuration.
+
 ## Host Runner Probe
 
 `io.github.uutzinger.cosmic-ext-applet-mounter.HostRunnerProbe.json` copies the
@@ -13,8 +21,12 @@ the applet needs.
 Build the probe binary first:
 
 ```sh
-cargo build --release --example flatpak_host_runner_probe
+cargo build --release --features development-probes --example flatpak_host_runner_probe
 ```
+
+The extra probe executables are available only to tests or this explicit
+development feature. Native/Debian and production Flatpak builds use the
+default feature set; do not enable `development-probes` for the shipped applet.
 
 Build and install the local Flatpak:
 
@@ -37,6 +49,12 @@ Expected checks:
 - `systemctl --user --version`
 - `fusermount3 --version`
 
+These commands belong only to this development transport probe. The production
+applet does not run version/help commands for dependency inventory. Native runs
+discover executable availability; the Flatpak confirms its host-execution route
+and reports a typed failure from a real operation when a host tool is absent or
+incompatible. Packaging/install-time checks enforce supported minimums.
+
 This prototype grants only `--talk-name=org.freedesktop.Flatpak`, which is
 required for `flatpak-spawn --host`. Add broader filesystem or session
 permissions only after a specific failing feature proves they are required.
@@ -47,6 +65,18 @@ permissions only after a specific failing feature proves they are required.
 locally built applet binary, helper, desktop file, AppStream metadata, and icon
 into a Flatpak so the real GUI can be smoke-tested before the final
 reproducible manifest exists.
+
+Install the Freedesktop 25.08 SDK, Rust extension, and COSMIC BaseApp from
+Flathub before building. The COSMIC repository hosts applets but does not
+currently publish the BaseApp ref; `com.system76.Cosmic.BaseApp//stable` on
+Flathub uses the same Freedesktop 25.08 runtime as this manifest.
+
+```sh
+flatpak install --user flathub \
+  org.freedesktop.Sdk//25.08 \
+  org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+  com.system76.Cosmic.BaseApp//stable
+```
 
 Build the applet first:
 
@@ -68,8 +98,10 @@ Run the settings window:
 flatpak run io.github.uutzinger.cosmic-ext-applet-mounter --settings
 ```
 
-This prototype currently grants Wayland, fallback X11, IPC, DRI,
-`org.freedesktop.Flatpak` access, and narrow filesystem grants for:
+This prototype uses `com.system76.Cosmic.BaseApp//stable` on Freedesktop 25.08
+and shares the source manifest's explicit UI/network/D-Bus/filesystem grants.
+The [permission rationale](#permission-rationale) covers every `finish-arg`;
+the filesystem grants are:
 
 - `xdg-config/cosmic/io.github.uutzinger.cosmic-ext-applet-mounter`
 - `xdg-config/cosmic/com.system76.CosmicTheme.Mode` (read-only)
@@ -80,10 +112,11 @@ This prototype currently grants Wayland, fallback X11, IPC, DRI,
 - `xdg-cache/cosmic-ext-applet-mounter`
 - `~/.local/state/cosmic-ext-applet-mounter`
 
-These permissions are for GUI smoke testing; they still need to be minimized
-against the final applet behavior.
+The prototype now includes the same narrow COSMIC settings-daemon grant as the
+source manifest. This source change does not update an installed Flatpak; its
+effective permissions and behavior require the final rebuild/acceptance gate.
 
-The GUI prototype now includes a first host-visible state bridge for the applet
+The GUI prototype includes the host-visible state bridge for the applet
 configuration document. When the applet detects Flatpak mode, it reads and
 writes the same native-visible COSMIC config document used by source and Debian
 installs:
@@ -121,11 +154,44 @@ repository submission remains pending.
 
 ## Permission Rationale
 
-The tested architecture does not require `--filesystem=host`. Host commands are
-executed with `flatpak-spawn --host`, and generated systemd units run host
-tools such as `rclone`, `onedriver`, `onedrive`, `nmcli`, and `fusermount3`
+The reviewed manifests do not grant `--filesystem=host`. Retained engine/helper
+commands use the typed `flatpak-spawn --host` runner, and generated units run host
+tools such as `rclone`, `onedriver`, `onedrive`, and `fusermount3`
 outside the sandbox. The Flatpak itself needs only enough filesystem access to
 share applet state and app-owned engine metadata with the host user session.
+
+Desktop control uses the same NetworkManager, user-systemd, and logind D-Bus
+adapters in native/source, Debian, and Flatpak builds. There are no production
+`nmcli`, `systemctl`, `journalctl`, `systemd-analyze`, proprietary Cisco, `ip`,
+`getent`, or `nc` command routes. Manual and scheduled rclone mirrors share the
+Rust coordinator; generated units invoke the installed restricted `--run-bisync
+scheduled <UUID>` worker (native/Debian) or its fixed `flatpak run --command`
+entry point. No bisync shell wrapper remains. Test/install commands are not
+shipping runtime requirements.
+
+Retained command families are reconciled in the
+[host-command inventory](../../docs/engineering/flatpak-host-command-inventory.md):
+
+| Host command | Why it remains |
+|---|---|
+| `rclone` | Remote setup/auth/configuration; scoped access checks; private RC readiness, queue/health/refresh/job operations; coordinator preview/sync, recovery markers, checksum verification, and ownership-checked retention. |
+| `onedriver` | Online OneDrive authentication; generated service runs the mount engine directly. |
+| `onedrive` | Offline OneDrive authentication, preview/sync/status; generated service runs its monitor directly. |
+| `fusermount3` | Clean FUSE detach and confirmed lazy recovery. |
+| `mountpoint`, `find`, `cat` | Host mount readiness, path/emptiness/preload checks, and mount-namespace inspection; native mountinfo instead reads local `/proc`. |
+| `flatpak document-info` | Explicit Documents portal-v4 compatibility exception, selected only for the unsupported sandbox interface-version result. |
+| `flatpak-spawn` | Transport for the above fixed host requests, not a UI command endpoint. |
+
+The fixed inspection adapter accepts only configuration dump or mountinfo,
+with a 10-second deadline, 1 MiB/4 MiB per-stream limits, strict validation,
+cancellation, and `--watch-bus` host-child lifetime protection. Other engine
+operations retain their own typed deadlines/safety policy. Raw config dumps
+are not returned in UI messages/errors. Idle rclone mirrors do not run bisync
+to scrape pending counts; active runs publish invocation-matched app-owned state.
+
+Keeping `org.freedesktop.Flatpak` permits host execution at the sandbox boundary;
+application-side fixed commands do not turn that grant into an OS-enforced
+per-executable allowlist. This retained exception still requires submission review.
 
 Current final-manifest `finish-args`:
 
@@ -133,17 +199,44 @@ Current final-manifest `finish-args`:
 - `--socket=fallback-x11`: retained as the tested fallback display path.
 - `--share=ipc`: paired with fallback X11 and common GUI toolkit behavior.
 - `--share=network`: lets the SharePoint editor verify a document-library
-  drive with Microsoft Graph. Host rclone still handles file access.
+  drive with Microsoft Graph and lets in-process VPN readiness checks perform
+  route selection, DNS resolution, and bounded endpoint connections. Host
+  rclone still handles file access.
 - `--device=dri`: retained from the GUI prototype so libcosmic rendering and
   acceleration match the tested settings-window behavior.
+- `--talk-name=com.system76.CosmicSettingsDaemon`: pinned libcosmic's
+  `dbus-config` integration obtains its settings proxy and watches COSMIC config/
+  theme changes. Direct host theme-file reads remain narrowly read-only below.
 - `--talk-name=org.freedesktop.Flatpak`: required for
   `flatpak-spawn --host`.
+- Documents portal access uses Flatpak's default allowance for
+  `org.freedesktop.portal.*`; no additional permission is needed. Sandboxed
+  portal v5+ resolves selected document IDs with `GetHostPaths`, while native
+  runs use `Info`. A host `flatpak document-info` fallback remains only for
+  sandboxed portal v4, whose host-path methods are not sandbox-accessible.
+- `--talk-name=org.freedesktop.systemd1`: control the applet's generated user
+  services and timers and start the fixed, user-installed
+  `cosmic-mounter-openconnect-agent.service` before OpenConnect activation.
+  Daemon reload, enable/disable, start/stop/restart, status, failure reset,
+  invocation IDs, job completion, unit load-state validation, and sleep-cleanup
+  policy checks no longer execute host `systemctl --user` or
+  `systemd-analyze`. Generated unit syntax still passes systemd's parser in
+  build/tests.
 - `--system-talk-name=org.freedesktop.login1`: subscribe to sleep preparation
   and retain the delay-inhibitor descriptor while opt-in Online cleanup runs.
+- `--system-talk-name=org.freedesktop.NetworkManager`: discover and control
+  saved VPN profiles and read connectivity, interface, and metered state through
+  NetworkManager D-Bus. The applet and generated metered-network guard no
+  longer execute host `nmcli`.
+- `--own-name` and `--talk-name` for
+  `io.github.uutzinger.cosmic-ext-applet-mounter.Runtime` and `.Settings`: the
+  typed cross-window/runtime IPC interfaces, single runtime ownership, settings
+  coordination, and completion notifications. These do not expose command text.
 - `--filesystem=xdg-run/systemd/user:create`: create only app-owned Online-unit
   runtime drop-ins for normal, nonforcing sleep cleanup. These safeguards
   persist for the user runtime session. Offline mirror units are not changed.
-  Both new sleep permissions require verification in a rebuilt Flatpak; older
+  The logind grant and runtime drop-in path require final rebuilt-Flatpak
+  verification; older
   installed packages will not acquire them from source changes alone.
 - `--filesystem=xdg-config/cosmic/com.system76.CosmicTheme.Mode:ro`: read the
   host COSMIC light/dark preference for standalone settings windows.
@@ -162,8 +255,28 @@ Current final-manifest `finish-args`:
 - `--filesystem=xdg-cache/cosmic-ext-applet-mounter:create`: store app-owned
   caches used by host-run engines such as onedriver/rclone.
 - `--filesystem=~/.local/state/cosmic-ext-applet-mounter:create`: store
-  app-owned runtime state such as rclone bisync work files.
+  coordinator locks/results, invocation-matched progress, and rclone bisync work files.
 
 The applet still uses the desktop folder portal for user-selected mountpoints
 and mirror directories. Document-portal paths are resolved back to host-visible
 paths before saving so host systemd services can use them.
+
+Resolving a host path does not itself grant the sandbox access to that original
+path. Final worker acceptance must prove local mirror/recovery metadata access
+under the reviewed grants and portal authorization. If another grant is needed,
+record the specific path/operation and a narrowly scoped solution; do not silently
+add `--filesystem=host`. Host engine execution and host-visible FUSE mounts do
+not prove that the sandboxed Rust worker can access every user-selected path.
+
+All remaining grants support current source paths; replacing host CLIs does not
+remove the D-Bus grants for their replacement APIs or the shared engine/unit
+paths. No blanket session/system bus socket or proprietary VPN-service grant is
+present. Final acceptance must inspect effective permissions (including BaseApp
+defaults), exact source/runtime identity, generated worker/guard units, and live
+Tasks (5)/(6) behavior before release. Do not enable `development-probes` in the
+shipping build, advance the tag prematurely, or substitute a different base/runtime.
+
+The packaged optional OneDrive auth helper uses Python GI, GTK 3, and WebKit2
+4.1 introspection. Final sandbox acceptance must verify those imports and its
+sign-in handoff inside the accepted runtime/base (or document manual URL handoff).
+Host Debian recommendations/installer packages do not supply sandbox libraries.

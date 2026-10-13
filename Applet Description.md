@@ -86,6 +86,17 @@ the network, VPN, or provider is slow.
   provides recovery and manual detach controls.
 - When connectivity returns, the applet automatically remounts connections that
   remain enabled, after all network and VPN readiness checks pass.
+- While a mount remains present but a required network or VPN dependency is
+  unavailable, the row is degraded rather than reported healthy. Unmount stays
+  available, along with the separately confirmed Repair/lazy-detach action if
+  clean unmount cannot detach it. Repair changes to a separately armed Confirm
+  Repair action outside the primary-switch row; duplicate delivery of its first
+  activation cannot perform the lazy detach, and its hit target cannot be
+  confused with Unmount. The action disappears as soon as Confirm Repair starts
+  the asynchronous cleanup. The pending-upload number is hidden as
+  unverifiable, and the applet tells the user to turn the connection off and on
+  to reauthenticate. It does not open an interactive password or second-factor
+  dialog merely because background connectivity returned.
 - The applet provides explicit mount, unmount, retry, and repair actions.
 
 An online mount's cache improves compatibility and reliability, but it is not a
@@ -117,6 +128,14 @@ directory, so cloud connectivity cannot block normal browsing and editing.
 - Deleted or overwritten files are retained in recovery storage for 30 days.
 - Interrupted synchronization resumes or recovers without silently discarding
   local work.
+- Offline Repair is a separately confirmed recovery-and-pause operation. For
+  rclone bisync it disables the schedule, stops the finite service, and retains
+  the bisync lock and recovery state. For `abraunegg/onedrive` it stops and
+  disables only the continuous monitor while preserving the client's token,
+  database, lock/state, mirror, and recovery data. Neither path synchronizes,
+  resyncs, authenticates, deletes recovery state, or uses Online-mount FUSE
+  Repair. The final row state comes from observed coordinator and systemd state,
+  not merely from a successful stop request.
 
 For Google Drive, cloud-native Google Docs, Sheets, and Slides are excluded from
 Offline mirror mode because exported representations cannot be safely edited
@@ -207,37 +226,50 @@ OneDrive, Box, and SharePoint use their provider-wide values.
 
 ## Supported VPN Connections
 
-The applet supports storage dependencies on:
+The applet supports storage dependencies on VPN profiles managed by
+NetworkManager. VPN profiles and credentials are configured outside the applet,
+for example with `nm-connection-editor`. The applet enumerates saved profiles
+over NetworkManager D-Bus and allows a user to associate one profile with a
+storage connection. It activates, observes, and deactivates that profile through
+NetworkManager D-Bus; it does not invoke `nmcli` or a proprietary VPN client.
 
-- Cisco Secure Client.
-- VPN connections configured through the COSMIC desktop network settings and
-  managed by NetworkManager.
-
-VPN profiles and credentials are configured outside the applet. The applet
-enumerates available profiles and allows a user to associate one profile with a
-storage connection.
+Cisco-compatible gateways are supported through the packaged NetworkManager
+OpenConnect plugin. When an OpenConnect profile requires interactive
+authentication, NetworkManager requests secrets over D-Bus from a host
+`nm-applet` secret agent. That agent launches the OpenConnect authentication
+dialog with all gateway-defined fields, including multi-field password and
+second-factor prompts. This `nm-applet` dependency applies only to OpenConnect
+profiles. Other NetworkManager VPN plugins use their own authentication paths.
+The applet never receives, stores, displays, or forwards VPN credentials and
+does not invoke the authentication dialog directly. Before OpenConnect
+activation, it restarts the installed static authentication-agent service through
+the systemd user-manager D-Bus and waits for successful job completion; it does
+not execute `nm-applet` or `systemctl`.
 
 A connection may define readiness checks such as active NetworkManager state,
 interface presence, route presence, DNS resolution, or endpoint reachability.
 Storage mounting or synchronization starts only after the checks pass.
 
-Starting the Cisco VPN agent does not necessarily establish an authenticated
-tunnel. The applet may start the agent and open Cisco Secure Client, then waits
-for the configured readiness checks while the user completes authentication.
-
 The applet disconnects a VPN only when it activated that VPN and no other active
 storage connection still requires it.
 
-### Interactive VPN connection wait (A)
+### Interactive VPN connection wait
 
-Cisco Secure Client is launched as an interactive application; the applet does
-not kill its window after a short command timeout. The saved Cisco timeout
-remains 90 seconds. Activation and readiness share one deadline, transient
-readiness failures are retried, and a mount starts only after the tunnel is
-connected and every configured readiness check passes. Timeout fails the mount
-attempt and the user can retry with the existing mount control. VPN detection
-preserves customized timeouts and readiness checks. Dedicated progress and
-Cancel/Retry controls remain a planned UI improvement.
+VPN activation and readiness share one bounded deadline that includes time for
+interactive password and second-factor authentication. Transient readiness
+failures are retried, and a mount starts only after NetworkManager reports the
+tunnel active and every configured readiness check passes. Timeout or
+cancellation fails the mount attempt without allowing a late activation result
+to start storage. Repeated requests for the same profile share one activation
+attempt and do not create duplicate authentication prompts.
+
+Before activating an OpenConnect profile, the applet restarts
+`cosmic-mounter-openconnect-agent.service` through the systemd user-manager
+D-Bus and waits for the complete start job, including the service's brief
+secret-agent registration stabilization step. If the unit is absent or fails,
+the applet stops before activation and provides package and service-installation
+guidance. The agent remains available for reauthentication until the graphical
+session ends. This operation is skipped for non-OpenConnect VPN profiles.
 
 ## Unmount Before Sleep (B)
 
@@ -504,6 +536,40 @@ sync on disposable data. Background scheduling becomes available only after
 SharePoint-specific overwrite, conflict, deletion, and interruption checks
 pass; indexing or applications that replace files during save can otherwise
 trigger unwanted uploads. Credentials stay with the external engines.
+
+## Native and Flatpak Host Integration
+
+Native and Flatpak installations use the same typed integration boundaries. The
+applet uses D-Bus APIs wherever the host exposes the required operation:
+
+- NetworkManager D-Bus for VPN discovery, state, activation, and deactivation;
+- the systemd user-manager D-Bus API for applet-owned service and timer
+  lifecycle and the fixed OpenConnect authentication-agent service;
+- logind D-Bus for sleep preparation; and
+- the Documents portal D-Bus API for host-path resolution when the installed
+  portal version supports the required method.
+
+The Flatpak shall not route a host operation through `flatpak-spawn --host` when
+an adequate D-Bus API is available. Host process execution is limited to the
+external storage engines, required FUSE/host-namespace helpers, and explicitly
+documented, version-gated compatibility fallbacks. Each
+remaining host command has a fixed executable identity, separately validated
+arguments, bounded output and lifetime, cancellation behavior, and secret
+redaction. The maintained command inventory in `docs/engineering/flatpak-host-command-inventory.md` records why
+each invocation as Replaced by D-Bus, Removed, or justified Unavoidable invocation;
+test/development-only commands do not expand the shipping executable surface.
+
+Manual and scheduled rclone mirrors share one Rust coordinator. Native/Debian
+services run the installed restricted worker; Flatpak services use its fixed
+`flatpak run --command` entry point. Neither route executes a bisync shell wrapper.
+Read-only remote/mount inspection is asynchronous and bounded, with stale editor
+results rejected and fresh observations retained for safety-critical decisions.
+
+On hosts whose Documents portal is older than version 5, a narrowly gated
+`flatpak document-info` fallback may remain because the sandbox cannot otherwise
+resolve a selected document path. It shall be removed when the minimum supported
+portal provides `GetHostPaths`. This exception does not permit general host
+shell execution.
 
 ## Legacy Import and Removal
 

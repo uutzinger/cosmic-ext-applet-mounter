@@ -53,7 +53,7 @@ where
         type Value = Option<u64>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("an unsigned integer or optional unsigned integer")
+            formatter.write_str(&crate::fl!("config-expected-optional-integer"))
         }
 
         fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
@@ -163,7 +163,96 @@ pub enum ValidationError {
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{self:?}")
+        let message = match self {
+            Self::InvalidSchemaVersion(version) => {
+                crate::fl!("config-invalid-schema", version = version.to_string())
+            }
+            Self::InvalidName { field, .. } => {
+                crate::fl!("config-invalid-name", field = field.to_string())
+            }
+            Self::DuplicateConnectionId(id) => {
+                crate::fl!("config-duplicate-connection", id = id.to_string())
+            }
+            Self::DuplicateVpnProfileId(id) => {
+                crate::fl!("config-duplicate-vpn", id = id.to_string())
+            }
+            Self::MissingVpnProfile(id) => crate::fl!("config-missing-vpn", id = id.to_string()),
+            Self::InvalidRemoteReference(id) => {
+                crate::fl!("config-invalid-remote", id = id.to_string())
+            }
+            Self::InvalidRemoteSubpath(id) => {
+                crate::fl!("config-invalid-subpath", id = id.to_string())
+            }
+            Self::InvalidLocalPath { connection, path } => crate::fl!(
+                "config-invalid-local",
+                id = connection.to_string(),
+                path = path.display().to_string()
+            ),
+            Self::UnsafeSystemPath { connection, path } => crate::fl!(
+                "config-unsafe-system-path",
+                id = connection.to_string(),
+                path = path.display().to_string()
+            ),
+            Self::ConflictingTargets {
+                first,
+                second,
+                first_path,
+                second_path,
+            } => crate::fl!(
+                "config-conflicting-targets",
+                first = first.to_string(),
+                second = second.to_string(),
+                first_path = first_path.display().to_string(),
+                second_path = second_path.display().to_string()
+            ),
+            Self::InvalidCacheDirectory { connection, path } => crate::fl!(
+                "config-invalid-cache",
+                id = connection.to_string(),
+                path = path.display().to_string()
+            ),
+            Self::InvalidRecoveryDirectory { connection, path } => crate::fl!(
+                "config-invalid-recovery",
+                id = connection.to_string(),
+                path = path.display().to_string()
+            ),
+            Self::InvalidSyncInterval(id) => {
+                crate::fl!("config-invalid-sync-interval", id = id.to_string())
+            }
+            Self::InvalidVpnTimeout(id) => {
+                crate::fl!("config-invalid-vpn-timeout", id = id.to_string())
+            }
+            Self::InvalidReadinessValue(id) => {
+                crate::fl!("config-invalid-readiness", id = id.to_string())
+            }
+            Self::InvalidPreloadSeconds(value) => crate::fl!(
+                "config-invalid-preload-time",
+                value = value.to_string(),
+                min = MIN_PRELOAD_SECONDS,
+                max = MAX_PRELOAD_SECONDS
+            ),
+            Self::InvalidPreloadDepth(value) => crate::fl!(
+                "config-invalid-preload-depth",
+                value = value.to_string(),
+                min = MIN_PRELOAD_DEPTH,
+                max = MAX_PRELOAD_DEPTH
+            ),
+            Self::InvalidPreloadPolicy(provider) => {
+                crate::fl!(
+                    "config-invalid-preload-policy",
+                    provider = provider.to_string()
+                )
+            }
+            Self::InvalidSmbPreloadOverride(id) => {
+                crate::fl!("config-invalid-smb-preload", id = id.to_string())
+            }
+            Self::InvalidSftpPreloadOverride(id) => {
+                crate::fl!("config-invalid-sftp-preload", id = id.to_string())
+            }
+            Self::InvalidTeamsIdentity(id) => {
+                crate::fl!("config-invalid-sharepoint", id = id.to_string())
+            }
+        };
+        formatter.write_str(&message)
     }
 }
 
@@ -180,7 +269,14 @@ pub enum SaveError {
 impl fmt::Display for SaveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Validation(errors) => write!(formatter, "configuration is invalid: {errors:?}"),
+            Self::Validation(errors) => formatter.write_str(&crate::fl!(
+                "ui-config-configuration-is-invalid-errors",
+                errors = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
             Self::Storage(error) => error.fmt(formatter),
             Self::Io(error) | Self::Serialize(error) => error.fmt(formatter),
         }
@@ -233,9 +329,10 @@ impl HostVisibleConfigStorage {
                 Err(error) => LoadReport {
                     config: Config::default(),
                     source: LoadSource::RecoveredDefaults,
-                    warnings: vec![format!(
-                        "failed to parse host-visible applet configuration `{}`: {error}",
-                        self.document_path.display()
+                    warnings: vec![crate::fl!(
+                        "ui-config-failed-to-parse-host-visible-applet-configuration",
+                        value1 = (self.document_path.display()).to_string(),
+                        error = (error).to_string()
                     )],
                 },
             },
@@ -247,9 +344,10 @@ impl HostVisibleConfigStorage {
             Err(error) => LoadReport {
                 config: Config::default(),
                 source: LoadSource::RecoveredDefaults,
-                warnings: vec![format!(
-                    "failed to read host-visible applet configuration `{}`: {error}",
-                    self.document_path.display()
+                warnings: vec![crate::fl!(
+                    "ui-config-failed-to-read-host-visible-applet-configuration",
+                    value1 = (self.document_path.display()).to_string(),
+                    error = (error).to_string()
                 )],
             },
         }
@@ -257,31 +355,34 @@ impl HostVisibleConfigStorage {
 
     fn write(&self, document: &ConfigDocument) -> Result<(), SaveError> {
         let parent = self.document_path.parent().ok_or_else(|| {
-            SaveError::Io(format!(
-                "configuration path `{}` has no parent directory",
-                self.document_path.display()
+            SaveError::Io(crate::fl!(
+                "ui-config-configuration-path-value1-has-no-parent-directory",
+                value1 = (self.document_path.display()).to_string()
             ))
         })?;
         fs::create_dir_all(parent).map_err(|error| {
-            SaveError::Io(format!(
-                "failed to create configuration directory `{}`: {error}",
-                parent.display()
+            SaveError::Io(crate::fl!(
+                "ui-config-failed-to-create-configuration-directory-value1-error",
+                value1 = (parent.display()).to_string(),
+                error = (error).to_string()
             ))
         })?;
         let content = ron::ser::to_string_pretty(document, ron::ser::PrettyConfig::new())
             .map_err(|error| SaveError::Serialize(error.to_string()))?;
         let tmp_path = self.document_path.with_extension("tmp");
         fs::write(&tmp_path, content).map_err(|error| {
-            SaveError::Io(format!(
-                "failed to write temporary configuration `{}`: {error}",
-                tmp_path.display()
+            SaveError::Io(crate::fl!(
+                "ui-config-failed-to-write-temporary-configuration-value1-error",
+                value1 = (tmp_path.display()).to_string(),
+                error = (error).to_string()
             ))
         })?;
         fs::rename(&tmp_path, &self.document_path).map_err(|error| {
             let _ = fs::remove_file(&tmp_path);
-            SaveError::Io(format!(
-                "failed to install configuration `{}`: {error}",
-                self.document_path.display()
+            SaveError::Io(crate::fl!(
+                "ui-config-failed-to-install-configuration-value1-error",
+                value1 = (self.document_path.display()).to_string(),
+                error = (error).to_string()
             ))
         })
     }
@@ -296,7 +397,12 @@ impl AppConfigStorage {
         } else {
             cosmic_config::Config::new(APP_ID, Config::VERSION)
                 .map(Self::Cosmic)
-                .map_err(|error| format!("Failed to open applet configuration storage: {error}"))
+                .map_err(|error| {
+                    crate::fl!(
+                        "ui-config-failed-to-open-applet-configuration-storage-error",
+                        error = (error).to_string()
+                    )
+                })
         }
     }
 
@@ -333,9 +439,9 @@ fn running_in_flatpak() -> bool {
 }
 
 fn host_visible_document_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-        "HOME is not set; cannot locate host-visible applet configuration".to_owned()
-    })?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| crate::fl!("ui-config-home-is-not-set-cannot-locate-host"))?;
     Ok(home
         .join(".config")
         .join("cosmic")
@@ -415,8 +521,10 @@ impl Config {
                         };
                         let mut warnings = Vec::new();
                         if let Err(error) = migrated.write_validated(current) {
-                            warnings
-                                .push(format!("failed to persist migrated configuration: {error}"));
+                            warnings.push(crate::fl!(
+                                "ui-config-failed-to-persist-migrated-configuration-error",
+                                error = (error).to_string()
+                            ));
                         }
                         LoadReport {
                             config: migrated,
@@ -924,6 +1032,18 @@ mod tests {
         document.restore_after_wake = true;
         let loaded: ConfigDocument = ron::from_str(&ron::to_string(&document).unwrap()).unwrap();
         assert_eq!(loaded, document);
+    }
+
+    #[test]
+    fn proprietary_cisco_kind_loads_only_as_an_inert_legacy_marker() {
+        assert_eq!(
+            ron::from_str::<VpnKind>("Cisco").expect("legacy Cisco kind"),
+            VpnKind::LegacyCisco
+        );
+        assert_eq!(
+            ron::to_string(&VpnKind::LegacyCisco).expect("serialize compatibility marker"),
+            "Cisco"
+        );
     }
 
     #[test]

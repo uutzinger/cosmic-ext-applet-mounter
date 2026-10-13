@@ -23,13 +23,27 @@ pub enum ImportError {
 impl fmt::Display for ImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ReadDirectory(error) => write!(formatter, "failed to scan units: {error}"),
-            Self::ReadUnit(path, error) => {
-                write!(formatter, "failed to read {}: {error}", path.display())
-            }
-            Self::Malformed(error) => write!(formatter, "malformed unit: {error}"),
-            Self::Unsupported(error) => write!(formatter, "unsupported unit: {error}"),
-            Self::Conflict(error) => write!(formatter, "conflicting import: {error}"),
+            Self::ReadDirectory(error) => formatter.write_str(&crate::fl!(
+                "ui-import-failed-to-scan-units-error",
+                error = (error).to_string()
+            )),
+            Self::ReadUnit(path, error) => formatter.write_str(&crate::fl!(
+                "ui-import-failed-to-read-value1-error",
+                value1 = (path.display()).to_string(),
+                error = (error).to_string()
+            )),
+            Self::Malformed(error) => formatter.write_str(&crate::fl!(
+                "ui-import-malformed-unit-error",
+                error = (error).to_string()
+            )),
+            Self::Unsupported(error) => formatter.write_str(&crate::fl!(
+                "ui-import-unsupported-unit-error",
+                error = (error).to_string()
+            )),
+            Self::Conflict(error) => formatter.write_str(&crate::fl!(
+                "ui-import-conflicting-import-error",
+                error = (error).to_string()
+            )),
         }
     }
 }
@@ -115,10 +129,11 @@ pub fn scan_legacy_units(directory: &Path) -> Result<Vec<LegacyUnit>, ImportErro
 }
 
 pub fn parse_rclone_backends(output: &str) -> Result<BTreeMap<String, Provider>, ImportError> {
-    let config: serde_json::Value = serde_json::from_str(output)
-        .map_err(|_| ImportError::Malformed("rclone config dump is not valid JSON".into()))?;
+    let config: serde_json::Value = serde_json::from_str(output).map_err(|_| {
+        ImportError::Malformed(crate::fl!("ui-import-rclone-config-dump-is-not-valid-json"))
+    })?;
     let remotes = config.as_object().ok_or_else(|| {
-        ImportError::Malformed("rclone config dump did not return an object".into())
+        ImportError::Malformed(crate::fl!("ui-import-rclone-config-dump-did-not-return-an"))
     })?;
     Ok(remotes
         .iter()
@@ -148,7 +163,10 @@ pub fn parse_unit(path: &Path, content: &str) -> Result<LegacyUnit, ImportError>
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            return Err(ImportError::Malformed(format!("line lacks '=': {line}")));
+            return Err(ImportError::Malformed(crate::fl!(
+                "ui-import-line-lacks-line",
+                line = (line).to_string()
+            )));
         };
         values
             .entry(format!("{section}.{key}"))
@@ -158,7 +176,7 @@ pub fn parse_unit(path: &Path, content: &str) -> Result<LegacyUnit, ImportError>
     let exec_start = values
         .get("Service.ExecStart")
         .and_then(|values| values.first())
-        .ok_or_else(|| ImportError::Unsupported("missing ExecStart".into()))
+        .ok_or_else(|| ImportError::Unsupported(crate::fl!("ui-import-missing-execstart")))
         .and_then(|value| tokenize_systemd_exec(value))?;
     Ok(LegacyUnit {
         path: path.to_path_buf(),
@@ -247,12 +265,14 @@ pub fn replacement_plan(
     default_config_root: &Path,
 ) -> Result<ImportReplacementPlan, ImportError> {
     if !confirmed {
-        return Err(ImportError::Conflict("import requires confirmation".into()));
+        return Err(ImportError::Conflict(crate::fl!(
+            "ui-import-import-requires-confirmation"
+        )));
     }
     if preview.active_conflict || preview.local_target_conflict {
-        return Err(ImportError::Conflict(
-            "active service or local target conflict must be resolved first".into(),
-        ));
+        return Err(ImportError::Conflict(crate::fl!(
+            "ui-import-active-service-or-local-target-conflict-must"
+        )));
     }
     let service = match preview.engine {
         LegacyEngine::RcloneMount => {
@@ -277,7 +297,9 @@ pub fn replacement_plan(
 
 fn classify_unit(unit: &LegacyUnit) -> Result<LegacyEngine, ImportError> {
     let Some(executable) = unit.exec_start.first() else {
-        return Err(ImportError::Unsupported("empty ExecStart".into()));
+        return Err(ImportError::Unsupported(crate::fl!(
+            "ui-import-empty-execstart"
+        )));
     };
     let binary = Path::new(executable)
         .file_name()
@@ -288,8 +310,9 @@ fn classify_unit(unit: &LegacyUnit) -> Result<LegacyEngine, ImportError> {
             Ok(LegacyEngine::RcloneMount)
         }
         "onedriver" => Ok(LegacyEngine::Onedriver),
-        _ => Err(ImportError::Unsupported(format!(
-            "unsupported executable {executable}"
+        _ => Err(ImportError::Unsupported(crate::fl!(
+            "ui-import-unsupported-executable-executable",
+            executable = (executable).to_string()
         ))),
     }
 }
@@ -300,9 +323,9 @@ fn parse_rclone_mount(
     rclone_backends: &BTreeMap<String, Provider>,
 ) -> Result<ParsedLegacyConnection, ImportError> {
     if unit.exec_start.len() < 4 {
-        return Err(ImportError::Malformed(
-            "rclone mount requires remote and target".into(),
-        ));
+        return Err(ImportError::Malformed(crate::fl!(
+            "ui-import-rclone-mount-requires-remote-and-target"
+        )));
     }
     let remote = &unit.exec_start[2];
     let target = expand_home(&unit.exec_start[3], home);
@@ -311,8 +334,9 @@ fn parse_rclone_mount(
         .get(&remote_reference)
         .copied()
         .ok_or_else(|| {
-            ImportError::Unsupported(format!(
-                "rclone remote {remote_reference} has no configured supported backend"
+            ImportError::Unsupported(crate::fl!(
+                "ui-import-rclone-remote-remote-reference-has-no-configured",
+                remote_reference = (remote_reference).to_string()
             ))
         })?;
     let mut cache_directory = None;
@@ -328,9 +352,9 @@ fn parse_rclone_mount(
                     ));
                 };
                 if expand_home(value, home) != home.join(".config/rclone/rclone.conf") {
-                    return Err(ImportError::Unsupported(
-                        "legacy service uses a non-default rclone config file".into(),
-                    ));
+                    return Err(ImportError::Unsupported(crate::fl!(
+                        "ui-import-legacy-service-uses-a-non-default-rclone"
+                    )));
                 }
                 index += 2;
             }
@@ -440,7 +464,8 @@ fn parse_onedriver(unit: &LegacyUnit, home: &Path) -> Result<ParsedLegacyConnect
             }
         }
     }
-    let target = target.ok_or_else(|| ImportError::Malformed("onedriver target missing".into()))?;
+    let target = target
+        .ok_or_else(|| ImportError::Malformed(crate::fl!("ui-import-onedriver-target-missing")))?;
     Ok(ParsedLegacyConnection {
         provider: Provider::OneDrive,
         remote_reference: "onedrive".into(),
@@ -453,10 +478,14 @@ fn parse_onedriver(unit: &LegacyUnit, home: &Path) -> Result<ParsedLegacyConnect
 
 fn parse_remote(value: &str) -> Result<(String, Option<String>), ImportError> {
     let Some((reference, subpath)) = value.split_once(':') else {
-        return Err(ImportError::Malformed("rclone remote lacks ':'".into()));
+        return Err(ImportError::Malformed(crate::fl!(
+            "ui-import-rclone-remote-lacks"
+        )));
     };
     if reference.is_empty() || reference.chars().any(char::is_control) {
-        return Err(ImportError::Malformed("invalid remote reference".into()));
+        return Err(ImportError::Malformed(crate::fl!(
+            "ui-import-invalid-remote-reference"
+        )));
     }
     let subpath = (!subpath.is_empty()).then(|| subpath.to_owned());
     Ok((reference.to_owned(), subpath))
@@ -508,9 +537,9 @@ fn tokenize_systemd_exec(value: &str) -> Result<Vec<String>, ImportError> {
         }
     }
     if quote.is_some() || escaped {
-        return Err(ImportError::Malformed(
-            "unterminated quoting or escape".into(),
-        ));
+        return Err(ImportError::Malformed(crate::fl!(
+            "ui-import-unterminated-quoting-or-escape"
+        )));
     }
     if !current.is_empty() {
         tokens.push(current);
@@ -519,7 +548,9 @@ fn tokenize_systemd_exec(value: &str) -> Result<Vec<String>, ImportError> {
         .iter()
         .any(|token| token.contains('\0') || token.contains('\n') || token.contains('\r'))
     {
-        return Err(ImportError::Malformed("unsafe control character".into()));
+        return Err(ImportError::Malformed(crate::fl!(
+            "ui-import-unsafe-control-character"
+        )));
     }
     Ok(tokens)
 }

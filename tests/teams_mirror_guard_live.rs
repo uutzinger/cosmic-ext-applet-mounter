@@ -1,19 +1,48 @@
 // SPDX-License-Identifier: MIT
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
+use cosmic_ext_applet_mounter::bisync_coordinator::{self, BisyncMode};
 use cosmic_ext_applet_mounter::config::{APP_ID, Config, ConfigDocument};
-use cosmic_ext_applet_mounter::mirror_script;
 use cosmic_ext_applet_mounter::model::{
     Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, Provider, TuningProfile,
 };
+use cosmic_ext_applet_mounter::process::SystemCommandRunner;
 use cosmic_ext_applet_mounter::sync::rclone_bisync_plan;
 use cosmic_ext_applet_mounter::teams::{MIRROR_GUARD_FLAG, MirrorGuardBinding, parse_library_url};
 use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+struct DisposableRemote(String);
+impl Drop for DisposableRemote {
+    fn drop(&mut self) {
+        // Constructed only from a fresh UUID child of the approved test root.
+        let output = Command::new("rclone").args(["purge", &self.0]).output();
+        if !output.is_ok_and(|result| result.status.success()) {
+            eprintln!(
+                "Disposable SharePoint test cleanup failed; inspect the cm-managed-runner test child."
+            );
+        }
+    }
+}
+
+fn assert_remote_matches_local(remote: &str, local: &Path, filters: &Path) {
+    let check = Command::new("rclone")
+        .args(["check", remote])
+        .arg(local)
+        .args(["--checksum", "--filter-from"])
+        .arg(filters)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "independent checksum check failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+}
 
 fn save_isolated_config(config_home: &Path, connection: Connection) {
     let config = Config {
@@ -82,24 +111,6 @@ fn compiled_guard_passes_approved_folder_and_blocks_changed_targets_before_sync(
         String::from_utf8_lossy(&pass.stderr)
     );
 
-    // A fake rclone records if the generated script ever gets past its guard.
-    let marker = temp.path().join("rclone-was-called");
-    let fake_rclone = temp.path().join("rclone-never-run.sh");
-    fs::write(
-        &fake_rclone,
-        format!(
-            "#!/bin/sh\nprintf called > '{}'\nexit 87\n",
-            marker.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&fake_rclone, fs::Permissions::from_mode(0o700)).unwrap();
-    let mut plan = rclone_bisync_plan(&original, &temp.path().join("work")).unwrap();
-    plan.preflight_command.as_mut().unwrap().executable = binary.to_path_buf();
-    plan.service.executable = fake_rclone;
-    let script = temp.path().join("managed-bisync.sh");
-    fs::write(&script, mirror_script::render(&plan).unwrap()).unwrap();
-
     let mut changed = original.clone();
     for case in [
         "remote", "drive", "library", "folder", "local", "recovery", "disabled",
@@ -134,16 +145,6 @@ fn compiled_guard_passes_approved_folder_and_blocks_changed_targets_before_sync(
             "unexpected {case} error: {}",
             String::from_utf8_lossy(&blocked.stderr)
         );
-        for mode in ["initial-preview", "initial-sync", "scheduled"] {
-            let output = Command::new("/usr/bin/sh")
-                .env("XDG_CONFIG_HOME", &config_home)
-                .arg(&script)
-                .arg(mode)
-                .output()
-                .unwrap();
-            assert!(!output.status.success(), "{case}/{mode} passed guard");
-            assert!(!marker.exists(), "{case}/{mode} reached rclone");
-        }
     }
     assert!(
         !original.local_path.exists(),
@@ -158,9 +159,9 @@ fn compiled_guard_passes_approved_folder_and_blocks_changed_targets_before_sync(
     );
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "writes only inside a new subfolder of the approved disposable SharePoint folder"]
-fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
+async fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
     let remote = std::env::var("TEAMS_TEST_REMOTE").expect("TEAMS_TEST_REMOTE");
     let url = std::env::var("TEAMS_TEST_LIBRARY_URL").expect("TEAMS_TEST_LIBRARY_URL");
     let drive_id = std::env::var("TEAMS_TEST_DRIVE_ID").expect("TEAMS_TEST_DRIVE_ID");
@@ -192,6 +193,7 @@ fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         "remote test folder: {}",
         String::from_utf8_lossy(&mkdir.stderr)
     );
+    let _remote_cleanup = DisposableRemote(remote_path.clone());
 
     let mut identity = parse_library_url(&url).unwrap();
     identity.drive_id = drive_id;
@@ -216,37 +218,34 @@ fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         teams_identity: Some(identity),
     };
     save_isolated_config(&config_home, connection.clone());
-    let mut plan = rclone_bisync_plan(&connection, &temp.path().join("work")).unwrap();
+    let work_root = temp.path().join("work");
+    let plan = rclone_bisync_plan(&connection, &work_root).unwrap();
     fs::write(
         local.join(plan.access_marker_name.as_ref().unwrap()),
         format!("{}\n", connection.id),
     )
     .unwrap();
-    plan.preflight_command.as_mut().unwrap().executable =
-        Path::new(env!("CARGO_BIN_EXE_cosmic-ext-applet-mounter")).to_path_buf();
-    fs::create_dir_all(&plan.work_directory).unwrap();
-    fs::write(&plan.filters_file, "- /.cosmic-mounter-recovery/\n+ **\n").unwrap();
-    let script = mirror_script::script_path(&plan);
-    fs::write(&script, mirror_script::render(&plan).unwrap()).unwrap();
-    for mode in ["initial-preview", "initial-sync"] {
-        let output = Command::new("/usr/bin/sh")
-            .env("XDG_CONFIG_HOME", &config_home)
-            .arg(&script)
-            .arg(mode)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{mode}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        if mode == "initial-sync" {
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("0 differences found"),
-                "missing final checksum verification"
-            );
-        }
-    }
+    bisync_coordinator::run(
+        &connection,
+        BisyncMode::InitialPreview,
+        &work_root,
+        &SystemCommandRunner,
+        CancellationToken::new(),
+    )
+    .await
+    .expect("initial preview");
+    bisync_coordinator::run(
+        &connection,
+        BisyncMode::InitialSync,
+        &work_root,
+        &SystemCommandRunner,
+        CancellationToken::new(),
+    )
+    .await
+    .expect("initial sync");
+    // The outcome contains the original bisync log, not the later check log.
+    // Independently verify the resulting data rather than infer it from text.
+    assert_remote_matches_local(&remote_path, &local, &plan.filters_file);
     let archive = Command::new("unzip")
         .arg("-t")
         .arg(local.join("office.docx"))
@@ -276,18 +275,16 @@ fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         "managed SharePoint runner update\n",
     )
     .unwrap();
-    let updated = Command::new("/usr/bin/sh")
-        .env("XDG_CONFIG_HOME", &config_home)
-        .arg(&script)
-        .arg("sync")
-        .output()
-        .unwrap();
-    assert!(
-        updated.status.success(),
-        "updated sync: {}",
-        String::from_utf8_lossy(&updated.stderr)
-    );
-    assert!(String::from_utf8_lossy(&updated.stderr).contains("0 differences found"));
+    bisync_coordinator::run(
+        &connection,
+        BisyncMode::Sync,
+        &work_root,
+        &SystemCommandRunner,
+        CancellationToken::new(),
+    )
+    .await
+    .expect("updated sync");
+    assert_remote_matches_local(&remote_path, &local, &plan.filters_file);
     let recovery = Command::new("rclone")
         .arg("lsf")
         .arg("--recursive")
@@ -299,12 +296,20 @@ fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         String::from_utf8_lossy(&recovery.stdout).contains("marker.txt-"),
         "previous marker missing from dated recovery"
     );
-    let output = Command::new("/usr/bin/sh")
-        .env("XDG_CONFIG_HOME", &config_home)
-        .arg(&script)
-        .arg("preview")
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("No changes found"));
+    let preview = bisync_coordinator::run(
+        &connection,
+        BisyncMode::Preview,
+        &work_root,
+        &SystemCommandRunner,
+        CancellationToken::new(),
+    )
+    .await
+    .expect("preview");
+    assert!(
+        format!(
+            "{}\n{}",
+            preview.output.stdout.text, preview.output.stderr.text
+        )
+        .contains("No changes found")
+    );
 }

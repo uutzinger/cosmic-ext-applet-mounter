@@ -19,13 +19,28 @@ use crate::services::ServiceCommand;
 pub const SERVICE_GUARD_FLAG: &str = "--verify-online-mountpoint";
 
 pub fn service_command(arguments: Vec<String>) -> Result<ServiceCommand, String> {
-    match CommandExecutionMode::detect_current() {
-        CommandExecutionMode::Native => Ok(ServiceCommand {
-            executable: std::env::current_exe()
-                .map_err(|_| fl!("mount-guard-missing-executable"))?,
+    let mode = CommandExecutionMode::detect_current();
+    let native_executable = match mode {
+        CommandExecutionMode::Native => {
+            std::env::current_exe().map_err(|_| fl!("mount-guard-missing-executable"))?
+        }
+        CommandExecutionMode::FlatpakSpawnHost => PathBuf::new(),
+    };
+    Ok(service_command_for_mode(mode, native_executable, arguments))
+}
+
+#[must_use]
+pub fn service_command_for_mode(
+    mode: CommandExecutionMode,
+    native_executable: PathBuf,
+    arguments: Vec<String>,
+) -> ServiceCommand {
+    match mode {
+        CommandExecutionMode::Native => ServiceCommand {
+            executable: native_executable,
             arguments,
-        }),
-        CommandExecutionMode::FlatpakSpawnHost => Ok(ServiceCommand {
+        },
+        CommandExecutionMode::FlatpakSpawnHost => ServiceCommand {
             executable: PathBuf::from("/usr/bin/flatpak"),
             arguments: [
                 vec![
@@ -36,7 +51,7 @@ pub fn service_command(arguments: Vec<String>) -> Result<ServiceCommand, String>
                 arguments,
             ]
             .concat(),
-        }),
+        },
     }
 }
 
@@ -165,6 +180,38 @@ pub async fn check_empty_mountpoint<R: CommandRunner>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applet_worker_launch_is_package_specific_but_preserves_arguments() {
+        let arguments = vec!["--run-bisync".into(), "probe".into(), "uuid".into()];
+        let executable = PathBuf::from("/opt/cloud-mounter/bin/cloud-mounter");
+        let native = service_command_for_mode(
+            CommandExecutionMode::Native,
+            executable.clone(),
+            arguments.clone(),
+        );
+        assert_eq!(native.executable, executable);
+        assert_eq!(native.arguments, arguments);
+
+        let flatpak = service_command_for_mode(
+            CommandExecutionMode::FlatpakSpawnHost,
+            PathBuf::from("/app/bin/cosmic-ext-applet-mounter"),
+            arguments.clone(),
+        );
+        assert_eq!(flatpak.executable, PathBuf::from("/usr/bin/flatpak"));
+        assert_eq!(
+            flatpak.arguments,
+            [
+                vec![
+                    "run".into(),
+                    "--command=cosmic-ext-applet-mounter".into(),
+                    APP_ID.into(),
+                ],
+                arguments,
+            ]
+            .concat()
+        );
+    }
     use crate::process::{CapturedOutput, CommandOutput, FakeCommandRunner, SystemCommandRunner};
 
     #[tokio::test]

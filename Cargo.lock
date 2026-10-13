@@ -919,10 +919,11 @@ dependencies = [
 
 [[package]]
 name = "cosmic-ext-applet-mounter"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "i18n-embed",
  "i18n-embed-fl",
+ "libc",
  "libcosmic",
  "percent-encoding",
  "reqwest",

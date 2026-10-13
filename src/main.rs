@@ -7,10 +7,53 @@ mod theme;
 use cosmic_ext_applet_mounter::{fl, i18n};
 
 fn main() -> cosmic::iced::Result {
+    let mut worker_arguments = std::env::args().skip(1);
+    if worker_arguments.next().as_deref()
+        == Some(cosmic_ext_applet_mounter::bisync_worker::WORKER_FLAG)
+    {
+        let arguments = worker_arguments.collect::<Vec<_>>();
+        match cosmic_ext_applet_mounter::bisync_worker::run(&arguments) {
+            Ok(message) => println!("{message}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        std::process::exit(0);
+    }
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
     i18n::init(&requested_languages);
     let mut arguments = std::env::args().skip(1);
     let guard = arguments.next();
+    if matches!(
+        guard.as_deref(),
+        Some(cosmic_ext_applet_mounter::vpn::METERED_GUARD_FLAG)
+            | Some(cosmic_ext_applet_mounter::vpn::OFFLINE_READINESS_GUARD_FLAG)
+    ) {
+        let arguments = arguments.collect::<Vec<_>>();
+        let result = tokio::runtime::Runtime::new()
+            .map_err(|error| error.to_string())
+            .and_then(|runtime| match guard.as_deref() {
+                Some(cosmic_ext_applet_mounter::vpn::METERED_GUARD_FLAG) => {
+                    if arguments.is_empty() {
+                        runtime.block_on(cosmic_ext_applet_mounter::vpn::run_unmetered_guard())
+                    } else {
+                        Err(crate::fl!(
+                            "ui-main-unmetered-network-guard-does-not-accept-arguments"
+                        ))
+                    }
+                }
+                Some(cosmic_ext_applet_mounter::vpn::OFFLINE_READINESS_GUARD_FLAG) => {
+                    runtime.block_on(app::run_offline_readiness_guard(&arguments))
+                }
+                _ => unreachable!(),
+            });
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
     if matches!(
         guard.as_deref(),
         Some(cosmic_ext_applet_mounter::teams::SERVICE_GUARD_FLAG)
