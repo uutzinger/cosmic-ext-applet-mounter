@@ -4576,6 +4576,37 @@ Retained organization-specific history remains explicitly acknowledged. No final
 hosted/tag checksum is equated to the earlier local candidate. Preparing the
 authorized commit/push and publication-disabled matrix; cleanup remains open.
 
+✅ Committed reviewed source as 95fa290 and pushed master successfully, including
+earlier candidate commits. No release tag or GitHub release was created. Existing
+Git GC/unreachable-object warning was left untouched; no prune/destructive cleanup.
+
+✅ Dispatched fresh Build Debian packages workflow with
+publish_after_acceptance=false. Run 38438465174 builds exact source
+95fa290ebd6bc3fcdad83870e503d67104bf6537 and is in progress. Six-job completion/
+artifact inspection remain pending; notes/publication status must not claim these
+passed. Versioned docs/releases/v0.5.3.md supplies future GitHub release body;
+debian/changelog separately records package changes.
+
+✅ Hosted run 38438465174 completed successfully: Ubuntu 22.04/24.04/26.04,
+amd64/arm64 build/test/upload jobs all passed for exact source 95fa290; publication
+job was skipped. Downloaded all six artifacts and verified per-job SHA-256,
+package/version/architecture, eight extracted payload checksums each, source-
+matching helper/catalog and stable 0.5.3 AppStream metadata. No artifact was
+installed; six builds are not six-platform live UI/storage acceptance.
+
+✅ Organized verified release candidates at target/artifacts/v0.5.3/ with combined
+SHA256SUMS and provenance README; checksum verification passes for all six there.
+Original run extraction/inspection remains under
+target/artifacts/0.5.3-ci-38438465174.kHHWVi/ pending deliberate artifact cleanup.
+Root artifacts/v0.5.2 contains the six older workflow packages, not copies of
+current 0.5.3. Other local test candidates have distinct build identities and
+must not be treated as interchangeable duplicates. No package removal occurred.
+
+⏳ Standardize old release/candidate/rollback artifact locations and fix the
+standalone download helper's legacy artifacts/deb default if requested. Preserve
+the historical v0.5.2 set before removing its old folder. Stale services/folders,
+receipt commit/push and separately authorized tag/publication remain outstanding.
+
 ### Candidate Flatpak UI receipt — October 13, 2026
 
 ✅ User confirmed candidate panel/settings responsiveness. Marked the UI receipt
@@ -4583,3 +4614,132 @@ authorized commit/push and publication-disabled matrix; cleanup remains open.
 are separate pending acceptance checks. The former `OneDrive Mirror Repair Test`
 name is absent from the current saved configuration, so do not silently reuse
 another production OneDrive profile for reauthentication.
+
+### Debian artifact layout cleanup — October 13, 2026
+
+✅ Verified the user-moved target/artifacts/v0.5.2/ set: all six SHA-256
+checks pass. Canonical v0.5.3 checks also pass. Moved each directory below
+with full file-by-file SHA-256 parity, retaining metadata and rollback files:
+
+- target/local-deb-2026-10-12.LBoZhW/
+- target/local-deb-helper-2026-10-12.5hQiO7/
+- target/local-deb-popup-2026-10-12.vc4ich/
+- target/local-deb-053-2026-10-12.QlFmb9/
+- target/local-deb-native053-20261013.N16OSk/
+
+Their new parent is target/artifacts/candidates/; the directory names remain
+unchanged. Historical commands above retain their original execution paths.
+Moved target/release-files/v0.5.0/ to target/artifacts/v0.5.0/ and
+target/release-assets/0.4.5/ to target/artifacts/v0.4.5/ with byte parity.
+
+✅ Removed exactly six checksum-identical .deb downloads from
+target/artifacts/0.5.3-ci-38438465174.kHHWVi/deb-*/; canonical copies remain
+in target/artifacts/v0.5.3/ and can also be downloaded again from that workflow.
+Retained per-job sums and extracted inspection evidence, with a relocation
+README. Removed the empty root artifacts/ directory. No unique build, Flatpak
+rollback bundle, installed artifact, service, configuration or user data changed.
+
+✅ The workflow helper defaults to target/artifacts/ci-<run-id>/, retaining
+environment and CLI destination overrides. Bash syntax, three offline fake-gh
+destination cases and git diff --check pass; no real workflow dispatched.
+AGENTS.md and the build guide now document the layout. All .deb/.ddeb files
+inside this repository are under target/artifacts/.
+
+⏳ Three older .deb files in the parent ~/Build directory (0.4.7, 0.5.0,
+0.5.1) remain outside this workspace and were not moved or deleted. Release
+tag/publication and stale mount-service/data cleanup remain separate gates.
+
+### Accepted native identity and cleanup review — October 13, 2026
+
+✅ Rechecked installed Debian version 0.5.3. Installed binary SHA-256 is
+`0fbf8b77eb8a7556564f07e1c7e16d51ca2a79ee2f25950c52942f5edfea73bb`,
+matching the extracted accepted local package; ELF build ID is
+`6ce0047816ce44c8642be90b1f11314f8bcfb561`. Accepted package at
+target/artifacts/candidates/local-deb-native053-20261013.N16OSk/ has SHA-256
+`c869497bb3d63a7aeddd83daf0d1da2206c93ab4b490ca3cc847e1b1a012f762`.
+Source-installed rollback binary SHA-256 is
+`a86554dafbc2268710fae4721b1e1d52ac5e89b34e5cf2fac26d77b65d3ca6ab`,
+build ID `4a16966949ae6389e13d9d70b41a84dc02d4b043`. Different build modes
+have distinct identities; the source and packaged UI receipts remain separate.
+
+✅ Reverified all six canonical branch-CI checksums for source
+95fa290ebd6bc3fcdad83870e503d67104bf6537, workflow 38438465174:
+
+| Package suffix (all version 0.5.3) | SHA-256 |
+|---|---|
+| ubuntu22.04_amd64.deb | `588b7a63428601186fbe6a41c6c2fa42fd189dd8e2883e7a5ae4e92951615e86` |
+| ubuntu22.04_arm64.deb | `6f96b031ea053712749981d16fdd1bdb71197d46ea19a8c13feda8da9e9eb4af` |
+| ubuntu24.04_amd64.deb | `5d6a1178822c9bf4c30cd881fd06b19f97aa36e24b035515120f04a5cfbc5da2` |
+| ubuntu24.04_arm64.deb | `2edc4a921da2c3c37a43c46e7d7139b2c96eebea8305a794833585e85aaae693` |
+| ubuntu26.04_amd64.deb | `277ecdc048d8b3b8639757bde6e6796507d6fababfb26e68d29c4d6c1b735e3c` |
+| ubuntu26.04_arm64.deb | `15a827e52cde0a1e0b9f5c9799bb32393e498dbb53848b9b9d505483c7722196` |
+
+All filenames begin cosmic-ext-applet-mounter_0.5.3_. Native live acceptance
+remains Pop!_OS 24.04 amd64; no six-platform live UI claim. These are retained
+branch-CI acceptance artifacts, not yet tagged/public release identities.
+No final Flatpak acceptance or COSMIC Store submission claim for 0.5.3.
+
+⏳ Requested separate approval for v0.5.3 tag/push and native GitHub publication
+after final-record commit and fresh tagged matrix verification. No approval
+reply, tag creation or publication occurred during this inventory.
+
+✅ Completed read-only cleanup review; see
+docs/engineering/development-cleanup-inventory.md. Managed-sandbox D-Bus access
+was denied; reran read-only systemd queries with authorized host access.
+UA OneDrive is currently enabled/running and mounted; leave it untouched.
+All 11 managed service identities have saved owners, including the two disabled
+SharePoint test profiles. Four disabled legacy rclone units are possible archive
+candidates, not proven orphans. Two prior OneDrive test folders contain no files;
+older repair authentication/database state remains and must not be pruned by
+folder-name inference. Shared recovery contains saved files and is retained.
+
+⏳ Cleanup execution awaits explicit test-profile retirement/legacy-unit archive
+scope. No service stopped, profile altered, folder deleted, authentication state
+removed, or remote data modified. Recommend retaining Rust Coordinator Initial
+Test as the 0.5.4 regression fixture. Generic Cloud/test ownership is unknown.
+
+### Approved narrow cleanup — October 13, 2026
+
+✅ User explicitly retained every applet-listed folder/mount. Kept all 11 saved
+connections, including both SharePoint tests and production offline mirrors.
+The reply was cleanup direction, not approval to tag/publish v0.5.3.
+
+✅ Archived four unlisted legacy rclone unit files (ua-box, ua-engr, ua-gdrive,
+uutzinger-gdrive) after confirming inactive/disabled state, no systemd reverse
+dependencies/triggers, no local unit/autostart references and no user crontab.
+Their managed replacements remain. Archived the two unlisted file-empty
+cosmic-mounter-{flatpak-auth-test-20261013,onedrive-repair-test-20261011}
+folders, retaining the latter's empty subdirectory. No files permanently deleted.
+Archive: target/artifacts/rollback/native-cleanup-20261013/ with original-path
+and rollback README. Existing unit backups remain in place.
+
+✅ Rechecked archived unit byte parity and unchanged saved connection document
+(SHA-256 ac1b9635462d4032a639b0e0ebd0cab2f665d99747cf5716a10ac9c350d7c23b).
+After user-manager reload, all 11 managed services, both test timers and the
+OpenConnect agent still exist. UA OneDrive remains active/running and mounted.
+No managed service stopped or restarted, no profile altered, and no remote
+data operation performed. Credentials/databases/recovery and unknown Cloud/test
+are retained. Cleanup task is complete within the approved narrow scope.
+
+⏳ Native v0.5.3 tag/publication still awaits explicit approval; final Flatpak
+and COSMIC Store submission remain excluded. Records/checksum receipts are saved
+in the working tree; no tag or publication occurred.
+
+### Native release follow-up source closure — October 13, 2026
+
+✅ Reviewed the checksum/CI receipts, reversible cleanup inventory, artifact
+layout instructions and run-specific download helper/tests. Applet and engine
+code are unchanged from accepted source 95fa290. Reconciled stale native gate
+and branch-CI parent checkboxes without closing immutable-tag/publication or
+0.5.4 sandbox acceptance. Fixed the release note's stale cleanup-pending wording.
+
+✅ Focused verification passes: Rust formatting, 9 dependency-installer tests,
+6 publication fixture tests, 3 download-destination subcases, shell syntax and
+release metadata/notes preflight. Source review covers intended changed files
+only; prior unchanged native/full-suite receipts remain separate. No mount or
+provider authentication test was repeated. Prepared the authorized follow-up
+commit/push with generated artifacts/rollback files excluded.
+
+⏳ Next gate: explicit native v0.5.3 tag/publication approval, fresh tagged
+six-platform builds and distinct final checksums. No tag, release publication
+or final Flatpak/COSMIC Store claim is authorized by this source follow-up.

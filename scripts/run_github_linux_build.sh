@@ -7,7 +7,7 @@ cd "${REPO_ROOT}"
 
 WORKFLOW="${WORKFLOW:-build-deb.yml}"
 REF="${REF:-$(git branch --show-current)}"
-DOWNLOAD_DIR="${DOWNLOAD_DIR:-artifacts/deb}"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-}"
 RUN_ID=""
 WAIT_FOR_EXISTING=0
 
@@ -20,7 +20,7 @@ Trigger the Debian-package workflow, wait for it, and download its artifacts.
 Options:
   --ref <branch-or-tag>      Ref already pushed to GitHub (default: current branch)
   --workflow <file-or-name>  Workflow identifier (default: ${WORKFLOW})
-  --download-dir <path>      Artifact destination (default: ${DOWNLOAD_DIR})
+  --download-dir <path>      Artifact destination (default: target/artifacts/ci-<run-id>)
   --run-id <id>              Use an existing workflow run
   --wait-for-existing        Find the newest run for --ref instead of dispatching
   -h, --help                 Show this help
@@ -62,6 +62,7 @@ fi
 
 echo "Watching run ${RUN_ID}"
 gh run watch "$RUN_ID" --exit-status
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-target/artifacts/ci-${RUN_ID}}"
 mkdir -p "$DOWNLOAD_DIR"
 gh run download "$RUN_ID" --dir "$DOWNLOAD_DIR"
 echo "Downloaded artifacts to ${DOWNLOAD_DIR}:"

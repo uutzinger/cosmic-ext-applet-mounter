@@ -4180,9 +4180,12 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
   now use verified immutable commit pins declaring Node.js 24. YAML, action
   inputs, six matrix targets, release guard/permissions, and shell syntax pass.
   Existing dependency changes are preserved; this is not a fresh hosted CI receipt.
-- [ ] Run formatting, locked all-target checks, strict all-target Clippy, the
+- [x] Run formatting, locked all-target checks, strict all-target Clippy, the
   full nonignored suite, applicable ignored/live tests, and Markdown/diff/link
   checks after the last source change.
+  Native acceptance completed in the October 13 closure below; final tagged
+  identities remain separate. Later download-helper changes have focused tests
+  and do not change accepted applet/engine code.
   - [x] Final local checkpoint on October 12: formatting, locked all-target
     checking, strict all-feature Clippy, all 373 nonignored Rust tests, 12 Python
     tests, localization, 22-document local link checks and diff checks passed.
@@ -4311,7 +4314,7 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
     files preserved unchanged. Reloaded `/usr/bin` Runtime owner verified and
     user confirmed expected panel/settings behavior. This is local amd64
     acceptance; hosted matrix and final Flatpak gates remain pending.
-  - [ ] Finalize native notes/AppStream status after native acceptance and review
+  - [x] Finalize native notes/AppStream status after native acceptance and review
     latest source. User authorized committing/pushing completed 0.5.3 development
     to Git; tag/publication still require separate approval. Final Flatpak
     acceptance is no longer a native 0.5.3 prerequisite.
@@ -4512,17 +4515,50 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
   found only launcher and four regenerated native service files changed. Config,
   credentials/cache/mirror data unchanged; services inactive. Source rollback
   artifacts retained under target/native-053-source-backup-20261013.FqvmDS/.
-- [ ] Run latest source/packaging gates and staged review, including research
+- [x] Run latest source/packaging gates and staged review, including research
   modules/fixtures; finalize native-only notes/AppStream after applicable checks.
   - [x] Native gates, metadata/notes preflight, formatting, signature scan and
     local links/anchors pass. No runtime code changed in stable metadata closure.
-  - [ ] Final cached review/commit and hosted matrix acceptance remain.
-- [ ] Commit and push completed source as authorized, dispatch a fresh six-platform
+  - [x] Final cached review passed and source committed as 95fa290; hosted
+    matrix acceptance remains separate.
+- [x] Commit and push completed source as authorized, dispatch a fresh six-platform
   Debian workflow with publication disabled, and inspect all artifacts.
+  - [x] Committed/pushed master at 95fa290 (October 13), including native-only
+    notes/metadata and deferred 0.5.4 tasks. No tag/publication.
+  - [x] Fresh workflow dispatched with publish_after_acceptance=false:
+    run 38438465174, head 95fa290ebd6bc3fcdad83870e503d67104bf6537.
+  - [x] All six jobs succeeded for 95fa290; publication skipped. Downloaded
+    artifacts passed SHA-256, package/version/architecture, extracted payload
+    integrity, helper/catalog source parity and stable AppStream checks.
+    Canonical verified set: target/artifacts/v0.5.3/. No six-platform live UI
+    acceptance is claimed; native live proof is Pop!_OS 24.04 amd64.
+- [x] Review, commit and push October 13 follow-up records and run-specific
+  download helper/tests. No applet/engine implementation changed since 95fa290;
+  fresh final tagged builds and publication remain separate approval gates.
 - [ ] Record accepted native identity/checksums and obtain separate release-tag/
   publication approval. No final Flatpak/submission claim for 0.5.3.
-
-- [ ] Clean up stale mount services and mount folders in ~/Cloud
+  - [x] Recorded/rechecked accepted installed/source identities and six verified
+    branch-CI package SHA-256 values in completion notes (October 13).
+    Tagged builds remain distinct; no final Flatpak/submission claim.
+  - [ ] Obtain explicit approval for v0.5.3 tag/push and native GitHub publication
+    after final-record commit and fresh tagged matrix verification; approval
+    requested October 13. User reply authorized narrow cleanup, not release
+    publication; tag/publication approval remains pending.
+- [x] Consolidate Debian packages under target/artifacts; preserve distinct local
+  candidates/rollback files and remove only checksum-identical CI duplicates.
+  October 13: download helper now defaults to run-specific directories; offline
+  destination/override checks pass. Historical artifact paths are relocated as
+  recorded in completion notes, not reinterpreted as new acceptance evidence.
+- [x] Clean up stale mount services and mount folders in ~/Cloud no longer needed for 0.5.4 development.
+  - [x] Read-only ownership/activity/data inventory completed October 13; see
+    [cleanup inventory](docs/engineering/development-cleanup-inventory.md).
+    UA OneDrive is active; all 11 managed connection services still have saved
+    owners. Test profiles and recovery data are not automatically obsolete.
+  - [x] User directed retention of every applet-listed mount/folder. Archived four
+    disabled legacy units and two unlisted file-empty OneDrive test folders under
+    target/artifacts/rollback/native-cleanup-20261013/. Retained both SharePoint
+    test profiles, credentials/recovery and unknown Cloud/test. Saved config
+    unchanged; user manager reloaded and active UA OneDrive retained.
 
 ## Release 0.5.4 — Engine decision and Flatpak completion
 

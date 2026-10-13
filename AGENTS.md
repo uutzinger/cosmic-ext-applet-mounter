@@ -145,6 +145,12 @@ Direct Cargo equivalents for a repository with a committed lockfile are:
 
 ## Build, installation, and packaging
 
+- Keep generated release packages under `target/artifacts/v<version>/` and
+  distinct local builds under `target/artifacts/candidates/`. Keep workflow
+  downloads in run-specific directories under `target/artifacts/`. Preserve
+  checksums, provenance and rollback files; equal version numbers do not make
+  packages duplicates. Remove duplicate downloads only after checksum comparison.
+
 - just build and just build-release build native artifacts. just run launches
   a development instance; use the configured launch mode and avoid a competing
   runtime owner during installed tests.

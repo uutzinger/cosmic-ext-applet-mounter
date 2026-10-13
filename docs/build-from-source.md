@@ -55,6 +55,11 @@ authorize a manual **Build Debian packages** dispatch on the accepted tag with
 Do not run tag/publish commands without the corresponding approval.
 Release 0.5.3 targets native source/Debian delivery; final Flatpak is a 0.5.4 gate.
 
+Generated packages belong in `target/artifacts/`: versioned release sets in
+`v<version>/`, distinct local builds in `candidates/`, and workflow downloads
+in run-specific folders. `scripts/run_github_linux_build.sh` defaults to
+`target/artifacts/ci-<run-id>/`; `--download-dir` overrides it.
+
 `just stage` installs into `target/stage/usr` and does not modify the host
 system. `just metadata-check` reports known COSMIC-specific freedesktop validation
 warnings without failing. Use `just metadata-check-strict` for the raw result
