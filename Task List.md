@@ -4540,10 +4540,12 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
   - [x] Recorded/rechecked accepted installed/source identities and six verified
     branch-CI package SHA-256 values in completion notes (October 13).
     Tagged builds remain distinct; no final Flatpak/submission claim.
-  - [ ] Obtain explicit approval for v0.5.3 tag/push and native GitHub publication
+  - [x] Obtain explicit approval for v0.5.3 tag/push and native GitHub publication
     after final-record commit and fresh tagged matrix verification; approval
-    requested October 13. User reply authorized narrow cleanup, not release
-    publication; tag/publication approval remains pending.
+    requested October 13. Initial reply authorized only cleanup; subsequent
+    explicit "Yes publish 05.3" authorizes native v0.5.3 tag/publication.
+  - [ ] Verify final tagged six-platform artifacts and checksums, publish native
+    GitHub release, then record public asset/source identities. Flatpak excluded.
 - [x] Consolidate Debian packages under target/artifacts; preserve distinct local
   candidates/rollback files and remove only checksum-identical CI duplicates.
   October 13: download helper now defaults to run-specific directories; offline

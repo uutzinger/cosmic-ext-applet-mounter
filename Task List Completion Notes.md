@@ -4743,3 +4743,17 @@ commit/push with generated artifacts/rollback files excluded.
 ⏳ Next gate: explicit native v0.5.3 tag/publication approval, fresh tagged
 six-platform builds and distinct final checksums. No tag, release publication
 or final Flatpak/COSMIC Store claim is authorized by this source follow-up.
+
+### Native v0.5.3 publication authorized — October 13, 2026
+
+✅ Follow-up source/records committed and pushed as 61f2798; worktree clean.
+User subsequently explicitly authorized publishing v0.5.3. Finalized native
+release-note status and recorded tag/publication approval. This approval
+excludes Flatpak delivery and COSMIC Store submission. Applet/engine code
+remains unchanged from native accepted source; download helper/tests and
+documentation changes were independently checked.
+
+⏳ Commit/push the final approval record, create the immutable v0.5.3 tag,
+verify the fresh six-platform tag build and package checksums, then use the
+explicit accepted-tag publication workflow. Preserve branch-CI identities
+and record tagged/public artifacts separately. No publication success yet.
