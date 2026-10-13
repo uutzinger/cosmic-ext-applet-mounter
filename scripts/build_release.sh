@@ -7,18 +7,18 @@ cd "${REPO_ROOT}"
 
 DRY_RUN=0
 REMOTE="origin"
+BUILD_RUN_ID=""
 
 usage() {
   cat <<'EOF'
-Usage: scripts/build_release.sh [--dry-run] [--remote <name>]
+Usage: scripts/build_release.sh [--dry-run] [--remote <name>] [--run-id <id>]
 
 Validate a release, create and push its v<version> tag, then wait for the
-GitHub Actions Debian builds and download their artifacts. Tag builds NEVER
-publish a GitHub release. After acceptance of the release's advertised package
-modes (source/Debian for 0.5.3; final Flatpak is deferred to 0.5.4), finalize
-docs/releases/v<version>.md, then explicitly dispatch Build Debian packages on
-that tag with publish_after_acceptance=true. This rebuilds all six packages
-from the tag before publication. That dispatch requires separate approval.
+GitHub Actions Debian build and download its artifacts. Tag pushes do not
+automatically build or publish. --run-id reuses a successful exact-commit build
+instead of dispatching a new one. After acceptance and separate approval,
+dispatch publish-release.yml on the tag with build_run_id and accepted=true.
+Promotion verifies/downloads that run's artifacts; it never rebuilds them.
 
 Before running, update Cargo.toml, Cargo.lock, debian/changelog, release notes,
 and commit and push the release commit.
@@ -29,6 +29,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --remote) REMOTE="${2:?--remote requires a value}"; shift 2 ;;
+    --run-id) BUILD_RUN_ID="${2:?--run-id requires a value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
@@ -57,6 +58,9 @@ git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1 || { echo "Missing 
 ! git rev-parse --verify "refs/tags/${TAG}" >/dev/null 2>&1 || { echo "Tag ${TAG} already exists locally" >&2; exit 1; }
 ! git ls-remote --exit-code --tags "$REMOTE" "refs/tags/${TAG}" >/dev/null 2>&1 || { echo "Tag ${TAG} already exists on ${REMOTE}" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "GitHub CLI is not authenticated; run: gh auth login" >&2; exit 2; }
+if [[ -n "$BUILD_RUN_ID" ]]; then
+  python3 scripts/promote_release.py "$TAG" "$BUILD_RUN_ID" --source-sha "$(git rev-parse HEAD)" --check-run-only
+fi
 
 echo "Release preflight passed: ${TAG} from ${BRANCH} at $(git rev-parse --short HEAD)"
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -66,7 +70,10 @@ fi
 
 git tag -a "$TAG" -m "Release ${TAG}"
 git push "$REMOTE" "refs/tags/${TAG}"
-bash scripts/run_github_linux_build.sh --ref "$TAG" --wait-for-existing \
-  --download-dir "target/artifacts/${TAG}"
+if [[ -n "$BUILD_RUN_ID" ]]; then
+  bash scripts/run_github_linux_build.sh --ref "$TAG" --run-id "$BUILD_RUN_ID"
+else
+  bash scripts/run_github_linux_build.sh --ref "$TAG"
+fi
 
-echo "Tag build ${TAG} completed; artifacts are in target/artifacts/${TAG}. No release was published."
+echo "Build for ${TAG} completed; artifacts are in target/artifacts/ci-<run-id>. No release was published."

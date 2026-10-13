@@ -145,6 +145,14 @@ Direct Cargo equivalents for a repository with a committed lockfile are:
 
 ## Build, installation, and packaging
 
+- Build each immutable release source once per required package/architecture
+  matrix, then inspect and publish those same artifacts. Reuse a successful
+  branch build when its source SHA exactly matches the release tag; otherwise
+  run one explicit release build. Do not rebuild merely to tag, publish, add
+  acceptance receipts, or repeat completed unchanged checks. Rebuild only when
+  source/package inputs change, a build fails, or artifacts are unavailable.
+  Publication remains separately approved and must verify source/run identity,
+  complete artifact coverage, checksums and advertised package acceptance.
 - Keep generated release packages under `target/artifacts/v<version>/` and
   distinct local builds under `target/artifacts/candidates/`. Keep workflow
   downloads in run-specific directories under `target/artifacts/`. Preserve

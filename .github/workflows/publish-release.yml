@@ -1,0 +1,44 @@
+name: Promote verified release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Successful Build Debian packages run for this exact tag commit"
+        required: true
+        type: string
+      accepted:
+        description: "Advertised package modes and selected artifacts accepted; publication approved"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Require approved stable-tag promotion
+        env:
+          SOURCE_REF: ${{ github.ref }}
+          ACCEPTED: ${{ inputs.accepted }}
+        run: '[[ "$SOURCE_REF" == refs/tags/v* && "$ACCEPTED" == true ]] || { echo "Accepted stable-tag publication required" >&2; exit 1; }'
+      - name: Check out accepted tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
+        with:
+          fetch-depth: 0
+      - name: Verify and promote existing artifacts without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: python3 scripts/promote_release.py "$RELEASE_TAG" "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --publish --accepted

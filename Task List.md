@@ -4565,6 +4565,24 @@ Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [
     target/artifacts/rollback/native-cleanup-20261013/. Retained both SharePoint
     test profiles, credentials/recovery and unknown Cloud/test. Saved config
     unchanged; user manager reloaded and active UA OneDrive retained.
+## Release build workflow follow-up — October 13, 2026
+
+User requested permanent reduction of repeated Debian builds after questioning
+the attempted third matrix run during 0.5.3 publication. That run was not started.
+
+- [x] Enforce one build per immutable source: build workflow is manual-only and
+  cannot publish; tag pushes no longer start a redundant build. Local release
+  script starts one matrix or reuses an exact-commit successful run via --run-id.
+- [x] Separate publication into promotion-only workflow/script with explicit
+  approval, same-repository/workflow/commit and remote-tag checks, complete
+  unexpired matrix artifacts, checksums and package identity validation. No
+  compilation or build dispatch occurs during promotion.
+- [x] Record the rule in AGENTS.md/build guide; add offline policy, package and
+  fake-command tests. Read-only reuse validation passed against existing tag
+  run 38447948939. No new build/publication or change to v0.5.3 was performed.
+- [ ] Verify the new hosted promotion workflow with the next approved immutable
+  release. Source/offline tests and live metadata validation are not hosted
+  publication acceptance; do not rebuild 0.5.3 merely to test this workflow.
 
 ## Release 0.5.4 — Engine decision and Flatpak completion
 
@@ -4599,10 +4617,13 @@ steps are not completed. Start with architecture, not more WebKit/auth code.
 
 ### Consolidated Flatpak acceptance and release
 
-- [ ] Adjust release promotion tooling to publish the exact verified artifact
+- [o] Adjust release promotion tooling to publish the exact verified artifact
   set from one successful immutable-source build without rebuilding it. Retain
   explicit approval, source/run/checksum validation and native/Flatpak gates;
   ordinary tag builds must still never publish automatically.
+  Source implementation and focused checks handled by
+  [Release build workflow follow-up](#release-build-workflow-follow-up--october-13-2026);
+  next hosted promotion acceptance remains explicitly open there.
 - [ ] Commit accepted implementation and generate/check Cargo sources; pin
   immutable 0.5.4 candidate/final source. Keep COSMIC BaseApp/Freedesktop 25.08
   unless a separate reviewed runtime decision explicitly changes the target.

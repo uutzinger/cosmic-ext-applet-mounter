@@ -48,15 +48,21 @@ killall cosmic-panel
 restarts the panel and loads the updated applet.
 
 Release preparation: `scripts/build_release.sh` creates/pushes the version tag
-and downloads Debian build artifacts only; it does not publish. After final
-acceptance of the advertised package modes and finalized notes/AppStream, separately
-authorize a manual **Build Debian packages** dispatch on the accepted tag with
-`publish_after_acceptance=true`. This rebuilds all six packages before publishing.
-Do not run tag/publish commands without the corresponding approval.
+and explicitly starts one Debian matrix build; tag pushes do not auto-build.
+Use `--run-id <id>` to reuse a successful build at the exact same commit instead.
+It downloads artifacts without publishing. Finalize metadata before that build;
+acceptance receipts alone do not require recompiling an unchanged source.
+
+After package acceptance and separate publication approval, dispatch
+**Promote verified release artifacts** (`publish-release.yml`) on the accepted
+tag with `build_run_id=<id>` and `accepted=true`. This verifies source/run identity,
+six unexpired artifacts, checksums and package identities, then publishes those
+existing packages without building again. Inspection-only local equivalent:
+`python3 scripts/promote_release.py v<version> <run-id>` from a clean checkout
+of that tag. Adding `--publish --accepted` requires publication approval.
+Expired/missing artifacts or changed source require a new accepted build, never
+a silent substitution. Do not run tag/publish commands without approval.
 Release 0.5.3 targets native source/Debian delivery; final Flatpak is a 0.5.4 gate.
-For 0.5.3, the user approved direct publication of the already verified tagged
-artifacts rather than rebuilding them. Future promotion tooling should preserve
-that single-build identity and the separate approval gate.
 
 Generated packages belong in `target/artifacts/`: versioned release sets in
 `v<version>/`, distinct local builds in `candidates/`, and workflow downloads

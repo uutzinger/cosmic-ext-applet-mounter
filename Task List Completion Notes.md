@@ -4806,3 +4806,50 @@ retained per-job checksums in target/artifacts/ci-38447948939/. Canonical packag
 remain in target/artifacts/v0.5.3/ and can be downloaded again from the release.
 No unique artifact removed. Publication metadata/fixture checks and diff checks
 pass; preparing the authorized receipt commit/push without moving the release tag.
+
+### Permanent single-build release path — October 13, 2026
+
+User's task-list note retained as historical request:
+"ATTEMPT TO BUILD DEB 3 TIMES / Complete changes to build workflow where rate
+limits stopped you. / What you mean by build worklow? did you decide on your
+own to build 3 tiems?" Converted that discussion into an actionable chronological
+follow-up in Task List.md without losing its purpose.
+
+✅ Root cause: AGENTS.md never required three builds. The old sequence used a
+branch matrix, automatic tag matrix, and manual publication workflow depending
+on a fresh matrix. The third dispatch during 0.5.3 was denied/not started; native
+0.5.3 was published by reusing verified tag artifacts. Historical tag unchanged.
+
+✅ Permanent source changes: build-deb.yml is manual-only and read-only, with
+no publication job/input or tag trigger. build_release.sh tags/pushes, then
+explicitly starts one matrix; --run-id checks and reuses an exact-source
+successful existing build before creating the tag. Publication uses separate
+manual publish-release.yml, requiring a tag, accepted=true and build_run_id.
+It invokes shared promote_release.py without compilation or build dispatch.
+
+✅ Promotion checks same trusted repository/head repository, build workflow,
+successful completed run, exact source SHA, remote lightweight/annotated tag,
+six unexpired/nonduplicate matrix artifacts, safe exact files, SHA-256 and Debian
+package/version/architecture. Requires clean tagged checkout and finalized
+metadata/notes. Only --publish --accepted creates a release; inspection and
+pre-tag run-only validation do not publish. Missing/expired artifacts fail closed
+with an explicit need for a new accepted build, never silent substitution.
+
+✅ Added tests to just test and Debian test recipes. Eleven promotion test
+methods cover positive/negative policy, remote tags, tampering/unsafe paths,
+inspection versus approved publication, and fake local release paths showing
+one default build dispatch or zero with reused run. Existing publication,
+download, installer and helper suites pass. Both workflows parse as manual-only
+single-job workflows; Bash syntax and diff checks pass. No Rust runtime changes
+or new package build needed for this focused tooling change.
+
+✅ Read-only live check of existing v0.5.3 run 38447948939 confirms reusable
+source 346c97bc090991d8f419caa1ebd74875e3516496 and all six artifacts. No
+download, build, tag, asset mutation or publication was performed by that check.
+AGENTS.md and build guide now require verified artifact reuse. Former 0.5.4
+tooling item is [o], transferred to the chronological follow-up.
+
+⏳ New hosted promotion execution remains for the next approved immutable
+release, not a repeat 0.5.3 build. Existing v0.5.3 tag predates these workflow
+files and will not be moved. Offline tests/live API validation do not establish
+the new workflow's hosted publication acceptance.

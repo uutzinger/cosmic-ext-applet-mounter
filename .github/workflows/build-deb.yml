@@ -1,16 +1,7 @@
 name: Build Debian packages
 
 on:
-  workflow_dispatch:
-    inputs:
-      publish_after_acceptance:
-        description: "Publish this v-tag only after acceptance of advertised package modes and finalized notes"
-        type: boolean
-        default: false
-        required: true
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -30,11 +21,6 @@ jobs:
           - { runner: ubuntu-26.04-arm, ubuntu: "26.04", arch: arm64 }
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Reject publication requests on branches
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_after_acceptance
-        env:
-          SOURCE_REF: ${{ github.ref }}
-        run: '[[ "$SOURCE_REF" == refs/tags/v* ]] || { echo "Publication requires an accepted v-tag" >&2; exit 1; }'
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
         with:
@@ -90,40 +76,3 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: release/*
-
-  release:
-    name: Explicitly publish accepted tagged release
-    # A tag push or ordinary manual build must never publish a release.
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_after_acceptance && startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-26.04
-    concurrency:
-      group: publish-${{ github.ref }}
-      cancel-in-progress: false
-    permissions:
-      contents: write
-    steps:
-      - name: Check out accepted tagged source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
-      - name: Validate publication source and finalized notes
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: bash scripts/check-release-publication.sh "$RELEASE_TAG"
-      - name: Download all package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node.js 24
-        with:
-          pattern: deb-*
-          path: release
-          merge-multiple: true
-
-      - name: Create combined checksums
-        run: |
-          cd release
-          rm -f SHA256SUMS
-          sha256sum *.deb > SHA256SUMS
-
-      - name: Create GitHub release and upload packages
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --notes-file "docs/releases/${GITHUB_REF_NAME}.md" --title "${GITHUB_REF_NAME}"
