@@ -107,7 +107,8 @@ Flatpak publication is pending; use Debian or source installations unless testin
 the [local manifests](packaging/flatpak/README.md). Desktop control uses D-Bus;
 storage engines still run on the host. Documents portal v4 retains a gated
 `flatpak document-info` fallback. The [command inventory](docs/engineering/flatpak-host-command-inventory.md)
-documents the remaining host calls; final 0.5.3 Flatpak acceptance is still open.
+documents the remaining host calls. Release 0.5.3 targets source/Debian installs;
+final Flatpak packaging and engine decisions are planned for 0.5.4.
 
 ### Post Installation
 

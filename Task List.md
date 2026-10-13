@@ -3247,8 +3247,9 @@ rebuilt-Flatpak lifecycle.
         installed user-local binary. Regenerated units invoked only the
         restricted Rust worker; manual, initial, scheduled, Pause, and Repair
         lifecycles passed without a shell or surviving storage process.
-      - [ ] Repeat the production worker lifecycle from the final rebuilt
+      - [o] Repeat the production worker lifecycle from the final rebuilt
         Flatpak before checking the packaging-mode parent item.
+        Transferred to [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
   - [x] Confirm scheduled execution can safely use the accepted Rust
     coordinator. The installed timer invoked the restricted worker, published
     matching systemd invocation state, completed successfully, and left no
@@ -3589,8 +3590,11 @@ rebuilt-Flatpak lifecycle.
     21-test coordinator suite, formatting, locked all-target check, and strict
     all-target Clippy pass. These are native host results, not acceptance of the
     final rebuilt Flatpak.
-- [ ] Validate both packaging modes before accepting shell removal in the final
+- [o] Validate both packaging modes before accepting shell removal in the final
   release artifact.
+  October 13: remaining steps transferred to
+  [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
+  Native receipts remain valid; deferred steps are not completed.
   - [x] Native: exercise manual preview/initial sync/normal sync and a timer-fired
     run with the installed applet and user service.
     - October 11 installed ordinary Preview passed on the initialized
@@ -3631,15 +3635,15 @@ rebuilt-Flatpak lifecycle.
       both sides; the remote contained only that anchor plus the excluded
       app-owned recovery directory. The standalone Modify window retained its
       stale `Sync Now requested` notice, as tracked above.
-  - [ ] Rebuilt Flatpak: repeat the same lifecycle and confirm the user service can
+  - [o] Rebuilt Flatpak: repeat the same lifecycle and confirm the user service can
     invoke only the restricted coordinator, host rclone remains reachable, and
     no new filesystem or general host-command permission is required.
-  - [ ] Verify progress counts, failure/repair UI, cancellation, initial-sync
+  - [o] Verify progress counts, failure/repair UI, cancellation, initial-sync
     confirmation, schedule pause/resume, and recovery retention from the
     installed application rather than only unit tests. Native acceptance covers
     the coordinator and both Repair engines; the final Flatpak repeat and
     retention warning behavior remain.
-  - [ ] Repeat the installed lifecycle for OneDrive, SharePoint, Google Drive, Box,
+  - [o] Repeat the installed lifecycle for OneDrive, SharePoint, Google Drive, Box,
     SMB, and SFTP offline engines as applicable. Keep these results separate
     from the provider-wide online-engine regression proof in Task (6).
   - [x] Live-verify the confirmed Repair flow with at least one rclone bisync mirror
@@ -3679,9 +3683,9 @@ proprietary Cisco command, GUI, agent, and configuration handling after
 installed-app acceptance passes.
 
 **Current status:** native and prototype-Flatpak OpenConnect acceptance passed.
-Only the immutable 0.5.3 source/tag, final reproducible Flatpak lifecycle, and
-post-acceptance Cisco rollback disposition remain open; those release steps are
-also summarized in the 0.5.3 gate below.
+October 13: final Flatpak lifecycle and Cisco rollback disposition are deferred
+to [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
+Native 0.5.3 delivery does not claim final Task (6) sandbox acceptance.
 
 - [x] Establish the compatibility baseline and rollback boundary.
   - [x] Confirm the current host state: Cisco Secure Client 5.1.19 is installed;
@@ -3976,7 +3980,10 @@ also summarized in the 0.5.3 gate below.
       slider off. Post-repair inspection found the service inactive/dead with
       `Result=success`, its unit disabled, no onedriver process or FUSE mount,
       and persisted `start_at_login: false`.
-- [ ] Complete automated and installed-app acceptance testing.
+- [o] Complete automated and installed-app acceptance testing.
+  Remaining sandbox steps transferred to
+  [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion);
+  existing native/prototype/automated receipts below remain valid.
   - [x] Add profile discovery/state/activation/deactivation coverage using an
     OpenConnect service-type fixture, plus legacy-config migration and missing
     profile errors. Installed D-Bus lifecycle evidence covers real activation
@@ -3987,7 +3994,7 @@ also summarized in the 0.5.3 gate below.
   - [x] Native: complete UA WebAuth/Duo, readiness, online mount, shared
     dependency ownership, unmount, and conditional disconnect through the
     installed applet. Offline sync acceptance is deferred to Task (5).
-  - [ ] Final tagged Flatpak: repeat the lifecycle through NetworkManager D-Bus
+  - [o] Final tagged Flatpak: repeat the lifecycle through NetworkManager D-Bus
     with no additional permission and confirm the host OpenConnect plugin owns
     the VPN implementation and authentication UI. Prototype evidence and the
     accepted runtime are recorded in the ordered gate below but do not replace
@@ -3998,7 +4005,7 @@ also summarized in the 0.5.3 gate below.
     Clippy, and the full suite passed before the later Task (5) coordinator
     changes. The repository-wide final gate is now centralized in the 0.5.3
     release list and must be repeated after the last source change.
-  - [ ] Complete the remaining Flatpak acceptance work in this order.
+  - [o] Complete the remaining Flatpak acceptance work in this order.
     1. [x] Rebuild and install the Freedesktop 25.08 GUI prototype from the
        current local release binary and record its Flatpak commit. This did not
        require a new source tag. Confirm the installed sandbox contains the
@@ -4042,7 +4049,7 @@ also summarized in the 0.5.3 gate below.
          canceled. The row returned to off without a COSMIC single-field
          prompt. Live checks confirmed no VPN active object, FUSE mount, or
          running mount service and persisted `start_at_login: false`.
-    5. [ ] Create and publish a commit/tag containing the accepted migration;
+    5. [o] Create and publish a commit/tag containing the accepted migration;
        do not use the older `v0.5.2` source as final-package evidence. Update the
        reproducible manifest and generated Cargo sources to that release.
     6. [x] Resolve `com.system76.Cosmic.BaseApp//stable` with the COSMIC Flatpak
@@ -4059,20 +4066,22 @@ also summarized in the 0.5.3 gate below.
          read-only GTK/KDE color-scheme paths appear in the effective permission
          report but no new application D-Bus or writable filesystem permission
          was introduced.
-    7. [ ] Build and install the final reproducible manifest, confirm it uses
+    7. [o] Build and install the final reproducible manifest, confirm it uses
        the accepted tag and runtime, and repeat at least the positive
        OpenConnect/VPN/mount/unmount lifecycle plus one negative authentication
        case. Prototype success alone does not close this final-package gate.
-  - [ ] Decide the Cisco Secure Client disposition only after the final Flatpak
+  - [o] Decide the Cisco Secure Client disposition only after the final Flatpak
     lifecycle passes. Until then keep it installed as the rollback client;
     afterward document whether it may be removed and update deployment guidance.
 
-## Release 0.5.3 — Flatpak host-integration completion
+## Release 0.5.3 — Native source and Debian release
 
-This is the concise release gate. Tasks (5) and (6) retain the implementation
-and acceptance detail; do not duplicate their historical evidence here. Build
-the final reproducible Flatpak only after every pre-build source item below is
-complete so that one tagged artifact can close both tasks.
+October 13 scope decision: complete source-install and Debian delivery with the
+current three engines. Native authentication is retained; forced manual URL
+handoff applies only to experimental Flatpak mode. Final Flatpak packaging and
+engine decisions are deferred to
+[Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
+Tasks (5)/(6) retain historical receipts; transferred steps use [o], not false [x].
 
 ### Pre-build source closure
 
@@ -4275,7 +4284,7 @@ complete so that one tagged artifact can close both tasks.
       candidate lifecycle evidence, not a cross-version 0.5.2-to-0.5.3 migration.
 - [ ] Advance all release metadata consistently to 0.5.3, prepare release
   notes and checksums, review the complete worktree, and create the immutable
-  accepted commit/tag required by the reproducible Flatpak manifest.
+  accepted native release source. Final Flatpak identity is a 0.5.4 gate.
   - [x] Resolve publication ordering before pushing a `v*` tag. Tag pushes and
     ordinary dispatch now build only. Explicit manual accepted-tag publication
     requires all six builds, matching Cargo/lock/Debian/AppStream versions,
@@ -4287,7 +4296,9 @@ complete so that one tagged artifact can close both tasks.
   - [x] Prepare 0.5.3 Cargo/lock/Debian/AppStream metadata and draft release notes.
     AppStream remains development and notes remain Draft pending final acceptance;
     README installation URLs and historical screenshots retain published 0.5.2.
-    Flatpak source pin stays at v0.5.2 until the accepted immutable tag exists.
+    Experimental Flatpak source pin remains unchanged until the 0.5.4 gate.
+    October 13 native acceptance: notes prepared and AppStream stabilized for
+    source/Debian scope. Hosted final artifact identities remain separate.
   - [x] Build and inspect a local versioned 0.5.3 amd64 candidate. October 12:
     385 nonignored Rust and 18 Python tests passed; payload checksums and fixed
     worker probe passed. Artifacts: `target/local-deb-053-2026-10-12.QlFmb9/`.
@@ -4300,11 +4311,11 @@ complete so that one tagged artifact can close both tasks.
     files preserved unchanged. Reloaded `/usr/bin` Runtime owner verified and
     user confirmed expected panel/settings behavior. This is local amd64
     acceptance; hosted matrix and final Flatpak gates remain pending.
-  - [ ] Finalize notes/AppStream status, review source and create the approved
-    immutable release source/tag without moving an existing tag. Resolve the
-    candidate-to-final source identity before final Flatpak acceptance; this
-    preparation does not authorize tagging, pushing, or publishing.
-    - [ ] Finish the [release source review](docs/engineering/release-source-audit.md),
+  - [ ] Finalize native notes/AppStream status after native acceptance and review
+    latest source. User authorized committing/pushing completed 0.5.3 development
+    to Git; tag/publication still require separate approval. Final Flatpak
+    acceptance is no longer a native 0.5.3 prerequisite.
+    - [x] Finish the focused [release source review](docs/engineering/release-source-audit.md),
       including latest all-feature tests, intended new/moved file inclusion,
       reference/secret checks and final staged diff. Existing default package
       and installed receipts remain valid where source is unchanged.
@@ -4326,11 +4337,131 @@ complete so that one tagged artifact can close both tasks.
         User approved the next local commit stage; candidate source committed as
         `efbf73e` on October 12. No full line-by-line security review is claimed.
         Tag, push and publication approval remain separate and outstanding.
-    - [ ] Accept the proposed immutable candidate-to-final sequence before any
-      commit/tag/push: test candidate commit/prerelease with draft metadata, then
+    - October 13: unfinished sandbox/candidate steps below are transferred to
+      [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
+      Completed research/test receipts are retained; no final acceptance claim.
+    - [x] Accept the immutable local candidate-commit route for initial validation:
+      user requested the next task after candidate commit. Test candidate commit
+      with draft metadata, then
       finalize in a new commit and verify the final stable-tag artifact. Never
       move an existing tag or treat candidate acceptance as final identity.
-- [ ] Build and install the final Flatpak from the accepted 0.5.3 tag and
+      Local candidate manifest pins `efbf73e`; no tag or push is needed for this
+      build. Final tag/push/publication still require separate approval.
+    - [x] Prepare a build-only candidate manifest under
+      `target/flatpak-candidate-053-efbf73e.hxxZ6G/`, changing only app source
+      URL/commit. Installed COSMIC BaseApp stable, SDK and Rust extension 25.08
+      verified; reviewed permissions and final manifest are unchanged.
+    - [o] Build the immutable candidate Flatpak, inspect source/runtime/effective
+      permissions/helper/worker, then obtain controlled installation/runtime
+      switch approval for candidate lifecycle tests. Do not count this as final
+      stable-tag acceptance or silently substitute runtimes/add broad grants.
+      - [x] Fix initial offline-fetch vendor identity mismatch: regenerate Cargo
+        sources from current lockfile and check all Git selectors/commits via a
+        new packaging contract. Three Flatpak source tests pass; dependency
+        revisions/download URLs and runtime/permissions are unchanged. Packaging
+        overlay must be committed before final source reproducibility acceptance.
+      - [x] Retry candidate build using refreshed generated sources; original
+        failure log preserved. October 12 log confirms efbf73e checkout and
+        locked offline 0.5.3 build; exported commit
+        `0b6b66e778a5d62365e3b52b30f39b6a5fe4c3b6fa2412d710d81ac0996da88d`.
+        Metadata retains COSMIC BaseApp stable/Freedesktop 25.08 and reviewed
+        grants, no blanket host filesystem. Build-only, not installed acceptance.
+      - [x] Fixed synthetic worker probe passed against Platform (not SDK).
+        October 12 user terminal output confirms the expected UUID receipt;
+        no configuration, storage or runtime-owner operation was performed.
+      - [o] Resolve optional OneDrive helper availability before candidate
+        acceptance: Platform Python reports `ModuleNotFoundError: gi`.
+        Host installation is not a remedy. Package the graphical helper for the
+        preferred flow and retain explicit manual browser handoff as fallback;
+        ensure a present
+        but unusable helper is not reported as successfully opened. Real sign-in
+        handoff still needs its own acceptance, not just successful imports.
+        - [x] Implement user-approved explicit Flatpak browser handoff. Flatpak
+          setup selects manual auth-files and bounded asynchronous OpenURI portal
+          requests, never launches the GI helper, and requires redirect submission.
+          Connection-scoped transient files use private shared app state rather
+          than sandbox /tmp. Native interactive/helper behavior is retained.
+          28 focused OneDrive tests, helper tests, strict Clippy and localization
+          checks pass; source-only implementation, not installed auth acceptance.
+        - [o] Run latest all-feature source tests, commit the reviewed packaging/
+          fallback delta with approval, and repin/rebuild the candidate from that
+          immutable source. Existing efbf73e build does not contain this fallback.
+          - [x] Latest host all-feature tests pass: 390 passed, zero failed,
+            12 ignored. Managed loopback restriction was rerun with authorized
+            host socket access; ignored tests remain separate.
+          - [x] Prepare frozen browser-fallback development snapshot at
+            `target/flatpak-candidate-053-browser.pzKAYd/`. Source archive is
+            checksummed; only manifest app source differs, no grant/runtime change.
+            This permits local testing without an unapproved commit/tag, but does
+            not replace the required immutable committed/final source gate.
+          - [x] Build frozen browser-fallback development snapshot. October 12:
+            locked offline 0.5.3 build/export succeeded; archive checksum verified,
+            browser-handoff Fluent labels packaged, metadata byte-identical to
+            preceding candidate (runtime/grants unchanged). Export commit
+            `d0f101c60a1e4fb78700184e3dac11c2544904989c3e171ec12d73e07d7138d7`.
+          - [x] Obtain controlled candidate installation/runtime-switch approval.
+            October 12: exact prior Flatpak saved/validated in rollback bundle;
+            candidate d0f101c installed and panel launcher switched reversibly.
+            Sole applet process is sandboxed; native/Debian preserved, all 5,328
+            baseline files unchanged after installation, config unchanged after
+            switch, storage units inactive. Global read-only theme overrides noted.
+          - [x] Confirm candidate panel/settings responsiveness. User confirmed
+            responsive behavior on October 13; authentication remains separate.
+          - [x] Verify positive browser handoff on disposable OneDrive setup.
+            October 13: user authenticated personal OneDrive using preceding
+            redirect URL from browser history; app reported authentication and
+            dry-run validation completed. Fast redirect remains a documented
+            usability limitation, not automatic capture. Transient auth directory
+            is private and empty after completion. No initial sync was started.
+        - [x] Verify candidate sandbox browser request, redirect submission and
+          transient cleanup on approved disposable setup (October 13).
+        - [o] Verify authentication failure/cancellation separately. Then save/
+          inspect disposable units without starting sync; final committed-source
+          build and affected final-artifact checks remain pending.
+        - [o] Package and validate the graphical OneDrive authentication helper
+          inside Flatpak — added October 13, 2026. Manual history/paste success
+          above is fallback evidence, not completion of graphical authentication.
+          - [o] Identify and package Python GI/PyGObject, GTK 3 and WebKitGTK 4.1
+            with required introspection/runtime dependencies against the accepted
+            COSMIC BaseApp/Freedesktop 25.08 target. Review sources, versions,
+            licenses, package size and maintenance; do not silently switch runtime
+            or add broad host filesystem/bus permissions.
+            - [x] Inventory accepted Platform/SDK 25.08 (October 13): Python
+              3.13.15, GTK 3.24.52 and typelibs, GI repository 1.0/2.0 and GLib
+              2.84.4 are available. PyGObject and WebKitGTK/JavaScriptCore are
+              missing. SDK has libsoup 3.6.6, introspection 1.86 and build tools;
+              WPE/backend libraries are missing. No SDK/runtime switch required
+              by the observed Python/GI gap; WebKit build compatibility pending.
+            - [x] Run initial WebKitGTK 2.54.1 configure-only probe in SDK 25.08
+              using checksum-verified upstream sources. GCC 15.2 and core library
+              checks pass; temporary Ruby 3.4.11 miniruby built successfully.
+              Optional libbacktrace was disabled, not browser sandboxing.
+            - [x] Complete configure with actual SDK-built sandbox executables.
+              October 13: pinned bubblewrap 0.13.0/xdg-dbus-proxy 0.1.9 modules
+              added, source digests/licenses reviewed, probe builds and Platform
+              loading pass. WebKitGTK 2.54.1 configure/generation succeeds with
+              sandbox/introspection ON, GTK3/4.1, bundled unifdef/sysprof and
+              optional libbacktrace OFF. Four packaging contracts pass. No newer
+              SDK, host binary, extra grant or sandbox disablement was needed.
+            - [o] Complete temporary Ruby generator tooling and compile WebKit
+              with bounded parallelism; then integrate helper modules with final
+              /app paths, package PyGObject and verify Platform imports/GUI.
+              Module definitions are not yet wired into the final manifest;
+              configure success/version probes are not full build/sandbox proof.
+          - [o] Verify imports in Platform, not SDK, then test graphical sign-in
+            and automatic native-client redirect capture on disposable setup.
+            Verify failure, cancellation, timeout, helper exit and transient-file
+            cleanup without exposing authorization URLs/tokens in diagnostics.
+          - [o] Restore graphical authentication as the preferred supported
+            Flatpak path, preserving native interactive behavior and one explicit
+            Use Manual Auth Handoff fallback. Remove duplicate manual entry
+            actions; browser-opening/response-entry controls belong to that flow.
+            Never report a missing/unusable helper as successfully opened.
+          - [o] Reconcile Requirements and Specifications, user/packaging guidance,
+            Fluent labels and draft notes. Retain manual history/paste as a known
+            fallback limitation; add focused regressions and repeat affected
+            installed/final-artifact authentication acceptance.
+- [o] Build and install the final Flatpak from the accepted 0.5.3 tag and
   accepted COSMIC BaseApp/Freedesktop 25.08 runtime. Verify its source identity,
   generated Cargo sources, permissions, and restricted coordinator worker.
   - Inspect effective grants including BaseApp defaults and the settings-daemon
@@ -4339,16 +4470,117 @@ complete so that one tagged artifact can close both tasks.
     host-path resolution alone grants no access to the original sandbox path.
     If access fails, record the precise path/operation and approved narrow
     solution; do not silently add `--filesystem=host` or restore a shell wrapper.
-  - Verify the optional OneDrive helper's Python GI/Gtk 3/WebKit2 4.1 imports
-    and sign-in handoff inside the accepted sandbox runtime/base, or explicitly
-    document manual URL handoff. Host helper package installation proves no
-    sandbox library availability.
-- [ ] From that final Flatpak, repeat the Task (5) offline coordinator lifecycle
+  - Verify the graphical OneDrive helper packaging/authentication subtask above
+    against the final sandbox runtime/base, including the single manual fallback.
+    Native helper installation and successful manual handoff alone do not close
+    graphical authentication acceptance.
+- [o] From that final Flatpak, repeat the Task (5) offline coordinator lifecycle
   and the Task (6) positive OpenConnect/VPN/mount/unmount lifecycle plus one
   negative authentication case.
-- [ ] Close Tasks (5) and (6), update the host-command inventory, decide and
+- [o] Close Tasks (5) and (6), update the host-command inventory, decide and
   document the Cisco Secure Client rollback disposition, and only then publish
   the 0.5.3 release and open the Flatpak packaging pull request.
+  Superseded combined-release gate: handled by
+  [Release 0.5.4](#release-054--engine-decision-and-flatpak-completion).
+  Native-only 0.5.3 publication no longer waits for these sandbox steps.
+
+### Remaining native 0.5.3 closure — October 13
+
+- [x] Rebuild latest native source and Debian candidate; verify source installation
+  and package identity, native OneDrive WebKit/manual helper operation, popup/
+  settings and affected auth-file cleanup. Reuse accepted unchanged engine/repair
+  receipts; do not convert working mirrors or replace credentials implicitly.
+  - [x] Latest source build installed with just install-user; installed bytes
+    match artifact, restricted worker probe and native helper imports pass.
+    Native WebKit helper captures a synthetic redirect into a 0600 response file;
+    process exits cleanly and synthetic files were removed. User confirmed native
+    popup/settings behavior. Real provider auth was not repeated unnecessarily.
+  - [x] Build/inspect latest native Debian candidate: 391 Rust/18 Python tests,
+    eight payload checksums, helper/catalog comparisons and worker probe pass.
+    Artifacts: target/local-deb-native053-20261013.N16OSk/. Known packaging
+    warnings unchanged; not a published release.
+  - [x] Verify installed latest Debian candidate and preservation, then finalize
+    native metadata/artifact identity; source helper/UI receipts remain separate.
+    - [x] October 13 APT reinstall succeeded. dpkg integrity/build ID match;
+      all 5,331 preservation-baseline files unchanged after installation.
+      Reloaded packaged /usr/bin Runtime owner verified; config unchanged and
+      storage units inactive. Source build and launcher backup retained.
+    - [x] User confirmed final packaged popup/settings respond normally (October 13).
+- [x] Restore native panel launcher/runtime from reversible Flatpak test switch;
+  preserve rollback packages and saved configuration.
+  October 13: native user-local Runtime verified; 5,331-file preservation baseline
+  found only launcher and four regenerated native service files changed. Config,
+  credentials/cache/mirror data unchanged; services inactive. Source rollback
+  artifacts retained under target/native-053-source-backup-20261013.FqvmDS/.
+- [ ] Run latest source/packaging gates and staged review, including research
+  modules/fixtures; finalize native-only notes/AppStream after applicable checks.
+  - [x] Native gates, metadata/notes preflight, formatting, signature scan and
+    local links/anchors pass. No runtime code changed in stable metadata closure.
+  - [ ] Final cached review/commit and hosted matrix acceptance remain.
+- [ ] Commit and push completed source as authorized, dispatch a fresh six-platform
+  Debian workflow with publication disabled, and inspect all artifacts.
+- [ ] Record accepted native identity/checksums and obtain separate release-tag/
+  publication approval. No final Flatpak/submission claim for 0.5.3.
+
+- [ ] Clean up stale mount services and mount folders in ~/Cloud
+
+## Release 0.5.4 — Engine decision and Flatpak completion
+
+Planned October 13, 2026. Authoritative home for deferred Flatpak work from
+Tasks (5)/(6) and 0.5.3. Prior [x] receipts remain historical; transferred [o]
+steps are not completed. Start with architecture, not more WebKit/auth code.
+
+### Decide supported engines before implementation
+
+- [ ] Decide whether continuous/event-driven offline mirroring is required or
+  scheduled bisync plus Sync Now meets product intent. Compare rclone-only with
+  retaining abraunegg/onedrive; justify continued jstaf/onedriver support and the
+  maintenance cost of any permanent user-selectable engine choices.
+- [ ] Define native/Flatpak engine matrix and explicit legacy migration policy.
+  Preserve existing connections, credentials, engine databases/caches and pending
+  writes. Never silently reinterpret account labels as rclone remotes or run two
+  engines on one mirror. Update Description/Requirements after deciding.
+- [ ] If consolidating, implement/test personal/business OneDrive rclone Online
+  and Offline routing, auth/drive identity, generated units, status/RC, repair,
+  initialization, retention and safety contracts on disposable trees. Cover
+  network loss, cached reads, reconnect/pending uploads, remote edits, conflicts/
+  deletions, cancellation and recovery before migrating real data.
+- [ ] If retaining abraunegg, review prior callback/device/helper trials and
+  validate the distinct host-terminal/script authorization route with isolated
+  confdir. Use upstream complete callback flow rather than just generating a URL
+  or reinventing OAuth. Organization consent remains independent of browser UI.
+- [ ] Decide whether WebKit packaging is still justified. Retain probe evidence
+  without claiming shipped support. Only if selected, finish Ruby/WebKit/PyGObject
+  builds, preserve sandboxing/licenses/security maintenance, remove build-only
+  Ruby, and prove automatic capture/failure/cancel/cleanup. Keep one explicit
+  manual fallback, not duplicate manual entry approaches.
+
+### Consolidated Flatpak acceptance and release
+
+- [ ] Commit accepted implementation and generate/check Cargo sources; pin
+  immutable 0.5.4 candidate/final source. Keep COSMIC BaseApp/Freedesktop 25.08
+  unless a separate reviewed runtime decision explicitly changes the target.
+- [ ] Build source-based candidate/final Flatpak with shipping features only;
+  verify source/runtime identity, helper/worker payloads and size. Inspect effective
+  grants including BaseApp/global overrides; no silent blanket host filesystem/
+  bus grants or restoration of obsolete shell wrappers.
+- [ ] Prove selected engine auth and sandbox mirror/recovery/state access through
+  reviewed grants/portal authorization. Host-path resolution is not an access
+  grant. Verify Platform capabilities, not merely SDK imports or host packages.
+- [ ] Complete Task (5) final sandbox Preview/initial/ordinary/scheduled sync,
+  worker/progress, pause/resume, cancellation, failure/Repair, lock/initialization
+  preservation and successful-only retention; expand provider matrix as applicable.
+- [ ] Complete Task (6) final OpenConnect positive VPN/mount/unmount/ownership and
+  one negative authentication lifecycle. Keep prior native/prototype receipts
+  separate. Decide Cisco rollback disposition only after relevant acceptance;
+  no OS client removal is implicit.
+- [ ] Verify final Online engines, busy unmount/Repair, clean-profile setup,
+  upgrade/removal preservation, panel/settings integration and translations.
+- [ ] Reconcile host-command inventory/permission rationale, close transferred
+  Tasks (5)/(6) sandbox gates and prepare concise COSMIC review description.
+  Confirm maintainer expectations for retained host execution/dependencies.
+- [ ] Finalize 0.5.4 metadata/notes/checksums, inspect native/final Flatpak artifacts
+  and obtain release publication/COSMIC packaging submission approval.
 
 # Cloud Mounter Applet Future Task List
 

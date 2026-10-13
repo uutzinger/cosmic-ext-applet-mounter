@@ -609,6 +609,7 @@ pub enum Message {
     StartOneDriveMirrorManualSetup,
     OneDriveMirrorSetupCompleted(Result<String, String>),
     OpenOneDriveMirrorAuthUrl,
+    OneDriveAuthUrlOpened(ConnectionId, Result<String, String>),
     SubmitOneDriveMirrorAuthResponse,
     TestDraft,
     DraftTested(Connection, Result<String, String>),
@@ -1978,7 +1979,12 @@ impl AppModel {
                 }
             },
             Message::OpenOneDriveMirrorAuthUrl => {
-                self.open_onedrive_mirror_auth_url();
+                return self.open_onedrive_mirror_auth_url();
+            }
+            Message::OneDriveAuthUrlOpened(id, result) => {
+                if self.draft.id == Some(id) {
+                    self.last_notice = Some(result.unwrap_or_else(|error| error));
+                }
             }
             Message::SubmitOneDriveMirrorAuthResponse => {
                 self.submit_onedrive_mirror_auth_response();
@@ -3409,9 +3415,17 @@ impl AppModel {
                 .push(widget::text::body(fl!("onedrive-auth-title")))
                 .push(widget::text::body(fl!("onedrive-auth-intro")))
                 .push(field_with_help(
-                    widget::button::suggested(fl!("onedrive-auth-open"))
-                        .on_press(Message::OpenOneDriveMirrorAuthUrl),
-                    fl!("onedrive-auth-open-help"),
+                    widget::button::suggested(if running_in_flatpak() {
+                        fl!("onedrive-auth-open-browser")
+                    } else {
+                        fl!("onedrive-auth-open")
+                    })
+                    .on_press(Message::OpenOneDriveMirrorAuthUrl),
+                    if running_in_flatpak() {
+                        fl!("onedrive-auth-open-browser-help")
+                    } else {
+                        fl!("onedrive-auth-open-help")
+                    },
                 ))
                 .push(widget::text::body(fl!("onedrive-auth-shell-fallback")))
                 .push(field_with_help(
@@ -4697,7 +4711,7 @@ impl AppModel {
     }
 
     fn start_onedrive_mirror_setup(&mut self) -> Task<cosmic::Action<Message>> {
-        self.start_onedrive_mirror_setup_with_mode(OneDriveMirrorSetupMode::Interactive)
+        self.start_onedrive_mirror_setup_with_mode(default_onedrive_auth_mode(running_in_flatpak()))
     }
 
     fn start_onedrive_mirror_manual_setup(&mut self) -> Task<cosmic::Action<Message>> {
@@ -4778,23 +4792,18 @@ impl AppModel {
         }
     }
 
-    fn open_onedrive_mirror_auth_url(&mut self) {
+    fn open_onedrive_mirror_auth_url(&mut self) -> Task<cosmic::Action<Message>> {
         let Some(connection_id) = self.draft.id else {
             self.last_notice = Some(fl!("notice-onedrive-start-before-open"));
-            return;
+            return Task::none();
         };
         let auth_files = onedrive_auth_files_for_connection(connection_id);
-        match open_onedrive_auth_url(&auth_files) {
-            Ok(message) => {
-                self.last_notice = Some(message);
-            }
-            Err(error) => {
-                self.last_notice = Some(fl!(
-                    "notice-onedrive-open-failed",
-                    error = error.to_string()
-                ));
-            }
-        }
+        Task::perform(
+            async move { open_onedrive_auth_url(&auth_files).await },
+            move |result| {
+                cosmic::Action::App(Message::OneDriveAuthUrlOpened(connection_id, result))
+            },
+        )
     }
 
     fn matching_rclone_remotes_in(
@@ -11068,10 +11077,14 @@ fn prepare_onedrive_offline_mirror_runtime_with(
 }
 
 fn onedrive_auth_files_for_connection(connection_id: ConnectionId) -> OneDriveMirrorAuthFiles {
+    onedrive_auth_files_in(connection_id, &default_work_root().join("onedrive-auth"))
+}
+
+fn onedrive_auth_files_in(connection_id: ConnectionId, root: &Path) -> OneDriveMirrorAuthFiles {
     let stem = format!("cosmic-mounter-onedrive-auth-{connection_id}");
     OneDriveMirrorAuthFiles {
-        auth_url_file: std::env::temp_dir().join(format!("{stem}-url")),
-        response_url_file: std::env::temp_dir().join(format!("{stem}-response")),
+        auth_url_file: root.join(format!("{stem}-url")),
+        response_url_file: root.join(format!("{stem}-response")),
     }
 }
 
@@ -11091,16 +11104,46 @@ fn validate_onedrive_auth_url(value: &str) -> Result<(), String> {
     }
 }
 
-fn open_onedrive_auth_url(auth_files: &OneDriveMirrorAuthFiles) -> Result<String, String> {
-    let url = fs::read_to_string(&auth_files.auth_url_file).map_err(|error| {
-        crate::fl!(
-            "ui-app-auth-url-file-is-not-ready-yet",
-            value1 = (auth_files.auth_url_file.display()).to_string(),
-            error = (error).to_string()
-        )
-    })?;
+fn default_onedrive_auth_mode(flatpak: bool) -> OneDriveMirrorSetupMode {
+    if flatpak {
+        OneDriveMirrorSetupMode::ManualAuthFiles
+    } else {
+        OneDriveMirrorSetupMode::Interactive
+    }
+}
+
+async fn open_onedrive_auth_url(auth_files: &OneDriveMirrorAuthFiles) -> Result<String, String> {
+    let url = tokio::fs::read_to_string(&auth_files.auth_url_file)
+        .await
+        .map_err(|error| {
+            crate::fl!(
+                "ui-app-auth-url-file-is-not-ready-yet",
+                value1 = (auth_files.auth_url_file.display()).to_string(),
+                error = (error).to_string()
+            )
+        })?;
     let url = url.trim();
     validate_onedrive_auth_url(url)?;
+    if running_in_flatpak() {
+        let request = async {
+            let connection = zbus::Connection::session().await?;
+            let proxy = zbus::Proxy::new(
+                &connection,
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+                "org.freedesktop.portal.OpenURI",
+            )
+            .await?;
+            let options = BTreeMap::<String, zbus::zvariant::OwnedValue>::new();
+            let _: zbus::zvariant::OwnedObjectPath =
+                proxy.call("OpenURI", &("", url, options)).await?;
+            Ok::<(), zbus::Error>(())
+        };
+        return match tokio::time::timeout(Duration::from_secs(10), request).await {
+            Ok(Ok(())) => Ok(fl!("onedrive-auth-browser-requested")),
+            _ => Err(fl!("onedrive-auth-browser-request-failed")),
+        };
+    }
     if let Some(helper) = onedrive_auth_helper_path() {
         Command::new(&helper)
             .env(
@@ -11180,6 +11223,8 @@ fn write_onedrive_auth_response(
                 error = (error).to_string()
             )
         })?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|_| fl!("onedrive-auth-directory-private-failed"))?;
     }
     let mut file = OpenOptions::new()
         .write(true)
@@ -11221,6 +11266,10 @@ fn prepare_onedrive_auth_files(auth_files: &OneDriveMirrorAuthFiles) -> Result<(
                 error = (error).to_string()
             )
         })?;
+    }
+    if let Some(parent) = auth_files.auth_url_file.parent() {
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|_| fl!("onedrive-auth-directory-private-failed"))?;
     }
     let _ = fs::remove_file(&auth_files.auth_url_file);
     let _ = fs::remove_file(&auth_files.response_url_file);
@@ -16205,6 +16254,61 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&auth_files.response_url_file).expect("response file"),
             response
+        );
+    }
+
+    #[test]
+    fn onedrive_auth_flatpak_defaults_to_manual_native_keeps_interactive() {
+        assert_eq!(
+            default_onedrive_auth_mode(true),
+            OneDriveMirrorSetupMode::ManualAuthFiles
+        );
+        assert_eq!(
+            default_onedrive_auth_mode(false),
+            OneDriveMirrorSetupMode::Interactive
+        );
+    }
+
+    #[test]
+    fn onedrive_auth_handoff_uses_scoped_private_shared_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("state/onedrive-auth");
+        let first = onedrive_auth_files_in(ConnectionId::new(), &root);
+        let second = onedrive_auth_files_in(ConnectionId::new(), &root);
+        assert_eq!(first.auth_url_file.parent(), Some(root.as_path()));
+        assert_ne!(first, second);
+        prepare_onedrive_auth_files(&first).unwrap();
+        assert_eq!(
+            fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        fs::write(&first.auth_url_file, "synthetic auth URL").unwrap();
+        fs::write(&first.response_url_file, "synthetic response").unwrap();
+        cleanup_onedrive_auth_files(&first);
+        assert!(!first.auth_url_file.exists());
+        assert!(!first.response_url_file.exists());
+    }
+
+    #[tokio::test]
+    async fn onedrive_auth_open_rejects_invalid_url_before_launch() {
+        let temp = tempfile::tempdir().unwrap();
+        let files = onedrive_auth_files_in(ConnectionId::new(), temp.path());
+        fs::write(&files.auth_url_file, "https://example.test/authorize").unwrap();
+        assert!(open_onedrive_auth_url(&files).await.is_err());
+    }
+
+    #[test]
+    fn onedrive_auth_open_completion_does_not_update_changed_draft() {
+        let mut app = AppModel::default();
+        app.draft.id = Some(ConnectionId::new());
+        app.last_notice = Some("keep current draft notice".into());
+        let _ = cosmic::Application::update(
+            &mut app,
+            Message::OneDriveAuthUrlOpened(ConnectionId::new(), Ok("old request".into())),
+        );
+        assert_eq!(
+            app.last_notice.as_deref(),
+            Some("keep current draft notice")
         );
     }
 

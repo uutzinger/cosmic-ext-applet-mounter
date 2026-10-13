@@ -49,10 +49,11 @@ restarts the panel and loads the updated applet.
 
 Release preparation: `scripts/build_release.sh` creates/pushes the version tag
 and downloads Debian build artifacts only; it does not publish. After final
-native/Flatpak acceptance and finalized notes/AppStream metadata, separately
+acceptance of the advertised package modes and finalized notes/AppStream, separately
 authorize a manual **Build Debian packages** dispatch on the accepted tag with
 `publish_after_acceptance=true`. This rebuilds all six packages before publishing.
 Do not run tag/publish commands without the corresponding approval.
+Release 0.5.3 targets native source/Debian delivery; final Flatpak is a 0.5.4 gate.
 
 `just stage` installs into `target/stage/usr` and does not modify the host
 system. `just metadata-check` reports known COSMIC-specific freedesktop validation

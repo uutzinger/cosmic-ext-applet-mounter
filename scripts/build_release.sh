@@ -14,7 +14,8 @@ Usage: scripts/build_release.sh [--dry-run] [--remote <name>]
 
 Validate a release, create and push its v<version> tag, then wait for the
 GitHub Actions Debian builds and download their artifacts. Tag builds NEVER
-publish a GitHub release. After native and final Flatpak acceptance, finalize
+publish a GitHub release. After acceptance of the release's advertised package
+modes (source/Debian for 0.5.3; final Flatpak is deferred to 0.5.4), finalize
 docs/releases/v<version>.md, then explicitly dispatch Build Debian packages on
 that tag with publish_after_acceptance=true. This rebuilds all six packages
 from the tag before publication. That dispatch requires separate approval.

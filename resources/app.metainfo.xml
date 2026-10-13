@@ -78,9 +78,9 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="0.5.3" date="2026-10-12" type="development">
+    <release version="0.5.3" date="2026-10-13">
       <description>
-        <p>Release candidate: D-Bus host integration and safer synchronization.</p>
+        <p>Native source and Debian release with D-Bus host integration and safer synchronization.</p>
         <ul>
           <li>Use typed desktop control and a shared Rust offline coordinator.</li>
           <li>Improve recovery and OpenConnect authentication integration.</li>

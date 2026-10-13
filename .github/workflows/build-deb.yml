@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_after_acceptance:
-        description: "Publish this v-tag only after native/Flatpak acceptance and finalized release notes"
+        description: "Publish this v-tag only after acceptance of advertised package modes and finalized notes"
         type: boolean
         default: false
         required: true

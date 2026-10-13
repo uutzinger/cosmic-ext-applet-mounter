@@ -1,0 +1,20 @@
+{
+  "name": "bubblewrap",
+  "buildsystem": "meson",
+  "config-opts": [
+    "-Dman=disabled",
+    "-Dtests=false",
+    "-Dbash_completion=disabled",
+    "-Dzsh_completion=disabled"
+  ],
+  "post-install": [
+    "install -Dm0644 COPYING /app/share/licenses/bubblewrap/COPYING"
+  ],
+  "sources": [
+    {
+      "type": "archive",
+      "url": "https://github.com/containers/bubblewrap/releases/download/v0.13.0/bubblewrap-0.13.0.tar.xz",
+      "sha256": "4734237473c0e5d695e4e9034a34e43b2dbf5164655bd13fa59ae376b2b7a765"
+    }
+  ]
+}

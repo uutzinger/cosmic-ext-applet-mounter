@@ -2,10 +2,102 @@
 
 //! Source packaging contracts, not rebuilt Flatpak acceptance.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cosmic_ext_applet_mounter::config::APP_ID;
 use serde_json::Value;
+
+#[test]
+fn webkit_sandbox_modules_are_pinned_source_builds_with_license_payloads() {
+    for (text, name, checksum) in [
+        (
+            include_str!("../packaging/flatpak/modules/bubblewrap.json"),
+            "bubblewrap",
+            "4734237473c0e5d695e4e9034a34e43b2dbf5164655bd13fa59ae376b2b7a765",
+        ),
+        (
+            include_str!("../packaging/flatpak/modules/xdg-dbus-proxy.json"),
+            "xdg-dbus-proxy",
+            "5450dda586ec3bb3ca709d311e845487883faa3b09cf562608d7e84f4311dced",
+        ),
+    ] {
+        let module: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(module["name"], name);
+        assert_eq!(module["buildsystem"], "meson");
+        assert_eq!(module["sources"][0]["type"], "archive");
+        assert_eq!(module["sources"][0]["sha256"], checksum);
+        assert!(
+            module["sources"][0]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://github.com/")
+        );
+        assert!(
+            module["post-install"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|command| command.as_str().unwrap().contains("/app/share/licenses/"))
+        );
+        assert!(module.get("finish-args").is_none());
+        assert!(!text.contains("chmod"));
+        assert!(!text.contains("--filesystem=host"));
+    }
+}
+
+#[test]
+fn generated_git_replacements_match_locked_source_selectors() {
+    let sources: Vec<Value> =
+        serde_json::from_str(include_str!("../packaging/flatpak/cargo-sources.json")).unwrap();
+    let config = sources
+        .iter()
+        .find(|source| source["dest"] == "cargo" && source["dest-filename"] == "config")
+        .unwrap()["contents"]
+        .as_str()
+        .unwrap();
+    let normalized = |value: &str| value.trim_end_matches(".git").to_owned();
+    for line in include_str!("../Cargo.lock").lines() {
+        let Some(source) = line.strip_prefix("source = \"git+") else {
+            continue;
+        };
+        let source = source.trim_end_matches('"');
+        let (location, commit) = source.rsplit_once('#').unwrap();
+        let mut url = url::Url::parse(location).unwrap();
+        let expected: BTreeMap<String, String> = url.query_pairs().into_owned().collect();
+        url.set_query(None);
+        let repository = normalized(url.as_str());
+        let replacement = config
+            .split("[source.")
+            .map(|block| {
+                block
+                    .lines()
+                    .filter_map(|line| line.split_once(" = "))
+                    .map(|(key, value)| (key.to_owned(), value.trim_matches('"').to_owned()))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .find(|block| {
+                block
+                    .get("git")
+                    .is_some_and(|git| normalized(git) == repository)
+            })
+            .unwrap_or_else(|| panic!("Missing replacement for {repository}"));
+        let actual: BTreeMap<_, _> = replacement
+            .into_iter()
+            .filter(|(key, _)| matches!(key.as_str(), "rev" | "tag" | "branch"))
+            .collect();
+        assert_eq!(actual, expected, "Source selector mismatch: {repository}");
+        assert!(
+            sources.iter().any(|entry| {
+                entry["type"] == "git"
+                    && entry["url"]
+                        .as_str()
+                        .is_some_and(|git| normalized(git) == repository)
+                    && entry["commit"] == commit
+            }),
+            "Missing pinned checkout: {repository}"
+        );
+    }
+}
 
 fn manifests() -> [Value; 2] {
     [

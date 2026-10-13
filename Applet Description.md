@@ -17,6 +17,11 @@ with ordinary local files.
 This document is the source description for subsequent requirements,
 specifications, and development tasks.
 
+Release 0.5.3 targets native source and Debian installation with the current
+engines. Flatpak remains experimental; final packaging and engine-consolidation
+decisions are deferred to 0.5.4. Existing connection/data semantics are retained
+until an explicitly accepted migration changes them.
+
 ## Supported Storage Providers and Tools
 
 Each storage connection uses exactly one access mode.

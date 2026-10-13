@@ -3,6 +3,12 @@
 This directory contains Flatpak packaging experiments. These files are not the
 final COSMIC repository submission.
 
+October 13 release decision: 0.5.3 ships through native source/Debian channels.
+Final Flatpak packaging is deferred to 0.5.4, starting with the engine decision in
+[Task List](../../Task%20List.md#release-054--engine-decision-and-flatpak-completion).
+Retain candidates/probes as evidence; do not ship unvalidated WebKit modules or
+claim native success completes sandbox acceptance.
+
 The permission review below targets the pending 0.5.3 working tree. The source
 manifest still pins `v0.5.2`; it does not build the newly migrated coordinator or
 inspection adapter until the release gate advances it to an accepted 0.5.3 tag.
@@ -280,3 +286,18 @@ The packaged optional OneDrive auth helper uses Python GI, GTK 3, and WebKit2
 4.1 introspection. Final sandbox acceptance must verify those imports and its
 sign-in handoff inside the accepted runtime/base (or document manual URL handoff).
 Host Debian recommendations/installer packages do not supply sandbox libraries.
+
+The accepted 25.08 Platform currently lacks Python GI. Flatpak therefore uses
+manual browser/response-URL handoff for OneDrive Offline setup, not the packaged
+WebKit helper: start setup, open sign-in through the desktop portal, then paste
+and submit the full final Microsoft native-client redirect URL. Browser request
+acceptance is not sign-in completion. Transient auth files live in the private
+app-owned shared state directory so the sandbox and host engine see the same files;
+they are removed after setup. Native installations retain the optional helper.
+Rebuild/installed sign-in acceptance remains required for this source change.
+
+October 13 candidate testing confirmed browser/redirect submission and dry-run
+validation. Some Microsoft personal-account redirects leave the native-client
+URL quickly; retrieving that preceding URL from browser history worked. Treat
+the redirect URL as a credential: paste it only into the applet response field,
+not logs or support messages. This is a manual workaround, not automatic capture.

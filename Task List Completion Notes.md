@@ -4174,3 +4174,412 @@ This freezes candidate source, not final Flatpak/release acceptance.
 and final Flatpak source-pin/acceptance gates remain open. Record this receipt
 in a documentation-only follow-up commit; the implementation candidate stays
 immutable rather than being amended.
+
+### Immutable local candidate Flatpak build prepared — October 12, 2026
+
+✅ Continued the task-list candidate-to-final gate. Prepared a build-only manifest
+under `target/flatpak-candidate-053-efbf73e.hxxZ6G/` using the local Git repository
+and full committed source identity `efbf73eae0e596d56f2aa950dca37afb91337947`.
+Only app source URL/tag-to-commit selector differ from the reviewed source
+manifest; generated Cargo sources, permissions/runtime/base are unchanged.
+This does not use copied native binaries or require a push/tag. The final manifest
+remains pinned to v0.5.2 pending final acceptance/tag authorization.
+
+✅ Verified installed BaseApp stable uses Freedesktop 25.08, with installed SDK
+and Rust extension 25.08. Exact commits/tool version are saved in the build
+directory README. No runtime substitution, installation or applet stop occurred.
+
+⏳ User can run the candidate build in their terminal with output saved under
+target. Build excludes --install; installed native/Flatpak artifacts stay intact.
+Candidate source/permission/helper/worker inspection and controlled live tests
+precede final-tag build/acceptance; no final package gate is marked complete.
+
+### Candidate Flatpak offline vendor identity repair — October 12, 2026
+
+✅ User build returned exit status 1. Log identifies failure before compilation:
+generated Cargo configuration qualified libcosmic with rev a991d7bb while the
+committed manifest/lock identify the unqualified Git source. Cargo did not match
+the vendored replacement and attempted a forbidden offline checkout. The correct
+commit was downloaded; the failure was source-selector configuration, not a
+missing runtime or a reason to enable online Cargo fetching.
+
+✅ Regenerated sources from unchanged Cargo.lock through the existing recipe.
+Managed runtime-directory access blocked the first invocation; authorized host
+rerun succeeded. Git dependency revisions and registry/download URLs are unchanged.
+Updated the build-only candidate's external generated sources. Added a regression
+contract comparing every locked Git source selector and pinned checkout with the
+generated replacements. Three Flatpak contract tests, formatting and diff check
+pass. No app runtime code, runtime/base selection or permissions changed.
+
+⏳ Retry build to a separate build-retry.log, retaining original failure evidence.
+The regenerated vendor input/test are currently uncommitted packaging changes;
+candidate app source stays efbf73e, so the overlay must be included in the final
+immutable source before final acceptance. No install, tag, push or publication.
+
+✅ User retry returned exit status zero. Reviewed saved log: exact efbf73e checkout,
+offline locked 0.5.3 compilation, successful export. Candidate OSTree commit:
+`0b6b66e778a5d62365e3b52b30f39b6a5fe4c3b6fa2412d710d81ac0996da88d`.
+Binary SHA-256:
+`5e820735d6799c6dbecd66ec631ab262a6fcb5b6f53bac529172963aff1072bd`;
+build ID `84338a68c3df76f11a10bfb1e1d9b6380f1da79c`.
+Refreshed vendor-input SHA-256:
+`0c098520c9e8933773ddd935afaa3cb109a78f137593ab9d7ac0ac1693b8815f`.
+Metadata retains BaseApp stable/Platform 25.08 and reviewed narrow grants.
+Known COSMIC desktop-category warning and BaseApp non-app-ID icon export skips
+remain; neither prevented export. No install or runtime switch occurred.
+
+⏳ Next pre-install checks must use Platform, not SDK: fixed synthetic worker
+probe and Python GI/Gtk 3/WebKit2 4.1 import capabilities. These checks do not
+establish live mirror path access, authentication or final installed permissions.
+
+✅ User ran the fixed synthetic worker probe with Platform/readonly build flags;
+output matches `bisync-worker-probe-ok` and the supplied synthetic UUID. Worker
+entry point passes without storage/configuration work or competing Runtime owner.
+
+⏳ User Platform Python import check fails immediately with
+`ModuleNotFoundError: No module named 'gi'`. GTK/WebKit imports and actual helper
+sign-in are not verified. Host GI packages do not supply sandbox libraries.
+Source inspection finds `open_onedrive_auth_url` selects a helper by file presence
+and reports success after spawn, without validating helper capability/exit; a
+packaged but unusable helper therefore cannot count as a working fallback.
+Existing manual auth-files/browser/response-URL UI is available, but a deliberate
+Flatpak policy and launcher handling still need implementation/acceptance.
+Proposed minimal route: explicit manual browser handoff for this Flatpak runtime,
+retaining optional graphical helper for native installations. Await user choice
+before adding sandbox dependencies or changing authentication policy.
+
+### Explicit Flatpak OneDrive browser fallback implemented — October 12, 2026
+
+✅ User approved manual browser/response-URL fallback. Flatpak default setup now
+selects manual auth-files; browser opening uses an asynchronous 10-second bounded
+OpenURI portal request and explicitly reports request acceptance, not sign-in
+success. It never selects the installed-but-unusable GI helper. Native setup
+retains interactive authorization and its optional graphical helper. Late launch
+completion does not replace another connection draft's notice.
+
+✅ Transient handoff paths are connection-scoped under private app-owned shared
+state, not sandbox /tmp that the host engine cannot see. Preparation and response
+writing enforce private directory permissions; normal setup cleanup removes URL/
+response files. Added four policy/path/privacy/invalid-URL/stale-draft regressions.
+The initial regression compilation exposed a missing trait qualification and
+the privacy test caught directory chmod missing at preparation; corrected both.
+All 28 focused OneDrive tests, three helper localization tests, compilation,
+strict all-feature Clippy, formatting and localization now pass. Catalog has
+1,301 messages and 1,455 references, with no missing/duplicate keys.
+
+✅ Requirements, draft notes and packaging guidance describe the runtime-specific
+manual fallback. No host-spawn exception, runtime switch, extra permission,
+installed-package replacement, real authentication, storage or remote write.
+
+⏳ Latest broad tests and an approved new immutable candidate commit/rebuild are
+required: the existing efbf73e Flatpak does not contain these edits. Sandbox
+browser/redirect/cleanup/cancellation acceptance remains open; source tests do
+not establish that actual sign-in succeeded.
+
+### Browser-fallback rebuild prepared — October 12, 2026
+
+✅ User recalled that browser redirect capture was difficult during prior manual
+tests and may require history; recorded this as an unresolved usability limitation,
+not something the portal request or source tests solve. User requested rebuilding.
+Prepared a frozen current-source archive including the uncommitted fallback/vendor
+delta, without implicitly authorizing a new commit/tag. Candidate build directory:
+`target/flatpak-candidate-053-browser.pzKAYd/`; archive SHA-256:
+`e24dabffac3f3a16635e25d27bddde157a7bd6f88b201d4109a8702e4a59b259`.
+Manifest only substitutes this checksummed source; runtime/base/grants unchanged.
+
+✅ Latest all-feature tests initially hit the managed loopback socket restriction.
+Authorized host rerun passed 390 tests, zero failed, 12 ignored. Saved full logs:
+`target/0.5.3-auth-fallback-tests.log` and
+`target/0.5.3-auth-fallback-tests-host.log`. Prior focused/lint/localization receipts
+remain; ignored live tests are not passing tests.
+
+⏳ Build frozen development snapshot without installation, then assess actual
+browser/redirect usability. This snapshot is not a final immutable-tag acceptance
+artifact; approved commit/repin and final package identity checks still remain.
+No installed applet/storage/authentication, tag or remote was changed.
+
+✅ User browser-fallback build returned exit status zero. Reviewed locked offline
+0.5.3 compilation/export log; archive checksum matches frozen snapshot. Packaged
+Fluent catalog contains the browser-request/manual-handoff labels. Exported
+metadata is byte-identical to the preceding candidate: accepted BaseApp/Platform
+and reviewed permissions are unchanged. Export commit:
+`d0f101c60a1e4fb78700184e3dac11c2544904989c3e171ec12d73e07d7138d7`.
+Binary SHA-256:
+`d28460f3683a23348c369f54eb73500b6d96939644a84a580c18ce5a0bdf27d0`.
+Known COSMIC desktop-category export warning remains nonfatal.
+
+⏳ Candidate is not installed. Current installed Flatpak commit remains
+`9896da0ac99a235dd21675ed170d11810c06c1c5c795cf369b72ce6cfab555bf`.
+Next needs explicit controlled installation/runtime-switch approval and rollback
+preparation; do not run native/Flatpak owners together against shared state.
+Browser/redirect usability and real authentication remain unverified. No automatic
+redirect capture is claimed; no package/runtime/service change was made here.
+
+### Candidate Flatpak installed and runtime switched — October 12, 2026
+
+✅ User approved rollback preparation, candidate installation and temporary runtime
+switch. Saved prior Flatpak as
+`target/flatpak-candidate-053-browser.pzKAYd/rollback-previous.flatpak`; validated
+bundle by offline delta application into a temporary repository and confirmed exact
+prior commit 9896da0. An unavailable `flatpak build-import` command was replaced by
+OSTree apply-offline; managed O_TMPFILE restriction required authorized host rerun.
+No existing repository/object was deleted or pruned.
+
+✅ Installed bundle candidate d0f101c under the existing user Flatpak ID; Debian
+installation is untouched. Fresh preservation comparison confirms all 5,328
+baseline files retain contents/modes after installation. Effective grants match
+candidate metadata plus four existing global read-only theme grants (GTK 3/4,
+kdeglobals and color-schemes). No app override or blanket host grant was added.
+
+✅ Saved exact native launcher as
+`target/flatpak-candidate-053-browser.pzKAYd/native-launcher-before.desktop`.
+Deployed reversible Exec=`/usr/bin/flatpak run --branch=master ...`, stopped only
+verified native PID 147124 and reloaded panel. Sole applet process is sandboxed
+PID 195586; host Runtime owner PID 195561 is its xdg-dbus-proxy, whose sandbox
+identity matches d0f101c. No native applet remains. Saved configuration hash is
+unchanged after switch; Cloud Mounter storage units remain inactive.
+
+⏳ Await panel/settings UI receipt before disposable OneDrive browser handoff.
+No authentication/mount/sync started. For rollback, stop the app-specific Flatpak,
+restore the saved native launcher and reload panel; reinstall the retained prior
+Flatpak bundle if needed. User-local and Debian rollback builds remain intact.
+Candidate tests do not establish final immutable-tag/package acceptance.
+
+### Flatpak OneDrive positive browser handoff — October 13, 2026
+
+✅ User created disposable `Flatpak OneDrive Auth Test` draft, started setup and
+opened browser from the separate sign-in action. Personal-account sign-in briefly
+showed the redirect and then navigated away. User recovered the preceding redirect
+URL from browser history, submitted it only to the applet and obtained completed
+authorization plus dry-run validation. This demonstrates the sandbox/host shared
+auth-file path and browser portal route; it does not show automatic redirect
+capture or initial synchronization. No credential/redirect value was recorded.
+
+✅ Read-only verification found the shared auth directory mode 0700 and no
+remaining transient files. Documented history workaround and credential handling.
+Corrected stale helper-specific start-notice wording in source; installed candidate
+still has the old notice until rebuilt. In Flatpak, Start Setup selects the same
+manual flow as Use Manual Auth Handoff; native default remains interactive.
+
+⏳ Negative authentication/cancellation and disposable saved-unit checks remain.
+No Preview/Sync Now/background Start is required to accept sign-in. Commit/repin
+and final-source artifact gates remain open, as does fast-redirect usability.
+
+### Graphical helper packaging follow-up planned — October 13, 2026
+
+✅ Added the requested subtask to the existing OneDrive authentication block:
+package/validate Python GI, GTK 3 and WebKitGTK 4.1 inside the accepted Flatpak;
+prove automatic redirect capture and negative/cleanup behavior; restore a
+preferred graphical path with one explicit manual fallback; reconcile UI/docs/
+specifications and affected final-artifact checks. Manual browser-history success
+remains fallback evidence and does not complete graphical authentication. Final
+Flatpak gate now references that subtask. No implementation/install change here.
+
+### Graphical helper dependency inventory started — October 13, 2026
+
+✅ Inspected accepted Platform (not host): Python 3.13.15, GTK 3.24.52 runtime/
+typelibs, GObject typelibs and GI repository 1.0/2.0 are present. PyGObject gi and
+WebKitGTK/JavaScriptCore libraries/typelibs are absent. SDK 25.08 provides GLib/GI
+2.84.4, introspection 1.86, libsoup 3.6.6, libseccomp 2.6.1, GStreamer 1.26.11,
+libsecret 0.21.7 and cmake/ninja/meson. WPE/backend and enchant are not detected.
+Python imports search /app/lib/python3.13/site-packages, so app-local GI packaging
+is possible without exposing host Python libraries.
+
+⏳ Packaging investigation is in progress: reuse runtime GTK/GI, add pinned
+PyGObject and WebKitGTK with only required supporting modules, review security/
+licenses/size/maintenance and test actual Platform imports. No SDK/runtime/base
+upgrade is justified by this missing-library result. Compatibility of the chosen
+WebKit source/options still needs build verification; no module/version acceptance
+or installed-app change is claimed. Upstream PyGObject packaging guide and
+WebKitGTK release/checksum listings are being consulted, not an old distro binary.
+
+### WebKitGTK SDK configure probe — October 13, 2026
+
+✅ Downloaded WebKitGTK 2.54.1 and verified the upstream published SHA-256;
+GTK3/4.1 configure probe uses the accepted SDK, two-job temporary tooling and
+readonly candidate app directory. Managed network access required host rerun;
+no SDK/runtime/base upgrade or installed app changes occurred. Logs/sources are
+under `target/webkitgtk-2541-compat-20261013/`.
+
+✅ First configure stopped at missing Ruby. Actual Flathub extension lookup
+found no Ruby 25.08 ref. Downloaded checksum-verified official Ruby 3.4.11 source
+and built miniruby in the temporary SDK probe directory. Resumed configuration
+passes compiler/core-library checks; optional libbacktrace was missing and its
+diagnostic feature was disabled for the next probe. Browser sandbox stayed ON.
+
+⏳ Next configure stops at missing bwrap. SDK inspection confirms both bwrap and
+xdg-dbus-proxy absent, while libseccomp/libcap are available. Need reviewed actual
+runtime sandbox-tool modules and build-only Ruby before complete configure/full
+WebKit build. Minimal interpreter success does not establish all Ruby generators.
+No newer SDK requirement has been found; full compatibility remains unverified.
+Current logs: configure.log, ruby-probe.log, configure-ruby.log and
+configure-no-backtrace.log. Do not disable WebKit sandboxing or bind host tools
+as a shortcut to final packaging acceptance.
+
+### WebKit configure succeeds on SDK 25.08 — October 13, 2026
+
+✅ Added candidate bubblewrap 0.13.0 and xdg-dbus-proxy 0.1.9 Meson modules with
+official release asset digests and upstream license payloads. Actual source-built
+tools compile in SDK 25.08 and load for version probes in Platform 25.08. Built
+only into the temporary tools prefix, not installed app/host; about 178 KiB combined
+executables. Module source contract plus existing Flatpak contracts pass (four).
+Upstream tool tests were disabled, not counted as passing integration tests.
+
+✅ WebKit configure passed sandbox checks with these tools, then found missing
+system unifdef and sysprof-capture. Used the source's bundled alternatives as its
+CMake branches recommend. Final configure/generation succeeds with sandbox and
+introspection ON, GTK3 API, libbacktrace OFF and the accepted SDK unchanged.
+Latest log: `target/webkitgtk-2541-compat-20261013/configure-bundled-sysprof.log`.
+There is no configure evidence requiring WPE modules or a newer SDK for this path.
+
+⏳ Prepared `build-webkit-probe.sh` under the probe output directory: finish the
+temporary full Ruby generator installation, then compile WebKit with two jobs.
+It does not install WebKit into /app. Full compiler/runtime/helper/nested-sandbox
+and automatic redirect tests remain; final module integration uses /app paths
+and strips build-only Ruby. Candidate installed app and user data were untouched.
+
+### OneDrive engine/auth alternatives investigated — October 13, 2026
+
+✅ At user's request, read prior Task List/completion OneDrive auth/lifecycle
+sections before recommending alternatives. Local callback/device-flow research,
+--reauth integration, WebKit helper and manual-history workaround were already
+recorded; this is not a proposal to blindly repeat those tests. Versioned upstream
+2.5.11 docs/source show --auth-files bypasses automatic desktop loopback auth;
+current Flatpak default deliberately uses that branch. Host desktop script could
+invoke existing complete authorization instead of merely emitting a URL, but
+this distinct path has not received a fresh live receipt.
+
+✅ Confirmed installed host versions (onedrive 2.5.11 package, rclone 1.75.0) and
+source integration gaps: Provider::OneDrive is explicitly rejected by existing
+rclone backend/bisync/coordinator, with no persisted offline-engine selector.
+Rclone OneDrive support is an achievable adaptation, not a configuration-only
+change. Device-code/personal-account limits and tenant admin consent remain
+independent of browser UI; no approval bypass is proposed.
+
+⏳ Recorded proposed decision in release-source audit: defer WebKit packaging,
+reuse rclone coordinator for OneDrive offline mirrors while preserving optional
+abraunegg monitoring/external host auth and existing configs. Await user decision
+before altering requirements, active tasks or engine routing. No cloud/auth/data
+operation, build stop, install, source implementation or module deletion occurred.
+
+### Three-engine architecture reconsidered — October 13, 2026
+
+✅ At user's request, assessed whether to retain abraunegg and jstaf before any
+terminal-auth test. Read current provider/planner/config routing and earlier native/
+Flatpak receipts; consulted primary upstream capability documentation. Onedriver
+has on-demand/cached read-only offline behavior and existing corporate acceptance;
+rclone VFS overlaps but equivalence is not yet tested. Abraunegg monitor mode's
+local event/remote signal behavior is a distinct capability that finite scheduled
+bisync does not replace. Rclone's OneDrive mount polling is not offline monitoring.
+
+⏳ Proposed rclone-only target if scheduled mirrors meet product requirements,
+not perpetual optional-engine support merely to postpone the decision. Requires
+disposable personal/business Online/Offline acceptance and explicit migration
+preserving legacy units/data/credentials/pending uploads. Documented maintenance,
+permission/review and CPU/power boundaries in source audit. No terminal auth,
+implementation, migration, installed change or deletion took place.
+
+### Native 0.5.3 / deferred Flatpak 0.5.4 scope adopted — October 13, 2026
+
+✅ User directed native source/Debian 0.5.3 completion and Git push, deferring
+final Flatpak packaging and engine-retention decision to 0.5.4. Verified source:
+native default is engine-interactive --reauth; manual handoff can launch installed
+WebKit helper. Only Flatpak defaults to manual copy/paste. Host helper imports
+pass. No native auth reversion or engine/data conversion is needed for this scope.
+
+✅ Consolidated remaining sandbox tasks under new chronological 0.5.4 release
+section before future tasks; prior unfinished steps use [o] with transfer links,
+while [x] evidence remains intact. New list starts with engine decision, preserves
+legacy migration safety, and covers conditional terminal/WebKit options, final
+source/runtime/permission/auth/worker/repair/VPN/clean-profile/submission gates.
+Updated Description/Requirements, concise README, draft notes and build/publication
+guidance to native-only 0.5.3. Final Flatpak no longer blocks native publication.
+
+⏳ Latest native source/package rebuild and installed helper smoke, restoration
+of native panel, source review and fresh six-platform Debian CI remain. User
+authorized completed-source commit/push; tag/publication is still separate. No
+installed package, launcher, storage, credentials, remote or engine changed while
+recording this decision. AppStream/notes remain provisional until native gates.
+
+✅ Latest native source gate passes 391 Rust tests (12 ignored remain separate),
+18 Python checks, strict all-feature Clippy, formatting, diff and local inline
+link/anchor checks. Source release build completed and just install-user installed
+the matching user-local bytes. Restricted synthetic worker probe passes; native
+Runtime PID 256850 resolves to that source binary, not Flatpak. User confirmed
+expected responsive popup/settings. Build ID: 4a16966949ae6389e13d9d70b41a84dc02d4b043.
+
+✅ Source-install rollback copies retain six prior user-local assets under
+target/native-053-source-backup-20261013.FqvmDS/. Fresh 5,331-file preservation
+comparison found only authorized launcher replacement and four regenerated
+Online service files with native ExecCondition helper paths. Config/credentials/
+cache/mirror data were unchanged and services remained inactive. The old Flatpak
+was already not running at the switch; no unrelated processes were stopped.
+
+✅ Executed installed native graphical WebKit helper with a synthetic callback,
+not a real login. It captured the expected synthetic URI, wrote mode 0600 and
+exited cleanly; removed both synthetic fixture files afterward. This proves the
+native helper path remains functional without reauthorizing a user account.
+No actual Microsoft sign-in or synchronization is claimed for that probe.
+
+⏳ Building latest native Debian candidate from complete snapshot
+/tmp/cloud-mounter-native053-deb.1QENj3/source; log is build.log there. Source/UI
+closure progressed; package inspection/installed acceptance, final metadata,
+commit/push and hosted CI remain. No release tag/publication has occurred.
+
+✅ Latest native Debian build succeeded with 391 passing Rust tests and 18 Python
+checks. Saved unsigned Debian/debug/buildinfo/changes artifacts under
+target/local-deb-native053-20261013.N16OSk/. Main package SHA-256:
+c869497bb3d63a7aeddd83daf0d1da2206c93ab4b490ca3cc847e1b1a012f762.
+Build ID: 6ce0047816ce44c8642be90b1f11314f8bcfb561. All eight payload checksums,
+source helper/catalog comparisons and extracted fixed worker probe pass. Known
+nonfatal packaging warnings remain. AppStream/notes remain provisional until
+native installed package acceptance/final metadata closure; no release published.
+
+⏳ Prepared fresh preservation baseline for latest Debian installation. User
+terminal APT is needed for sudo password. User-local source Runtime is currently
+active and preserved for rollback. Package installation itself will not replace
+that running source instance; controlled packaged-panel verification follows.
+
+### Latest native Debian candidate installed — October 13, 2026
+
+✅ User APT reinstall completed. Installed 0.5.3 integrity passes and build ID is
+6ce0047816ce44c8642be90b1f11314f8bcfb561. The local-file _apt permission notice
+is nonfatal. All 5,331 baseline files retained identical content/modes after APT;
+no config/credential/cache/mirror data was changed by installation.
+
+✅ No Settings bus owner remained. Saved native source launcher as
+target/local-deb-native053-20261013.N16OSk/source-launcher-before.desktop, deployed
+reversible Exec=/usr/bin override, verified/stopped only source Runtime PID 256850
+and reloaded COSMIC panel. New Runtime PID 264223 is native /usr/bin. Configuration
+hash remains unchanged after reload and storage units remain inactive. User-local
+source build, Flatpak rollback and all existing data are retained.
+
+⏳ Await packaged popup/settings receipt, then finalize native metadata/source
+review and authorized Git push/hosted Debian gate. No tag/publication occurred.
+
+✅ User confirmed final packaged popup/settings behavior. Installed native latest
+source/Debian acceptance is complete; marked [x] separately from hosted CI and
+release publication. Prepared native-only notes and stable 0.5.3 AppStream entry
+dated October 13. Runtime code did not change in metadata closure. Tested local
+package predates that metadata-only edit; final hosted/tag identities remain
+separate, not silently equated to the local candidate.
+
+⏳ Proceed with authorized reviewed-source commit/push and fresh publication-
+disabled six-platform Debian workflow. Cleanup item added by user remains open:
+exact stale units/folders need inventory and approval before any material removal.
+No cleanup, tag or release publication is implicit in this push.
+
+✅ Native metadata/notes preflight passes; six publication fixture tests pass.
+Fresh intended-source scan finds only the same two synthetic test-password
+matches, no confirmed credential, and no unresolved local inline links/anchors.
+Retained organization-specific history remains explicitly acknowledged. No final
+hosted/tag checksum is equated to the earlier local candidate. Preparing the
+authorized commit/push and publication-disabled matrix; cleanup remains open.
+
+### Candidate Flatpak UI receipt — October 13, 2026
+
+✅ User confirmed candidate panel/settings responsiveness. Marked the UI receipt
+`[x]`; browser sign-in, redirect capture, shared auth-file access and cancellation
+are separate pending acceptance checks. The former `OneDrive Mirror Repair Test`
+name is absent from the current saved configuration, so do not silently reuse
+another production OneDrive profile for reauthentication.

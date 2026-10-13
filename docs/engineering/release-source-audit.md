@@ -3,7 +3,7 @@
 Type: Audit
 Status: In progress — not final source approval
 Created: October 12, 2026
-Last reviewed: October 12, 2026
+Last reviewed: October 13, 2026
 
 ## Scope and sources
 
@@ -111,3 +111,159 @@ separate documentation commit, not an amendment or claim of final acceptance.
   line/security review merely because tests pass.
 
 Detailed receipts belong in [completion notes](../../Task%20List%20Completion%20Notes.md).
+
+## October 13 WebKitGTK compatibility probe
+
+Configure-only SDK 25.08 probe uses WebKitGTK 2.54.1 from the
+[upstream release directory/checksum](https://webkitgtk.org/releases/webkitgtk-2.54.1.tar.xz.sums).
+Source SHA-256: ea0bbb02dbdbc596874a4e7ad35b66645b3e0a232bd0e4081de5ed92eb0a397d.
+GTK3/4.1 API is selected with USE_GTK4=OFF; introspection and bubblewrap
+sandboxing remain enabled. No source/app installation or runtime upgrade.
+
+SDK GCC 15.2, GLib/GTK/libsoup/ICU and subsequent core library checks succeed.
+The first probe lacked Ruby; official Ruby 3.4.11 source matches its published
+SHA-256 5c22be44524312b3d433d68739bcc530633b1da5ef8ba0afa0a37680da17d3de.
+Its minimal interpreter built in the temporary SDK-bound probe directory, not
+on the host or in the shipped app. Production build must provide the complete
+Ruby tooling needed by generators and remove it from the final payload.
+
+Second probe stopped at optional libbacktrace; with USE_LIBBACKTRACE=OFF the
+next blocker is missing bwrap. SDK inspection also confirms xdg-dbus-proxy is
+missing; libseccomp 2.6.1 and libcap 2.78 are available. Package the actual sandbox
+tools as runtime dependencies; do not disable sandboxing to produce a misleading
+configure success. No evidence requires a newer SDK yet. Configure completion,
+full build, Platform imports and actual rendering/authentication are unverified.
+
+Artifacts/logs: target/webkitgtk-2541-compat-20261013/. These are local generated
+probe outputs, not committed dependencies or accepted packaging modules.
+
+### Configure completed with source-built sandbox tools
+
+October 13: upstream release metadata/digests pin bubblewrap 0.13.0 and
+xdg-dbus-proxy 0.1.9. Both built with SDK 25.08 and load for version probes in
+Platform 25.08. Candidate [module definitions](../../packaging/flatpak/modules/README.md)
+preserve license payloads and add no permissions/setuid steps; they are not yet
+wired into the final app manifest. Probe executables total about 178 KiB,
+excluding libraries; this is not the final helper/package footprint. Upstream
+tool tests were disabled for the minimal probe and are not claimed as passes.
+
+WebKit configure/generation now succeeds with ENABLE_BUBBLEWRAP_SANDBOX and
+ENABLE_INTROSPECTION ON, USE_GTK4 OFF (4.1 API), optional libbacktrace OFF, and
+bundled unifdef/sysprof-capture. No WPE module was required by this GTK configure
+result. Sandbox tools use actual temporary SDK-built paths, not host binaries.
+Four packaging source contracts pass. No newer SDK requirement was encountered.
+
+Next compile proof must complete Ruby generator tooling and build WebKit with
+bounded parallelism. Full sandboxed helper acceptance still requires Platform
+imports, nested process behavior, rendering, redirect capture and negative tests.
+Final packaging must use /app executable paths, include PyGObject, retain source/
+license/security maintenance, and remove build-only Ruby. Installed app unchanged.
+
+## October 13 authentication strategy reconsideration (proposed, not implemented)
+
+User requested comparison of lighter alternatives before committing to bundled
+WebKit. Reviewed Task List lines 746–778/1294–1327 and completion notes 928–960/
+1523–1558, plus current October 13 manual handoff receipts. These already record
+local-redirect investigation/implementation, Python helper implementation/live
+checks, personal-mirror lifecycle tests and browser-history fallback. They do not
+record the outcome/reason for every rejected authentication mechanism; do not
+claim that loopback or device-code support is newly discovered or never tried.
+
+Current installed host engines: onedrive v2.5.11-1+np1+1.1; rclone v1.75.0.
+[Versioned upstream usage](https://github.com/abraunegg/onedrive/blob/v2.5.11/docs/usage.md)
+documents automatic host-browser loopback auth and device auth. Versioned source
+confirms --auth-files bypasses the loopback branch; our current Flatpak default
+explicitly selects that file handoff. Desktop detection uses display/session,
+runtime directory, uid and home, not a TTY requirement. Thus a host setup script
+could invoke the existing engine's complete browser/callback authorization in
+an isolated app-owned confdir, without WebKit or app-owned OAuth implementation.
+Generating only another URL would not solve the fast-redirect capture problem.
+This specific host-script route is a proposal, not a live success claim; any
+new test must explain its environment/argument difference from previous trials.
+
+Device auth is not a universal substitute: upstream documents personal-account
+limitations for its registration. Organizational admin consent is separate from
+UI technology; neither a helper, script nor device code grants missing tenant
+approval. rclone also remains subject to account/tenant policy.
+
+[Rclone's OneDrive backend](https://rclone.org/onedrive/) supports personal and
+business drives, and [bisync](https://rclone.org/bisync/) provides the same engine
+family as our SharePoint mirrors. Current app code rejects Provider::OneDrive in
+rclone backend/planner/coordinator routing, and OfflineMirrorConfig has no engine
+selector. Supporting it is feasible but requires an explicit persisted offline-
+engine choice, auth/remote setup, unit/status/repair/controller routing and tests;
+not simply a backend-name substitution or automatic migration of existing data.
+Online onedriver behavior must remain separate.
+
+Recommendation for decision: defer bundled WebKit; prioritize rclone OneDrive
+offline support using the existing Rust coordinator, retain abraunegg monitoring
+as an optional engine with external host authorization, and evaluate that minimal
+host setup before restoring an embedded-browser dependency. Existing configurations,
+tokens and data stay unchanged. Rclone remains scheduled/one-shot; adding a local
+watcher would be separate future work and would not eliminate remote polling.
+Never let two engines write the same mirror. No engine conversion or new auth,
+script implementation, build cancellation, module removal, commit/tag/push was
+performed by this read-only investigation.
+
+## October 13 three-engine consolidation assessment (proposed)
+
+User requested an architecture decision before terminal authentication tests.
+No engine conversion, authentication test or installed change is authorized by
+this assessment. Earlier optional-engine proposal above remains historical,
+not an adopted requirement.
+
+| Engine | Strongest justification for retention | Consolidation trade-off |
+|---|---|---|
+| rclone | Common provider/auth/mount/RC/recovery pipeline and Rust bisync coordinator already implemented. | OneDrive routing/setup/acceptance still must be added; existing SharePoint success does not prove personal/business OneDrive equivalence. |
+| abraunegg/onedrive | True local mirror with inotify-driven changes and supported remote notification/delta behavior in monitor mode. | Scheduled bisync is not continuous monitoring; external host authorization removes WebKit burden but retains engine/database/state/repair/test maintenance. |
+| jstaf/onedriver | On-demand filesystem with documented cached read-only offline access and our recorded successful corporate setup. | Rclone provides on-demand VFS caching, but exact offline/reconnect/conflict behavior needs acceptance rather than assumed parity. |
+
+Primary references: [rclone mount](https://rclone.org/commands/rclone_mount/),
+[OneDrive backend](https://rclone.org/onedrive/),
+[onedriver features](https://github.com/jstaf/onedriver), and
+[onedrive monitor architecture](https://github.com/abraunegg/onedrive/blob/v2.5.11/docs/client-architecture.md).
+Rclone 1.75 source implements OneDrive delta-based change polling for mounts;
+this does not turn finite bisync into an event-driven offline daemon.
+
+Assessment: a rclone-only target is defensible if scheduled offline sync plus
+explicit Sync Now meets product intent. Optional engine selection does not
+eliminate engine-specific lifecycle/auth/version/repair branches or test matrices.
+Onedriver has pragmatic existing acceptance value, but no demonstrated mandatory
+requirement currently justifies maintaining it forever alongside a validated
+rclone replacement. Abraunegg has a stronger distinct feature case; retain it
+only if continuous/event-driven mirroring is a hard requirement, not solely to
+avoid making an engine decision.
+
+Simplification would remove two engine runtime recommendations, their auth/helper
+paths and WebKit bundling, and eventually consolidate service/status/repair policy.
+It does not remove FUSE, justified host engine execution, systemd/NetworkManager
+D-Bus or optional VPN dependencies; it cannot promise store acceptance or tenant
+consent. Fewer engines also do not prove lower CPU/power: sync cadence, tree size
+and metadata/hash work determine that and need measurement.
+
+Recommended decision sequence: agree whether continuous mirroring is required;
+prototype personal/business OneDrive rclone Online and Offline on disposable
+trees; verify auth, editing/uploads, remote changes, network-loss/pending-cache
+handling, conflicts/deletions/recovery and repair; then adopt requirements and
+plan explicit migration. Do not silently reinterpret old account labels as rclone
+remotes, reuse engine databases/caches/tokens, or run two engines on one tree.
+Protect active legacy units and pending data until a controlled migration succeeds.
+Legacy compatibility may be transitional without offering permanent engine choices
+for new connections. Keep Online/Offline modes distinct; no engine removal yet.
+
+## October 13 adopted release-channel decision
+
+User deferred final Flatpak packaging and engine decisions to 0.5.4. Release
+0.5.3 proceeds with current engines through source/Debian channels; no engine
+conversion or WebKit bundling is part of that release closure. Native source
+still selects interactive engine auth, and explicit manual handoff retains the
+installed graphical helper. Host Python GI/Gtk 3/WebKit2 4.1 imports pass.
+Flatpak's forced manual fallback does not apply to native installations.
+
+Task List retains completed receipts and marks transferred unfinished sandbox
+steps [o] with an authoritative 0.5.4 reference. Full latest native rebuild/
+installed helper checks and six-platform CI remain before final metadata/source
+acceptance. Completed-development commit/push is authorized; tag/publication is
+separate. Existing Flatpak runtime switch/rollback must be restored to native
+for those checks, with configuration/data preserved. Prior candidate-to-final
+Flatpak ordering proposals remain history, not 0.5.3 prerequisites.

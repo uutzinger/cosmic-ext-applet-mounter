@@ -8,6 +8,16 @@ testable product requirements and a proposed technical design.
 
 `Applet Description.md` is the source of truth when this document and the source description disagree.
 
+### Release delivery boundary — October 13, 2026
+
+Release 0.5.3 shall support native source and Debian delivery with the current
+engine matrix. Native OneDrive Offline setup shall retain engine-interactive
+authentication and the optional installed WebKit helper for Manual Auth Handoff;
+it shall not inherit the experimental Flatpak forced-copy/paste default. Final
+Flatpak package acceptance/submission is deferred to 0.5.4, whose engine-retention
+decision must precede implementation or migration. Long-term sandbox requirements
+remain planned requirements, not a claim of 0.5.3 delivered support.
+
 ## 1. Purpose
 
 The Cloud Mounter Applet manages cloud and network storage connections from the
@@ -850,6 +860,15 @@ manual guidance rather than guessed package/USE-flag changes. Flatpak must suppl
 the helper runtime inside the accepted sandbox base/runtime; host installation
 does not establish sandbox availability. Manual browser/response-URL handoff
 shall remain available when this optional sign-in window is omitted.
+
+For the accepted Flatpak 25.08 runtime without Python GI, OneDrive Offline setup
+shall select manual browser/response-URL handoff and never spawn the unusable
+WebKit helper. Browser opening shall use the desktop portal asynchronously with
+a bounded request wait, and request acceptance shall not imply authentication
+completion. Handoff files shall be scoped by connection identity in private
+app-owned host-visible state, accessible to both sandbox and host engine, and
+cleaned after setup. Late browser-launch replies shall not update another draft.
+Native setup shall retain its existing interactive/helper behavior.
 
 ### 8.3 Permissions
 
