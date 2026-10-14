@@ -19,4 +19,8 @@ These remain at the repository root:
 - [Task completion notes](../Task%20List%20Completion%20Notes.md).
 - [Agent working guide](../AGENTS.md).
 
+Completed release history is archived, frozen, under `docs/archive/`:
+[task list through v0.5.3](archive/task-list-through-v0.5.3.md) and
+[completion notes through v0.5.3](archive/task-list-completion-notes-through-v0.5.3.md).
+
 The [project README](../README.md) remains the repository's main entry point.

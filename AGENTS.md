@@ -187,6 +187,10 @@ Do not run both a recipe and its Cargo equivalent.
   means deliberately skipped or handled elsewhere. Give transferred work a reference to its
   authoritative task. Do not mark source implementation as installed/native or
   sandboxed acceptance when those checks are still pending.
+- After a release is published, archive its completed sections of the task list and
+  completion notes unchanged to `docs/archive/<name>-through-v<version>.md`, and copy
+  every still-open item verbatim into the active list's "Open items carried forward"
+  section. Do not delete history. Repair relative links; `repo_hygiene_test.py` checks them.
 
 ### Engineering records
 
