@@ -22,24 +22,21 @@ fmt-check:
     cargo fmt --all -- --check
 
 check:
-    cargo check --all-targets
+    cargo check --locked --all-targets
 
 lint:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --locked --all-targets --all-features -- -D warnings
 
 test:
-    cargo test --all-targets
-    python3 tests/dependency_installer_test.py
-    python3 tests/release_publication_test.py
-    python3 tests/github_download_test.py
-    python3 tests/release_promotion_test.py
-    python3 tests/task_output_test.py
-    python3 tests/artifact_inspection_test.py
-    python3 tests/dev_wrapper_test.py
-    python3 tests/setup_reporting_test.py
-    python3 tests/flatpak_wrapper_test.py
-    python3 tests/flatpak_inspection_test.py
-    python3 tests/flatpak_reuse_test.py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo test --locked --all-targets
+    for t in tests/*_test.py; do
+        [ "$t" = tests/auth_helper_localization_test.py ] && continue  # run by localization-check
+        python3 "$t"
+    done
+
+gate: fmt-check lint test
 
 metadata-check:
     # Strict freedesktop validators currently reject official COSMIC applet

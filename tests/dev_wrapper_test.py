@@ -52,7 +52,7 @@ else:
                               cwd="/tmp", env=env, capture_output=True, text=True, timeout=10)
 
     def test_allowed_recipes_run_once_with_bounded_output_and_dirty_receipt(self):
-        tasks = ["fmt-check", "localization-check", "check", "lint", "test", "verify",
+        tasks = ["fmt-check", "localization-check", "check", "lint", "test", "verify", "gate",
                  "metadata-check", "metadata-check-strict", "build", "build-release"]
         for task in tasks:
             with self.subTest(task=task), tempfile.TemporaryDirectory() as tmp:
@@ -86,6 +86,8 @@ else:
             result = self.run_task(root, env, "check")
             self.assertEqual(result.returncode, 37)
             self.assertEqual(json.loads(result.stdout.splitlines()[-1])["status"], "failed")
+            self.assertIn("last log lines", result.stderr)
+            self.assertLess(len(result.stderr), 6000)
 
     def test_existing_log_directory_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:

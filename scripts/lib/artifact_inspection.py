@@ -5,9 +5,7 @@ from pathlib import Path
 import re
 import stat
 
-MATRIX = [(version, arch) for version in ("22.04", "24.04", "26.04")
-          for arch in ("amd64", "arm64")]
-PACKAGE = "cosmic-ext-applet-mounter"
+from project import MATRIX, PACKAGE  # noqa: F401  (re-exported for callers)
 
 
 def regular_file(path):

@@ -13,6 +13,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from task_output import TaskReport, atomic_json
 from artifact_inspection import MATRIX, verify_matrix
+from project import ARTIFACT_COUNT, WORKFLOW_PATH
 
 _report = None
 
@@ -33,7 +34,7 @@ def validate_run(run, artifacts, repository, sha):
     if (run.get("repository", {}).get("full_name") != repository
             or run.get("head_repository", {}).get("full_name") != repository
             or run.get("head_sha") != sha
-            or run.get("path") != ".github/workflows/build-deb.yml"
+            or run.get("path") != WORKFLOW_PATH
             or run.get("event") not in ("workflow_dispatch", "push")
             or run.get("status") != "completed" or run.get("conclusion") != "success"):
         raise ValueError("Build must be a successful trusted same-repository workflow at the exact accepted commit")
@@ -41,7 +42,7 @@ def validate_run(run, artifacts, repository, sha):
     names = [item["name"] for item in artifacts]
     if (len(names) != len(expected) or set(names) != expected
             or any(item.get("expired", True) for item in artifacts)):
-        raise ValueError("Exactly six unexpired matrix artifacts are required; missing/expired artifacts need a new accepted build")
+        raise ValueError(f"Exactly {ARTIFACT_COUNT} unexpired matrix artifacts are required; missing/expired artifacts need a new accepted build")
 
 
 def verify_remote_tag(repository, tag, sha):
@@ -74,8 +75,8 @@ def operation(args, report):
         verify_remote_tag(repository, args.tag, sha)
     run = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}"))
     artifact_data = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100"))
-    if artifact_data.get("total_count") != 6:
-        raise ValueError("Build must supply exactly the six expected artifacts")
+    if artifact_data.get("total_count") != ARTIFACT_COUNT:
+        raise ValueError(f"Build must supply exactly the {ARTIFACT_COUNT} expected artifacts")
     validate_run(run, artifact_data["artifacts"], repository, sha)
     if args.check_run_only:
         report.phase("run-validated", next_action="Run metadata verified only; no build, download or publication.")

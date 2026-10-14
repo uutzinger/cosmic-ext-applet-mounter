@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import promote_release as promotion
+from project import ARTIFACT_COUNT, PACKAGE, WORKFLOW, WORKFLOW_PATH
 from task_output import TaskReport, atomic_json
 
 
@@ -40,7 +41,7 @@ def validate_selected(run, report):
     if (run.get("repository", {}).get("full_name") != state["repository"]
             or run.get("head_repository", {}).get("full_name") != state["repository"]
             or run.get("head_sha") != state["source_sha"]
-            or run.get("path") != ".github/workflows/build-deb.yml"
+            or run.get("path") != WORKFLOW_PATH
             or run.get("event") not in ("workflow_dispatch", "push")
             or (state["run_id"] and str(run.get("id")) != state["run_id"])):
         raise ValueError("Selected run has wrong repository, workflow or source")
@@ -48,9 +49,9 @@ def validate_selected(run, report):
 
 def version_from_packages(root):
     names = [p.name for p in root.glob("deb-*/*.deb")]
-    pattern = r"cosmic-ext-applet-mounter_([0-9]+\.[0-9]+\.[0-9]+)_ubuntu[0-9.]+_(?:amd64|arm64)\.deb"
+    pattern = re.escape(PACKAGE) + r"_([0-9]+\.[0-9]+\.[0-9]+)_ubuntu[0-9.]+_(?:amd64|arm64)\.deb"
     matches = [re.fullmatch(pattern, n) for n in names]
-    if len(names) != 6 or not all(matches) or len({m[1] for m in matches}) != 1:
+    if len(names) != ARTIFACT_COUNT or not all(matches) or len({m[1] for m in matches}) != 1:
         raise ValueError("Unexpected package set/version")
     return "v" + matches[0][1]
 
@@ -74,7 +75,7 @@ def hosted(report, args):
         if not args.wait_for_existing and not args.resume_report:
             request_id = uuid.uuid4().hex
             report.phase("dispatch-intent", request_id=request_id)
-            report.run(["gh", "workflow", "run", "build-deb.yml", "--repo", repository,
+            report.run(["gh", "workflow", "run", WORKFLOW, "--repo", repository,
                         "--ref", args.ref, "-f", f"request_id={request_id}"])
         if request_id and not re.fullmatch(r"[0-9a-f]{32}", request_id):
             raise ValueError("Invalid dispatch identity")
@@ -82,7 +83,7 @@ def hosted(report, args):
         deadline = time.monotonic() + args.discovery_timeout
         while True:
             runs = json.loads(report.capture("gh", "run", "list", "--repo", repository,
-                              "--workflow", "build-deb.yml",
+                              "--workflow", WORKFLOW,
                               "--commit", sha, "--limit", "100", "--json",
                               "databaseId,headSha,event,displayTitle"))
             matches = [r for r in runs if r.get("headSha") == sha
@@ -127,13 +128,13 @@ def hosted(report, args):
                 raise ValueError("Existing artifact directory has different provenance; refusing overwrite")
             packages = promotion.verify_packages(destination, args.version or version_from_packages(destination))
             actual = {str(p.absolute()): promotion.hashlib.sha256(p.read_bytes()).hexdigest() for p in packages}
-            if len(receipt["artifacts"]) != 6 or {p["path"]: p["sha256"] for p in receipt["artifacts"]} != actual:
+            if len(receipt["artifacts"]) != ARTIFACT_COUNT or {p["path"]: p["sha256"] for p in receipt["artifacts"]} != actual:
                 raise ValueError("Cached artifact receipt does not match verified files")
             report.phase("reused-verified-artifacts", artifact_receipt_path=str(destination / "receipt.json"))
         else:
             artifacts = metadata(report, f"{prefix}/{run_id}/artifacts?per_page=100")
-            if artifacts.get("total_count") != 6:
-                raise ValueError("Expected six build artifacts")
+            if artifacts.get("total_count") != ARTIFACT_COUNT:
+                raise ValueError(f"Expected {ARTIFACT_COUNT} build artifacts")
             promotion.validate_run(run, artifacts["artifacts"], repository, sha)
             report.phase("downloading")
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +157,7 @@ def hosted(report, args):
 
 def preparation(report, args):
     packages = json.loads(report.capture("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"))["packages"]
-    version = next(p["version"] for p in packages if p["name"] == "cosmic-ext-applet-mounter")
+    version = next(p["version"] for p in packages if p["name"] == PACKAGE)
     tag = "v" + version
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag) or report.capture("dpkg-parsechangelog", "-S", "Version") != version:
         raise ValueError("Release versions do not match")
@@ -198,7 +199,7 @@ def preparation(report, args):
             raise ValueError("Pre-tag reuse requires a successful completed run")
         if not args.resume:
             artifacts = metadata(report, f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100")
-            if artifacts.get("total_count") != 6:
+            if artifacts.get("total_count") != ARTIFACT_COUNT:
                 raise ValueError("Pre-tag reuse requires the complete artifact set")
             promotion.validate_run(run, artifacts["artifacts"], repository, sha)
     if args.dry_run:
@@ -223,7 +224,7 @@ def main():
     parser = argparse.ArgumentParser(prog="scripts/build_release.sh" if task == "release-prepare" else "scripts/run_github_linux_build.sh", description=__doc__)
     parser.add_argument("--ref", default=os.environ.get("REF") if task == "hosted-build" else None,
                         help="Hosted source ref (default: current branch; original SHA when resuming a receipt)")
-    parser.add_argument("--workflow", choices=["build-deb.yml"], default=os.environ.get("WORKFLOW", "build-deb.yml"),
+    parser.add_argument("--workflow", choices=[WORKFLOW], default=os.environ.get("WORKFLOW", WORKFLOW),
                         help="Build-only workflow; publication is never dispatched here")
     parser.add_argument("--repo", help="GitHub owner/repository (default: current repository)")
     parser.add_argument("--run-id", help="Select an existing exact-source run; do not dispatch")
@@ -231,7 +232,7 @@ def main():
     parser.add_argument("--wait-for-existing", action="store_true", help="Require one unambiguous exact-source run; never dispatch")
     parser.add_argument("--download-dir", default=os.environ.get("DOWNLOAD_DIR"), help="New or receipt-verified artifact directory")
     parser.add_argument("--log-dir", help="New private task directory (default: target/task-runs/<unique>)")
-    parser.add_argument("--poll-seconds", type=int, default=30, help="CI polling interval, 1..300 (default: 30)")
+    parser.add_argument("--poll-seconds", type=int, default=60, help="CI polling interval, 1..300 (default: 60)")
     parser.add_argument("--timeout-seconds", type=int, default=7200, help="Overall CI wait budget (default: 7200)")
     parser.add_argument("--discovery-timeout", type=int, default=120, help="Correlated run discovery budget (default: 120)")
     parser.add_argument("--remote", default="origin", help="Release Git remote (default: origin)")
@@ -244,7 +245,7 @@ def main():
         parser.error("Invalid polling/timeout bounds")
     if sum(bool(x) for x in [args.run_id, args.resume_report, args.wait_for_existing]) > 1:
         parser.error("Choose one run-selection/resumption mode")
-    if args.workflow != "build-deb.yml":
+    if args.workflow != WORKFLOW:
         parser.error("This helper only dispatches the build-only workflow")
     if task == "hosted-build" and (args.resume or args.dry_run or args.remote != "origin"):
         parser.error("Use --resume-report or --run-id for hosted retrieval; tag options belong to release preparation")

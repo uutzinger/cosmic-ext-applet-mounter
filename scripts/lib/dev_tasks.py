@@ -7,7 +7,7 @@ import re
 
 from task_output import TaskReport
 
-RECIPES = ("fmt-check", "localization-check", "check", "lint", "test", "verify",
+RECIPES = ("fmt-check", "localization-check", "check", "lint", "test", "verify", "gate",
            "metadata-check", "metadata-check-strict", "build", "build-release")
 
 

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 import traceback
 
@@ -41,7 +42,7 @@ class TaskReport:
         self.log_path = self.directory / "task.log"
         self.log = self.log_path.open("x")
         self.log_path.chmod(0o600)
-        self.state = dict.fromkeys(["source_sha", "ref", "repository", "run_id", "run_url",
+        self.state = dict.fromkeys(["source_sha", "source_dirty", "ref", "repository", "run_id", "run_url",
                                     "request_id", "exit_code", "artifact_receipt_path"])
         self.state.update(schema_version=1, task=task, status="running", phase="preflight",
                           log_path=str(self.log_path), summary_path=str(self.directory / "summary.json"),
@@ -107,6 +108,14 @@ class TaskReport:
                            "run_id": self.state["run_id"], "artifacts": files})
         self.update(artifact_receipt_path=str(Path(path).absolute()))
 
+    def print_excerpt(self, lines=30, chars=4000):
+        """Show a bounded log tail on stderr so failures need no manual log read."""
+        try:
+            tail = "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
+        except OSError:
+            return
+        print(f"--- last log lines ({self.log_path}) ---\n{tail[-chars:]}\n---", file=sys.stderr, flush=True)
+
     def __enter__(self):
         def interrupted(signum, _frame):
             raise Cancelled(signum)
@@ -128,10 +137,12 @@ class TaskReport:
             traceback.print_exception(kind, error, tb, file=self.log)
         self.update(status=status, exit_code=code)
         self.log.close()
+        if error:
+            self.print_excerpt()
         for signum, handler in self.handlers.items():
             signal.signal(signum, handler)
         print(json.dumps({key: self.state[key] for key in ["task", "status", "exit_code",
-                         "source_sha", "run_id", "summary_path", "log_path",
+                         "source_sha", "source_dirty", "run_id", "summary_path", "log_path",
                          "artifact_receipt_path", "next_action"]}), flush=True)
         if error:
             raise SystemExit(code)
