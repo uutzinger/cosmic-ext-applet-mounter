@@ -6,10 +6,14 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from tooling_fixtures import ToolingFixture
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/lib"))
+from task_output import TaskReport  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("promotion", ROOT / "scripts/promote_release.py")
@@ -35,10 +39,9 @@ class PromotionTests(unittest.TestCase):
         commit = json.dumps({"object": {"type": "commit", "sha": self.sha}})
         annotated = json.dumps({"object": {"type": "tag", "sha": "b" * 40}})
         for responses in [[commit], [annotated, commit]]:
-            with patch.object(promotion, "output", side_effect=responses):
-                promotion.verify_remote_tag(self.repo, "v0.5.4", self.sha)
-        with patch.object(promotion, "output", return_value=commit), self.assertRaises(ValueError):
-            promotion.verify_remote_tag(self.repo, "v0.5.4", "c" * 40)
+            promotion.verify_remote_tag(self.repo, "v0.5.4", self.sha, Mock(side_effect=responses))
+        with self.assertRaises(ValueError):
+            promotion.verify_remote_tag(self.repo, "v0.5.4", "c" * 40, Mock(return_value=commit))
 
     def test_inspection_and_approved_publication_reuse_downloaded_artifacts(self):
         def fake_output(*args):
@@ -77,8 +80,8 @@ class PromotionTests(unittest.TestCase):
                 argv += ["--publish", "--accepted"]
             with self.subTest(publish=publish), tempfile.TemporaryDirectory() as logs, \
                     patch("sys.argv", [*argv, "--log-dir", str(Path(logs) / "report")]), \
-                    patch.object(promotion, "output", side_effect=fake_output), \
-                    patch.object(promotion, "command", side_effect=fake_run):
+                    patch.object(TaskReport, "capture", lambda _self, *a, **k: fake_output(*a)), \
+                    patch.object(TaskReport, "run", lambda _self, a, **k: fake_run(a)):
                 promotion.main()
                 summary = json.loads((Path(logs) / "report/summary.json").read_text())
                 self.assertEqual(summary["status"], "succeeded")
@@ -121,10 +124,10 @@ class PromotionTests(unittest.TestCase):
                 "Architecture": "arm64" if "arm64" in args[-2] else "amd64"}[args[-1]]
 
     def test_checksums_and_identities_pass_without_build(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(promotion, "output", self.identity):
+        with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.fixtures(root)
-            self.assertEqual(len(promotion.verify_packages(root, "v0.5.4")), 6)
+            self.assertEqual(len(promotion.verify_packages(root, "v0.5.4", self.identity)), 6)
 
     def test_checksum_tamper_extra_file_and_symlink_fail(self):
         for kind in ["tamper", "extra", "symlink", "unsafe-sum"]:
@@ -142,15 +145,15 @@ class PromotionTests(unittest.TestCase):
                     package.symlink_to("/dev/null")
                 else:
                     (folder / "SHA256SUMS").write_text("0" * 64 + "  ../../outside\n")
-                with patch.object(promotion, "output", self.identity), self.assertRaises(ValueError):
-                    promotion.verify_packages(root, "v0.5.4")
+                with self.assertRaises(ValueError):
+                    promotion.verify_packages(root, "v0.5.4", self.identity)
 
     def test_wrong_package_identity_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.fixtures(root)
-            with patch.object(promotion, "output", return_value="wrong"), self.assertRaises(ValueError):
-                promotion.verify_packages(root, "v0.5.4")
+            with self.assertRaises(ValueError):
+                promotion.verify_packages(root, "v0.5.4", Mock(return_value="wrong"))
 
     def test_unapproved_publish_and_invalid_inputs_fail_before_network(self):
         for args in [["v0.5.4", "123", "--publish"], ["../v0.5.4", "123"],

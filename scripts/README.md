@@ -168,3 +168,6 @@ or distribution differ, also update `lib/artifact_inspection.py`,
   underscore-named tool requires a caller and link migration, not a cosmetic move.
 - Every new tool gets a fixture test under `tests/` that runs in `just test`
   (the `tests/*_test.py` glob picks it up).
+- `tests/repo_hygiene_test.py` fails if an entry point loses its git executable
+  bit, is missing from this catalog, or if a relative Markdown link in the
+  maintained docs breaks.

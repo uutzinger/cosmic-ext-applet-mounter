@@ -118,41 +118,37 @@ def hosted(report, args):
     destination = Path(args.download_dir or f"target/artifacts/ci-{run_id}").absolute()
     if destination.is_symlink():
         raise ValueError("Artifact destination must not be a symlink")
-    promotion._report = report
-    try:
-        if destination.exists():
-            if (destination / "receipt.json").is_symlink():
-                raise ValueError("Artifact receipt must not be a symlink")
-            receipt = json.loads((destination / "receipt.json").read_text())
-            if receipt.get("run_id") != str(run_id) or receipt.get("source_sha") != sha:
-                raise ValueError("Existing artifact directory has different provenance; refusing overwrite")
-            packages = promotion.verify_packages(destination, args.version or version_from_packages(destination))
-            actual = {str(p.absolute()): promotion.hashlib.sha256(p.read_bytes()).hexdigest() for p in packages}
-            if len(receipt["artifacts"]) != ARTIFACT_COUNT or {p["path"]: p["sha256"] for p in receipt["artifacts"]} != actual:
-                raise ValueError("Cached artifact receipt does not match verified files")
-            report.phase("reused-verified-artifacts", artifact_receipt_path=str(destination / "receipt.json"))
-        else:
-            artifacts = metadata(report, f"{prefix}/{run_id}/artifacts?per_page=100")
-            if artifacts.get("total_count") != ARTIFACT_COUNT:
-                raise ValueError(f"Expected {ARTIFACT_COUNT} build artifacts")
-            promotion.validate_run(run, artifacts["artifacts"], repository, sha)
-            report.phase("downloading")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix=".download-", dir=destination.parent) as tmp:
-                stage = Path(tmp)
-                report.run(["gh", "run", "download", str(run_id), "--repo", repository, "--dir", str(stage)], timeout=900)
-                packages = promotion.verify_packages(stage, args.version or version_from_packages(stage))
-                files = [{"path": str(destination / p.relative_to(stage)),
-                          "sha256": promotion.hashlib.sha256(p.read_bytes()).hexdigest()} for p in packages]
-                atomic_json(stage / "receipt.json", {"schema_version": 1, "source_sha": sha,
-                            "run_id": str(run_id), "artifacts": files})
-                if destination.exists():
-                    raise ValueError("Artifact destination appeared concurrently; refusing replacement")
-                os.rename(stage, destination)
-            report.update(artifact_receipt_path=str(destination / "receipt.json"))
-        report.phase("artifacts-ready", next_action="Review artifact receipt and required acceptance; no installation/publication performed.")
-    finally:
-        promotion._report = None
+    if destination.exists():
+        if (destination / "receipt.json").is_symlink():
+            raise ValueError("Artifact receipt must not be a symlink")
+        receipt = json.loads((destination / "receipt.json").read_text())
+        if receipt.get("run_id") != str(run_id) or receipt.get("source_sha") != sha:
+            raise ValueError("Existing artifact directory has different provenance; refusing overwrite")
+        packages = promotion.verify_packages(destination, args.version or version_from_packages(destination), report.capture)
+        actual = {str(p.absolute()): promotion.hashlib.sha256(p.read_bytes()).hexdigest() for p in packages}
+        if len(receipt["artifacts"]) != ARTIFACT_COUNT or {p["path"]: p["sha256"] for p in receipt["artifacts"]} != actual:
+            raise ValueError("Cached artifact receipt does not match verified files")
+        report.phase("reused-verified-artifacts", artifact_receipt_path=str(destination / "receipt.json"))
+    else:
+        artifacts = metadata(report, f"{prefix}/{run_id}/artifacts?per_page=100")
+        if artifacts.get("total_count") != ARTIFACT_COUNT:
+            raise ValueError(f"Expected {ARTIFACT_COUNT} build artifacts")
+        promotion.validate_run(run, artifacts["artifacts"], repository, sha)
+        report.phase("downloading")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".download-", dir=destination.parent) as tmp:
+            stage = Path(tmp)
+            report.run(["gh", "run", "download", str(run_id), "--repo", repository, "--dir", str(stage)], timeout=900)
+            packages = promotion.verify_packages(stage, args.version or version_from_packages(stage), report.capture)
+            files = [{"path": str(destination / p.relative_to(stage)),
+                      "sha256": promotion.hashlib.sha256(p.read_bytes()).hexdigest()} for p in packages]
+            atomic_json(stage / "receipt.json", {"schema_version": 1, "source_sha": sha,
+                        "run_id": str(run_id), "artifacts": files})
+            if destination.exists():
+                raise ValueError("Artifact destination appeared concurrently; refusing replacement")
+            os.rename(stage, destination)
+        report.update(artifact_receipt_path=str(destination / "receipt.json"))
+    report.phase("artifacts-ready", next_action="Review artifact receipt and required acceptance; no installation/publication performed.")
 
 
 def preparation(report, args):

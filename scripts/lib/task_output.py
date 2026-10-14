@@ -133,7 +133,8 @@ class TaskReport:
             code, status = 1, "failed"
         else:
             code, status = 0, "succeeded"
-        if error:
+        if error and not isinstance(error, subprocess.CalledProcessError):
+            # A failed command already wrote its own output to the log.
             traceback.print_exception(kind, error, tb, file=self.log)
         self.update(status=status, exit_code=code)
         self.log.close()

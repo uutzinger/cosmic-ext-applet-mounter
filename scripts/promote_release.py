@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tempfile
 
@@ -14,20 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from task_output import TaskReport, atomic_json
 from artifact_inspection import MATRIX, verify_matrix
 from project import ARTIFACT_COUNT, WORKFLOW_PATH
-
-_report = None
-
-
-def output(*args):
-    if _report is not None:
-        return _report.capture(*args)
-    return subprocess.check_output(args, text=True).strip()
-
-
-def command(args):
-    if _report is not None:
-        return _report.run(args, timeout=900)
-    return subprocess.run(args, check=True)
 
 
 def validate_run(run, artifacts, repository, sha):
@@ -45,8 +30,8 @@ def validate_run(run, artifacts, repository, sha):
         raise ValueError(f"Exactly {ARTIFACT_COUNT} unexpired matrix artifacts are required; missing/expired artifacts need a new accepted build")
 
 
-def verify_remote_tag(repository, tag, sha):
-    ref = json.loads(output("gh", "api", f"repos/{repository}/git/ref/tags/{tag}"))["object"]
+def verify_remote_tag(repository, tag, sha, capture):
+    ref = json.loads(capture("gh", "api", f"repos/{repository}/git/ref/tags/{tag}"))["object"]
     for _ in range(8):
         if ref["type"] == "commit":
             if ref["sha"] != sha:
@@ -54,34 +39,39 @@ def verify_remote_tag(repository, tag, sha):
             return
         if ref["type"] != "tag" or not re.fullmatch(r"[0-9a-f]{40}", ref["sha"]):
             raise ValueError("Invalid remote tag object")
-        ref = json.loads(output("gh", "api", f"repos/{repository}/git/tags/{ref['sha']}"))["object"]
+        ref = json.loads(capture("gh", "api", f"repos/{repository}/git/tags/{ref['sha']}"))["object"]
     raise ValueError("Remote tag chain is too deep")
 
 
-def verify_packages(root, tag):
+def verify_packages(root, tag, capture):
     """Check exact filenames/checksums/identities without executing package code."""
-    return verify_matrix(root, tag, output)
+    return verify_matrix(root, tag, capture)
 
 
 def operation(args, report):
-    repository = args.repo or output("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+    capture = report.capture
+
+    def command(argv):
+        return report.run(argv, timeout=900)
+
+    repository = args.repo or capture("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Invalid repository identity")
-    sha = args.source_sha or output("git", "rev-parse", f"refs/tags/{args.tag}^{{commit}}")
+    sha = args.source_sha or capture("git", "rev-parse", f"refs/tags/{args.tag}^{{commit}}")
     report.update(repository=repository, ref=args.tag, source_sha=sha, run_id=args.run_id,
                   run_url=f"https://github.com/{repository}/actions/runs/{args.run_id}",
                   next_action="Inspect the private log and remote release state before retrying publication; never replace assets automatically.")
     if not args.source_sha:
-        verify_remote_tag(repository, args.tag, sha)
-    run = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}"))
-    artifact_data = json.loads(output("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100"))
+        verify_remote_tag(repository, args.tag, sha, capture)
+    run = json.loads(capture("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}"))
+    artifact_data = json.loads(capture("gh", "api", f"repos/{repository}/actions/runs/{args.run_id}/artifacts?per_page=100"))
     if artifact_data.get("total_count") != ARTIFACT_COUNT:
         raise ValueError(f"Build must supply exactly the {ARTIFACT_COUNT} expected artifacts")
     validate_run(run, artifact_data["artifacts"], repository, sha)
     if args.check_run_only:
         report.phase("run-validated", next_action="Run metadata verified only; no build, download or publication.")
         return
-    if output("git", "rev-parse", "HEAD") != sha or output("git", "status", "--porcelain"):
+    if capture("git", "rev-parse", "HEAD") != sha or capture("git", "status", "--porcelain"):
         raise ValueError("Use a clean checkout of the accepted tag for promotion")
     command(["bash", "scripts/check-release-publication.sh", args.tag])
     report.phase("downloading")
@@ -91,7 +81,7 @@ def operation(args, report):
             name = f"deb-ubuntu-{version}-{arch}"
             command(["gh", "run", "download", args.run_id, "--repo", repository,
                      "--name", name, "--dir", str(root / name)])
-        packages = verify_packages(root, args.tag)
+        packages = verify_packages(root, args.tag, capture)
         sums = root / "SHA256SUMS"
         sums.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in packages))
         receipt = report.directory / "artifacts.json"
@@ -111,7 +101,6 @@ def operation(args, report):
 
 
 def main():
-    global _report
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tag")
     parser.add_argument("run_id")
@@ -129,11 +118,7 @@ def main():
     if args.source_sha and (not args.check_run_only or not re.fullmatch(r"[0-9a-f]{40}", args.source_sha)):
         parser.error("--source-sha is only valid for pre-tag --check-run-only")
     with TaskReport("release-promotion", args.log_dir) as report:
-        _report = report
-        try:
-            operation(args, report)
-        finally:
-            _report = None
+        operation(args, report)
 
 
 if __name__ == "__main__":
