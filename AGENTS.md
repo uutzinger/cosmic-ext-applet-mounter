@@ -163,17 +163,15 @@ State which of these levels you verified; never claim a higher one.
 
 ### Rust verification procedure
 
-Use the pinned toolchain and project recipes when available. For projects with
-a committed lockfile, direct Cargo equivalents include:
+Prefer `bash scripts/dev.sh <task>`. When no recipe fits, run the Cargo equivalent
+with `--locked` and record the features and targets used:
 
     cargo fmt --all -- --check
     cargo check --locked --all-targets
     cargo clippy --locked --all-targets --all-features -- -D warnings
     cargo test --locked --all-targets
 
-These are alternatives to applicable recipes, not an extra duplicate gate.
-Record lockfile/features/targets with results; do not assume a recipe supplies
-flags that its current definition does not contain.
+Do not run both a recipe and its Cargo equivalent.
 
 ### Task and evidence records
 
@@ -250,7 +248,7 @@ publishes.
   stays usable. Run `metadata-check-strict` for the freedesktop-only result and
   record any warnings with their rationale.
 - Without a recipe, use the direct Cargo commands in the Rust verification
-  procedure above, with `--locked`.
+  procedure above.
 
 ### Documentation
 
