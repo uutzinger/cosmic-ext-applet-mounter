@@ -5029,3 +5029,235 @@ git diff --check passes. Archived local script contents remain excluded from
 version control. This source update does not authorize or require another
 build, tag, installation or release publication. P2 remains the next
 implementation phase; hosted P1 acceptance remains separately pending.
+
+### Script internal-module catalog clarification — October 13, 2026
+
+✅ Expanded scripts/README.md's brief internal-module paragraph into a dedicated
+catalog of both scripts/lib modules, their callers and state-change boundaries.
+Updated the engineering inventory with the same layout decision: retain public
+entry points at scripts/, shared implementation in lib/, and historical material
+in archive/. No further directory migration is warranted at the current size.
+P2 retains the planned extraction of shared artifact inspection policy from
+promotion. Documentation-only change; local links and git diff --check verified,
+with no build, installation, service change or publication.
+
+### P2 shared artifact inspection — October 13, 2026
+
+✅ Began P2 with the shared inspector, preserving the earlier uncommitted script
+catalog clarification. Extended the output contract before implementation.
+Added scripts/inspect-artifacts.py and scripts/lib/artifact_inspection.py;
+promotion's stable verify_packages interface now delegates to the shared policy.
+Modes cover the existing six-target Debian matrix, a single Debian package and
+native byte identity. Streamed SHA-256, expected package metadata, nonsymbolic
+regular inputs and bounded checksum metadata are checked without execution.
+Private atomic receipts describe observed paths/bytes, not trusted provenance,
+runtime/ABI compatibility, dependencies/payload or installed acceptance.
+
+✅ Six new inspector tests pass, including CLI validation, fake Debian metadata,
+native receipts, symbolic/nonregular/missing inputs and failure receipts.
+The 15 promotion and nine hosted-download regression tests also pass using fake
+CLIs only. Logs: /tmp/mounter-p2-inspection.log, /tmp/mounter-p2-promotion.log,
+/tmp/mounter-p2-hosted.log (temporary local logs, not durable build artifacts).
+An initial new-test fixture constructor mismatch was fixed before the passing
+run. Registered the inspector suite in just test and Debian rules; updated
+catalog, inventory, build guide and task statuses. No real package build, GitHub
+dispatch, installation, tag or publication. P2 is partial: local Debian wrapper,
+fixed dev wrapper and deployment reporting/tests remain outstanding.
+
+### Script-only P2/P3 scope clarified — October 13, 2026
+
+✅ At user request, removed release-number and engine-decision dependencies
+from the script inventory. Product architecture and dependency-policy choices
+remain in their existing project tasks; no product work was deleted or marked
+complete. Script phases now have concrete implementation and exit criteria:
+P2 local Debian candidate/provenance/reuse, fixed dev recipes, standalone-safe
+opt-in setup reporting, fixtures and handoff; P3 explicit-manifest Flatpak
+orchestration, shared metadata inspection and fake-command coverage. Existing
+dependencies and service policy stay unchanged during reporting improvements.
+Tooling implementation does not claim live build or final package acceptance.
+Updated Task List and script catalog consistently. Documentation-only change;
+whitespace, removed release-specific inventory references and new section links
+checked. No builds, installers, engine changes or release operations performed.
+
+### P2 logged development wrapper — October 13, 2026
+
+✅ Implemented bash scripts/dev.sh with fixed task dispatch in
+scripts/lib/dev_tasks.py, reusing TaskReport and existing just recipes. Full
+stdout/stderr stay private; console output is phases and a final result/log path.
+Receipts identify recipe, HEAD and dirty-state flag without claiming dirty inputs
+equal HEAD. Bounded timeout and signal cleanup preserve failure/cancellation;
+arbitrary recipe arguments and install/cleanup/launch/release tasks are rejected.
+Defined the interface in the output contract before implementation.
+
+✅ Five fixture methods pass, exercising every allowed recipe, noisy output,
+real exit codes, invalid tasks/arguments, log-directory preservation, timeout
+and SIGTERM child cleanup. Shared reporting (four methods) and inspection (six)
+regressions pass. Logs: /tmp/mounter-p2-dev.log, /tmp/mounter-p2-output.log,
+/tmp/mounter-p2-inspection.log. Bash/Python syntax and diff checks pass.
+Actual bash scripts/dev.sh fmt-check succeeded without compiling the app;
+receipt: target/task-runs/dev-fmt-check-gdkhxn7q/summary.json.
+
+✅ Marked the local Debian wrapper [o] per user decision: local work builds
+source, Debian packaging uses hosted matrix artifacts; just deb remains an
+exceptional diagnostic, not a required release gate. Updated catalog, inventory,
+guide and test recipes. No package build, installer, service, Git mutation or
+publication performed. Remaining P2: setup reporting/fixtures and final tooling
+gate; changes remain uncommitted.
+
+### P2 standalone setup reporting and tooling closure — October 13, 2026
+
+✅ Added optional --log-dir NEW_DIRECTORY to both standalone setup scripts.
+Default package/component/service behavior is retained. The embedded, parity-tested
+Bash reporter mirrors existing output so prompts remain visible; it logs no
+input or command tracing. New directories/logs/reports are private, JSON path
+escaping is covered, initial/final receipts are atomic and exit codes preserved.
+Existing/symbolic destinations, duplicate/missing arguments and control-character
+paths fail before setup. Help stays non-mutating. Signal status is reported,
+without claiming transactional rollback or the dev reporter's child-group cleanup.
+Logging failures do not turn a failed operation into success. Reporting uses only
+ordinary Bash/coreutils, with no Python or repository-relative bootstrap imports.
+
+✅ Thirteen new setup-report fixture methods pass: standalone stdin help and
+logged failure, parity, permissions/escaping, default behavior, failed log sinks,
+failure/signals/no retry, path rejection, visible input prompts without logging
+input, all five OpenConnect package branches through fake adapters, generated
+unit/icon/no-start policy, package/reload partial failures, uninstall preservation,
+and dependency component/default selection. Existing nine installer tests pass.
+No real package manager, gsettings, systemctl, sudo or authentication operation ran.
+
+✅ Final applicable Python gate: 70 methods passed (4 reporting, 6 inspection,
+5 dev, 13 setup reporting, 9 dependency installer, 6 publication preflight,
+3 helper localization, 9 hosted-download and 15 promotion). Logs are local
+/tmp/mounter-p2-final-<suite>.log; the last setup rerun after diagnostic newline
+cleanup is /tmp/mounter-p2-setup.log. Bash/Python syntax and git diff --check pass.
+ShellCheck is not installed; no ShellCheck claim. Test recipes, help, setup guides,
+catalog, contracts and inventory are updated. P2 marked complete for source and
+fixtures only; local Debian wrapper remains [o], P3 remains pending. Separate
+live/hosted package acceptance is not inferred. Changes remain uncommitted;
+no builds, installation, service mutation, tag or release publication performed.
+
+### P3.1 explicit-manifest candidate build/export — October 13, 2026
+
+✅ Defined the build/export contract before implementation. Added
+scripts/build-flatpak.sh and scripts/lib/flatpak_tasks.py with explicit JSON
+manifest, expected clean packaging-checkout SHA, architecture, branch and new
+output destination. Referenced inputs must be tracked, within that checkout and
+nonsymbolic; Git sources require full commit pins and remote archive/file sources
+require SHA-256. Includes/local files are fingerprinted and rechecked after build.
+No mutable-tag substitution, source generation, force-clean, installation, app
+launch or publication. Packaging-checkout identity is not confused with separately
+pinned application/dependency source commits.
+
+✅ Required runtime/SDK/BaseApp identities and installed commits are observed
+read-only. The fixed sequence builds, exports a local repository and creates a
+bundle; tool versions, declared finish-args, source pins, built metadata snapshot
+and bundle hashes go into candidate receipts. Missing tools/runtimes or mismatched
+built identities fail closed. Partial output is retained on failure, never silently
+removed/retried. Output must be new/outside the source checkout and separate from
+the report directory. Existing-output reuse is deliberately not yet supported;
+P3.2 shared export inspection and P3.3 verified reuse remain outstanding.
+
+✅ Eight fixture methods pass, covering successful build/export/bundle receipts,
+immutable pins and JSON includes, dirty/wrong/untracked/escaping/symbolic inputs,
+branch/runtime/app identity mismatches, missing runtime, build/export/bundle and
+input-mutation failures, existing-output preservation, rejected unsafe flags,
+timeout and cancellation/child cleanup. An initial lexical containment bug was
+caught by the path-escape fixture and fixed using canonical paths before the
+passing run. Log: /tmp/mounter-p3-flatpak.log. Four shared reporter regressions
+also pass (/tmp/mounter-p3-output.log). Bash/Python syntax, wrapper help and
+git diff --check pass. Registered fixtures in just/Debian tests and updated
+catalog, inventory, contracts, guide and task statuses.
+
+Only real Flatpak/builder help was inspected; no real build/export, network,
+runtime installation, app install or Git/release operation ran. The existing
+source manifest still has a mutable tag and must not be claimed compatible
+without an accepted commit pin. SDK-extension resolution and final exported
+permissions/repository integrity, live sandbox behavior and shipping acceptance
+are not established by these fixtures. Changes remain uncommitted.
+
+### P3.2 shared Flatpak artifact inspection — October 13, 2026
+
+✅ Defined the metadata comparison contract, then added
+scripts/lib/flatpak_inspection.py and flatpak-repo/flatpak-bundle modes to the
+existing inspector. Require explicit app/architecture/branch and expected
+metadata, with optional OSTree commit pin. Compare all metadata sections and
+keys, not a permission subset: runtime/SDK, Context, bus policy, Environment and
+extension settings. Reject malformed/duplicate/default/continued keyfiles,
+unsafe refs, symbolic inputs, ref drift, changed baselines or changed bundles.
+Record canonical metadata fingerprints separately from raw input hashes.
+Bundle import occurs only in a private temporary repository and is cleaned up;
+no app/runtime installation, configured remote or app launch is used.
+
+✅ Build/export now invokes the shared policy for both exported repository and
+bundle, requiring matching commits and built/exported metadata before success.
+Its built metadata is a consistency baseline, not independent permission
+approval. The wrapper records ostree tool identity and private inspection
+details. Updated fake export fixtures cover exported policy mismatch; test
+recipes, catalog, inventory, packaging guide and task status are updated.
+
+✅ Eight new inspection methods pass (including policy/runtime/identity/ref,
+bundle/import/input failure, malformed keyfile, privacy and path cases); eight
+updated build/export and six existing Debian/native inspection tests pass.
+Logs: /tmp/mounter-p3-inspection.log,
+/tmp/mounter-p3-inspection-wrapper.log, /tmp/mounter-p3-inspection-existing.log.
+Python syntax and git diff --check pass.
+
+✅ Also verified the real OSTree read and Flatpak bundle-import interfaces with
+a tiny synthetic metadata-only repository/bundle under
+/tmp/mounter-p3-metadata.9Io4Fm/ (not a Cloud Mounter build). Repository inspection
+passed in the managed sandbox. Bundle import first failed with read-only
+O_TMPFILE access; the approved unrestricted rerun passed. Receipts:
+repo-report/summary.json and bundle-report-unrestricted/summary.json there.
+No installed application/runtime or remote was altered. Payload integrity,
+signatures, installed/dynamic overrides, trusted provenance and store acceptance
+are outside this metadata check. P3.2 is complete at the stated boundary;
+P3.3 verified reuse/final handoff remains pending. Changes remain uncommitted.
+
+### P3.3 verified reuse and tooling closure — October 13, 2026
+
+✅ Defined explicit --reuse-receipt behavior before implementation. Candidate
+receipts now use schema 2 (task summaries remain schema 1), recording manifest
+relative path, canonical output and build options for exact comparison. Reuse
+requires the prior successful producer summary and checks selected clean source,
+manifest/include/local-file hashes, source pins, app/branch/architecture, exact
+bundle/metadata paths and hashes, recorded runtime/tool provenance and build
+options. It rechecks source, artifacts, baseline and exported ref before success.
+Legacy/incomplete/failed receipts, corruption and mismatches fail closed.
+
+✅ Reuse performs read-only ostree fsck without repair/delete flags and shared
+repository/bundle commit/full-metadata inspection. Symbolic repository roots are
+rejected before fsck. No builder invocation (including --version), runtime info,
+build-export or build-bundle occurs on reuse. Original build tool/runtime records
+are retained; current verification tool versions and prior receipt path/hash are
+recorded separately in a new private report. Original receipts/candidates are not
+overwritten. Local receipts remain trusted comparison records, not signatures.
+No automatic retry, rebuild, cleanup, installation or publication was introduced.
+
+✅ Seven reuse fixture methods pass: successful/chained reuse without builder
+or runtimes; bundle/metadata/repository/commit tampering, missing artifacts and
+fsck failure; malformed/legacy/incomplete/failed/symbolic producer records;
+source/options mismatch; mid-verification mutation and symbolic repository;
+partial-build refusal with a separately selected new-output build; cancellation
+with child cleanup and original preservation. Final gate: 93 Python methods pass
+across all 12 applicable tooling suites. Logs:
+/tmp/mounter-p3-final-<suite>.log, including flatpak_reuse, flatpak_wrapper,
+flatpak_inspection and the existing P1/P2 regressions. Bash/Python syntax,
+wrapper help and git diff --check pass. Real ostree fsck also passed on the
+earlier synthetic metadata-only repository /tmp/mounter-p3-metadata.9Io4Fm/repo.
+No Cloud Mounter compilation, package matrix, install or runtime/service change
+was performed. Previous synthetic bundle-import evidence remains separate.
+
+Updated setup/build recipes, agent binding, script catalog, inventory, contracts,
+packaging handoff/recovery instructions and task markers. P0–P3 script source/
+fixture work is complete; local Debian wrapper remains [o]. Actual pinned-manifest
+build, installed sandbox acceptance, next hosted release acceptance and any store
+submission remain distinct project gates. Accumulated changes remain uncommitted.
+
+### Script-tooling source commit/push authorized — October 13, 2026
+
+✅ User approved committing and pushing the accumulated P2/P3 source, tests and
+documentation. Reviewed the intended worktree and reused the recorded 93-test
+gate for unchanged code; whitespace checks pass. Package workflows remain
+manual-only. Stage only maintained files, not private reports, synthetic fixtures
+under /tmp, packages, caches or ignored archive contents. This source update
+does not dispatch a build, move a release tag, install or publish a package.

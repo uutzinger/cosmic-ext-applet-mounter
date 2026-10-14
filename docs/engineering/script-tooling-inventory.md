@@ -2,7 +2,7 @@
 
 Type: Inventory
 
-Status: Maintained inventory; P0 and P1 implemented with focused verification, P2/P3 pending
+Status: P0–P3 source/fixture gates complete; separate live/hosted package acceptance pending
 
 Created: October 13, 2026
 
@@ -19,28 +19,59 @@ authentication helpers, builds, service changes, tag/push or publication command
 This is a tooling inventory, not a full installer security or distro-validation
 audit. Installed executables and external user scripts were not inventoried.
 
+This record owns script organization, interfaces, implementation and verification
+only. Product engine selection, dependency policy, release scheduling and package
+runtime approval belong to their project plans. Scripts consume the selected
+configuration; improving them does not require making those product decisions.
+
 General requirements: one build per immutable source/required target, separate
 state-changing approvals, bounded logs with real exit status, operator handoff,
 preserved data and script-first repeatable workflows. See [AGENTS.md](../../AGENTS.md).
 
-## Active scripts: nine retained
+## Active scripts: nine retained, two added in P2, one added in P3
 
 | Script in scripts/ | Category | Current evidence/callers | Disposition |
 |---|---|---|---|
-| `install-dependencies.sh` | Project host setup | README, dependency guide, dependency-installer tests; component selectors, helper-runtime checks and package-manager operations | Keep. Update logging/summary interface later; engine selectors depend on 0.5.4 decisions. No-options installation is not read-only. |
-| `setup-openconnect.sh` | Project host setup | OpenConnect guide; installs packages, changes icon setting and writes on-demand agent unit; uninstall removes unit, not packages/profile | Keep. Add focused service/setting fixtures and bounded reporting later. Do not remove until COSMIC-agent replacement is accepted. |
-| `cosmic-ext-applet-mounter-onedrive-auth-helper` | Installed runtime payload | just/debian installation, app helper launcher, localization tests and package contracts | Keep. Not obsolete because Flatpak helper packaging is deferred. Any retirement follows engine/auth decisions and migration. |
+| `install-dependencies.sh` | Project host setup | Dependency guide, installer/reporting fixtures, component selections | P2 optional --log-dir implemented; visible prompts, private logs/atomic result, unchanged selections. No-options installation is not read-only. |
+| `setup-openconnect.sh` | Project host setup | OpenConnect guide and fake package/service/setting/report fixtures | P2 optional --log-dir implemented; installs/changes service and icon as before. Uninstall retains packages/profiles. No live setup execution counted. |
+| `cosmic-ext-applet-mounter-onedrive-auth-helper` | Installed runtime payload | just/debian installation, app helper launcher, localization tests and package contracts | Keep as an actively called runtime payload. Not a build wrapper or archive candidate; no behavior changes in this tooling plan. |
 | `check-ui-localization.sh` | Development gate | just localization-check; calls translation checker plus helper localization tests | Keep wrapper: it adds test coverage beyond the checker alone. |
 | `check-ui-translations.py` | Source verification | localization wrapper and audit; checks catalog identity/literal references and selected UI strings | Keep. Already concise; not a general Fluent parser or rendered UI test. |
 | `check-release-publication.sh` | Release preflight | publication fixtures and promotion script; validates versions, stable metadata and finalized notes | Keep. Read-only and already concise; does not replace human acceptance. |
 | `run_github_linux_build.sh` | Hosted build/retrieval | build_release.sh, guide, fake-gh download tests | P1 implemented: delegates to fixed Python task; correlated run selection, bounded status/logging, cache verification and resumable receipts. Hosted execution remains separate acceptance. |
 | `build_release.sh` | Release preparation | guide, AGENTS and fake-command promotion tests; creates/pushes tag and builds/reuses one run | P1 implemented: common reporting and explicit original-source --resume --run-id. Network/tag mismatches fail closed; no implicit rebuild or retag. |
-| `promote_release.py` | Artifact inspection/promotion | promotion workflow, guide, policy/package/fake-command tests | P1 implemented: private logs and persistent name/hash/origin inspection receipts. Default remains no-publication. Shared standalone inspector remains P2. |
+| `promote_release.py` | Artifact inspection/promotion | promotion workflow, guide, policy/package/fake-command tests | P1 reporting/resumption implemented; P2 delegates package verification to shared inspection policy. Default remains no-publication. |
+| `inspect-artifacts.py` | Offline artifact inspection | Shared Debian/native and Flatpak metadata verifiers; fixtures registered in just/Debian tests | Implemented: package/byte identity and explicit-baseline repository/bundle metadata comparison. No builds/network/install, provenance or installed-acceptance claim. |
+| `dev.sh` | Logged native development | Fixed just recipes through lib/dev_tasks.py; fixture tests in just/Debian gates | Implemented: private logs, concise results, recipe/HEAD/dirty identity, real exit status and cancellation. No install/cleanup/release tasks. |
+| `build-flatpak.sh` | Candidate Flatpak build/export/reuse | Explicit clean manifest checkout, pinned sources and fake-command fixtures | Implemented: build/export, shared inspection and explicit schema-2 reuse with fsck/hashes/successful producer summary. No implicit rebuild or install/launch/submission; mutable-tag manifest is not silently fixed. |
 
 These tools contain project bindings even where their underlying task is
 reusable. Do not move installers into generic build tooling, rename public
 download URLs cosmetically, or archive current runtime payloads. New names
 should be lowercase/hyphenated; existing underscore names remain stable.
+
+## Internal modules and layout
+
+The twelve public commands above are distinct from six maintained support modules:
+`scripts/lib/task_output.py` supplies private logging, atomic receipts and child
+cleanup to promotion and the task driver; `scripts/lib/release_tasks.py` supplies
+the fixed hosted-build/release-preparation tasks behind the two Bash wrappers.
+The latter reuses promotion's compatibility wrapper around the extracted
+`scripts/lib/artifact_inspection.py` policy. The standalone inspector uses that
+same module; checksums are streamed and symbolic/nonregular inputs are rejected.
+`scripts/lib/dev_tasks.py` supplies the fixed just-recipe dispatcher behind dev.sh.
+`scripts/lib/flatpak_tasks.py` supplies tracked/pinned input checks, runtime
+observations and the candidate build/export/receipt driver behind build-flatpak.sh.
+`scripts/lib/flatpak_inspection.py` supplies selected-ref/commit and complete
+metadata comparison, including temporary bundle import, for both that driver
+and inspect-artifacts.py. No app or runtime installation is involved.
+
+Keep public entry points at `scripts/`, internal implementation at `scripts/lib/`,
+and frozen historical material at `scripts/archive/`. The current size does not
+justify further setup/build/release subdirectories or public-name migrations.
+The [script catalog](../../scripts/README.md#internal-modules-and-directory-layout)
+documents each module's callers and execution boundary. Tests stay in `tests/`;
+generated logs, receipts, packages and caches are not maintained scripts.
 
 ## Archive disposition
 
@@ -72,21 +103,21 @@ and a proposed new file. They do not authorize executing any state change.
 | Native compilation and development launch | just build/build-release/run | Keep recipes. No duplicate build-source.sh needed. |
 | Focused and aggregate verification | just fmt-check/check/lint/test/localization-check/verify; direct focused tests | Keep recipes; add logged task wrapper, not duplicate test policy. |
 | Staged and user-local source installation | just stage/install-user/uninstall; build guide and live receipts | Keep recipes. A dedicated safe reload/install wrapper is optional only if repeated handoffs justify it; no new mandatory installer now. |
-| Project dependencies/OpenConnect setup | Existing two setup scripts | Update reporting and tests; keep separate from build/release defaults. |
+| Project dependencies/OpenConnect setup | Two standalone Bash scripts with opt-in private logs/JSON summaries | Implemented and fixture-tested. Prompt output remains visible; identical embedded reporter is parity-tested. Keep separate from build/release defaults. |
 | Bounded output, logs, reliable exit status and receipt schema | P1: scripts/lib/task_output.py and output/resumption contract | Implemented. Replaced the proposed Bash-only task-output.sh with a shared standard-library Python reporter; stable Bash entry points delegate rather than duplicating JSON/state handling. No arbitrary shell-text/eval interface. |
-| Operator-friendly native checks/builds | just recipes; no durable bounded-output wrapper | Create `scripts/dev.sh` as a fixed task-to-recipe dispatcher with log/summary/exit reporting; no installation/publication by default. |
-| Local Debian candidate creation and collection | just deb/debian rules; ad hoc output collection during 0.5.3 | Create `scripts/build-deb.sh` around existing Debian build, with explicit output/log paths, source provenance and inspection handoff. Do not silently skip package tests or rebuild a reusable accepted candidate. |
+| Operator-friendly native checks/builds | P2: dev.sh plus lib/dev_tasks.py over just recipes | Implemented and fixture-tested; private logs, real exit codes and fixed tasks only. |
+| Local Debian candidate creation and collection | just deb/debian rules | Deliberately dropped from P2. Native development uses source builds; Debian packages use hosted matrix artifacts. Keep just deb only for exceptional diagnostics; no build-deb.sh needed. |
 | Hosted matrix creation/retrieval | P1: stable Bash entry point, lib/release_tasks.py, correlated manual build workflow | Implemented and fixture-tested. Reuse selected runs, exact source and request-ID selection; no newest-run shortcut. |
-| Reusable artifact inspection | promote_release.py covers six Debian artifact checks; additional inspection was ad hoc | Create `scripts/inspect-artifacts.py` for offline/read-only inspection and receipt generation, initially Debian/native. Reuse it from promotion/local packaging; add Flatpak support after its acceptance contract is agreed. |
+| Reusable artifact inspection | P2: inspect-artifacts.py and lib/artifact_inspection.py, reused by promotion | Implemented/fixture-verified for offline Debian/native identity/bytes. P3 adds explicitly scoped Flatpak inspection. |
 | Release preparation and artifact promotion | P1: existing entry points plus shared reporter/fixed task driver | Implemented logs/receipts/resume, with fixture verification. No competing release.sh or rebuild merely to publish. Next hosted acceptance remains open. |
-| Reproducible Flatpak build/inspection | Packaging guide/manifests and just flatpak-cargo-sources; no unified shipping build wrapper | Create `scripts/build-flatpak.sh` after engine/runtime/manifest decisions. Separate build from installation/submission, distinguish prototypes, record source/runtime/grants. |
+| Flatpak build/inspection orchestration | build-flatpak.sh, lib/flatpak_tasks.py and shared lib/flatpak_inspection.py | P3 implemented/fixture-tested: immutable inputs, build/export, metadata comparison and explicit verified reuse without builder calls. Reuse adds fsck; original runtime/tool evidence retained. No shipping acceptance implied. |
 | Installed native/sandbox smoke | Manual/live receipts and some tests, not one reusable command | Optional later `scripts/check-installed.sh` for read-only identities/services/mount ownership. Never automate repair/unmount/reload as an implicit check. UI acceptance stays operator-assisted. |
 
-Proposed P2/P3 files are a plan, **not existing commands**. Shared logging and
-existing-tool improvements are implemented first in P1. The remaining minimal
-new-tool plan is a dev task wrapper, local Debian wrapper,
-shared artifact inspector, and later Flatpak wrapper. Installed-smoke tooling
-is optional; do not build a framework merely to wrap a one-off command.
+The minimal P0–P3 tooling plan is implemented and fixture-verified: shared
+reporting, existing hosted/setup improvements, inspector, dev and Flatpak wrappers,
+and verified reuse. The local Debian wrapper was deliberately dropped.
+Installed-smoke tooling remains optional; do not build a framework merely to
+wrap a one-off command. Source/fixture completion is not final-package acceptance.
 
 ### Verification gap found during this inventory (P0, resolved October 13)
 
@@ -124,14 +155,78 @@ pass. This verifies source contracts, not hosted publication or installed UI.
    remain retrievable by explicit ID; new correlated dispatch requires the
    updated workflow in the selected source. Resume/cache and cancellation are
    fixture-verified, not a claim of new hosted publication acceptance.
-4. **P2 — Add dev/local-Debian wrappers and shared inspection** using existing
-   just/Debian recipes and promotion policy, with tests. Keep install approval
-   and artifact inspection separate from building.
-5. **P2 — Add deployment-script reporting/tests**, preserving their service,
-   package, credential and rollback boundaries. Revisit optional engine/runtime
-   dependency choices only after the 0.5.4 engine decision.
-6. **P3 — Shipping Flatpak wrapper and affected acceptance**, after decisions
-   already tracked under 0.5.4. Consider installed-smoke wrapper only if needed.
+4. **P2 — Completed, source/fixtures:** local development and deployment tooling, using the
+   concrete work and exit criteria below. Shared inspection is already done.
+
+5. **P3 — Completed, source/fixtures:** Flatpak orchestration and inspection, using an explicit supplied
+   manifest and fixture verification. Script implementation is not gated on a
+   release number or engine selection; final-package acceptance is separate.
+
+## P2 remaining implementation and exit criteria
+
+Implement in this order; extend the output contract before each interface change.
+
+1. **[o] Local Debian wrapper dropped.** Use source builds locally and hosted
+   matrix artifacts for Debian packaging; a local package cannot validate six
+   hosted targets. Keep just deb for exceptional diagnostics only.
+2. **[x] Development wrapper — `scripts/dev.sh`.** Fixed task-to-just-recipe
+   allowlist for checks and native builds, using the common private log/summary
+   interface and real exit status. Reject arbitrary shell text, recipe injection
+   and unapproved passthrough flags. Do not include installation, uninstallation,
+   cleanup, panel reload or publication as implicit tasks. Keep justfile as the
+   authority for command sequencing; record which recipe ran and its boundary.
+3. **[x] Existing setup-script reporting and fixtures.** Improve
+   `install-dependencies.sh` and `setup-openconnect.sh` without changing selected
+   packages, versions, service policy or existing defaults. Preserve documented
+   standalone download/pipe-to-Bash use: no mandatory checkout-relative Python
+   imports or new bootstrap dependencies. Define an opt-in logged/receipt mode
+   that preserves interactive privilege prompts and keeps secrets out of public
+   output. Separate inspection/help from mutations; never rerun an installer
+   automatically after failure. Cover package-manager failure, component options,
+   generated unit paths, icon setting, uninstall preservation and partial failure
+   using fake commands and temporary user directories.
+4. **[x] Close the tooling gate.** Register tests in maintained recipes; update
+   help, catalog, module callers, inventory and operator handoff examples. Test
+   noisy output, cancellation, real exit codes, conflicting destinations, dirty
+   inputs, failed inspection and reuse without rebuilding. Preserve earlier P1
+   regression coverage. Use fixtures first; a real candidate build or setup run
+   is separately authorized and does not replace fixture verification.
+
+P2 is complete when these interfaces and applicable fixtures pass and their
+boundaries are documented. No package matrix, release, engine migration or live
+installer execution is required merely to close the script implementation phase.
+
+## P3 implementation and exit criteria
+
+1. **[x] Flatpak wrapper — `scripts/build-flatpak.sh` (source/fixtures).** Require an explicit
+   manifest and immutable source/input identity, with unique build/output paths
+   and the common log/summary interface. Record application ID/branch,
+   runtime/SDK/BaseApp, manifest/dependency-input hashes, tool identity and
+   effective permissions. Reject missing dependencies with a typed/clear failure;
+   never substitute a runtime, broaden grants or regenerate dependency inputs
+   silently. No default `--force-clean`, installation, launch or submission.
+   Existing outputs are refused by default; explicit verified reuse is implemented below.
+2. **[x] Flatpak artifact inspection (source/fixtures and synthetic local CLI check).** Extend the shared inspector with an
+   agreed bundle/repository metadata contract: application/ref identity,
+   checksums, runtime and permissions. Clearly distinguish a prototype,
+   successful build and accepted shipping artifact. Do not execute the app to
+   inspect metadata or equate a supplied manifest with built effective grants.
+3. **[x] Fixtures, verified reuse and handoff.** Build/export/inspection and
+   explicit schema-2 reuse are implemented with producer-summary validation,
+   source/artifact fingerprints and read-only fsck. Reuse does not invoke the
+   builder or require installed build runtimes. Fake commands cover wrong ref,
+   missing runtime, permission mismatch, build/export failure, cancellation,
+   destination conflicts and explicit reuse without rebuilding. Document exact
+   operator commands and separate build/export from installation/publication.
+   Final gate: 93 applicable Python methods passed, plus Bash/Python syntax,
+   help and whitespace checks. Real fsck passed on the earlier metadata-only
+   synthetic repository; no Cloud Mounter rebuild or installed acceptance claimed.
+
+P3 script completion requires the contract, implementation and fixtures, not a
+particular product release. A live build against the chosen project manifest and
+final sandboxed-package acceptance remain distinct project verification gates.
+An installed-smoke script remains optional, not a P2/P3 completion requirement;
+add it only for a demonstrated recurring read-only inspection gap.
 
 ## Acceptance and maintenance
 

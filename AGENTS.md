@@ -432,8 +432,11 @@ repository's recipes, selecting only the applicable checks:
     just test
     just verify
 
-Use `just fmt` when formatting changes are needed. Inspect the constituent
-recipes and their exit behavior before interpreting `just verify`. Recipes may
+Use `just fmt` when formatting changes are needed. Use the recipes directly,
+or `bash scripts/dev.sh <task>` for allowlisted checks and
+native builds with private logs and concise results. The wrapper runs the same
+just recipes; it does not install, clean, launch or publish. See the script catalog.
+Inspect constituent recipes and their exit behavior before interpreting `just verify`. Recipes may
 make known COSMIC-specific metadata warnings nonfatal; verify this in the
 justfile. Where available, use `just metadata-check-strict` for the strict
 validator result and record warnings and their rationale.
@@ -469,6 +472,14 @@ The following are this repository's entry points and installation behavior.
 
 #### Flatpak packages
 
+- `bash scripts/build-flatpak.sh --help` describes explicit-manifest candidate
+  build/export with private logs. It requires a clean pinned source checkout,
+  refuses existing output by default, and never installs or submits. Explicit
+  `--reuse-receipt` verifies an existing schema-2 candidate without invoking the
+  builder; mismatches fail rather than triggering rebuild/repair. Shared repository/bundle
+  metadata inspection is available through `scripts/inspect-artifacts.py`; it
+  requires the ostree CLI and an explicit comparison baseline. Preserve producer
+  summaries and receipts alongside artifact provenance; do not bypass reuse guards.
 - Follow ${PACKAGING_GUIDE_FILE} for the selected source-based manifest and its
   build/install commands; that directory also contains explicitly labeled probes
   and prototypes. Verify ${APPLICATION_ID}, selected branch and helper/worker

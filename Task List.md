@@ -4624,11 +4624,35 @@ the attempted third matrix run during 0.5.3 publication. That run was not starte
   persistent promotion receipts. Tests use fake CLIs only; next approved hosted
   acceptance remains separate. See
   [output/resumption contracts](docs/engineering/script-output-contracts.md).
-- [ ] Add the justified dev, local-Debian and shared-inspection wrappers; improve
+- [x] Add the justified dev and shared-inspection wrappers; improve
   deployment-script reporting/tests. Keep existing just recipes as underlying
   implementation rather than creating competing procedures.
-- [ ] After 0.5.4 engine/runtime decisions, add the shipping Flatpak wrapper.
-  Installed-smoke wrapper remains optional; full plan/status is in the inventory.
+  - [x] P2 shared offline artifact inspector and extracted promotion verification
+    policy: Debian matrix/single package and native byte receipts. Focused
+    inspection, promotion and hosted-download fixtures pass; no real build.
+  - [o] P2 local-Debian wrapper dropped by user: native source development is
+    local; Debian packages use the six-target hosted workflow. Retain just deb
+    for exceptional diagnostics, not a mandatory release gate.
+  - [x] P2 fixed dev-task allowlist around existing just recipes, with private
+    reporting; fixture checks cover output, rejection, exit status and cleanup.
+  - [x] P2 opt-in setup reporting and focused fixtures; preserve standalone Bash
+    use, existing dependency selections and service/data safety boundaries.
+  - [x] P2 close fixture/regression, help/catalog and operator-handoff gate:
+    70 applicable Python tests pass; source/fixture scope, not live deployment.
+- [x] P3 explicit-manifest Flatpak build/export wrapper, shared metadata
+  inspection and fake-command failure/reuse tests. Tooling implementation is
+  independent of release/engine decisions; live build and final package acceptance
+  stay in the project packaging plan. Installed-smoke wrapper remains optional.
+  See the inventory's P2/P3 exit criteria for authoritative tooling scope.
+  - [x] P3.1 explicit-manifest immutable-input build/export/bundle wrapper,
+    private receipts and fake-command failure/cancellation checks. No live build.
+  - [x] P3.2 shared Flatpak repository/bundle identity and complete metadata/
+    permissions comparison, reused by build/export; fake tests and synthetic
+    local OSTree/Flatpak checks pass. No installed/package acceptance claimed.
+  - [x] P3.3 explicit schema-2 candidate reuse with successful producer summary,
+    input/artifact identity, metadata and read-only fsck verification. No builder/
+    export/runtime calls on reuse; mismatches fail without rebuild or cleanup.
+    Final tooling gate: 93 Python methods pass; source/fixture acceptance only.
 
 ## Release 0.5.4 — Engine decision and Flatpak completion
 

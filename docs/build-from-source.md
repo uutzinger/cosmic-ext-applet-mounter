@@ -28,6 +28,29 @@ just deb
 
 Useful read-only examples:
 
+For concise output with full private logs, run a fixed recipe through the wrapper:
+
+```sh
+bash scripts/dev.sh check
+bash scripts/dev.sh test
+```
+
+Use `--help` for the task list. It preserves just's exit status and prints a
+result with log/summary paths under `target/task-runs/`; it does not install or
+reload the applet. `build` and `build-release` explicitly compile native source.
+Debian release packages use the hosted workflow, not a required local build.
+
+Inspect an existing local Debian candidate without rebuilding or installing:
+
+```sh
+python3 scripts/inspect-artifacts.py debian /absolute/path/to/package.deb --version 0.5.3 --architecture amd64
+```
+
+Use `debian-matrix /path/to/download-root --version 0.5.3` for six hosted
+targets, or `native /path/to/binary` for byte identity only. The tool writes a
+private receipt under `target/task-runs/`; this is not installed acceptance or
+proof of build provenance. See the [script catalog](../scripts/README.md).
+
 ```sh
 cargo run --example dependency_inventory
 ```

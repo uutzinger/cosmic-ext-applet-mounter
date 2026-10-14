@@ -8,8 +8,8 @@ Created: October 13, 2026
 
 Last reviewed: October 13, 2026
 
-Scope: Hosted Debian build/retrieval, release preparation and artifact promotion.
-Associated task: script-tooling P1. No installation, package matrix or publication
+Scope: Hosted/local tooling, setup reporting and Debian/native/Flatpak inspection.
+Associated task: script-tooling P1–P3. No installation, package matrix or publication
 is authorized merely by implementing this interface.
 
 ## Common receipt
@@ -77,8 +77,157 @@ reporting helper and avoids separate shell JSON/state implementations.
 
 ## Verification boundary
 
+### P3.3 verified candidate reuse contract
+
+`build-flatpak.sh` accepts explicit `--reuse-receipt PATH/artifacts.json`, with
+the same manifest/source/architecture/branch/output arguments. Default invocation
+still refuses any existing output. Reuse requires a schema-2 candidate receipt
+and its sibling successful flatpak-build summary; legacy/incomplete/failed
+receipts are not adopted. Verify checkout/input fingerprints, selected manifest,
+identity, recorded runtime/tool provenance and build options, canonical output
+locations, exactly the expected bundle/metadata files and their hashes. Require
+repository and bundle ref/commit/full metadata to match the recorded results.
+Run read-only `ostree fsck --quiet` without deletion/repair options before reuse;
+this adds object-integrity checking to P3.2 metadata comparison.
+
+Reuse does not invoke flatpak-builder (even for --version), build-export or
+build-bundle, and does not require current installed build runtimes. Their original
+recorded commits and tool versions remain provenance; current inspector versions
+are recorded separately, not substituted as build evidence. Input/options mismatch,
+corruption, missing output, prior failure or cancellation fails with no rebuild,
+overwrite, cleanup or retry. A partial candidate requires diagnosis; a newly
+authorized build uses a different destination.
+
+The new private report links the prior receipt path/hash and records verification
+results without changing that receipt or original outputs (repository checking
+may use tool locks). Recheck source/artifact/receipt stability before success.
+Receipts are trusted local comparison baselines, not signed attestations: editing
+both artifacts and their entire baseline cannot be detected cryptographically.
+No installed acceptance, runtime availability, signatures or publication claim.
+Summary schema remains version 1; reusable Flatpak candidate artifacts.json uses
+version 2. Other inspector/promotion receipt schemas are unchanged.
+
+### P3.2 offline Flatpak inspection contract
+
+The shared inspector adds `flatpak-repo` and `flatpak-bundle`. Both require
+explicit --app-id, --flatpak-arch, --branch and --expected-metadata, with optional
+--expected-commit. The selected expected keyfile is the caller's comparison
+baseline, not automatically an approved permission policy. Compare all sections
+and keys (including Context, bus policies, Environment and extension settings),
+not just requested finish-args or a permission subset. Require expected and
+actual application/runtime/SDK identities and architecture to agree. Reject
+duplicate/default/malformed metadata, unsafe identities and symbolic inputs.
+
+Read the selected local OSTree app ref and its /metadata without executing app
+code. Bundle inspection imports into a private temporary repository only, never
+an installed application, configured remote or user/system installation. Fixed
+local flatpak/ostree commands do not fetch network data or install runtimes.
+Record selected ref/commit, canonical metadata hash, expected-file hash and
+bundle hash when applicable. Confirm ref/input stability across inspection.
+The canonical metadata fingerprint is distinct from the raw keyfile byte hash.
+
+Candidate build/export reuses the same functions: exported repository and bundled
+ref must match each other and the built metadata, before a success receipt is
+written. This establishes export consistency, not independent permission approval.
+Report full metadata only in private receipts, not console output (Environment
+can contain sensitive values). Installed overrides/dynamic permissions, object
+payload integrity, signatures, provenance and store acceptance remain outside
+metadata inspection. P3.3 reuse must not mistake this for full repository fsck.
+
+### P3.1 explicit-manifest build/export contract
+
+`bash scripts/build-flatpak.sh --manifest PATH --source-sha SHA --arch ARCH
+--branch BRANCH --output-dir NEW_DIRECTORY` builds an unaccepted candidate.
+The manifest must be JSON inside a clean Git checkout at the expected SHA;
+referenced JSON/source/patch inputs must be tracked inside that checkout.
+Git sources require full commit pins, remote file/archive inputs require SHA-256,
+and local regular-file inputs are hashed. Mutable tags alone, directory sources,
+unsupported input forms and symbolic paths fail closed. This intentionally does
+not accept existing prototype/loosely pinned manifests automatically.
+
+The wrapper records packaging-checkout identity separately from manifest engine/
+application source pins. It invokes fixed flatpak-builder build, flatpak
+build-export and build-bundle operations, with no installation, launch, runtime
+substitution, dependency generation, cleanup, signing or submission. Required
+runtime/SDK/BaseApp are checked read-only and their installed commits recorded;
+extensions may additionally fail in the builder. --offline disables source
+downloads; otherwise pinned-source downloads are permitted, not runtime installs.
+Build state lives under the new candidate directory, so offline operation needs
+sources already available to the builder; no cache population is implied.
+
+The requested branch must match any manifest branch; architecture is explicit.
+Tool versions, input hashes and declared finish-args are recorded. Built metadata
+is retained separately (never equated with declared permissions); application,
+runtime and SDK identities must match. The source input fingerprint is rechecked
+before success. Build/export/bundle failures retain private logs/partial output,
+never a success receipt or implicit retry. Output parents must exist, destinations
+must be new and outside the tracked source inputs, and a log directory cannot be
+inside the candidate output. --timeout-seconds applies per command (1–86400,
+default 7200); local child cleanup uses TaskReport.
+
+A final artifacts.json records the exported bundle hash, built metadata hash,
+input/runtime/tool identity and local repository location. It does not certify
+repository integrity, reproducibility, dependency closure, installed behavior or
+store acceptance. Shared inspection checks export consistency; existing outputs
+are refused unless P3.3 --reuse-receipt is explicitly selected and verified.
+
+### P2 standalone setup reporting contract
+
+Both setup scripts accept optional `--log-dir NEW_DIRECTORY` (parent must exist).
+Default behavior and dependency/service selections stay unchanged. Logging mirrors
+stdout/stderr to private task.log **and keeps existing console output visible**:
+unlike noninteractive dev tasks, installers must not hide sudo/package prompts or
+instructions. Input and shell tracing are never recorded by the reporter; raw
+command diagnostics may still be sensitive and logs must not be published.
+No checkout-relative modules, Python, network bootstrap or automatic retries are
+introduced. The same embedded Bash block is parity-tested in both standalone files.
+Help does not create a report or perform mutations.
+
+Opt-in reporting creates a new private directory, preserves exit status and writes
+atomic summary.json on exit: schema_version, task, status, exit_code, log_path,
+summary_path and next_action. Initial status is running with a null exit_code;
+SIGINT/SIGTERM exit 130/143 and mark cancelled. Reporting does not promise child
+group cleanup, rollback or transactional package/service operations. Partial
+changes can remain after failure and require inspection, never implicit retry.
+No source/run provenance is inferred for a downloaded standalone script. Reject
+existing/symbolic log destinations and control characters in report paths.
+
+### P2 development task contract
+
+`bash scripts/dev.sh <task>` runs one allowlisted just recipe from the repository
+root: fmt-check, localization-check, check, lint, test, verify, metadata-check,
+metadata-check-strict, build or build-release. No arbitrary arguments, overrides,
+installation, cleanup, launch or publication tasks are accepted. The justfile
+remains authoritative, including its documented nonfatal metadata warnings.
+Build tasks build when explicitly selected; they do not promise cached acceptance.
+The shared reporter retains stdout/stderr privately and prints phase/final status
+only. `--log-dir` requires a new directory; `--timeout-seconds` is bounded to
+1–86400 (default 7200). Cancellation terminates the local recipe process group.
+Summary fields additionally record `recipe` and `source_dirty`; source_sha is
+the checkout HEAD, not proof that dirty inputs equal that revision. No build
+provenance or installed acceptance is implied. Underlying just exit codes are
+preserved; timeout is a failed task, not a successful check.
+
+### P2 offline artifact inspection contract
+
+The standalone inspector accepts an explicit `debian-matrix`, `debian` or
+`native` mode and expected version/architecture where applicable. It performs
+no network requests, builds, installation or executable launch. Debian metadata
+is read with `dpkg-deb`, never package maintainer scripts. Matrix inspection
+shares the promotion verifier and requires its six expected checksummed targets.
+Single-package inspection validates package/version/architecture; native inspection
+records bytes only, not ABI, runtime or UI acceptance. Reject symbolic/nonregular
+inputs and unsafe version/path components. Stream hashes rather than loading
+large packages into memory. Input files are not modified; private task receipts
+are the only output writes. Receipts describe observed bytes, not trusted build
+provenance; source/run identity stays unknown unless verified by the calling
+build/promotion workflow. Artifact payload/dependency and installed acceptance
+remain separate checks. P2 wrappers and deployment reporting have their own
+contracts above and do not expand byte inspection into installed acceptance.
+
 Use fake CLI fixtures for dispatch correlation, stale/ambiguous runs, exit codes,
 noisy logs, cancellation, download validation, cache reuse and partial-tag resume.
 Read-only live metadata checks are optional and distinct. A real hosted build or
-publication is not required to test this control flow. Local/native and Flatpak
-wrappers remain P2/later tasks; installers/runtime auth are outside P1.
+publication is not required to test this control flow. P2/P3 wrapper and setup
+reporting fixtures add their stated coverage; runtime authentication remains
+outside this script-tooling scope.

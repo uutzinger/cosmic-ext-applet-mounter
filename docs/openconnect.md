@@ -21,6 +21,11 @@ Or download and run it locally:
 bash scripts/setup-openconnect.sh install
 ```
 
+Optionally add `--log-dir /tmp/openconnect-setup-report` to install or uninstall
+for private logs and a JSON result. The directory must be new; its parent must
+exist. Prompts/output remain visible. Do not publish raw logs; after failure,
+inspect any partial changes before retrying.
+
 To remove only the on-demand agent service later:
 
 ```sh

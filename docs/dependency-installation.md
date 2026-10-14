@@ -24,6 +24,11 @@ Or run it locally after cloning the repository:
 bash scripts/install-dependencies.sh --all
 ```
 
+Optionally add `--log-dir /tmp/dependency-setup-report` (a new directory with
+an existing parent) to retain private logs and a JSON result. Prompts/output
+remain visible. Logs can contain sensitive diagnostics; do not publish them.
+Failure may leave partial changes—inspect before retrying.
+
 The script installs rclone using the official installer by default. If you prefer
 to try rclone's package-aware selfupdate first, add `--rclone-selfupdate`:
 

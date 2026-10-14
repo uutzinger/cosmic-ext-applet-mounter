@@ -12,12 +12,9 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from task_output import TaskReport, atomic_json
+from artifact_inspection import MATRIX, verify_matrix
 
 _report = None
-
-
-MATRIX = [(os_version, arch) for os_version in ("22.04", "24.04", "26.04")
-          for arch in ("amd64", "arm64")]
 
 
 def output(*args):
@@ -62,25 +59,7 @@ def verify_remote_tag(repository, tag, sha):
 
 def verify_packages(root, tag):
     """Check exact filenames/checksums/identities without executing package code."""
-    packages = []
-    for version, arch in MATRIX:
-        folder = root / f"deb-ubuntu-{version}-{arch}"
-        name = f"cosmic-ext-applet-mounter_{tag[1:]}_ubuntu{version}_{arch}.deb"
-        package = folder / name
-        sums = folder / "SHA256SUMS"
-        if (folder.is_symlink() or not folder.is_dir()
-                or {p.name for p in folder.iterdir()} != {name, "SHA256SUMS"}
-                or package.is_symlink() or sums.is_symlink()):
-            raise ValueError("Unexpected or symbolic artifact contents")
-        match = re.fullmatch(r"([0-9a-f]{64})  " + re.escape(name) + r"\n?", sums.read_text())
-        if not match or hashlib.sha256(package.read_bytes()).hexdigest() != match[1]:
-            raise ValueError("Artifact checksum mismatch or unsafe checksum filename")
-        for field, expected in [("Package", "cosmic-ext-applet-mounter"),
-                                ("Version", tag[1:]), ("Architecture", arch)]:
-            if output("dpkg-deb", "-f", str(package), field) != expected:
-                raise ValueError("Debian package identity mismatch")
-        packages.append(package)
-    return packages
+    return verify_matrix(root, tag, output)
 
 
 def operation(args, report):

@@ -3,6 +3,94 @@
 This directory contains Flatpak packaging experiments. These files are not the
 final COSMIC repository submission.
 
+## Candidate build/export wrapper
+
+`scripts/build-flatpak.sh` provides logged build/export only, with no install or
+submission. It requires a selected JSON manifest in a separate clean checkout
+at an expected commit, tracked referenced inputs, full Git source commit pins
+and SHA-256 for remote archives/files. Tags alone and directory-source prototypes
+are rejected. The existing source manifest still needs its mutable tag replaced
+by an accepted commit before this wrapper can build it; this tooling does not
+change that manifest or choose a runtime.
+
+Example interface (placeholders, not a request to build now):
+
+```sh
+bash scripts/build-flatpak.sh \
+  --manifest /path/to/clean-checkout/packaging/flatpak/selected.json \
+  --source-sha FULL_PACKAGING_CHECKOUT_COMMIT \
+  --arch x86_64 --branch candidate \
+  --output-dir /path/to/new-candidate
+```
+
+The output parent must exist, the destination must be new/outside the source
+checkout, and the report directory must be separate. Prefer a new destination
+under `target/artifacts/candidates/` in the tooling checkout when building from
+a separate clean source checkout. `--log-dir` chooses a new private report
+directory; default logs are under `target/task-runs/`. `--offline` forbids source
+downloads; it does not populate caches. Required runtimes/SDK/BaseApp must already
+be available. Failures leave partial output for inspection, never automatic
+cleanup/retry. The resulting repository/bundle, built metadata and hash receipt
+are unaccepted candidates, not installed or store-ready packages. Shared metadata
+inspection now compares both repository and bundle to built metadata before
+success. Existing destinations are refused unless --reuse-receipt is explicitly
+selected. The wrapper also requires the local `ostree` CLI.
+
+### Reuse instead of rebuilding
+
+Repeat the original manifest/source/architecture/branch/output arguments, adding
+`--reuse-receipt /path/to/original-report/artifacts.json`. Use a new `--log-dir`
+or let the wrapper allocate one. For example, after a successful candidate build:
+
+```sh
+bash scripts/build-flatpak.sh \
+  --manifest /path/to/clean-checkout/packaging/flatpak/selected.json \
+  --source-sha FULL_PACKAGING_CHECKOUT_COMMIT \
+  --arch x86_64 --branch candidate \
+  --output-dir /path/to/existing-candidate \
+  --reuse-receipt /path/to/original-report/artifacts.json
+```
+
+Keep the receipt and its sibling `summary.json`. Reuse requires schema 2, a
+successful producer summary, matching source/manifest fingerprints and build
+options (including `--offline` if originally used). It verifies exact artifact
+paths/hashes, recorded runtime/tool identities, repository integrity via
+`ostree fsck --quiet`, and repository/bundle ref/commit/metadata agreement.
+It never invokes the builder, export or bundle creation, and does not require
+build runtimes still to be installed. Original build provenance is retained;
+current inspection tool versions are recorded separately. The new report links
+the previous receipt; original reports/candidate files are not overwritten.
+
+Any mismatch, missing output, corrupt repository, partial build or legacy
+receipt fails closed. There is no automatic rebuild or repair. Inspect the
+private log first; if a new build is actually authorized, choose a new destination.
+Legacy candidates remain inspectable with the standalone inspector but are not
+silently promoted to reusable schema-2 candidates. Local receipts are comparison
+baselines, not signed attestations. No installation/publication is implied.
+
+## Offline artifact inspection
+
+Select the expected metadata keyfile explicitly after reviewing it. For example:
+
+```sh
+python3 scripts/inspect-artifacts.py flatpak-bundle /path/to/candidate.flatpak \
+  --app-id org.example.Candidate --flatpak-arch x86_64 --branch candidate \
+  --expected-metadata /path/to/reviewed-metadata.ini
+```
+
+Use `flatpak-repo /path/to/repo` for an exported local repository with the same
+identity/metadata options; `--expected-commit` optionally pins its OSTree commit.
+Both require `ostree`; bundles also require `flatpak`. No application/runtime is
+installed or launched. A bundle is imported only into a private temporary repo,
+which is removed after inspection. All keyfile sections/keys are compared, including
+permissions and environment; do not publish potentially sensitive metadata receipts.
+The build wrapper uses its built metadata as the consistency baseline, not an
+independently approved permission policy. Manifest finish-args are not treated as
+proof of exported permissions. Checks cover selected ref/commit/metadata and bundle
+bytes—not payload integrity, signatures, installed overrides or final acceptance.
+
+## Project packaging status
+
 October 13 release decision: 0.5.3 ships through native source/Debian channels.
 Final Flatpak packaging is deferred to 0.5.4, starting with the engine decision in
 [Task List](../../Task%20List.md#release-054--engine-decision-and-flatpak-completion).

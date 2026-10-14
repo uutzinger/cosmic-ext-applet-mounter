@@ -34,6 +34,12 @@ test:
     python3 tests/github_download_test.py
     python3 tests/release_promotion_test.py
     python3 tests/task_output_test.py
+    python3 tests/artifact_inspection_test.py
+    python3 tests/dev_wrapper_test.py
+    python3 tests/setup_reporting_test.py
+    python3 tests/flatpak_wrapper_test.py
+    python3 tests/flatpak_inspection_test.py
+    python3 tests/flatpak_reuse_test.py
 
 metadata-check:
     # Strict freedesktop validators currently reject official COSMIC applet

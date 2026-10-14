@@ -607,6 +607,7 @@ Options:
   --onedrive-auth-helper Install/check only the optional OneDrive GUI runtime.
   --skip-onedrive-auth-helper Omit GUI runtime; use manual browser/URL handoff.
   --help               Show this help message.
+  --log-dir DIR        Mirror visible output to a new private log/report directory.
 
 With no options, --all is assumed.
 
@@ -618,6 +619,101 @@ EOF
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+# BEGIN standalone setup reporting (kept identical in both setup scripts)
+setup_json_string() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+}
+
+setup_write_report() {
+    local status="$1" code="$2" temporary
+    temporary="$(mktemp "${setup_report_dir}/.summary.XXXXXX")" || return
+    {
+        printf '{"schema_version":1,"task":'
+        setup_json_string "$setup_report_task"
+        printf ',"status":"%s","exit_code":%s,"log_path":' "$status" "$code"
+        setup_json_string "${setup_report_dir}/task.log"
+        printf ',"summary_path":'
+        setup_json_string "${setup_report_dir}/summary.json"
+        printf ',"next_action":"Inspect partial changes before retrying; do not publish raw logs."}\n'
+    } > "$temporary"
+    mv -- "$temporary" "${setup_report_dir}/summary.json"
+}
+
+setup_finish_report() {
+    local code="$?" status=failed
+    trap - EXIT INT TERM
+    set +e
+    exec 1>&3 2>&4
+    wait "$setup_stdout_pid"
+    local stdout_code="$?"
+    wait "$setup_stderr_pid"
+    local stderr_code="$?"
+    if (( code == 0 && (stdout_code != 0 || stderr_code != 0) )); then code=1; fi
+    if (( code == 0 )); then status=succeeded; fi
+    if (( code == 130 || code == 143 )); then status=cancelled; fi
+    setup_write_report "$status" "$code"
+    if (( $? != 0 )); then
+        printf 'Could not finalize setup report.\n' >&2
+        if (( code == 0 )); then code=1; fi
+    fi
+    printf 'Setup %s (exit %s). Report: %s/summary.json\n' "$status" "$code" "$setup_report_dir"
+    exit "$code"
+}
+
+setup_entry() {
+    local requested_log_dir="" option
+    local -a setup_arguments=()
+    for option in "$@"; do
+        case "$option" in --help|-h|help) usage; return 0 ;; esac
+    done
+    while (( $# )); do
+        case "$1" in
+            --log-dir)
+                if (( $# < 2 )) || [[ -z "$2" || -n "$requested_log_dir" ]]; then
+                    printf 'One nonempty --log-dir NEW_DIRECTORY is required.\n' >&2
+                    return 2
+                fi
+                requested_log_dir="$2"
+                shift 2 ;;
+            *) setup_arguments+=("$1"); shift ;;
+        esac
+    done
+    if [[ -n "$requested_log_dir" ]]; then
+        for option in tee mktemp mv; do
+            command -v "$option" >/dev/null || {
+                printf 'Reporting requires %s.\n' "$option" >&2
+                return 127
+            }
+        done
+        if [[ "$requested_log_dir" =~ [[:cntrl:]] ]]; then
+            printf 'Control characters are not allowed in report paths.\n' >&2
+            return 2
+        fi
+        # mkdir (without -p) refuses existing files/directories and symbolic links.
+        (umask 077; mkdir -m 700 -- "$requested_log_dir") || return
+        setup_report_dir="$(cd -- "$requested_log_dir" && pwd -P)"
+        if [[ "$setup_report_dir" =~ [[:cntrl:]] ]]; then
+            printf 'Control characters are not allowed in resolved report paths.\n' >&2
+            return 2
+        fi
+        (umask 077; : > "${setup_report_dir}/task.log")
+        setup_write_report running null
+        exec 3>&1 4>&2
+        exec > >(tee -a "${setup_report_dir}/task.log" >&3)
+        setup_stdout_pid=$!
+        exec 2> >(tee -a "${setup_report_dir}/task.log" >&4)
+        setup_stderr_pid=$!
+        trap setup_finish_report EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+    fi
+    main "${setup_arguments[@]}"
+}
+# END standalone setup reporting
 
 main() {
     local do_all=false
@@ -681,5 +777,6 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
-    main "$@"
+    setup_report_task=dependency-setup
+    setup_entry "$@"
 fi
