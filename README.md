@@ -46,7 +46,7 @@ The following connection engines are used to connect to the providers:
 
 `jstaf/onedriver` is ideal for on-demand access to OneDrive.
 
-`abraunegg/onedrive` is ideal to monitor local and remote changes in a bidirectional mirror and does not need sync scheduler. Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent)
+`abraunegg/onedrive` is ideal to monitor local and remote changes in a bidirectional mirror and does not need sync scheduler. Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent). To use your own Microsoft Entra application ID, see [Microsoft cloud authentication setup](docs/microsoft-cloud-auth-setup.md).
 
 `rclone` is best suited to mount documnet libraries from Microsoft Teams or SharePoint but its bisync mirror needs sync scheduling.
 

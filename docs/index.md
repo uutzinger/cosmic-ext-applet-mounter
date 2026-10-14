@@ -30,6 +30,8 @@ rclone remote.
   on-demand authentication agent.
 - [Google Cloud authentication setup](google-cloud-auth-setup.md): private
   Google OAuth clients for rclone.
+- [Microsoft cloud authentication setup](microsoft-cloud-auth-setup.md): your own
+  Microsoft Entra application ID for OneDrive and SharePoint.
 
 Run commands that refer to repository files from the checkout's root directory.
 
