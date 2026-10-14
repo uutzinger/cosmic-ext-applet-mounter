@@ -192,128 +192,72 @@ flags that its current definition does not contain.
 
 ### Engineering records
 
-Engineering records are maintained design and verification documents: inventories,
-contracts, audits, designs, and decisions. Keep them under
-${ENGINEERING_RECORDS_DIR}, separate from the repository's primary product,
-requirements, task, and deployment documents.
+Inventories, contracts, audits, designs and decisions live in `docs/engineering/`
+(${ENGINEERING_RECORDS_DIR}). Read its [README](docs/engineering/README.md) before
+creating or changing a record: it has the naming, header, status and indexing rules.
 
-- Use lowercase ASCII filenames with hyphens: subject-kind.md. Prefer the kinds
-  inventory, contracts, audit, design, and decision. Choose a descriptive subject
-  and retain the same filename while maintaining the same record.
-- Keep dates in document metadata for maintained records. For a separate frozen
-  baseline or historical snapshot, use YYYY-MM-DD-subject-kind.md and state which
-  current record or task it supports. Do not create a new dated copy for every
-  small update or silently overwrite an accepted historical baseline.
-- Create the directory and its README.md index with the first record. List each
-  record's purpose, type, status, and relative link in the index. Avoid deeper
-  subdirectories until the number of records makes them useful.
-- Track reviewed engineering records in version control. Compiled binaries,
-  packages, caches, and transient raw reports/logs belong in the build tool's
-  output area, such as ${BUILD_OUTPUT_DIR}, or a task-specific temporary directory.
-  They are not engineering records and must not be mixed into that directory.
-
-#### Creation and maintenance process
-
-1. Create a record when work needs a durable baseline inventory, interface or
-   safety contract, architecture decision, or audit beyond a checklist entry.
-   Use existing records for routine follow-ups instead of creating redundant
-   documents. Establish a required baseline or contract before its implementation.
-2. Begin with a title, type, status, creation date, and last-reviewed date. Identify
-   the scope, associated task, applicable requirements, and authoritative source
-   files or interfaces. State whether the text describes an observed baseline,
-   a proposed design, an accepted contract, or verified behavior.
-3. Record assumptions, relevant versions/capabilities, ownership, dependencies,
-   decisions, and unresolved issues. For inventories, classify each item and its
-   disposition. For contracts, define permitted operations, invariants, failure
-   handling, and acceptance criteria. For audits, state the method, coverage,
-   intentional exceptions, findings, and corrective actions.
-4. Separate documentation status from implementation and acceptance status.
-   Identify what was checked in source, automated tests, native installations,
-   live systems, and final sandboxed packages. Include dates and build identities
-   when relevant; do not turn an accepted design into a claim of tested behavior.
-5. Link the record from the appropriate task and the directory index. Put durable
-   product requirements into ${SPECIFICATION_FILE}, or reference an accepted
-   contract there. Keep detailed execution chronology in ${COMPLETION_NOTES_FILE}
-   and avoid copying the same checklist or transcript into multiple records.
-6. Update maintained records when related implementation or decisions change.
-   Preserve frozen baselines and mark superseded records with links to their
-   successors. Maintain references if a record is renamed and verify relative
-   links from its actual directory. Review for secrets and private diagnostic
-   data before recording evidence.
+- Name files `subject-kind.md`; reuse an existing record for follow-ups.
+- State documentation status separately from implementation and acceptance
+  status; never present a design as tested behavior.
+- Keep logs, packages and raw reports in ${BUILD_OUTPUT_DIR}, not in that directory.
 
 ## Part II — Project bindings
 
-These instructions bind Part I's policy to the configured
-language, desktop, package modes and repository tooling. Commands below identify maintained entry
-points, not instructions to run every command on every task.
-The script catalog and inventory distinguish existing commands from proposed
-tools; a planned filename is not an available or approved command.
+Commands below are the maintained entry points, not a list to run on every task.
+A script named only in the catalog or inventory as "planned" does not exist.
 
 ### COSMIC desktop and API integration
 
-#### Required API choices
+#### Required APIs
 
-- Use NetworkManager's system D-Bus API for network/VPN control and the systemd
-  user-manager session D-Bus API for user services/timers. Use appropriate desktop
-  portals for sandboxed requests. Do not replace these with CLI wrappers merely
-  because a CLI is convenient.
-- Use the correct session or system D-Bus for each service. Declare narrowly
-  scoped permissions for required bus names and filesystem locations. Prefer
-  portals and specific grants to blanket host-filesystem access.
-- Resolve portal-selected paths through the supported portal API. Specify which
-  configuration and engine state belongs on the host and which belongs in the
-  sandbox; preserve that ownership across installation methods.
+- Network and VPN: NetworkManager on the system D-Bus. User services and timers:
+  the systemd user manager on the session D-Bus. Sandboxed requests: desktop
+  portals. Do not substitute CLI wrappers for these.
+- Pick the correct bus per service. Request narrow Flatpak permissions (specific bus
+  names and paths), never blanket host filesystem access.
+- Resolve portal-selected paths through the portal API. Keep a written split of
+  what state lives on the host and what lives in the sandbox, and keep it the
+  same for native and Flatpak installs.
 
-#### Desktop, UI and runtime ownership
+#### Applet, UI and runtime rules
 
-- Follow supported ${UI_FRAMEWORK} application/applet patterns and the pinned
-  toolchain. Read the existing entry points and package metadata before adding
-  new windows or launch modes.
-- Keep ${APPLICATION_ID} consistent across desktop/AppStream/icon metadata
-  and window identity. For applets, retain the COSMIC applet metadata and test
-  launch from the actual panel, including standalone settings windows.
-- Define one owner for shared runtime state and route other windows/instances
-  through typed IPC. Keep long operations cancellable without blocking that IPC
-  or the UI; reconcile displayed state from observed backend state.
-- Use Fluent for app-owned labels, tooltips, notices, validation, and diagnostics,
-  including separate graphical helpers. Keep protocol strings and user data
-  distinct from translated messages. Use locale-aware plural rules and provide
-  keyboard, accessible, and non-color state cues.
-- For installed UI verification, close project settings/editor windows and use
-  the authorized panel reload or logout/login workflow described in
-  ${BUILD_GUIDE_FILE}. A debug launch does not replace an already-running
-  installed applet. Preserve user configuration and unrelated processes.
+- Follow existing ${UI_FRAMEWORK} applet patterns and the pinned toolchain. Read the
+  entry points and package metadata before adding a window or launch mode.
+- ${APPLICATION_ID} must be identical in the desktop file, AppStream metadata, icon
+  and window app id. Keep the COSMIC applet metadata and test from the real panel,
+  including the standalone settings window.
+- One owner holds shared runtime state; other windows and instances talk to it
+  through typed IPC. Long operations are cancellable and never block the IPC or
+  UI thread. Show state read back from the backend, not state you assumed.
+- All app-owned text (labels, tooltips, notices, validation, diagnostics, and the
+  separate graphical helpers) goes through Fluent. Protocol strings and user data
+  are not translated. Use locale plural rules, and give every state a keyboard
+  path, an accessible name and a non-color cue.
+- Installed UI checks: close settings/editor windows, then reload the panel or
+  log out and in as described in ${BUILD_GUIDE_FILE}. A debug launch does not
+  replace the running installed applet. Do not touch user configuration or
+  unrelated processes.
 
-### Rust recipes and metadata checks
+### Recipes
 
-Inspect `just --list`, the justfile, and ${BUILD_GUIDE_FILE} first. Prefer the
-repository's recipes, selecting only the applicable checks:
+Run checks through `bash scripts/dev.sh <task>` (see the routine loop above).
+Tasks: `fmt-check`, `localization-check`, `check`, `lint`, `test`, `gate`,
+`verify`, `metadata-check`, `metadata-check-strict`, `build`, `build-release`.
+`just fmt` applies formatting. The wrapper never installs, cleans, launches or
+publishes.
 
-    just fmt-check
-    just localization-check
-    just check
-    just lint
-    just test
-    just verify
-
-Use `just fmt` when formatting changes are needed. Use the recipes directly,
-or `bash scripts/dev.sh <task>` for allowlisted checks and
-native builds with private logs and concise results. The wrapper runs the same
-just recipes; it does not install, clean, launch or publish. See the script catalog.
-Inspect constituent recipes and their exit behavior before interpreting `just verify`. Recipes may
-make known COSMIC-specific metadata warnings nonfatal; verify this in the
-justfile. Where available, use `just metadata-check-strict` for the strict
-validator result and record warnings and their rationale.
-
-Use the [Rust verification procedure](#rust-verification-procedure) when direct
-Cargo checks are needed instead of a recipe.
+- `metadata-check` ignores known COSMIC-specific validator warnings so `verify`
+  stays usable. Run `metadata-check-strict` for the freedesktop-only result and
+  record any warnings with their rationale.
+- Without a recipe, use the direct Cargo commands in the Rust verification
+  procedure above, with `--locked`.
 
 ### Documentation
 
 Keep ${DESCRIPTION_FILE}, ${SPECIFICATION_FILE}, ${TASK_LIST_FILE} and
 ${COMPLETION_NOTES_FILE} at the root, user guides in ${USER_DOCS_DIR}, and release
 notes in ${RELEASE_NOTES_DIR}. When paths change, update links and indexes
-together. Layout and release-note rules are in the procedures record below.
+together. Layout and release-note rules are in the procedures record linked below.
 
 ### Packaging and release entry points
 
