@@ -190,7 +190,8 @@ Do not run both a recipe and its Cargo equivalent.
 - After a release is published, archive its completed sections of the task list and
   completion notes unchanged to `docs/archive/<name>-through-v<version>.md`, and copy
   every still-open item verbatim into the active list's "Open items carried forward"
-  section. Do not delete history. Repair relative links; `repo_hygiene_test.py` checks them.
+  section. Use `bash scripts/archive-release.sh <version> --tasks-from <heading> --notes-from <heading>`
+  (`--dry-run` first); it edits files only and never commits. Do not delete history.
 
 ### Engineering records
 

@@ -6,6 +6,8 @@ the public website homepage. This README is the GitHub directory entry.
 
 ## Repository-specific guidance
 
+- [Reusing the development workflow](reusing-the-development-workflow.md): copy
+  the agent guide, scripts, tests and task records to another project.
 - [Flatpak packaging guide](../packaging/flatpak/README.md): build inputs,
   permissions, installation, and publication gates.
 
