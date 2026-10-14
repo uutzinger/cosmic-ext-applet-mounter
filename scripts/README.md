@@ -34,10 +34,10 @@ so standalone users do not need Python or checkout-relative support files.
 | Script | Purpose | Current boundary |
 |---|---|---|
 | [check-ui-localization.sh](check-ui-localization.sh) | Localization gate used by `just localization-check`. | Calls translation checker and helper localization tests; does not build. |
-| [dev.sh](dev.sh) | Run a fixed just check/native-build recipe with private logs and concise phase/result output. | `bash scripts/dev.sh check`; supports `--log-dir` and bounded `--timeout-seconds`. No arbitrary arguments, install, cleanup, GUI launch or release tasks. |
+| [dev.sh](dev.sh) | Run a fixed just check/native-build recipe with private logs and concise phase/result output. | `bash scripts/dev.sh check`; `gate` runs fmt-check, lint and test; supports `--log-dir` and bounded `--timeout-seconds`. No arbitrary arguments, install, cleanup, GUI launch or release tasks. |
 | [build-flatpak.sh](build-flatpak.sh) | Explicit-manifest candidate build/export, or verified reuse with --reuse-receipt. | Clean source SHA and pinned inputs required. Builds need a new output; reuse needs a schema-2 receipt/successful summary and passes hashes, fsck and metadata checks without builder/runtime calls. No installation, launch or submission. |
 | [check-ui-translations.py](check-ui-translations.py) | Catalog/reference and selected hardcoded UI-string checks. | Source checks, not full Fluent compilation or rendered UI review. |
-| [check-release-publication.sh](check-release-publication.sh) | Version/metadata/finalized-note preflight. | Read-only; does not prove package acceptance or grant approval. |
+| [check-release-publication.sh](check-release-publication.sh) | Version/metadata/finalized-note preflight (wrapper for `lib/publication_check.py`). | Read-only; does not prove package acceptance or grant approval. |
 | [run_github_linux_build.sh](run_github_linux_build.sh) | Dispatch or retrieve a hosted Debian build. | Unique dispatch correlation, structured polling and verified downloads/cache. `--run-id` or `--resume-report` does not dispatch. No installation/publication. |
 | [build_release.sh](build_release.sh) | Tag/push and start one hosted matrix or reuse an exact-commit run. | Tag/push approval required. `--dry-run` is non-mutating; `--resume --run-id` reuses the original tag/run without implicit rebuilding. Does not publish. |
 | [promote_release.py](promote_release.py) | Validate/download an existing accepted build and optionally publish its packages. | Inspection default; publication requires `--publish --accepted` and approval. Persistent inspection receipt, no rebuild. |
@@ -61,7 +61,7 @@ Failure excerpts must be bounded and redacted; they are not printed automaticall
 Choose custom log directories outside the source tree or under ignored output;
 release clean-worktree checks must not be bypassed for untracked log directories.
 
-Hosted monitoring defaults to 30-second polls; `--poll-seconds`,
+Hosted monitoring defaults to 60-second polls; `--poll-seconds`,
 `--timeout-seconds` and `--discovery-timeout` are bounded controls. Cancellation
 stops local child processes, not remote CI. Resume the same run using its ID or
 the original `summary.json` (`--resume-report`); ambiguous dispatches never retry
@@ -74,6 +74,8 @@ legacy/unrelated directories are not overwritten or silently adopted.
 |---|---|---|
 | [lib/task_output.py](lib/task_output.py) | Shared `TaskReport`, atomic JSON receipts, private logging, exit-status preservation and local child cancellation/cleanup. Used by the task driver and promotion tool. | Importable support module, not an operator command. Does not cancel remote CI. |
 | [lib/release_tasks.py](lib/release_tasks.py) | Fixed hosted-build and release-preparation implementations behind `run_github_linux_build.sh` and `build_release.sh`; reuses verification functions from `promote_release.py`. | Internal task driver, not an additional public entry point. It can dispatch builds or create/push tags through the authorized wrappers. |
+| [lib/project.py](lib/project.py) | Project constants (package name, hosted workflow, Debian artifact matrix and count) shared by the release tooling. | Edit this file first when reusing the scripts in another project; `tests/project_constants_test.py` checks it against Cargo.toml and the workflow. |
+| [lib/publication_check.py](lib/publication_check.py) | Version, AppStream and release-note preflight using `tomllib`, behind `check-release-publication.sh`. | Read-only; exercised by `tests/release_publication_test.py`. |
 | [lib/artifact_inspection.py](lib/artifact_inspection.py) | Shared Debian identity checks and streaming hashes, used by inspection and promotion (also through the hosted task driver). | Importable offline policy; reads metadata using a caller-provided command adapter, never installs or executes artifacts. |
 | [lib/dev_tasks.py](lib/dev_tasks.py) | Allowlisted just dispatch behind `dev.sh`, using the shared reporter. | Records recipe, HEAD and dirty-state flag; no independent build/test policy. |
 | [lib/flatpak_tasks.py](lib/flatpak_tasks.py) | Validates tracked/pinned inputs, observes required runtimes, builds/exports and records inspected candidate receipts. | Uses shared export/bundle comparison against built metadata; no independent policy approval or shipping acceptance. |
@@ -94,31 +96,75 @@ logs, receipts, packages and generated caches are ignored build output, not
 maintained tools. Do not create a separate README for each two-file internal
 directory unless its usage grows beyond this catalog.
 
-## Status and next work
+## Reusing the tooling in another project
 
-The [engineering inventory](../docs/engineering/script-tooling-inventory.md) is
-the authoritative current classification, reference coverage, gaps and proposed
-implementation order. Proposed tools are **not implemented** by this catalog.
-General operator/rebuild/logging policy lives in [AGENTS.md](../AGENTS.md).
+The development and release tools are written to be copied to another Rust
+project (they use only the Python standard library, `just`, `git`, `gh` and, for
+packages, `dpkg-deb`/`ostree`/`flatpak-builder`). Copy `scripts/`, the matching
+`tests/*_test.py` and `tests/tooling_fixtures.py`, then adapt the items below.
+Run the project's `just test` afterwards: the fixture tests catch most missed edits.
 
-[P2](../docs/engineering/script-tooling-inventory.md#p2-remaining-implementation-and-exit-criteria)
-is complete for source/fixture verification: setup reporting, dev wrapper and
-inspector are implemented. Live deployment remains separate. The local Debian wrapper
-was dropped: packages come from the hosted matrix; `just deb` remains diagnostic.
-[P3](../docs/engineering/script-tooling-inventory.md#p3-implementation-and-exit-criteria)
-has implemented candidate build/export, shared metadata inspection and explicit
-verified reuse (see the packaging guide for commands and recovery). These are
-tooling phases, not release or engine-selection plans; live package acceptance
-and installation/publication approvals remain separate.
+**Usually no change needed**
 
-[archive/](archive/README.md) contains local frozen legacy tools moved from the
-older archive location, not installation or build inputs. The original nine active
-scripts remain needed; P2 adds the inspector/dev wrapper and P3 adds Flatpak
-orchestration. Python `__pycache__` is generated output, not
-an archive candidate or an engineering record.
+- `lib/task_output.py` (receipts, logs, cancellation) and the `.sh` wrappers.
+- `dev.sh` / `lib/dev_tasks.py`, provided the project has `just` recipes with the
+  allowlisted names. Add or remove names in `RECIPES` and in
+  `tests/dev_wrapper_test.py`; keep the allowlist fixed, never pass arbitrary args.
 
-Keep existing public script names stable. For new tools prefer lowercase,
-hyphenated names; internal importable Python modules use underscores. Renaming
-old underscore-named tools requires a caller/link migration, not a cosmetic move.
-Update this catalog, tests, packaging and the
-inventory together when tools are added, retired or materially changed.
+**Edit first: [lib/project.py](lib/project.py)**
+
+| Constant | Set it to |
+|---|---|
+| `PACKAGE` | The Cargo package / Debian package name. `tests/project_constants_test.py` checks it against `Cargo.toml`. |
+| `WORKFLOW` | The manual, build-only GitHub workflow file (default `build-deb.yml`). It must not publish and should take a `request_id` input used in the run title (`Debian packages · <request_id>`), which run correlation relies on. |
+| `MATRIX` | `(ubuntu version, arch)` pairs the workflow builds. Artifacts are named `deb-ubuntu-<version>-<arch>`; `ARTIFACT_COUNT` follows automatically. |
+
+If your artifact names, package file names (`<PACKAGE>_<version>_ubuntu<ver>_<arch>.deb`)
+or distribution differ, also update `lib/artifact_inspection.py`,
+`version_from_packages()` in `lib/release_tasks.py` and `tests/tooling_fixtures.py`.
+
+**Project files the tools read** (rename or adjust the paths if yours differ)
+
+| Tool | Reads |
+|---|---|
+| `lib/publication_check.py` | `Cargo.toml` and `Cargo.lock`, `debian/changelog` (via `dpkg-parsechangelog`), `resources/app.metainfo.xml` (latest `<release>`), `docs/releases/v<version>.md` (must not contain "draft"). |
+| `promote_release.py` | `docs/releases/v<version>.md` as the release body; runs `check-release-publication.sh`. |
+| `lib/release_tasks.py` | `cargo metadata` for the version and `debian/changelog`; a clean branch on a GitHub remote. |
+| `check-ui-translations.py`, `check-ui-localization.sh` | `src/**/*.rs`, `i18n/*/cosmic_ext_applet_mounter.ftl`, `tests/auth_helper_localization_test.py`. COSMIC/Fluent-specific: adapt the catalog name or drop the `localization-check` recipe. |
+| `build-flatpak.sh`, `inspect-artifacts.py` | An explicit Flatpak manifest passed on the command line; drop them if you do not ship Flatpak. |
+
+**Project-specific and not reusable as written**
+
+- `install-dependencies.sh`, `setup-openconnect.sh` and the OneDrive auth helper
+  belong to this applet.
+- `archive/` holds retired runtime helpers; leave it behind.
+
+**Checklist**
+
+1. Copy the files and edit `lib/project.py`.
+2. Make the `justfile` provide the recipes `dev_tasks.py` allows (`gate` is
+   `fmt-check lint test`; `test` should run `cargo test --locked` and any Python tests).
+3. Provide the workflow, `debian/`, AppStream file and `docs/releases/` layout
+   above, or adapt the readers.
+4. Replace the project-specific `AGENTS.md` variables block and Part II; keep the
+   routine verification loop and approval gates, which refer to these scripts.
+5. Run `just gate` and the Python tests; update this catalog and the script
+   inventory for anything you removed.
+
+## Maintenance
+
+- The [engineering inventory](../docs/engineering/script-tooling-inventory.md) is
+  the authoritative classification, caller evidence and tooling history (phases
+  P1–P3 are complete for source and fixture verification; live package
+  acceptance, installation and publication approvals remain separate). Update it
+  and this catalog together whenever a tool is added, changed or retired.
+- Operator and logging policy: [AGENTS.md](../AGENTS.md). Rebuild and release
+  policy: [release and packaging procedures](../docs/engineering/release-packaging-procedures-contracts.md).
+- [archive/](archive/README.md) holds frozen legacy tools, not installation or
+  build inputs. Python `__pycache__` is generated output, not an archive
+  candidate or an engineering record.
+- Keep existing public script names stable. New tools use lowercase hyphenated
+  names; importable Python modules in `lib/` use underscores. Renaming an old
+  underscore-named tool requires a caller and link migration, not a cosmetic move.
+- Every new tool gets a fixture test under `tests/` that runs in `just test`
+  (the `tests/*_test.py` glob picks it up).

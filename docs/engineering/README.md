@@ -13,6 +13,7 @@ Documentation status does not establish implementation or final-package acceptan
 | [Development cleanup inventory](development-cleanup-inventory.md) | Inventory | October 13 approved narrow cleanup: obsolete legacy units/empty unlisted test folders archived reversibly; all listed connections retained. |
 | [Script/tooling inventory](script-tooling-inventory.md) | Inventory | October 13 active/archived script classification, caller evidence, stale Rust contract finding and prioritized existing/update/create tooling plan. |
 | [Script output/resumption contracts](script-output-contracts.md) | Contracts | P1/P2 tooling; P3 immutable-manifest export, metadata comparison and schema-2 verified reuse without rebuilding. Fixtures/synthetic checks remain separate from installed acceptance. |
+| [Release, packaging and documentation procedures](release-packaging-procedures-contracts.md) | Contracts | October 13 relocation of build/artifact policy, release gates, native/Debian/Flatpak/GitHub procedures, release-note rules and package script bindings from the agent guide; read on demand. |
 
 See the [agent guide](../../AGENTS.md) for naming and record-creation rules and
 the [task list](../../Task%20List.md) for current work. Detailed execution history

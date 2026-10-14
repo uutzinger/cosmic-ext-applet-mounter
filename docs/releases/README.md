@@ -12,4 +12,4 @@ from engineering inventories and detailed test chronology.
 
 Create new notes as `v<version>.md` during release preparation, label drafts
 clearly, and finalize them against the accepted artifact before publication.
-See [AGENTS.md](../../AGENTS.md) for the release-note process.
+See the [release and packaging procedures](../engineering/release-packaging-procedures-contracts.md) for the release-note process.

@@ -37,12 +37,12 @@ preserved data and script-first repeatable workflows. See [AGENTS.md](../../AGEN
 | `cosmic-ext-applet-mounter-onedrive-auth-helper` | Installed runtime payload | just/debian installation, app helper launcher, localization tests and package contracts | Keep as an actively called runtime payload. Not a build wrapper or archive candidate; no behavior changes in this tooling plan. |
 | `check-ui-localization.sh` | Development gate | just localization-check; calls translation checker plus helper localization tests | Keep wrapper: it adds test coverage beyond the checker alone. |
 | `check-ui-translations.py` | Source verification | localization wrapper and audit; checks catalog identity/literal references and selected UI strings | Keep. Already concise; not a general Fluent parser or rendered UI test. |
-| `check-release-publication.sh` | Release preflight | publication fixtures and promotion script; validates versions, stable metadata and finalized notes | Keep. Read-only and already concise; does not replace human acceptance. |
+| `check-release-publication.sh` | Release preflight | publication fixtures and promotion script; validates versions, stable metadata and finalized notes | Keep. Thin wrapper over `lib/publication_check.py` (October 13: moved from an inline heredoc, TOML parsed with `tomllib`); read-only, does not replace human acceptance. |
 | `run_github_linux_build.sh` | Hosted build/retrieval | build_release.sh, guide, fake-gh download tests | P1 implemented: delegates to fixed Python task; correlated run selection, bounded status/logging, cache verification and resumable receipts. Hosted execution remains separate acceptance. |
 | `build_release.sh` | Release preparation | guide, AGENTS and fake-command promotion tests; creates/pushes tag and builds/reuses one run | P1 implemented: common reporting and explicit original-source --resume --run-id. Network/tag mismatches fail closed; no implicit rebuild or retag. |
 | `promote_release.py` | Artifact inspection/promotion | promotion workflow, guide, policy/package/fake-command tests | P1 reporting/resumption implemented; P2 delegates package verification to shared inspection policy. Default remains no-publication. |
 | `inspect-artifacts.py` | Offline artifact inspection | Shared Debian/native and Flatpak metadata verifiers; fixtures registered in just/Debian tests | Implemented: package/byte identity and explicit-baseline repository/bundle metadata comparison. No builds/network/install, provenance or installed-acceptance claim. |
-| `dev.sh` | Logged native development | Fixed just recipes through lib/dev_tasks.py; fixture tests in just/Debian gates | Implemented: private logs, concise results, recipe/HEAD/dirty identity, real exit status and cancellation. No install/cleanup/release tasks. |
+| `dev.sh` | Logged native development | Fixed just recipes through lib/dev_tasks.py; fixture tests in just/Debian gates | Implemented: private logs, concise results (including `source_dirty` and a bounded failure excerpt on stderr), recipe/HEAD/dirty identity, real exit status and cancellation; `gate` = fmt-check, lint, test. No install/cleanup/release tasks. |
 | `build-flatpak.sh` | Candidate Flatpak build/export/reuse | Explicit clean manifest checkout, pinned sources and fake-command fixtures | Implemented: build/export, shared inspection and explicit schema-2 reuse with fsck/hashes/successful producer summary. No implicit rebuild or install/launch/submission; mutable-tag manifest is not silently fixed. |
 
 These tools contain project bindings even where their underlying task is
@@ -59,7 +59,7 @@ the fixed hosted-build/release-preparation tasks behind the two Bash wrappers.
 The latter reuses promotion's compatibility wrapper around the extracted
 `scripts/lib/artifact_inspection.py` policy. The standalone inspector uses that
 same module; checksums are streamed and symbolic/nonregular inputs are rejected.
-`scripts/lib/dev_tasks.py` supplies the fixed just-recipe dispatcher behind dev.sh.
+`scripts/lib/dev_tasks.py` supplies the fixed just-recipe dispatcher behind dev.sh; `scripts/lib/project.py` holds the project constants (package, workflow, artifact matrix) shared by release tooling.
 `scripts/lib/flatpak_tasks.py` supplies tracked/pinned input checks, runtime
 observations and the candidate build/export/receipt driver behind build-flatpak.sh.
 `scripts/lib/flatpak_inspection.py` supplies selected-ref/commit and complete
