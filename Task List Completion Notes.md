@@ -458,3 +458,61 @@ gate for unchanged code; whitespace checks pass. Package workflows remain
 manual-only. Stage only maintained files, not private reports, synthetic fixtures
 under /tmp, packages, caches or ignored archive contents. This source update
 does not dispatch a build, move a release tag, install or publish a package.
+
+### OneDrive Offline engine decision — October 14, 2026
+
+✅ User decided to drop `abraunegg/onedrive`: no clear authentication path covers
+both personal and corporate accounts, and the employer does not support its
+Microsoft Graph access requirements. OneDrive Offline mirrors will use `rclone
+bisync` through the existing SharePoint (Teams) coordinator; `jstaf/onedriver` stays
+for OneDrive Online, and no other mount engine changes. Continuous/event-driven
+mirroring is not required; abraunegg already polled the remote every 300 seconds
+(`--monitor-interval 300`, `src/sync.rs`), so scheduled bisync plus Sync Now keeps
+automatic syncing and loses only immediate local-change upload and delta efficiency.
+
+✅ Rewrote the Release 0.5.4 engine section in `Task List.md` as a recorded decision
+plus three open decisions (legacy timeline, which SharePoint guards apply, Microsoft
+app registration) and six phases: contract/requirements, disposable-account
+prototype, implementation, legacy migration, removal, acceptance. Source touchpoints
+were identified read-only (`RcloneBackend::try_from(Provider)` rejects OneDrive;
+`one_drive_*` in `src/sync.rs`; the auth UI in `src/app.rs`; `debian/control`
+Recommends `onedrive`, `python3-gi`, `gir1.2-webkit2-4.1`).
+
+⏳ No source, packaging, requirements or Description change, authentication test,
+migration or installation occurred. `Applet Description.md` and `Requirements and
+Specifications.md` still describe abraunegg until phase 1 updates them.
+
+✅ October 14, 2026 (same decision): legacy timeline chosen. Existing abraunegg
+connections keep running but cannot be created for one release, then the engine is
+removed. No conversion tool is planned because the applet has no established user
+base; users recreate OneDrive Offline mirrors as rclone connections. Task List phase 4
+now covers a deprecation notice, an overlap guard so two engines never share a tree,
+and manual replacement documentation; the conversion flow and rehearsal were removed.
+
+✅ October 14, 2026: mirror-guard approach agreed for the rclone OneDrive Offline
+mirror. The SharePoint guards (identity guard, UUID-bound access marker, Office-rewrite
+flags with convergence pass, checksum verification; see `src/sync.rs` and
+`src/bisync_coordinator.rs`) came from SharePoint tests and are not assumed to apply
+to OneDrive. Task List phase 2 now has a per-drive-type Office-rewrite test and guard
+tests; the open decision lists the baseline to confirm or reject by test. Initial
+Preview plus confirmed initial sync, recovery copies and `--max-delete` are already
+generic. No code change or test was run.
+
+✅ October 14, 2026: user decided against Microsoft app registration for the rclone
+OneDrive Offline mirror. Custom app registration does not work for the corporate
+storage, and the SharePoint rclone mirror already works with rclone's default client,
+so the OneDrive editor will have no client ID/secret/tenant fields. Accepted risk: a
+tenant that blocks rclone's shared client cannot use OneDrive Offline. Task List
+open decision closed; the custom-client mentions in phase 3, phase 4 and the
+post-0.5.4 backlog were removed. `docs/microsoft-cloud-auth-setup.md` is unchanged.
+
+✅ October 14, 2026: closed the mirror-guard design decision as a rule (safety guards
+always on; compatibility workarounds only where a per-drive-type test shows the
+instability and the fix; checksum verification by cadence) with an empty
+per-drive-type profile table to fill from test results. Added the operator-run live
+check `scripts/onedrive-mirror-guard-check.sh` (lib/mirror_guard_check.py): one
+uniquely named test folder on a named rclone OneDrive remote, generic versus
+compatibility bisync profiles compared by stability of a no-edit second sync,
+optional web-edit pause, and purge restricted to that folder after its marker is
+confirmed. Verified only against a fake rclone (`tests/mirror_guard_check_test.py`,
+5 methods); no live run, authentication or cloud change occurred.

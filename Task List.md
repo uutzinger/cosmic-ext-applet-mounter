@@ -68,7 +68,7 @@ _Subsection: Community Review_
 
 - [o] A: Add dedicated waiting/progress, Cancel and Retry UI (existing mount
   control remains the retry action). Add explicit authentication-rejection UI.
-  Duplicate of the Future item in "Deferred validation after the SFTP native release" ("add the separately planned waiting/Cancel/Retry UI"); tracked there.
+  Duplicate of the Future item in "Post-0.5.4 validation and expansion backlog" ("add the separately planned waiting/Cancel/Retry UI"); tracked there.
 
 ### From: SFTP Provider Extension — September 29, 2026
 
@@ -480,30 +480,152 @@ Planned October 13, 2026. Authoritative home for deferred Flatpak work from
 Tasks (5)/(6) and 0.5.3. Prior [x] receipts remain historical; transferred [o]
 steps are not completed. Start with architecture, not more WebKit/auth code.
 
-### Decide supported engines before implementation
+### Engine decision and OneDrive Offline migration to rclone — decided October 14, 2026
 
-- [ ] Decide whether continuous/event-driven offline mirroring is required or
-  scheduled bisync plus Sync Now meets product intent. Compare rclone-only with
-  retaining abraunegg/onedrive; justify continued jstaf/onedriver support and the
-  maintenance cost of any permanent user-selectable engine choices.
-- [ ] Define native/Flatpak engine matrix and explicit legacy migration policy.
-  Preserve existing connections, credentials, engine databases/caches and pending
-  writes. Never silently reinterpret account labels as rclone remotes or run two
-  engines on one mirror. Update Description/Requirements after deciding.
-- [ ] If consolidating, implement/test personal/business OneDrive rclone Online
-  and Offline routing, auth/drive identity, generated units, status/RC, repair,
-  initialization, retention and safety contracts on disposable trees. Cover
-  network loss, cached reads, reconnect/pending uploads, remote edits, conflicts/
-  deletions, cancellation and recovery before migrating real data.
-- [ ] If retaining abraunegg, review prior callback/device/helper trials and
-  validate the distinct host-terminal/script authorization route with isolated
-  confdir. Use upstream complete callback flow rather than just generating a URL
-  or reinventing OAuth. Organization consent remains independent of browser UI.
-- [ ] Decide whether WebKit packaging is still justified. Retain probe evidence
-  without claiming shipped support. Only if selected, finish Ruby/WebKit/PyGObject
-  builds, preserve sandboxing/licenses/security maintenance, remove build-only
-  Ruby, and prove automatic capture/failure/cancel/cleanup. Keep one explicit
-  manual fallback, not duplicate manual entry approaches.
+Decision (user): drop `abraunegg/onedrive`. It has no clear authentication path
+for both personal and corporate accounts, and the employer does not support its
+Microsoft Graph access requirements. OneDrive Offline mirrors move to `rclone`,
+reusing the SharePoint (Teams) bisync path. `jstaf/onedriver` stays for OneDrive
+Online. No other mount engine is added or changed.
+
+| Provider | Online mount | Offline mirror |
+|---|---|---|
+| OneDrive | `jstaf/onedriver` | `rclone bisync` (new; replaces `abraunegg/onedrive`) |
+| SharePoint (Teams), Google Drive, Box, SMB, SFTP | `rclone mount` | `rclone bisync` |
+
+- [x] Continuous/event-driven mirroring is not required. Scheduled bisync plus
+  Sync Now meets product intent (abraunegg already polled the remote every 300 s
+  in `sync.rs`; the loss is immediate local-change upload and delta efficiency).
+- [x] Drop abraunegg/onedrive; keep jstaf/onedriver for Online; rclone for every
+  other Online and Offline path.
+- [o] Retain abraunegg with host-script authorization: not pursued. Dropped by the
+  decision above.
+- [o] Decide whether WebKit packaging is justified: no. The WebKit auth helper
+  leaves with abraunegg (see removal below). Probe evidence stays historical.
+
+#### Open decisions
+
+- [x] Legacy timeline (decided October 14, 2026): existing abraunegg connections
+  keep running but cannot be created for one release; the engine is removed in
+  the following release. No conversion tool: the applet has no established user
+  base, so users recreate the connection as an rclone mirror manually.
+- [x] Mirror guard rule (decided October 14, 2026). The SharePoint guards came from
+  SharePoint tests and do not transfer to OneDrive, so:
+  - Safety guards are always on: the identity guard (verified drive ID checked
+    before every run) and the UUID-bound access marker (local and remote). The
+    initial Preview plus confirmed initial sync, recovery copies and `--max-delete`
+    are already generic.
+  - Compatibility workarounds (`--ignore-size`, `--ignore-checksum`,
+    `--modify-window 1s`, `--check-sync false`, `--compare modtime,checksum`, the
+    convergence pass) are enabled for a drive type only if its test shows an
+    unstable second sync with generic settings and a stable one with them.
+  - Full-tree checksum verification runs after the initial sync and on manual
+    Verify, not on every scheduled run, unless the runtime measurement shows it is
+    affordable.
+  - Implementation uses one small per-drive-type profile, defaulting to the
+    generic settings. The test results fill in the table below.
+
+  | Drive type | Compatibility profile | Evidence |
+  |---|---|---|
+  | Personal OneDrive | pending (default: generic) | pending |
+  | OneDrive Business | pending (default: generic) | pending |
+
+- [x] Microsoft app registration (decided October 14, 2026): use rclone's default
+  client only; no client ID, secret or tenant fields in the OneDrive Offline
+  editor. Custom app registration does not work for the corporate storage, and the
+  SharePoint rclone mirror already works with the default client. Accepted risk: a
+  tenant that blocks rclone's shared client cannot use OneDrive Offline, and there
+  is no in-app fallback.
+
+#### 1. Contract and requirements (before implementation)
+
+- [ ] Write `docs/engineering/onedrive-rclone-offline-contracts.md`: persisted
+  configuration (rclone remote reference, drive type, subpath, legacy-engine
+  marker with a serde default for old files), setup/auth flow, safety guards from
+  the open decision, repair semantics, and the legacy handling rules. Link it from
+  the engineering README and the requirements.
+- [ ] Update `Applet Description.md` (engine matrix, Offline sections, lines
+  referring to `abraunegg/onedrive`) and `Requirements and Specifications.md`
+  (engine matrix, 4.2 Offline behavior, dependency list, FR-060A–C Repair), plus
+  `README.md`, `docs/dependency-installation.md` and `docs/index.md`.
+
+#### 2. Prototype on disposable accounts (no real data)
+
+- [ ] Personal and business OneDrive via rclone browser OAuth in a native and a
+  Flatpak-style run. Verify the signed-in drive differs from other accounts (see
+  the earlier wrong-account incident) using the existing in-process Graph
+  identity check.
+- [ ] Office-rewrite test, separately for a personal and a business drive, with
+  `scripts/onedrive-mirror-guard-check.sh` (operator-run; creates and purges only its
+  own `CloudMounter-GuardTest-<token>` folder). Use real `.docx`/`.xlsx` files via
+  `--files-dir` and add `--web-edit` to include a web-editor save. A stable second
+  sync with generic settings means that drive type needs no special handling; an
+  unstable one means it needs the compatibility profile, which the script then
+  confirms. Copy each `results.json` verdict and receipt path into the profile
+  table above. Do not reuse the SharePoint results.
+- [ ] Guard tests per drive type: wrong account or drive (identity guard blocks),
+  empty or missing local and remote folder (access marker blocks), and a changed
+  target invalidating Preview and initial-sync state.
+- [ ] Bisync on disposable trees: first sync, edits both sides, deletes, conflicts,
+  large files, network loss and pending uploads, cancellation, Repair. Measure
+  runtime at a 5-minute interval on a representative tree, with and without
+  full-tree checksum verification, to set its cadence.
+- [ ] Confirm the minimum rclone version and flags; update the dependency checks.
+
+#### 3. Implementation
+
+- [ ] Routing: `RcloneBackend::try_from(Provider)` (`src/providers.rs:113`) rejects
+  OneDrive for all modes. Introduce mode-aware routing so OneDrive Offline uses the
+  rclone `onedrive` backend while OneDrive Online keeps `onedriver_mount_plan`.
+- [ ] Remote setup and verification: reuse the `teams_oauth.rs` create/continue
+  pattern for OneDrive (personal/business, rclone default client),
+  verify type, authentication, drive identity and subtree access before saving;
+  secrets stay in rclone config only.
+- [ ] Planner/coordinator: add OneDrive bisync planning and the guards chosen above
+  (`src/bisync_coordinator.rs`); exclude cloud-native documents consistently with
+  the existing SharePoint rules; keep recovery, ownership, retention and
+  initialization-marker behavior identical.
+- [ ] Units and status: generated scheduled service/timer (`--run-bisync scheduled
+  <UUID>`), readiness/VPN guards, Start/Stop, Pause, Repair, Preview/Sync Now, and
+  per-connection pending counts via bisync preview (replaces the abraunegg
+  `--display-sync-status` parsing; supersedes the abraunegg part of the carried
+  "Offline mirror counts" item).
+- [ ] Add/Modify editor: replace the abraunegg authentication controls (open URL,
+  paste response, graphical helper) with rclone remote create/select for OneDrive
+  Offline; Fluent keys for every new string and `just localization-check`.
+- [ ] Tests: config round trip with old files, routing, plan/unit generation, fake
+  runner coordinator tests, and a regression proving onedriver Online is unchanged.
+
+#### 4. Legacy abraunegg connections (no conversion tool)
+
+- [ ] Stop offering abraunegg for new OneDrive Offline connections; existing ones
+  keep working unchanged for one release. Show a deprecation notice on legacy
+  connections that explains how to create the rclone mirror and delete the old one.
+- [ ] Guard against two engines on one tree: block creating an rclone OneDrive
+  mirror whose local path overlaps an existing legacy abraunegg mirror, and never
+  reuse the abraunegg database, cache or token.
+- [ ] Document the manual replacement steps in the release notes.
+
+#### 5. Removal (the release after the deprecation release)
+
+- [ ] Remove abraunegg code (`one_drive_*` in `src/sync.rs`, `OneDriveSync`
+  dependency kind, auth-files UI in `src/app.rs`), the
+  `scripts/cosmic-ext-applet-mounter-onedrive-auth-helper` and its install/desktop
+  entries, and the Fluent keys for the helper.
+- [ ] Packaging: drop `onedrive`, `python3-gi` and `gir1.2-webkit2-4.1` from
+  `debian/control`; remove OneDrive options from `scripts/install-dependencies.sh`
+  and its tests; remove the `onedrive` rows from the Flatpak host-command
+  inventory and permission rationale; update AppStream/README text.
+- [ ] Update the script catalog and inventory; run `bash scripts/dev.sh gate`.
+
+#### 6. Acceptance
+
+- [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
+  Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
+- [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
+  Flatpak acceptance items below).
+- [ ] Release notes: engine removal, migration steps and the Microsoft app
+  registration guide.
 
 ### Consolidated Flatpak acceptance and release
 
@@ -543,16 +665,18 @@ steps are not completed. Start with architecture, not more WebKit/auth code.
 
 Items that will be activated at some time in the future.
 
-## Deferred validation after the SFTP native release — October 1, 2026
+## Post-0.5.4 validation and expansion backlog
 
-These are follow-ups, not additional gates for the native SFTP release above.
-Move one here into the release gate only if its supported behavior changes or
-the final tests expose a related defect.
+Deferred validation and functional expansion planned after the 0.5.4 release.
+Originally recorded October 1, 2026 as follow-ups to the native SFTP release; they
+are not gates for any current release. Move one into a release gate only if its
+supported behavior changes or testing exposes a related defect.
 
 - [ ] After the public COSMIC Flatpak repository/package is available, test
   installed Flatpak SFTP editor notices, Online and Offline controls, generated
   host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
-  test. The local Flatpak prototype and host bridge have separate evidence.
+  test, including OneDrive (onedriver Online, rclone Offline). The local Flatpak
+  prototype and host bridge have separate evidence.
 - [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
   unreadable-file, permission, agent, and timeout variants, and live-check a
   VPN-bound SFTP connection. Direct protocol and automated classifier tests
@@ -561,17 +685,26 @@ the final tests expose a related defect.
   shared drive, including API/rate-limit behavior; repeat cloud cold-cache
   preload trials without reading or changing file contents.
 - [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
-  cancellation on OneDrive, Box, SMB, and Google Drive's RC refresh when
+  cancellation on OneDrive (onedriver), Box, SMB, and Google Drive's RC refresh when
   suitable active-preload shares are available.
 - [ ] Complete broader installed native/Flatpak Settings title, focus,
-  keyboard, scaling, long-list, editor-save, and background-poll visual checks.
+  keyboard, scaling, long-list, editor-save, and background-poll visual checks,
+  including the rclone-based OneDrive Offline setup editor once it exists.
 - [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
   and rejected-credential path with a real VPN profile; add the separately
   planned waiting/Cancel/Retry UI before accepting that extended workflow.
   Include a VPN-bound SFTP connection when that combination is available.
+- [ ] After the rclone OneDrive Offline mirror ships, broaden its testing: very
+  large trees, shared-with-me and SharePoint-backed libraries, personal vault,
+  Graph throttling (HTTP 429) and retry behavior, Office-document metadata changes,
+  and tenant conditional-access/consent policies.
+- [ ] Evaluate whether a debounced local-change trigger (starting one scheduled
+  bisync after local edits) is worth a separate watcher, since scheduled polling
+  replaces abraunegg's immediate local upload. Measure CPU/power first; do not add
+  a second writer to a mirror.
 - [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
-  fault cases, then investigate the separately reported OneDrive sleep hang
-  with journal evidence. The native SFTP release gate above includes one
+  fault cases, then investigate the separately reported onedriver (OneDrive
+  Online) sleep hang with journal evidence. The native SFTP release gate above includes one
   normal sleep/wake cycle only.
 
 ## Future Tasks depending on Pop!_OS or COSMIC desktop upgrades
@@ -632,7 +765,7 @@ the active implementation and verification record.
     and tests for contradictions or stale command paths.
   - Ensure the final host-command and permission descriptions agree with the
     closed inventory and contain no removed Cisco, `nmcli`, `systemctl`, journal,
-    or shell-wrapper behavior.
+    shell-wrapper, `abraunegg/onedrive` or WebKit authentication-helper behavior.
   - Resolve every remaining permitted architecture alternative, or clearly mark
     it as an intentional supported variation with equivalent acceptance tests.
 - [ ] Restore clear document roles without discarding history.
