@@ -49,8 +49,8 @@ fn promotion_verifies_existing_artifacts_and_finalized_notes() {
     let promotion = include_str!("../scripts/promote_release.py");
     assert!(promotion.contains("if args.publish and (not args.accepted"));
     assert!(promotion.contains("validate_run(run,"));
-    assert!(promotion.contains("verify_remote_tag(repository, args.tag, sha)"));
-    assert!(promotion.contains("verify_packages(root, args.tag)"));
+    assert!(promotion.contains("verify_remote_tag(repository, args.tag, sha, capture)"));
+    assert!(promotion.contains("verify_packages(root, args.tag, capture)"));
     assert!(promotion.contains("scripts/check-release-publication.sh"));
     assert!(promotion.contains("\"gh\", \"run\", \"download\""));
     assert!(promotion.contains("\"--verify-tag\""));
