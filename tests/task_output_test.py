@@ -40,6 +40,26 @@ class TaskOutputTests(unittest.TestCase):
             self.assertNotIn("private-error", console.getvalue())
             self.assertIn("private-error", Path(final["log_path"]).read_text())
 
+    def test_failure_prints_bounded_excerpt_without_traceback_in_log(self):
+        script = "import sys; [print('line %d' % i) for i in range(500)]; print('x' * 20000); sys.exit(3)"
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            with self.assertRaises(SystemExit):
+                with TaskReport("fixture", Path(tmp) / "task") as report:
+                    report.run([sys.executable, "-c", script])
+            log = report.log_path.read_text()
+        self.assertIn("last log lines", errors.getvalue())
+        self.assertLess(len(errors.getvalue()), 4500)
+        self.assertNotIn("Traceback", log)
+
+    def test_unexpected_error_keeps_traceback_in_log(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                with TaskReport("fixture", Path(tmp) / "task") as report:
+                    raise ValueError("fixture failure")
+            self.assertIn("ValueError: fixture failure", report.log_path.read_text())
+
     def test_existing_log_directory_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "sentinel"

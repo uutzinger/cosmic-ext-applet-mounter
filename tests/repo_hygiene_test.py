@@ -3,6 +3,7 @@
 from pathlib import Path
 import re
 import subprocess
+import sys
 import unittest
 from urllib.parse import unquote
 
@@ -10,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "scripts/README.md",
         *sorted((ROOT / "docs").rglob("*.md"))]
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+
+
+sys.path.insert(0, str(ROOT / "scripts/lib"))
+from dev_tasks import RECIPES  # noqa: E402
 
 
 def entry_points():
@@ -44,6 +49,13 @@ class RepositoryHygiene(unittest.TestCase):
                     continue
                 path = (doc.parent / unquote(target.split("#")[0])).resolve()
                 self.assertTrue(path.exists(), f"{doc.relative_to(ROOT)}: broken link {target}")
+
+    def test_dev_tasks_exist_in_justfile_and_agent_guide(self):
+        justfile = (ROOT / "justfile").read_text()
+        recipes = (ROOT / "AGENTS.md").read_text().split("### Recipes", 1)[1].split("\n### ", 1)[0]
+        for task in RECIPES:
+            self.assertRegex(justfile, rf"(?m)^{re.escape(task)}\b[^\n]*:", f"justfile lacks recipe {task}")
+            self.assertIn(f"`{task}`", recipes, f"AGENTS.md Recipes section lacks {task}")
 
 
 if __name__ == "__main__":

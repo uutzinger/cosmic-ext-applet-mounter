@@ -29,7 +29,12 @@ import json,os,pathlib,sys,time
 root=pathlib.Path(os.environ['FIXTURE_ROOT'])
 name=pathlib.Path(sys.argv[0]).name
 with (root/'calls').open('a') as log: log.write(json.dumps([name,*sys.argv[1:]])+'\\n')
-if name=='git':
+if name=='git' and sys.argv[1]=='count-objects':
+ counter=root/'objects'
+ calls=int(counter.read_text()) if counter.exists() else 0
+ counter.write_text(str(calls+1))
+ print('count: %d' % (100+calls*int(os.environ.get('LOOSE_STEP','0'))))
+elif name=='git':
  print('a'*40 if sys.argv[1]=='rev-parse' else os.environ.get('DIRTY',''),end='')
 else:
  print('private-stdout'*10000)
@@ -43,7 +48,7 @@ else:
         for name in ["git", "just"]:
             (tools / name).symlink_to(fake)
         env = dict(os.environ, PATH=f"{tools}:{os.environ['PATH']}", FIXTURE_ROOT=str(root))
-        for key in ["DIRTY", "SLEEP", "RESULT"]:
+        for key in ["DIRTY", "SLEEP", "RESULT", "LOOSE_STEP"]:
             env.pop(key, None)
         return root, env
 
@@ -70,6 +75,18 @@ else:
                 calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
                 self.assertEqual([c for c in calls if c[0] == "just"],
                                  [["just", "--justfile", "justfile", task]])
+
+    def test_loose_object_growth_is_recorded_and_warned_about(self):
+        for step, warns in [(0, False), (5000, True)]:
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as tmp:
+                root, env = self.setup_fixture(tmp)
+                env["LOOSE_STEP"] = str(step)
+                result = self.run_task(root, env, "check")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                summary = json.loads(result.stdout.splitlines()[-1])
+                receipt = json.loads(Path(summary["summary_path"]).read_text())
+                self.assertEqual(receipt["loose_objects_after"] - receipt["loose_objects_before"], step)
+                self.assertEqual("loose Git objects" in result.stderr, warns)
 
     def test_invalid_tasks_and_arguments_do_not_run_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
