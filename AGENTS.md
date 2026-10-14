@@ -31,238 +31,137 @@ instructions apply when those technologies are configured above.
 
 ## Guide map
 
-- [Part I — General policy and technology procedures](#part-i--general-policy-and-technology-procedures):
-  reusable policy plus applicable Rust, Debian, Flatpak and GitHub procedures.
-- [Part II — Project bindings](#part-ii--project-bindings): concrete COSMIC/API
-  choices, recipes, manifests, paths and release entry points for this project.
+- [Part I — General policy](#part-i--general-policy): working rules, verification,
+  scripts, Git gates, Rust checks, task and engineering records.
+- [Part II — Project bindings](#part-ii--project-bindings): COSMIC/API choices,
+  recipes and runtime ownership.
+- [Release, packaging and documentation procedures](docs/engineering/release-packaging-procedures-contracts.md):
+  read on demand for build/artifact policy, release gates, native/Debian/Flatpak/GitHub
+  procedures, release notes, documentation layout and the release script table.
 
-General policy applies to every workflow. Technology procedures apply only when
-that technology is in use; they are reusable across projects, not universal
-requirements to use a particular package system. Project bindings select the
-concrete tools and configuration without waiving the general safeguards.
+General policy applies to every workflow. Project bindings select concrete tools
+without waiving the general safeguards.
 
-## Part I — General policy and technology procedures
+## Part I — General policy
 
 ### Working rules
 
-- Work through the authorized task or phase and keep ${TASK_LIST_FILE} current.
-- Inspect the current files before editing and preserve unrelated user changes.
-- Use small, reviewable patches with a clear purpose.
-- Keep real credentials, tokens, and organization-specific secrets out of source,
-  fixtures, logs, and documentation. Redact diagnostic output.
-- Use temporary directories, synthetic fixtures, and fake adapters for automated
-  tests. Use approved disposable resources for live integration tests.
-- Complete the applicable verification before reporting a phase as complete.
-- Report changed files, checks performed, failures, unresolved risks, and the
-  next relevant step. Save evidence in ${COMPLETION_NOTES_FILE}.
-- Honor explicit approval gates. Obtain approval when it is still required;
-  recognize approval already given for the same scope instead of asking again.
+- Read a file before editing it. Never revert or reformat changes you did not make.
+- Keep patches to one purpose. Update ${TASK_LIST_FILE} when a task starts and when
+  it finishes; mark `[x]` only for what was actually verified.
+- Never put real credentials, tokens or organization names in source, fixtures,
+  logs or docs. Redact them from any output you quote.
+- Automated tests use temp directories, synthetic fixtures and fake adapters.
+  Live tests run only against approved disposable resources.
+- Before reporting a phase done, run the checks in the routine loop below. The
+  report lists: files changed, commands run with exit status, failures, open risks,
+  next step. Put evidence in ${COMPLETION_NOTES_FILE}, not in chat.
+- If approval for the same scope was already given in this conversation, proceed;
+  otherwise ask before any action in the approval gates below.
 
-### Efficient verification and operator handoff
+### Routine verification loop
 
-- Choose checks from the changed behavior and acceptance boundary. Reuse recorded
-  successful evidence for unchanged behavior; do not rerun a broad gate merely
-  because the task moved to a different phase.
-- Keep verbose build/test output in task-specific logs under ${BUILD_OUTPUT_DIR}
-  or a private temporary directory, not in the conversation or tracked source.
-  Preserve the real command exit status; output truncation must not hide failure.
-- Monitor long operations with status-only queries at bounded intervals. Do not
-  repeatedly stream compile logs or refreshing watch output into model context.
-  Read a short completion summary on success. On failure, inspect the failing
-  step and a bounded relevant excerpt; expand only when needed for diagnosis.
-- Record source SHA, run ID, artifact/checksum identity, check scope, outcome and
-  log location once in ${COMPLETION_NOTES_FILE}; reference that receipt on later
-  steps instead of rereading full logs. Redact secrets before sharing excerpts.
-- For long builds, package creation or verbose verification, prefer offering
-  an operator-run shell command unless automation was explicitly requested.
-  Give the working directory, maintained script/recipe, expected state changes,
-  log destination and exact result to return. Ask for the exit status and concise
-  summary, not pasted compiler output. Retain responsibility for interpreting
-  failures, tracking progress and completing verification.
-- Do short read-only checks and focused tests directly when useful. Do not ask
-  the operator to perform every small step. When automation is requested, run
-  the scoped workflow with bounded output rather than delegating it back.
-- Operator execution does not replace approval gates. Distinguish commands that
-  only inspect/build from installation, service changes, Git push/tag/publication
-  and data removal. Obtain or recognize the applicable approval before either
-  the agent or operator performs those changes.
+Use `bash scripts/dev.sh <task>`; it logs to `target/task-runs/`, keeps the real
+exit status and prints a one-line JSON receipt (check `status` and `source_dirty`).
 
-### Design before implementation
+1. After a Rust edit: `check`, then the focused test (`cargo test --locked <name>`).
+2. Before reporting done: `gate` (= `fmt-check`, `lint`, `test`). Add `localization-check`
+   if UI strings or `.ftl` files changed, `metadata-check` if desktop/AppStream
+   files changed.
+3. Run `verify` only when asked or before a release; it repeats step 2.
+4. On failure read the stderr excerpt, then at most the failing section of
+   `task.log`. Do not paste whole logs into the conversation.
+5. Do not re-run a passing check whose inputs have not changed; cite the earlier
+   receipt in ${COMPLETION_NOTES_FILE} (source SHA, task, outcome, log path).
+6. Tasks expected to exceed a few minutes (release builds, package builds, hosted
+   CI waits): give the operator the exact command, working directory, expected
+   state changes and log path, and ask only for exit status and the summary line.
+   Run short read-only checks yourself. If the user asked you to run it, run it.
+7. Hosted builds take about 7 minutes. The release scripts wait and poll
+   internally (default 60 seconds); run them once and read the summary line. Do
+   not add your own polling loop around them.
 
-- Use ${DESCRIPTION_FILE} for product intent and ${SPECIFICATION_FILE} for
-  testable behavior and safety boundaries. Clarify material contradictions
-  before building an incompatible implementation.
-- Identify supported desktops, operating systems, native packages, and sandboxed
-  packages at design time. Prototype their integration boundaries early.
-- Choose an API for every desktop-control operation before implementing it.
-  Prefer supported structured APIs and typed libraries over CLI wrappers. See
-  Part II for the project's required desktop APIs and transport choices.
-- A host-spawn mechanism is a transport exception, not the default architecture.
-  Justify each production host invocation by the capability it supplies that an
-  available API cannot provide. Preserve an inventory of commands, permissions,
-  paths, ownership, and fallback-removal criteria when host execution is needed.
-- Verify API availability and permissions on the minimum supported host. If an
-  API is unavailable, specify a capability/version-gated fallback or an explicit
-  minimum requirement. Do not silently substitute a runtime or drop behavior.
-- Put desktop control behind typed, testable adapters. Native and sandboxed
-  packages must share operation policy and safety contracts; isolate differences
-  in transport, path resolution, and package launch specifications.
-- Retain process execution for engines whose work requires it. Use fixed
-  executables, separate validated arguments, bounded output/timeouts, controlled
-  retries, and cancellation that finishes child cleanup. Background workers
-  accept fixed operations and validated identities, not arbitrary shell text or
-  executable/command payloads.
-- Enforce dependency minimums through packaging and installation checks, then
-  provide typed failures from actual operations. Avoid startup-wide CLI
-  version/help probes used only to inventory dependencies.
-- Keep observations and outcomes structured. Do not determine control state by
-  parsing localized display text, scraping human-readable logs, or assuming
-  that an active timer means its operation succeeded.
-- Prefer notifications/signals over repeated external commands. Bound necessary
-  polling and keep long-running I/O, authentication, and process waits off the
-  graphical event loop.
+### Design rules
 
-### Verification boundaries
+- Product intent is in ${DESCRIPTION_FILE}; testable behavior in
+  ${SPECIFICATION_FILE}. If they contradict each other or the request, ask before
+  building.
+- Decide the API for each desktop-control operation before coding it. Use the
+  typed D-Bus/portal/library API from Part II; do not wrap a CLI because it is
+  quicker. A CLI is acceptable only for engines that need a process (for example
+  rclone); then use a fixed executable, separate validated arguments, a timeout,
+  a bounded output size, and cancellation that reaps the child. Background workers
+  accept fixed operations and validated identities, never shell text.
+- Host command execution from the Flatpak sandbox (flatpak-spawn) needs a written
+  justification and an entry in `docs/engineering/flatpak-host-command-inventory.md`
+  (command, permission, path, owner, removal criteria).
+- If an API is missing on the minimum supported host, either gate a fallback on
+  capability/version or raise the stated minimum. Never swap runtimes or drop
+  behavior silently.
+- Put desktop control behind a trait with a fake implementation for tests. Native
+  and Flatpak builds share the policy code; only transport, path resolution and
+  launch specs differ.
+- Check dependency minimums in packaging metadata and report typed errors from
+  the actual operation. Do not probe CLI `--version` at startup.
+- Derive state from structured data (D-Bus properties, exit codes, typed results).
+  Never parse localized text or log lines, and never treat "timer is active" as
+  "operation succeeded".
+- Prefer D-Bus signals over polling. Any necessary poll has a fixed interval and
+  upper bound. No blocking I/O, authentication or process wait on the UI thread.
 
-- Start with focused tests for the affected behavior, then run the applicable
-  broader gate. Do not repeat completed live tests unless changes or failures
-  invalidate their evidence.
-- Distinguish compilation, fake-adapter tests, command/engine integration,
-  installed-service tests, rendered UI review, and final-package acceptance.
-  State exactly which boundary was verified.
-- If a managed sandbox blocks sockets, D-Bus, a GUI, or network access, record
-  that result and rerun with the required authorized access. An excluded,
-  ignored, or blocked test is not a passing test. Run applicable ignored live
-  tests explicitly with their documented disposable setup.
-- Include rollback, cancellation, ownership, malformed state, and partial-failure
-  behavior in verification for stateful integrations. Keep real user services
-  and data outside ordinary unit tests.
+### What a test result means
 
-### Maintained scripts and execution ownership
+State which of these levels you verified; never claim a higher one.
 
-- Use ${SCRIPT_CATALOG_FILE} to find current tools and their state-change
-  boundaries; ${SCRIPT_INVENTORY_FILE} records callers, archive disposition and
-  planned gaps. Update both when tools are added, changed or retired. Archive
-  only with replacement/non-use evidence, preserving provenance and existing
-  privacy/tracking boundaries; old-looking runtime helpers are not obsolete.
-- Use maintained scripts/recipes for routine build, installation, inspection,
-  Git release and publication operations. Inspect their current behavior and
-  approval boundary before running them; a script name is not proof of safety.
-- If a script lacks a required capability or contradicts policy, explain the
-  gap and improve/test it within the authorized task instead of silently
-  bypassing it with ad hoc commands. Changes to scripts are separate from
-  permission to execute their state-changing operations.
-- If an exceptional manual path is necessary, explain its scope, obtain any
-  required approval and record the reason, exact artifact identities and outcome.
-  Do not silently bypass a guard. Feed durable improvements back into the script
-  so the same exception is not needed on each release.
-- Scripts should own command sequencing, log files, preserved exit status and
-  concise machine-readable/summary output. Agent and operator should use the
-  same entry points; avoid maintaining a parallel conversational procedure.
+1. Compiles (`check`).
+2. Unit/fake-adapter tests pass (`test`).
+3. Real engine or command integration (ignored live tests, run explicitly with
+   their documented disposable setup).
+4. Installed service behavior (user systemd units, D-Bus, after `install-user`).
+5. Rendered UI in the running panel applet.
+6. Final package (Debian or Flatpak) installed and exercised.
 
-### Build and artifact policy
+- Run the focused test first, then the broader gate. Repeat a live test only if
+  the code under it changed or it failed.
+- If a sandbox blocks sockets, D-Bus, GUI or network, record that and rerun with
+  authorized access. A skipped, ignored or blocked test is not a pass.
+- For anything stateful (mounts, services, mirrors) test rollback, cancellation,
+  ownership, malformed state and partial failure. Real user services and data
+  never appear in ordinary unit tests.
 
-- Before rebuilding, state what changed, which accepted evidence is invalidated,
-  and why the existing build/artifacts cannot be reused. Identify the package
-  mode and affected targets; prefer a focused check or artifact inspection when
-  recompilation is unnecessary. Do not dispatch a redundant matrix simply to
-  obtain a newer receipt or attach a release tag.
-- Build each immutable release source once per required package/architecture
-  matrix, then inspect and publish those same artifacts. Reuse a successful
-  branch build when its source SHA exactly matches the release tag; otherwise
-  run one explicit release build. Do not rebuild merely to tag, publish, add
-  acceptance receipts, or repeat completed unchanged checks. Rebuild only when
-  source/package inputs change, a build fails, or artifacts are unavailable.
-  Publication remains separately approved and must verify source/run identity,
-  complete artifact coverage, checksums and advertised package acceptance.
-- Keep generated release packages under `${ARTIFACTS_DIR}/v<version>/` and
-  distinct local builds under `${ARTIFACTS_DIR}/candidates/`. Keep workflow
-  downloads in run-specific directories under `${ARTIFACTS_DIR}/`. Preserve
-  checksums, provenance and rollback files; equal version numbers do not make
-  packages duplicates. Remove duplicate downloads only after checksum comparison.
+### Scripts
 
-- Keep release metadata and package contents consistent. Preserve configuration,
-  credentials, and user data across upgrades/removal. Commit, tag, publish, and
-  external submission actions follow the user's authorization and release gates.
+- Find tools in ${SCRIPT_CATALOG_FILE} (state-change boundaries) and
+  ${SCRIPT_INVENTORY_FILE} (callers, archive status). Update both when a script is
+  added, changed or retired. Do not archive a runtime helper without evidence it
+  is unused.
+- Use the maintained script or `just` recipe for builds, installs, inspections,
+  releases and publication. Read its `--help` or source first; a script name does
+  not prove it is safe.
+- If a script lacks a capability or contradicts policy, say so and fix and test
+  the script within the task. Do not bypass it with ad hoc commands. Editing a
+  script does not authorize running its state-changing operations.
+- If a manual exception is unavoidable: state its scope, get approval, record the
+  reason, artifact identities and outcome in ${COMPLETION_NOTES_FILE}, then fold
+  the fix back into the script.
+- Scripts own sequencing, logging, exit status and the summary line; agent and
+  operator use the same entry points.
 
-### Git changes and release gates
+### Git changes and approval gates
 
-- Inspect branch/worktree/staged state before editing or committing. Stage only
-  intended source, tests and records; exclude packages, caches, logs and rollback
-  material. Preserve unrelated changes and do not include them implicitly.
-- Commit, push, tag and publication are distinct actions. Perform only those
-  authorized for the current scope; recognize approval already granted. A request
-  to edit code/documentation alone does not authorize publishing a release.
-- Never force-push, amend accepted history or move an existing release tag to
-  conceal later changes. Diagnose Git warnings without destructive housekeeping
-  unless separately authorized.
-- Finalize version/package metadata and release notes before freezing the build
-  revision. Use that same revision for the single build, acceptance and tag,
-  then promote its verified artifacts. A branch build is reusable only at the
-  exact tag SHA; tagging before the single build is also valid.
-- Record later acceptance/publication receipts separately without moving the
-  immutable tag or rebuilding just to incorporate those records. Changed package
-  inputs require renewed affected acceptance; unavailable/expired artifacts need
-  an explicit replacement build, not silent substitution.
-- Verify remote source/tag identity and published asset coverage/checksums.
-  Report commit, run, tag and public release identifiers separately; source
-  approval, build success, installed acceptance and publication are not synonyms.
+- Run `git status` and check the branch before editing or committing. Stage only
+  intended source, tests and records; never packages, caches, logs or rollback files.
+- These need separate approval for the current scope, unless already granted in
+  this conversation: commit, push, tag, build dispatch (hosted CI), package
+  installation (`install-user`, APT), service changes, deleting data, publication.
+  Editing code or docs authorizes none of them.
+- Never force-push, amend accepted history or move a release tag.
+- Releases use only the maintained scripts, which enforce source, tag and
+  artifact identity. Do not rebuild just to tag, publish or attach receipts.
+- Before a build matrix, package build, release preparation or publication, read
+  the [release and packaging procedures](docs/engineering/release-packaging-procedures-contracts.md).
 
-### Technology-specific procedures
-
-Select the applicable package mode and verification scope before building.
-Acceptance in one mode does not establish acceptance in another; do not rebuild
-all modes for every edit. These procedures do not prescribe project script names.
-
-#### Native source builds and installation
-
-- Distinguish compilation, staged installation, live installation and launching.
-  Inspect staged payloads before replacing installed files where appropriate.
-- Verify the installed binary matches the accepted artifact and reload/restart
-  the intended running instance through the supported desktop workflow. A debug
-  launch or file replacement does not replace an already-running process.
-- Preserve configuration and user data. Avoid competing runtime owners during
-  installed checks and reuse accepted artifacts for unchanged behavior.
-
-#### Debian packaging procedure
-
-- Use the project's maintained package recipe. Debian's `debian/rules` defines
-  build/test/install steps; `debian/control` defines package dependencies.
-  A package build may compile and test rather than merely wrap an existing binary.
-- Inspect package name/version/architecture, dependencies, payload and checksums.
-  A .deb file's existence is not package acceptance. Reuse compatible accepted
-  hosted packages for local checks instead of automatically rebuilding them.
-- Install the selected absolute package path through the package manager only
-  with installation approval. Verify installed identity and affected lifecycle;
-  preserve configuration, credentials, services, caches and data across upgrade
-  and removal. Keep distinct candidate packages and provenance separate.
-
-#### Flatpak packaging procedure
-
-- Use the selected source-based manifest and accepted runtime/BaseApp. Verify
-  immutable source, offline dependencies, payload and effective permissions.
-  Do not silently substitute runtimes, broaden grants or assume a dependency
-  installed on the host is available inside the sandbox.
-- Separate build, installation and store submission/publication. Confirm app
-  identity/branch and replacement effect before installing; preserve rollback.
-- Prototype builds that copy local binaries are not reproducible release proof.
-  Verify affected installed sandbox, authentication, portal and lifecycle behavior;
-  native acceptance alone does not establish final Flatpak acceptance.
-
-#### GitHub Actions build and promotion procedure
-
-- Freeze release metadata/source before the build. Select a successful trusted
-  repository/workflow run at the exact tag SHA; verify required target coverage,
-  unexpired artifacts, checksums and package identities before promotion.
-- Separate building from publication approval. Publishing should download and
-  upload the accepted artifacts, not trigger recompilation. Do not automatically
-  build again just because a tag was pushed or a release is being published.
-- Treat source acceptance, hosted build/test success, installed acceptance and
-  public asset verification as distinct evidence. Reject wrong-source, failed,
-  incomplete, expired or mismatched artifacts; obtain an explicit replacement
-  build when needed. Keep the chosen run/artifact identities visible throughout.
-
-#### Rust verification procedure
+### Rust verification procedure
 
 Use the pinned toolchain and project recipes when available. For projects with
 a committed lockfile, direct Cargo equivalents include:
@@ -342,44 +241,9 @@ requirements, task, and deployment documents.
    links from its actual directory. Review for secrets and private diagnostic
    data before recording evidence.
 
-### Documentation layout and release notes
-
-- Keep the repository README and agent guide at the root for discovery. Keep
-  ${DESCRIPTION_FILE}, ${SPECIFICATION_FILE}, ${TASK_LIST_FILE}, and
-  ${COMPLETION_NOTES_FILE} as the central project documents at their configured
-  root locations. Engineering records support them rather than replacing them.
-- Put README-linked setup, authentication, dependency, and source-build guides
-  in ${USER_DOCS_DIR}, using lowercase hyphenated filenames. If that directory
-  also supplies a public website, maintain index.md as its homepage and primary
-  documentation catalog; keep README.md as the GitHub directory entry linking
-  to that catalog and repository-specific guidance. Otherwise use README.md as
-  the directory index. Keep public homepage/privacy locations stable;
-  changing their URLs is a separate publication decision.
-- Keep package-specific build guidance beside its packaging configuration when
-  that makes commands and paths clearer, and link it from the documentation index.
-- Store release notes in ${RELEASE_NOTES_DIR} as v<version>.md. Release notes are
-  user-facing version records; inventories, design contracts, and technical audits
-  remain in ${ENGINEERING_RECORDS_DIR}. Keep a release-note index with relative
-  links and versions in ascending order.
-- Create a release-note draft when the release scope is agreed and preparation
-  begins. Summarize user-visible changes, fixes, upgrade/dependency requirements,
-  compatibility, known limitations, and supported installation/package modes.
-  Link relevant user guides. Keep raw command output and detailed execution
-  history in ${COMPLETION_NOTES_FILE}.
-- Mark drafts explicitly. Finalize notes after the applicable acceptance checks
-  pass and before tagging/publication; describe only verified scope and identify
-  remaining limitations. Record the release version and tested artifact identity
-  when relevant. Creating notes does not authorize publishing a release.
-- Preserve published notes as historical records. Make any necessary correction
-  explicit and dated; do not silently claim later fixes existed in an old release.
-- When document paths change, update task/completion references, specifications,
-  README/user-guide links, tooling/help references, and directory indexes together.
-  Resolve relative links from each file's actual location and check for stale
-  filenames, broken anchors, accidental content loss, and secret leakage.
-
 ## Part II — Project bindings
 
-These instructions bind Part I's policy and procedures to the configured
+These instructions bind Part I's policy to the configured
 language, desktop, package modes and repository tooling. Commands below identify maintained entry
 points, not instructions to run every command on every task.
 The script catalog and inventory distinguish existing commands from proposed
@@ -444,74 +308,18 @@ validator result and record warnings and their rationale.
 Use the [Rust verification procedure](#rust-verification-procedure) when direct
 Cargo checks are needed instead of a recipe.
 
-### Package build and installation bindings
+### Documentation
 
-Apply the relevant [technology-specific procedure](#technology-specific-procedures).
-The following are this repository's entry points and installation behavior.
+Keep ${DESCRIPTION_FILE}, ${SPECIFICATION_FILE}, ${TASK_LIST_FILE} and
+${COMPLETION_NOTES_FILE} at the root, user guides in ${USER_DOCS_DIR}, and release
+notes in ${RELEASE_NOTES_DIR}. When paths change, update links and indexes
+together. Layout and release-note rules are in the procedures record below.
 
-#### Native source
+### Packaging and release entry points
 
-- Follow ${BUILD_GUIDE_FILE}. `just build` and `just build-release` create native
-  artifacts. `just run` launches a development instance; avoid a competing runtime
-  owner during installed tests.
-- `just stage` builds/stages an installation under the configured staging
-  directory for inspection, not into the live host installation.
-- `just install-user` builds/replaces user-local artifacts. Use it only when
-  installation is authorized, verify installed ${BINARY_NAME} identity, then
-  use this project's COSMIC reload workflow for live checks.
-
-#### Debian packages
-
-- `just deb` invokes `dpkg-buildpackage`; `debian/rules` defines its build, test
-  and payload steps, and `debian/control` defines dependencies for ${BINARY_NAME}.
-- The current local command writes packages to the repository's parent directory.
-  Collect them with provenance/checksums under ${ARTIFACTS_DIR}; keep distinct
-  candidates separate. Use APT for approved installation, then reload the native
-  COSMIC panel instance and obtain the applicable UI/lifecycle receipt. Preserve
-  this applet's mirror/cache/recovery state and generated user services.
-
-#### Flatpak packages
-
-- `bash scripts/build-flatpak.sh --help` describes explicit-manifest candidate
-  build/export with private logs. It requires a clean pinned source checkout,
-  refuses existing output by default, and never installs or submits. Explicit
-  `--reuse-receipt` verifies an existing schema-2 candidate without invoking the
-  builder; mismatches fail rather than triggering rebuild/repair. Shared repository/bundle
-  metadata inspection is available through `scripts/inspect-artifacts.py`; it
-  requires the ostree CLI and an explicit comparison baseline. Preserve producer
-  summaries and receipts alongside artifact provenance; do not bypass reuse guards.
-- Follow ${PACKAGING_GUIDE_FILE} for the selected source-based manifest and its
-  build/install commands; that directory also contains explicitly labeled probes
-  and prototypes. Verify ${APPLICATION_ID}, selected branch and helper/worker
-  payloads. Native and Flatpak modes share saved connections/host service state;
-  prevent competing runtime owners. Use ${TASK_LIST_FILE} for accepted runtime,
-  manifests and supported release scope, not an assumption that all modes ship.
-
-### GitHub release scripts and workflow bindings
-
-Apply the general Git/release gates first. Local Git review/staging/commit/push
-uses the normal non-destructive Git workflow; release sequencing belongs to the
-maintained entry points below. Inspect their help/current implementation before
-execution. Do not bypass them with a parallel ad hoc publication procedure.
-
-| Task | Entry point | Execution boundary |
-|---|---|---|
-| Build or retrieve hosted Debian packages | `scripts/run_github_linux_build.sh` | Starts a manual matrix unless an existing run is selected; downloads artifacts, does not install/publish. |
-| Prepare release tag and build/reuse artifacts | `scripts/build_release.sh` | Creates/pushes a new tag, then starts one matrix or reuses `--run-id`; requires tag/push approval, never publishes. |
-| Validate release metadata/notes | `scripts/check-release-publication.sh` | Read-only preflight, not proof of package acceptance or publication approval. |
-| Validate/download existing release artifacts | `python3 scripts/promote_release.py <tag> <run-id>` | Default is inspection only from a clean tagged checkout; no compilation/build dispatch. |
-| Publish accepted existing artifacts | `.github/workflows/publish-release.yml` | Manual tag dispatch with selected `build_run_id` and `accepted=true`; requires publication approval. |
-| Local approved promotion alternative | `python3 scripts/promote_release.py <tag> <run-id> --publish --accepted` | Same verification policy; publishes existing artifacts without rebuilding. |
-
-- `.github/workflows/build-deb.yml` defines the hosted Debian matrix and is
-  manual-only, with no publication job. Tag pushes do not automatically build.
-- `scripts/promote_release.py` implements the general promotion checks for this
-  repository's Debian matrix. Changes to supported targets must update its
-  expected artifact coverage, the workflow and their tests together.
-- Build/release tools use the shared `scripts/lib/task_output.py` receipt/logger;
-  the stable Bash entry points delegate fixed tasks to `scripts/lib/release_tasks.py`.
-  Use `--log-dir` for a new private log/summary directory and selected-run/receipt
-  options for resumption; see ${SCRIPT_CATALOG_FILE} and the output contract.
-- Use ${BUILD_GUIDE_FILE} for deployment commands and ${RELEASE_NOTES_DIR} for
-  release content. Keep operational receipts in ${COMPLETION_NOTES_FILE}; do not
-  change a frozen source/tag merely to attach those receipts.
+Native, Debian, Flatpak and GitHub release bindings (`just stage`, `just deb`,
+`scripts/build-flatpak.sh`, `scripts/run_github_linux_build.sh`,
+`scripts/build_release.sh`, `scripts/promote_release.py`, publication workflow)
+are documented with their approval boundaries in the
+[release and packaging procedures](docs/engineering/release-packaging-procedures-contracts.md).
+Installation (`just install-user`, APT) and publication need explicit approval.
