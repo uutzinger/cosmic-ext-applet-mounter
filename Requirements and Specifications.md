@@ -89,9 +89,7 @@ kept in `Applet Description.md` and `Task List.md`.
 A FUSE filesystem can still make an application wait while the provider, network
 or VPN is unavailable. Bounded timeouts and automatic detachment reduce but cannot
 eliminate this. The applet shall recommend Offline mirror mode when uninterrupted
-local browsing and editing are required. Lazy unmount shall be offered only after
-clean unmount fails and the user explicitly confirms the warned action; queued or
-in-progress writes shall prevent lazy unmount.
+local browsing and editing are required.
 
 ### 4.2 Offline mirror behavior
 
@@ -461,7 +459,16 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   system sleep indefinitely.
 - **FR-044F:** The existing notice mechanism shall report whether any provider
   preload completed, stopped at its deadline, or failed. Failure details shall
-  remain sanitized. No manual Cancel control is required.
+  remain sanitized. No manual Cancel control is required. Notices shall be
+  brief and readable before automatic dismissal: completed (with requested depth
+  where applicable), time limit reached with an incomplete scan, or skipped; an
+  excluded SFTP target is reported as skipped, never completed. They omit
+  configured and elapsed times and routine explanations, and take their settings
+  from the running job, not from settings reread at completion. Elapsed time may
+  exceed the limit while work stops; strict wall-clock termination is not an
+  acceptance requirement. Successful traversal is not proof of faster browsing;
+  validate usefulness with repeatable fresh-mount comparisons with preload
+  disabled and enabled.
 - **FR-044G:** After a Box or SMB Online mount, the applet shall wait for both
   the mountpoint and a usable root directory listing before starting an
   app-managed, directory-only walk. Box shall stop at the configured depth-2
@@ -1058,8 +1065,8 @@ configuration namespace.
 AppConfig
   version
   notifications_enabled
-  unmount_before_sleep: bool = false  # planned B
-  restore_after_wake: bool = false    # planned B
+  unmount_before_sleep: bool = false
+  restore_after_wake: bool = false
   preload:
     google_drive: { enabled: true, maximum_seconds: 60 }
     onedrive: { enabled: true, maximum_seconds: 60 }
@@ -1163,13 +1170,12 @@ rclone rc --unix-socket <connection socket> rc/noop
 rclone rc --unix-socket <connection socket> vfs/refresh recursive=true fast_list=true _async=true
 ```
 
-The managed rclone service enables RC commands without authentication only on
-its connection-specific Unix socket below the user's private runtime directory.
-The applet retains the returned RC job ID and rclone execution ID, polls
-`job/status`, and uses `job/stop` to cancel it before unmount, repair, removal,
-or sleep cleanup. Status parsing treats non-`OK` values below `output.result` as
-provider failures even if rclone marks the RC job successful. The mount
-operation succeeds independently of this background job.
+The managed rclone service enables unauthenticated RC commands only on its
+connection-specific Unix socket below the user's private runtime directory. The
+applet retains the RC job ID and rclone execution ID, polls `job/status`, and
+cancels with `job/stop` before unmount, repair, removal or sleep cleanup. Any
+non-`OK` value below `output.result` is a provider failure even if rclone marks
+the job successful. Mount success is independent of this background job.
 
 OneDrive, Box, and SMB post-mount directory preload:
 
@@ -1177,24 +1183,10 @@ OneDrive, Box, and SMB post-mount directory preload:
 find -P <mountpoint> -xdev [-maxdepth <Box or SMB depth>] -type d -printf ""
 ```
 
-The applet shall construct this as a typed command rather than shell text. It
-shall wait for the mountpoint and root listing to become usable, enforce the
-effective provider or SMB-connection deadline, retain incremental VFS metadata
-on timeout, and cancel the child before detach. OneDrive traverses without a
-depth limit. Box defaults to depth 2 and SMB to depth 3. Box and SMB shall not
-use recursive `vfs/refresh`.
-
-All preload mechanisms (Google Drive recursive refresh and OneDrive, Box, SMB,
-and SFTP directory walks) shall use consistent, brief outcome notices readable
-before automatic dismissal. Show completion (including requested depth where
-applicable), time limit reached with an incomplete scan, or skipped. Omit configured
-and elapsed times and routine browsing/exclusion explanations from completion and
-timeout notices. Elapsed time may exceed the
-limit while work stops; strict wall-clock termination is not an acceptance
-requirement. Report excluded SFTP targets as skipped, never completed. Capture
-report settings from the running job rather than rereading settings on completion.
-Successful traversal is not proof of faster browsing; validate usefulness through
-repeatable fresh-mount comparisons with preload disabled and enabled.
+The applet shall construct this as a typed command, not shell text, enforce the
+effective provider or connection deadline, and cancel the child before detach
+(FR-044C, FR-044EA, FR-044G). OneDrive traverses without a depth limit; Box and
+SMB use their configured depths and shall not use recursive `vfs/refresh`.
 
 ### 11.2 Rclone Offline mirror
 
@@ -1291,22 +1283,21 @@ Remote deletion shall:
   offline.
 - A failed sync shall not trigger automatic destructive resync.
 - Clean unmount is always attempted before any alternative.
-- Manual Online unmount shall show in-progress status and, when preload is
-  active, indicate that background preload is stopping first. Directory-walk
-  subprocesses shall be cancelled and reaped before clean detach. If they do
-  not exit within the bounded wait, leave the mount service running and report
-  that unmount can be retried. Attempt clean FUSE detach while the service is
-  still available, preserving a usable mount if another process holds it busy.
-  Retry a transient busy result briefly after preload cancellation, and use the
-  mount table to resolve a helper error after the mount has already detached.
-- A successful service-stop command is not sufficient evidence of unmount
-  success. The mount-table entry shall disappear before the applet reports
-  completion or disconnects an applet-started VPN. A stopped or failed service
-  with a lingering mount entry shall report Error and offer the confirmed
-  Repair flow. Unmount shall not recreate or prepare the mountpoint. Repair
-  shall reset systemd failed state only when the service is actually Failed;
-  an already inactive/successful service shall not make a successful lazy
-  detach appear to fail.
+- Manual Online unmount shall show progress and, when preload is active, say that
+  preload is stopping first. Directory-walk subprocesses shall be cancelled and
+  reaped before clean detach; if they do not exit within the bounded wait, leave
+  the mount service running and report that unmount can be retried. Attempt clean
+  FUSE detach while the service is still available, keeping a mount usable if
+  another process holds it busy. Retry a transient busy result briefly after
+  preload cancellation, and use the mount table to resolve a helper error after
+  the mount has already detached.
+- A successful service-stop command is not evidence of unmount success. The
+  mount-table entry shall disappear before the applet reports completion or
+  disconnects an applet-started VPN. A stopped or failed service with a lingering
+  mount entry shall report Error and offer the confirmed Repair flow. Unmount
+  shall not recreate or prepare the mountpoint. Repair shall reset systemd failed
+  state only when the service is actually Failed, so an already inactive service
+  never makes a successful lazy detach appear to fail.
 - If clean unmount fails, the applet may offer lazy unmount only after explicit
   user confirmation and a clear warning.
 - Queued or in-progress writes shall prevent lazy unmount.
