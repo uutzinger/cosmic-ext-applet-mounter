@@ -152,10 +152,10 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 ### 6.1 Panel and status
 
 - **FR-001:** The applet shall provide a COSMIC panel icon and popup.
-- **FR-001A (layout revision, September 15, 2026):** The popup shall place a
-  clickable Settings gear at the right edge of the title row, with Cloud
-  Mounter aligned to the left. Add Connection, Refresh and sleep options shall be in General
-  Settings, with no toolbar or sleep-settings footer in the popup.
+- **FR-001A:** The popup shall place a clickable Settings gear at the right edge
+  of the title row, with Cloud Mounter aligned to the left. Add Connection,
+  Refresh and sleep options shall be in General Settings, with no toolbar or
+  sleep-settings footer in the popup.
 - **FR-001B:** The popup empty state shall explain that a connection can be
   added through Settings; the title-row gear shall remain available.
 - **FR-001C:** The gear shall open/focus one standalone General Settings window
@@ -215,11 +215,10 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 - **FR-010A:** Connection operations in the popup shall be interactive controls,
   not text-only labels.
 - **FR-010B:** The popup shall expose one currently valid primary operation
-  control per connection. Online mounts use Mount or Unmount. Offline mirrors
-  use Start or Stop for automatic/background synchronization. Less common or
-  secondary actions such as Preview, Sync Now, Retry, Repair, Details, and
-  Remove shall be available from the Add/Modify or diagnostics workflow rather
-  than cluttering the main popup.
+  control per connection (FR-003). Secondary actions such as Preview, Sync Now,
+  Retry, Details, and Remove shall be available from the Add/Modify or
+  diagnostics workflow, not the main popup; Repair appears only as FR-006A
+  specifies.
 - **FR-010C:** Unavailable primary operations shall be disabled with a visible
   reason.
 
@@ -256,13 +255,19 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   data-affecting actions, including initial synchronization, state rebuild,
   resync, removal, disabling imported originals, lazy unmount, and cleanup.
 - **FR-011H:** Add/Modify help shall be attached to the relevant input, button,
-  choice, action, or chip as a delayed tooltip when the toolkit supports it.
+  choice, action, status chip, or VPN chip as a COSMIC/libcosmic hover tooltip
+  when the toolkit supports it, appearing after a short delay of about one
+  second and positioned above or beside the source so it does not obscure it.
   Tooltip wrappers shall not be nested; each interactive control shall own at
-  most one tooltip so help text does not overlay other help text.
+  most one tooltip so help text does not overlay other help text. Visible help
+  buttons are reserved for future controls that cannot carry a tooltip. Longer
+  dependency, safety, setup, and troubleshooting guidance belongs in
+  documentation, not a main-popup Help control.
 - **FR-011I:** Add/Modify shall keep verbose selected-item explanations out of
   the normal form body when the same information can be provided as help text.
-  In particular, selected VPN profile details shall be available from the VPN
-  profile choice tooltip instead of inline paragraphs.
+  In particular, selected VPN profile details (external profile behavior,
+  readiness checks, timeout, activation expectations) shall be available from the
+  VPN profile choice tooltip instead of inline paragraphs.
 - **FR-011J:** Add, Modify, and Import shall open in a standalone COSMIC
   settings application window titled `Cloud Mounter Connection Settings`, not as
   embedded applet child windows.
@@ -1305,178 +1310,125 @@ Remote deletion shall:
 
 ## 13. UI Specification
 
+Behavior is specified by the functional requirements in Section 6. This section
+fixes layout and presentation; its statements are normative layout requirements.
+
 ### 13.1 Panel popup
 
-- Title row with Cloud Mounter aligned left and a clickable Settings gear
-  aligned to the right edge,
-  followed by active connection count, notification state and VPN summary.
-- A current notice/result area below the header when an operation has something
-  useful to report.
-- No Add Connection/Refresh toolbar or sleep-settings footer. Put these in
-  General Settings and restore the connection list space they previously used.
-- Use a continuous themed background for header and connections. Separate
-  status/notices from the connection list with a thin horizontal line and no
-  empty background band.
-- Scrollable connection rows sized for the fixed-width COSMIC applet popup.
-- Each row is a compact card:
-  - preferred layout: one line with the connection name on the left and a
-    compact primary state control on the right;
-  - if the connection name is too long, it may wrap or elide, but the primary
-    state control remains reachable and consistently sized.
-- The connection name is clickable and opens the Add/Modify editor for that
-  connection.
-- The main popup shall not repeat static connection settings such as provider,
-  mode, local path, or remote; those fields are shown in Add/Modify.
-- Online mounts expose Mount or Unmount as the primary operation.
-- Offline mirrors expose Start or Stop as the primary operation for
-  background synchronization.
-- Preview, Sync Now, Retry, Repair, Details, and Remove are kept out of the
-  main popup and belong in the Add/Modify or diagnostics workflow.
-- Disabled or unavailable primary controls explain why the action cannot
-  currently run.
-- Empty state directs the user to Settings > Add Connection. The gear remains
-  visible without duplicating Add Connection in the popup.
-- Import previews shall not replace the connection list. Imported candidates
-  remain previews until the user confirms creating applet-managed connections.
-- Popup actions dispatch typed operation requests and return immediately without
-  blocking the COSMIC event loop.
-- The popup shall grow to fit configured rows up to a bounded maximum height.
-  Scrolling shall engage only when the configured rows exceed that bound.
+Behavior: FR-001A to FR-001D, FR-002, FR-003 to FR-003B, FR-010A to FR-010C.
+
+- Title row with Cloud Mounter aligned left and a clickable Settings gear at the
+  right edge, followed by active connection count, notification state and VPN
+  summary.
+- A notice/result area below the header only when an operation has something to
+  report.
+- A continuous themed background for header and connections, with a thin
+  horizontal line between status/notices and the connection list and no empty
+  background band. The space the removed toolbar and sleep footer used belongs to
+  the connection list.
+- Rows are compact cards sized for the fixed-width popup: one line with the name
+  on the left and the compact primary state control on the right. A long name may
+  wrap or elide, but the control stays reachable and consistently sized.
+- The popup grows to fit configured rows up to a bounded maximum height; scrolling
+  engages only when rows exceed it.
+- Import previews do not replace the connection list; candidates stay previews
+  until the user confirms creating applet-managed connections.
+- Popup actions dispatch typed operation requests and return immediately.
 
 ### 13.1A General Settings
 
-- Open/focus using the popup title-row gear. Use a standalone window with an
-  ordinary close control and title `Cloud Mounter Settings`.
-- Present both sleep toggles together under Sleep. Use short labels “Unmount
-  when sleep” and “Restore after wake up”; help shall explain Online-only scope
-  and restoration eligibility. The second toggle remains visible but disabled
-  while the first is off, so changing the first does not resize the window.
-- Place Add Connection and Refresh together in the top row of the window,
-  above the Preload and Sleep settings and status/feedback areas.
-  Add Connection launches the existing editor rather than replacing General
-  Settings with connection-specific fields. Refresh updates the runtime owner.
-- Add a **Preload** section with separate Google Drive, OneDrive, Box, SMB, and
-  SFTP rows, placing SFTP immediately below SMB. Each row contains an enabled control and maximum seconds. Box and SMB
-  also contain maximum depth. Populate controls from saved values and show
-  defaults of 60 seconds for all providers, depth 2 for Box, and depth 3 for
-  SMB. Keep controls visible when disabled so toggling a provider does not
-  resize the window. Keep each provider's switch, duration field, and optional
-  depth field on one horizontal row. Explain maximum duration and recursive
-  depth, including their accepted ranges, through delayed hover help instead of
-  persistent captions or a standalone range line. Duration help shall state
-  that browsing remains available while preload runs. Depth help shall explain
-  that deeper scans increase server requests, can trigger provider rate limits,
-  and may consume the available preload time. Provider and sleep toggles shall
-  have visible spacing between their text labels and switches.
-- Use the same COSMIC themed list surface as the popup and Add/Modify content,
-  including the area behind hover help; do not hardcode a background color.
-- Place Refresh results, Add Connection launch errors and connection-to-applet
-  notices directly below the top button row, before Sleep and wake.
-- End the sleep options with “Applies only to Online connections.” Display sleep
+Behavior: FR-001C, FR-044D and the sleep requirements of Section 6.11.
+
+- Opened and focused from the popup gear in a standalone window with an ordinary
+  close control, titled `Cloud Mounter Settings`, on the same COSMIC themed list
+  surface as the popup and Add/Modify content, including behind hover help; no
+  hardcoded background color.
+- Top row: Add Connection and Refresh. Add Connection launches the existing
+  editor rather than embedding connection fields. Refresh updates the runtime
+  owner. Refresh results, launch errors and connection-to-applet notices appear
+  directly below this row, before the sleep options.
+- Sleep: both toggles together, labeled "Unmount when sleep" and "Restore after
+  wake up". Help explains the Online-only scope and restoration eligibility. The
+  second toggle stays visible but disabled while the first is off, so the window
+  does not resize.
+- End the sleep options with "Applies only to Online connections." Show sleep
   preference feedback and cleanup status as ordinary wrapping text immediately
-  below it, without a “Sleep cleanup status” heading or fixed-height status box.
-  Keep these messages separate from top-row action notices. Surface unresolved
-  sleep problems briefly in popup status even when Settings is closed.
+  below it, with no "Sleep cleanup status" heading or fixed-height box, separate
+  from top-row notices. Surface unresolved sleep problems briefly in popup status
+  even when Settings is closed.
+- **Preload** section: one row per Online provider (Google Drive, OneDrive, Box,
+  SharePoint, SMB, SFTP, with SFTP immediately below SMB), each with an enabled
+  control and maximum seconds; Box, SharePoint, SMB and SFTP also have maximum
+  depth. Defaults and bounds are in FR-044D, FR-SFTP-015 and Section 10. Populate
+  from saved values; keep controls visible when disabled so the window does not
+  resize; keep each provider's switch, duration and optional depth on one
+  horizontal row. Explain duration and depth, with accepted ranges, through
+  delayed hover help instead of captions or a range line. Duration help states
+  that browsing remains available while preload runs; depth help explains that
+  deeper scans add server requests, can trigger rate limits and may use up the
+  preload time.
+- Provider and sleep toggles have visible spacing between label and switch.
 - Persist toggles immediately with validated writes acknowledged by the owner;
-  display save failures without presenting an unsaved setting as effective.
-- All controls shall remain reachable with keyboard navigation, long translated
-  labels, display scaling and small windows. Long status details shall wrap in
-  the window’s overall scrollable content; do not reserve a separate status box
-  or reduce the main popup list height for hidden settings. Pad content inside
-  the scrollable region so its vertical scrollbar remains at the right edge of
-  the window.
+  show save failures without presenting an unsaved setting as effective.
+- All controls remain reachable with keyboard navigation, long translated
+  labels, display scaling and small windows. Long status details wrap in the
+  window's scrollable content, with content padding inside the scrollable region
+  so the vertical scrollbar stays at the window's right edge; do not reserve a
+  separate status box or reduce the popup list height.
 
 ### 13.2 Add, Modify, Import, and Field Help
 
-- Add Connection, reached from General Settings, opens the existing connection
-  wizard. App-wide General Settings and the per-connection editor are distinct.
-- Modify opens the same wizard prefilled for an existing connection.
-- Add mode instruction text shall describe the required choices: provider, mode,
-  remote/subtree, local target, VPN, and startup policy. The same notice area
-  shall be reused for validation results and operation feedback.
-- Modify mode shall show connection actions at the top. Most connection types
-  may use one action row. OneDrive Offline mirror and other action-heavy modes
-  may split actions into two rows to avoid clipping.
-- An SMB Online connection shall show **Use global preload settings**, enabled
-  by default. Disabling it reveals or enables that connection's preload toggle,
-  maximum seconds, and maximum depth. Help text shall explain that the override
-  is useful when home, LAN, corporate, and VPN shares have different sizes and
-  latency.
-- The wizard step order is:
-  1. Choose provider: OneDrive, Google Drive, Box, SMB, or SFTP.
-     Place SFTP immediately to the right of SMB with matching button styling.
-  2. Choose access mode: Online mount or Offline mirror. The provider/mode
-     matrix determines the engine.
-  3. Choose account or remote. OneDrive Online uses `jstaf/onedriver`; OneDrive Offline,
-     Google Drive, Box, SMB, and SFTP use rclone remotes.
-  4. Choose whole remote or remote subtree.
-  5. Choose local target: mountpoint for Online mount or mirror directory for
-     Offline mirror. Mountpoints and mirror directories are not interchangeable.
-  6. Configure mode-specific behavior.
-  7. Configure optional VPN dependency.
-  8. Review dependency status, generated units, sync/mount preview, and safety
-     warnings.
-  9. Confirm creation or update.
-- Online mount fields include display name, enabled state, rclone VFS cache
-  limit with 20 GiB default, timeout and retry bounds, bandwidth limits, safe
-  detach behavior, and lazy-unmount confirmation policy. Persistent startup is
-  controlled only by the popup switch.
-- Offline mirror fields include display name, enabled state, whole-drive or
-  subtree selection, disk-space estimate, initial-sync preview, sync interval,
-  manual Sync Now availability, metered-network default pause, per-connection
-  metered override, recovery location, 30-day retention, conflict preservation,
-  and resync/state-rebuild confirmation.
-- VPN configuration is per connection. The user can choose no VPN or a detected
-  or configured NetworkManager VPN profile. Cisco-compatible gateways are
-  represented by NetworkManager OpenConnect profiles; direct Cisco Secure Client
-  dependencies are not offered. The applet may import these as applet VPN
-  profile references, but it does not create or edit VPN profiles and does not
-  store VPN credentials. The VPN selector presents No VPN, NetworkManager VPN
-  profiles, and Detect VPNs compactly. The
-  Detect VPNs action imports or updates references and reports completion
-  through the normal app notice path; it shall not leave a detection transcript
-  or detected-profile list in the VPN section body. VPN fields include readiness
-  checks, timeout, whether the applet may activate the VPN, and the rule that
-  the applet may only disconnect VPNs it activated. The
-  disconnect-when-unused control appears only after a VPN dependency is
-  selected.
-- Import opens a dedicated import workflow. It scans `~/.config/systemd/user/`
-  by default, previews compatible rclone and `jstaf/onedriver` units, maps each preview
-  into the Add/Modify wizard fields, shows unsupported options and conflicts,
-  and requires explicit confirmation before creating an applet-managed
-  connection. Originals are preserved by default; disabling an original is a
-  separate confirmed action.
-- In Add mode for rclone-backed providers, remote controls include:
-  Detect rclone remotes, provider-specific Create Remote, detected remote
-  choices, and a management area for removing unused remotes. Remote creation
-  and removal controls shall not appear while modifying an existing connection.
-  Detected remote choice buttons shall wrap into bounded rows at the default
-  settings-window width. Remote-name help shall explain new-name entry before
-  Create and detected/exact existing-name selection (FR-011MA). SMB help shall
-  explain Create/Update. Since Modify hides creation actions, its help shall
-  describe existing-name use without directing users to a hidden Create button.
-- OneDrive setup controls shall use user-facing guidance: complete required
-  fields, finish browser authentication, then run Test Connection and Save
-  Connection. Implementation details about credential file locations belong in
-  documentation and diagnostics, not normal form text.
-- Per-field help opens concise guidance near the relevant setting. The preferred
-  behavior is COSMIC/libcosmic hover tooltips attached directly to the relevant
-  field, button, choice row, status chip, or VPN chip. Visible help buttons are
-  not part of the default design and shall be reserved only for future controls
-  that cannot reasonably carry their own tooltip. Tooltips shall be positioned
-  above or to the side of the source control so they do not obscure the field or
-  button being explained. Tooltips shall appear after a short delay,
-  approximately one second, so ordinary pointer movement does not constantly
-  open help. Tooltip wrappers shall not be nested around controls that already
-  have their own tooltip. Selected-item details, such as NetworkManager or
-  OpenConnect external profile behavior, readiness checks, timeout, and activation
-  expectations, belong in the relevant choice tooltip rather than as inline body
-  text. Longer dependency, safety, setup, and troubleshooting guidance belongs
-  in documentation rather than a standalone main-popup Help control.
-- Destructive or data-affecting actions use explicit confirmation dialogs with
-  the action, target paths, preserved data, and expected consequences.
-- Controls shall be keyboard accessible, localized, and understandable without
-  color.
+Behavior: FR-011 to FR-011N, FR-SFTP-002 to FR-SFTP-004.
+
+- Add Connection (from General Settings) opens the wizard; Modify opens it
+  prefilled. App-wide General Settings and the per-connection editor are distinct.
+- Add mode instruction text names the required choices: provider, mode,
+  remote/subtree, local target, VPN and startup policy. The same notice area
+  shows validation results and operation feedback.
+- Modify mode shows connection actions at the top, in one row where possible and
+  two rows for action-heavy modes such as OneDrive Offline to avoid clipping.
+- An SMB or SFTP Online connection shows **Use global preload settings**, enabled
+  by default. Disabling it enables that connection's toggle, maximum seconds and
+  maximum depth; help explains the override suits home, LAN, corporate and VPN
+  shares of differing size and latency (FR-044H).
+- Wizard step order: (1) provider: OneDrive, Google Drive, Box, SMB or SFTP, with
+  SFTP immediately right of SMB in matching style; (2) access mode, which with the
+  provider determines the engine; (3) account or remote (OneDrive Online uses
+  `jstaf/onedriver`; every other case uses rclone remotes); (4) whole remote or
+  subtree; (5) local target, a mountpoint for Online or a mirror directory for
+  Offline (not interchangeable); (6) mode-specific behavior; (7) optional VPN;
+  (8) review of dependency status, generated units, preview and safety warnings;
+  (9) confirm creation or update.
+- Online fields: display name, enabled state, VFS cache limit (20 GiB default),
+  timeout and retry bounds, bandwidth limits, safe-detach behavior and
+  lazy-unmount confirmation policy. Persistent startup is controlled only by the
+  popup switch.
+- Offline fields: display name, enabled state, whole-drive or subtree selection,
+  disk-space estimate, initial-sync preview, sync interval, Sync Now, metered
+  pause default and per-connection override, recovery location, 30-day retention,
+  conflict preservation, and resync/state-rebuild confirmation.
+- VPN is per connection: No VPN, a NetworkManager VPN profile, or Detect VPNs,
+  presented compactly. Cisco-compatible gateways are NetworkManager OpenConnect
+  profiles; direct Cisco Secure Client dependencies are not offered. Detect VPNs
+  imports or updates references and reports through the normal notice path, with
+  no detection transcript or profile list in the section body. Fields are
+  readiness checks, timeout, whether the applet may activate the VPN, and the
+  rule that it disconnects only VPNs it activated; the disconnect-when-unused
+  control appears only after a VPN is selected.
+- Import opens a dedicated workflow (FR-011F, FR-011N, Section 6.7) whose previews
+  map into the wizard fields.
+- Rclone-backed providers in Add mode show Detect rclone remotes, the
+  provider-specific Create Remote, detected-remote choices wrapped into bounded
+  rows, and the unused-remote management area (FR-011K to FR-011MA). Modify mode
+  hides these; its remote-name help describes existing-name use without pointing
+  to a hidden Create button, and SMB help explains Create/Update.
+- OneDrive setup uses user-facing guidance: complete required fields, finish
+  browser authentication, then Test Connection and Save Connection. Credential
+  file locations belong in documentation and diagnostics, not form text.
+- Per-field help follows FR-011H.
+- Destructive or data-affecting actions use confirmation dialogs stating the
+  action, target paths, preserved data and expected consequences.
+- Controls are keyboard accessible, localized and understandable without color.
 
 ### 13.3 Error and conflict details
 
