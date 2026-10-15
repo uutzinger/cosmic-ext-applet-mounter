@@ -2,7 +2,7 @@
 
 Type: Design
 
-Status: Approved plan (October 15, 2026); steps 1-6 done (preamble, sections 1-5, 6.1-6.5, 6.7, 7, 8, 10-15, 16).
+Status: Approved plan (October 15, 2026); steps 1-7 done (all sections except 9.4 and 9.5).
 This record is an observed baseline of the specification at commit 936c2f0, not a
 claim about the product.
 
@@ -24,6 +24,9 @@ sections are edited.
 - IDs cited outside the specification and therefore fixed: FR-031, FR-031A,
   FR-031B, FR-031C, FR-053, FR-060A, FR-060B, FR-060C, and "4.2 Offline behavior"
   (Task List.md lines about 132-135). Update that section citation if 4.2 moves.
+- Step 7 added two IDs, FR-008A (pending-change count) and FR-037B (Online
+  mountpoint preflight), when the unnumbered dated blocks were folded into Section 6;
+  no ID was removed. The SharePoint identity gate became a bullet of 18.2.
 - The status matrix (implemented / pending acceptance / future) lives only in
   `Applet Description.md`. The specification carries no status, date, release or
   "planned" wording; such text moves to `Task List.md` or the completion notes.

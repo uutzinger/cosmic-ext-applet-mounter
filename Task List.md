@@ -375,7 +375,7 @@ Plan, decisions and section order:
   - [x] Step 4: section 13 with 6.1 and 6.2 (123.6 KB to 120.0 KB; layout-only 13, tooltip rules merged into FR-011H).
   - [x] Step 5 (high effort): sections 6.3-6.5 and 6.7 (already compact; FR-023 and FR-044D corrected, no size change).
   - [x] Step 6: section 14 (120.2 KB to 119.6 KB; duplicate UI checks merged, status pointer removed; section 15 kept as is).
-  - [ ] Step 7 (high effort): sections 17 and 18, folding the unnumbered blocks into 6.x.
+  - [x] Step 7 (high effort): sections 17 and 18, folding the unnumbered blocks into 6.x (119.6 KB to 118.2 KB; new IDs FR-008A and FR-037B; real organization URL replaced).
   - [ ] Step 8 (high effort): sections 9.4 and 9.5.
   - [ ] Step 9: stale-tool grep, ID-list diff, update the line 447 item.
 
