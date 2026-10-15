@@ -325,8 +325,8 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   running startup-wide version/help probes solely for inventory.
 - **FR-022:** The applet shall require a current supported release of each
   selected storage engine.
-- **FR-023:** The applet shall reject the installed rclone `1.60.1` for managed
-  connections and direct the user to upgrade.
+- **FR-023:** The applet shall reject an installed rclone older than the minimum
+  in Section 8.2 for managed connections and direct the user to upgrade.
 - **FR-024:** Dependency guidance shall identify the required upstream project
   and shall not perform installation or repository changes.
 - **FR-025:** A missing dependency for one provider or mode shall not prevent use
@@ -448,11 +448,13 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   It shall not intentionally read file contents, follow symbolic links, or
   leave the selected mount tree.
 - **FR-044D:** General Settings shall contain a **Preload** section with saved
-  enabled and maximum-duration values for Google Drive, OneDrive, Box, and SMB.
-  All four providers shall default enabled with a 60-second maximum. Duration
-  bounds shall be 5 to 600 seconds. Box shall have a default maximum directory
-  depth of 2 and SMB a default maximum directory depth of 3, with validated
-  depth bounds from 1 to 10. Google Drive and OneDrive shall not expose depth.
+  enabled and maximum-duration values for Google Drive, OneDrive, Box,
+  SharePoint, SMB, and SFTP. Google Drive, OneDrive, Box, and SMB shall default
+  enabled with a 60-second maximum; SharePoint and SFTP shall default disabled
+  with a 30-second maximum. Duration bounds shall be 5 to 600 seconds. Box,
+  SharePoint, and SFTP shall have a default maximum directory depth of 2 and SMB
+  a default of 3, with validated depth bounds from 1 to 10. Google Drive and
+  OneDrive shall not expose depth.
 - **FR-044E:** Before a Google Drive connection is unmounted, repaired, removed,
   or stopped for sleep, the applet shall cancel its active rclone refresh with
   `job/stop`. Cancellation and detach shall remain bounded so the refresh cannot
