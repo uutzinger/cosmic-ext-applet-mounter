@@ -697,16 +697,16 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 - **FR-086:** Mounting or synchronization shall start only after the tunnel is
   connected and all configured readiness checks pass. Timeout shall fail the
   attempt without starting storage.
-- **FR-087:** The UI shall report when external interactive VPN authentication
-  is required and shall keep the applet responsive while it is pending.
-- **FR-086A (A):** Use one monotonic overall activation/readiness deadline from
+- **FR-086A:** Use one monotonic overall activation/readiness deadline from
   the saved profile. Include interactive password and second-factor time in that
   deadline. NetworkManager D-Bus activation monitoring shall not impose a
   shorter process timeout. Short readiness-probe timeouts shall remain separate.
-- **FR-086B (A):** Existing saved positive timeouts shall be preserved;
+- **FR-086B:** Existing saved positive timeouts shall be preserved;
   Detect VPNs shall preserve user timeout and readiness settings when refreshing
   references.
-- **FR-087A (planned A):** Show waiting, connected/checking, timeout and failed
+- **FR-087:** The UI shall report when external interactive VPN authentication
+  is required and shall keep the applet responsive while it is pending.
+- **FR-087A:** Show waiting, connected/checking, timeout and failed
   states, elapsed/remaining time, Cancel and Retry. Cancel shall prevent a late
   activation result from starting storage. Transient probe failures shall retry
   within the deadline; explicit authentication rejection shall be actionable.
@@ -744,13 +744,12 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 - **FR-096:** Conflict, pending-write, low-space, and recovery-required states
   shall produce persistent UI indicators until resolved.
 
-### 6.11 Sleep preparation and wake (B; live acceptance pending)
+### 6.11 Sleep preparation and wake
 
 - **FR-097:** Provide an app-wide “Unmount when sleep” setting in General
   Settings, default false and persisted across restarts. Its help shall state
-  that only Online connections are affected. The September 15 layout revision
-  supersedes placement below the popup connection list. Keep this control out
-  of both the main popup and Add/Modify connection settings. Scope includes
+  that only Online connections are affected. Keep this control out of both the
+  main popup and Add/Modify connection settings. Scope includes
   applet-owned Online mounts, including disabled connections with a remaining
   live mount;
   unrelated system/removable mounts are outside its scope.
@@ -1115,6 +1114,7 @@ AppConfig
     onedrive: { enabled: true, maximum_seconds: 60 }
     box: { enabled: true, maximum_seconds: 60, maximum_depth: 2 }
     smb: { enabled: true, maximum_seconds: 60, maximum_depth: 3 }
+    sharepoint: { enabled: false, maximum_seconds: 30, maximum_depth: 2 }
     sftp: { enabled: false, maximum_seconds: 30, maximum_depth: 2 }
   connections[]
   vpn_profiles[]

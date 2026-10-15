@@ -2,7 +2,7 @@
 
 Type: Design
 
-Status: Approved plan (October 15, 2026); steps 1-8 done (all sections; step 9 final checks remain).
+Status: Approved plan (October 15, 2026); all nine steps done; specification condensed from 130 KB to 117.5 KB (October 15, 2026).
 This record is an observed baseline of the specification at commit 936c2f0, not a
 claim about the product.
 

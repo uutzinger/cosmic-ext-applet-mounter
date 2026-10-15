@@ -366,7 +366,7 @@ Plan, decisions and section order:
 
 - [x] Archive completed history through `0.5.4-pre`, condense the carried-forward
   items into `Task List Carry Forward.md`, and condense `Applet Description.md`.
-- [ ] Condense `Requirements and Specifications.md` section by section in the
+- [x] Condense `Requirements and Specifications.md` section by section in the
   planned order, keeping every requirement ID and every safety-critical "shall";
   commit after each step.
   - [x] Step 1: preamble, sections 1-5, 15, 16 (130 KB to 124 KB; 199 IDs unchanged; section 16 reduced to application identity).
@@ -377,7 +377,7 @@ Plan, decisions and section order:
   - [x] Step 6: section 14 (120.2 KB to 119.6 KB; duplicate UI checks merged, status pointer removed; section 15 kept as is).
   - [x] Step 7 (high effort): sections 17 and 18, folding the unnumbered blocks into 6.x (119.6 KB to 118.2 KB; new IDs FR-008A and FR-037B; real organization URL replaced).
   - [x] Step 8 (high effort): sections 9.4 and 9.5 (118.2 KB to 117.5 KB; command-runner rules unified in 9.3, OpenConnect text points to FR-084 to FR-084D).
-  - [ ] Step 9: stale-tool grep, ID-list diff, update the line 447 item.
+  - [x] Step 9: stale-tool grep, ID-list diff, FR-086A/B and FR-087A tags, 6.11 heading, FR-097 date and SharePoint preload config entry fixed (117.5 KB final; 201 IDs, FR-008A and FR-037B added). The line 447 item below stays open: its audit starts after the Flatpak migration.
 
 # Cloud Mounter Applet Future Task List
 
@@ -472,6 +472,8 @@ the active implementation and verification record.
   - Replace references that delegate required behavior to `Task List.md` with
     the actual requirement or a stable supporting document.
 - [ ] Separate current supported scope from future and acceptance-pending scope.
+  - October 15 progress: the status matrix now lives only in `Applet Description.md`;
+    the specification carries no status, date, release or "planned" wording.
   - Add a concise status matrix for implemented, pending live validation, and
     future providers and features, including SFTP, SharePoint, Flatpak, and VPN
     authentication.
