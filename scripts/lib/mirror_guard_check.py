@@ -1,10 +1,10 @@
 """Live check of which rclone bisync compatibility handling a OneDrive drive type needs.
 
-Creates ONE uniquely named test folder on an existing rclone OneDrive remote, runs
-bisync stages against a local test tree and records whether a second sync with no
-edits is stable (an Office-file rewrite by the service shows up as instability).
-Everything it deletes is limited to that folder, and only after its marker file is
-confirmed. Run it only against a disposable test area.
+Creates fresh token-named test folders on an existing rclone OneDrive remote.
+Legacy mode checks post-initial-sync stability. --round-trip additionally compares
+untouched originals with independent downloads and measures sync transfers.
+Deletes only its test folders after ownership-marker confirmation. Local evidence
+is retained. Run only with disposable sample data.
 """
 
 import argparse
@@ -59,8 +59,10 @@ def seed_local(directory, files_dir):
         copied, total = copied + 1, total + size
     if not files_dir:
         synthetic_office(directory)
-    (directory / "plain.txt").write_text("Cloud Mounter guard test\n")
-    (directory / "binary.bin").write_bytes(os.urandom(4096))
+    if not (directory / "plain.txt").exists():
+        (directory / "plain.txt").write_text("Cloud Mounter guard test\n")
+    if not (directory / "binary.bin").exists():
+        (directory / "binary.bin").write_bytes(os.urandom(4096))
     return files_dir is None
 
 
@@ -121,6 +123,10 @@ def run_profile(report, args, name, files_dir, run_dir):
     result = {"profile": name, "folder": folder, "synthetic_office": synthetic, "stages": stages,
               "issues": issues}
     try:
+        # OneDrive bisync --resync reads Path2 before uploading Path1.
+        # It cannot bootstrap a missing remote directory.
+        report.phase(f"{name}-create-test-folder")
+        report.run(["rclone", "mkdir", location], timeout=RCLONE_TIMEOUT)
         report.phase(f"{name}-initial-sync")
         stages["initial_exit"] = bisync(report, local, location, workdir, flags, resync=True)
         first = observe(report, local, location)
@@ -198,11 +204,17 @@ def parse(argv):
     parser.add_argument("--keep", action="store_true", help="Keep the remote and local test folders")
     parser.add_argument("--plan", action="store_true", help="Validate the remote and print the plan only")
     parser.add_argument("--log-dir")
+    parser.add_argument("--round-trip", action="store_true",
+                        help="Schema-2 original/upload/download comparison and measured repeated syncs")
+    parser.add_argument("--settle-seconds", type=int, default=10,
+                        help="Round-trip observation interval (0..60 seconds; default 10)")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.remote):
         parser.error("--remote must be a plain rclone remote name without ':'")
     if args.files_dir and not Path(args.files_dir).is_dir():
         parser.error("--files-dir must be an existing directory")
+    if not 0 <= args.settle_seconds <= 60:
+        parser.error("--settle-seconds must be between 0 and 60")
     return args
 
 
@@ -219,10 +231,21 @@ def main(argv=None):
         if types.get(args.remote) != "onedrive":
             raise ValueError("Remote not found or not of type onedrive")
         if args.plan:
-            print(f"plan: create {PREFIX}<token> on {args.remote}:, run generic profile"
-                  f"{' with a web-edit pause' if args.web_edit else ''}, then the compat profile only if "
-                  f"generic is unstable, then purge only that folder.", file=sys.stderr)
+            if args.round_trip:
+                print("round-trip plan: separate original/upload/download trees, two observations, "
+                      "two measured no-edit syncs; separate token-scoped cloud folders; "
+                      "compatibility candidate only if generic fails; marker-verified cleanup. "
+                      f"Observation interval: {args.settle_seconds}s; web edit: {args.web_edit}.", file=sys.stderr)
+            else:
+                print(f"plan: create {PREFIX}<token> on {args.remote}:, run generic profile"
+                      f"{' with a web-edit pause' if args.web_edit else ''}, then the compat profile only if "
+                      f"generic is unstable, then purge only that folder.", file=sys.stderr)
             report.phase("plan-complete")
+            return
+        if args.round_trip:
+            from mirror_guard_roundtrip import run
+            run(report, args)
+            report.phase("check-complete")
             return
         run_dir = report.directory / "work"
         run_dir.mkdir()

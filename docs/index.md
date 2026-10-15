@@ -20,6 +20,10 @@ rclone remote.
 
 ## Documentation
 
+### General description
+
+[README](https://github.com/uutzinger/cosmic-ext-applet-mounter/blob/master/README.md)
+
 ### Setup and installation
 
 - [Dependency installation](dependency-installation.md): supported engine

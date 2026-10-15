@@ -527,8 +527,8 @@ Online. No other mount engine is added or changed.
 
   | Drive type | Compatibility profile | Evidence |
   |---|---|---|
-  | Personal OneDrive | pending (default: generic) | pending |
-  | OneDrive Business | pending (default: generic) | pending |
+  | Personal OneDrive | generic (provisional; round-trip check pending) | October 15, 2026: `target/task-runs/onedrive-guard-check-qmyfk3fx/results.json`; stable before/after web edit, 15 equal files |
+  | OneDrive Business | generic (provisional; round-trip check pending) | October 15, 2026: `target/task-runs/onedrive-guard-check-rsx8nj5g/results.json`; stable before/after web edit, 15 equal files |
 
 - [x] Microsoft app registration (decided October 14, 2026): use rclone's default
   client only; no client ID, secret or tenant fields in the OneDrive Offline
@@ -539,40 +539,153 @@ Online. No other mount engine is added or changed.
 
 #### 1. Contract and requirements (before implementation)
 
-- [ ] Write `docs/engineering/onedrive-rclone-offline-contracts.md`: persisted
+- [x] Write `docs/engineering/onedrive-rclone-offline-contracts.md`: persisted
   configuration (rclone remote reference, drive type, subpath, legacy-engine
   marker with a serde default for old files), setup/auth flow, safety guards from
-  the open decision, repair semantics, and the legacy handling rules. Link it from
-  the engineering README and the requirements.
-- [ ] Update `Applet Description.md` (engine matrix, Offline sections, lines
+  the open decision (the per-drive-type profile table is completed after phase 2),
+  repair semantics, and the legacy handling rules. Link it from
+  the engineering README and the requirements. Drafted October 14, 2026; the
+  compatibility profile table is completed after phase 2.
+- [x] Update `Applet Description.md` (engine matrix, Offline sections, lines
   referring to `abraunegg/onedrive`) and `Requirements and Specifications.md`
   (engine matrix, 4.2 Offline behavior, dependency list, FR-060A–C Repair), plus
-  `README.md`, `docs/dependency-installation.md` and `docs/index.md`.
+  `README.md`, `docs/dependency-installation.md` and `docs/index.md`. Done October
+  14, 2026 as target-state requirements (new FR-031C; FR-031/031A/031B/053/060C
+  revised) with planned-change notes in the user docs and Flatpak guide; the
+  shipped-behavior text changes with the implementation and removal phases.
+  `docs/index.md` needed no engine change.
 
-#### 2. Prototype on disposable accounts (no real data)
+#### 2. Mirror guard check (live, operator-run; after the contract draft)
+
+Settles the per-drive-type compatibility profile in the open decision above. The
+script creates and purges only its own `CloudMounter-GuardTest-<token>` folder.
+
+- [x] Prepare: one rclone remote per drive type using the default client
+  (`rclone config`, type `onedrive`, personal and business), a dedicated test area,
+  and a directory of real `.docx`, `.xlsx` and `.txt` files (at most 20 files and
+  5 MB; real Office files reproduce service rewrites better than the synthetic
+  ones the script generates when `--files-dir` is omitted). Verified October 15,
+  2026; sample counts, format checks and remote evidence are in the completion notes.
+- [x] Validate each remote without changes:
+  `bash scripts/onedrive-mirror-guard-check.sh --remote NAME --drive personal --plan`
+  (and `--drive business`). Both operator-run plans passed October 15, 2026;
+  receipts are recorded in the completion notes.
+- [x] Run once per drive type:
+  `bash scripts/onedrive-mirror-guard-check.sh --remote NAME --drive TYPE --files-dir DIR --web-edit`.
+  Business and personal passed October 15, 2026 with generic settings.
+  Generic stable: that drive type uses the generic profile. Generic unstable and
+  compat stable: it needs the compatibility profile. Neither stable: investigate
+  before choosing guards. Do not reuse the SharePoint results.
+- [x] Record each verdict, date and `results.json` path in the profile table of the
+  open decision, then copy the confirmed profiles into the contracts record.
+- [x] If the run exposes a script gap, fix and test the script instead of working
+  around it, and record the change in the completion notes.
+  October 15: missing remote-folder creation before initial bisync fixed;
+  six focused tests, formatting, lint and broader tests passed. Business live
+  retry and personal live run both passed.
+
+#### 2a. Initial-upload round-trip and unnecessary-transfer check (added October 15, 2026)
+
+Extend `scripts/onedrive-mirror-guard-check.sh` and its Python module, rather than
+using ad hoc commands. Phase 2 established stability after initial sync, not
+original-byte preservation during upload or absence of redundant transfers.
+Profiles remain provisional until this follow-up passes, before phase 3. Preserve
+the completed checks and their receipts.
+
+October 15: `--round-trip` extension implemented; focused fake-rclone and local-only
+rclone checks and the broader gate passed. First operator attempt failed before
+cloud setup on unsupported `rclone version --json`; provenance fix and regression
+verification in progress. No live round-trip verdict yet.
+Implementation checks below do not imply live cloud acceptance.
+
+- [x] Add a separately recorded round-trip stage. Before upload, create an isolated
+  baseline from the samples; record relative paths, byte lengths, SHA-256, timestamps
+  and a common remote-supported checksum. Never write to the sample source; verify
+  its hashes again at the end.
+- [x] Upload copies to a fresh script-owned subtree; capture remote-reported sizes,
+  timestamps and available checksums. Download every file into a separate empty
+  directory without size/checksum-based skipping. Compare actual downloaded sizes
+  and SHA-256 with the untouched baseline, and the common checksum separately.
+  Distinguish reported-size discrepancies, timestamp drift and actual byte rewrites.
+  Missing files, unavailable evidence or command failures cannot produce a pass.
+- [x] Use a separate fresh pair for initial bisync, preserving its pre-sync baseline.
+  Measure initial changes, then at least two no-edit syncs and the existing web-edit
+  and settling stages. Record structured transfer counts/bytes and snapshots per
+  stage: unchanged snapshots alone do not prove zero transfers. Exclude deliberate
+  diagnostic downloads from sync transfer totals. Define bounded service-settling
+  observations and record timing; unresolved drift is inconclusive.
+- [ ] If generic settings cause repeated transfers or drift, test compatibility
+  settings on independent fresh trees with identical samples. Identify the smallest
+  justified settings and any required convergence pass. A size discrepancy or byte
+  rewrite alone does not prove a workaround is needed. Ignoring size/hash for sync
+  must not bypass downloaded-byte verification; explain rewrites before accepting
+  a profile, otherwise leave the result unresolved.
+- [x] Add fake-rclone tests for unchanged round trips, reported-size-only differences,
+  byte rewrites, redundant transfers despite unchanged snapshots, missing evidence,
+  transfer failures, cancellation and partial cleanup. Preserve marker-scoped
+  deletion and original samples; retain partial failure evidence. Version results,
+  record tool/source identity and effective settings, update help/catalog/inventory,
+  then run focused tests and the routine gate.
+- [ ] Run separately for personal and business with operator web-edit handoffs.
+  Record dated results paths, original/downloaded comparisons, transfer counts,
+  cleanup and limitations in completion notes. Finalize both profile tables from
+  these results only. No whole-drive sync or installed-app acceptance is implied.
+
+Test script(s) output
+
+uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$ bash scripts/onedrive-mirror-guard-check.sh   --remote onedrive_personal   --drive personal   --files-dir "$HOME/Cloud/OneDrive_Mirrors/test_folder"   --round-trip   --web-edit
+onedrive-guard-check: roundtrip-upload
+onedrive-guard-check: roundtrip-download-0
+onedrive-guard-check: roundtrip-download-1
+onedrive-guard-check: generic-initial
+onedrive-guard-check: generic-no-edit-1
+onedrive-guard-check: generic-no-edit-2
+onedrive-guard-check: generic-verification
+
+Open CloudMounter-GuardTest-5ed5484e249fb4d9b65974043e2ecb54/ on the drive in the web editor, change and save one Office file, then press Enter.
+
+onedrive-guard-check: generic-web-edit
+onedrive-guard-check: generic-post-edit
+onedrive-guard-check: generic-post-edit-verification
+verdict (personal): generic passed round-trip and measured sync stages
+results: /home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/results.json
+onedrive-guard-check: check-complete
+{"task": "onedrive-guard-check", "status": "succeeded", "exit_code": 0, "source_sha": "7d78d2ef0c9e95965658cbc15d104588eb6d7650", "source_dirty": true, "run_id": null, "summary_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/summary.json", "log_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/task.log", "artifact_receipt_path": null, "next_action": "Inspect the task log if this operation does not complete."}
+uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$
+
+
+uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$ bash scripts/onedrive-mirror-guard-check.sh   --remote onedrive_business   --drive business   --files-dir "$HOME/Cloud/OneDrive_Mirrors/test_folder"   --round-trip   --web-edit
+onedrive-guard-check: roundtrip-upload
+onedrive-guard-check: roundtrip-download-0
+onedrive-guard-check: roundtrip-download-1
+onedrive-guard-check: generic-initial
+onedrive-guard-check: generic-no-edit-1
+onedrive-guard-check: generic-no-edit-2
+onedrive-guard-check: generic-verification
+
+Open CloudMounter-GuardTest-5887ffe0a0abbcaf9d742291943f3169/ on the drive in the web editor, change and save one Office file, then press Enter.
+
+onedrive-guard-check: generic-web-edit
+onedrive-guard-check: generic-post-edit
+onedrive-guard-check: generic-post-edit-verification
+verdict (business): generic passed round-trip and measured sync stages
+results: /home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/results.json
+onedrive-guard-check: check-complete
+{"task": "onedrive-guard-check", "status": "succeeded", "exit_code": 0, "source_sha": "7d78d2ef0c9e95965658cbc15d104588eb6d7650", "source_dirty": true, "run_id": null, "summary_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/summary.json", "log_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/task.log", "artifact_receipt_path": null, "next_action": "Inspect the task log if this operation does not complete."}
+
+#### 3. Prototype on disposable accounts (no real data)
 
 - [ ] Personal and business OneDrive via rclone browser OAuth in a native and a
   Flatpak-style run. Verify the signed-in drive differs from other accounts (see
   the earlier wrong-account incident) using the existing in-process Graph
   identity check.
-- [ ] Office-rewrite test, separately for a personal and a business drive, with
-  `scripts/onedrive-mirror-guard-check.sh` (operator-run; creates and purges only its
-  own `CloudMounter-GuardTest-<token>` folder). Use real `.docx`/`.xlsx` files via
-  `--files-dir` and add `--web-edit` to include a web-editor save. A stable second
-  sync with generic settings means that drive type needs no special handling; an
-  unstable one means it needs the compatibility profile, which the script then
-  confirms. Copy each `results.json` verdict and receipt path into the profile
-  table above. Do not reuse the SharePoint results.
-- [ ] Guard tests per drive type: wrong account or drive (identity guard blocks),
-  empty or missing local and remote folder (access marker blocks), and a changed
-  target invalidating Preview and initial-sync state.
 - [ ] Bisync on disposable trees: first sync, edits both sides, deletes, conflicts,
   large files, network loss and pending uploads, cancellation, Repair. Measure
   runtime at a 5-minute interval on a representative tree, with and without
   full-tree checksum verification, to set its cadence.
 - [ ] Confirm the minimum rclone version and flags; update the dependency checks.
 
-#### 3. Implementation
+#### 4. Implementation
 
 - [ ] Routing: `RcloneBackend::try_from(Provider)` (`src/providers.rs:113`) rejects
   OneDrive for all modes. Introduce mode-aware routing so OneDrive Offline uses the
@@ -596,7 +709,7 @@ Online. No other mount engine is added or changed.
 - [ ] Tests: config round trip with old files, routing, plan/unit generation, fake
   runner coordinator tests, and a regression proving onedriver Online is unchanged.
 
-#### 4. Legacy abraunegg connections (no conversion tool)
+#### 5. Legacy abraunegg connections (no conversion tool)
 
 - [ ] Stop offering abraunegg for new OneDrive Offline connections; existing ones
   keep working unchanged for one release. Show a deprecation notice on legacy
@@ -606,7 +719,7 @@ Online. No other mount engine is added or changed.
   reuse the abraunegg database, cache or token.
 - [ ] Document the manual replacement steps in the release notes.
 
-#### 5. Removal (the release after the deprecation release)
+#### 6. Removal (the release after the deprecation release)
 
 - [ ] Remove abraunegg code (`one_drive_*` in `src/sync.rs`, `OneDriveSync`
   dependency kind, auth-files UI in `src/app.rs`), the
@@ -618,14 +731,17 @@ Online. No other mount engine is added or changed.
   inventory and permission rationale; update AppStream/README text.
 - [ ] Update the script catalog and inventory; run `bash scripts/dev.sh gate`.
 
-#### 6. Acceptance
+#### 7. Acceptance
 
+- [ ] Implemented guards, per drive type: wrong account or drive (identity guard
+  blocks), empty or missing local and remote folder (access marker blocks), and a
+  changed target invalidating Preview and initial-sync state.
 - [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
   Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
 - [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
   Flatpak acceptance items below).
-- [ ] Release notes: engine removal, migration steps and the Microsoft app
-  registration guide.
+- [ ] Release notes: engine removal and the manual steps to recreate a OneDrive
+  Offline mirror as an rclone connection.
 
 ### Consolidated Flatpak acceptance and release
 

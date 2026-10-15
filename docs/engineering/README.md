@@ -12,7 +12,8 @@ Documentation status does not establish implementation or final-package acceptan
 | [Release source review](release-source-audit.md) | Audit | 0.5.3 worktree review in progress; source inclusion and immutable candidate/final ordering, not final source approval. |
 | [Development cleanup inventory](development-cleanup-inventory.md) | Inventory | October 13 approved narrow cleanup: obsolete legacy units/empty unlisted test folders archived reversibly; all listed connections retained. |
 | [Script/tooling inventory](script-tooling-inventory.md) | Inventory | October 13 active/archived script classification, caller evidence, stale Rust contract finding and prioritized existing/update/create tooling plan. |
-| [Script output/resumption contracts](script-output-contracts.md) | Contracts | P1/P2 tooling; P3 immutable-manifest export, metadata comparison and schema-2 verified reuse without rebuilding. Fixtures/synthetic checks remain separate from installed acceptance. |
+| [Script output/resumption contracts](script-output-contracts.md) | Contracts | P1/P2 tooling; P3 immutable-manifest export, metadata comparison and schema-2 verified reuse without rebuilding. Includes October 15 OneDrive guard schema-2 evidence. Fixtures/synthetic checks remain separate from installed acceptance. |
+| [OneDrive Offline mirror on rclone](onedrive-rclone-offline-contracts.md) | Contracts | October 14 accepted design for dropping `abraunegg/onedrive`: configuration, setup, guards (generic profiles verified on both sample trees October 15), scheduling, legacy handling and acceptance criteria; implementation not started. |
 | [Release, packaging and documentation procedures](release-packaging-procedures-contracts.md) | Contracts | October 13 relocation of build/artifact policy, release gates, native/Debian/Flatpak/GitHub procedures, release-note rules and package script bindings from the agent guide; read on demand. |
 
 ## Rules

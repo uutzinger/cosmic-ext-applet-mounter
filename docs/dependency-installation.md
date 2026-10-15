@@ -175,6 +175,8 @@ Reference:
 
 ## abraunegg/onedrive (OneDrive Mirror)
 
+> **Planned deprecation (0.5.4):** OneDrive Offline mirrors will move to `rclone bisync`. Install `onedrive` and the sign-in helper below only to keep existing OneDrive mirror connections working during the transition release; they will no longer be needed afterwards. This note describes the plan, not shipped behavior; see the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
+
 Ubuntu 24.04 repositories may provide an obsolete 2.4.x package. Use an
 upstream-supported package source that provides version 2.5.10 or newer.
 

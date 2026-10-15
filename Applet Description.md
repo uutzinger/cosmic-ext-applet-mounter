@@ -28,11 +28,16 @@ Each storage connection uses exactly one access mode.
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| Microsoft OneDrive | `jstaf/onedriver` | `abraunegg/onedrive` |
+| Microsoft OneDrive | `jstaf/onedriver` | `rclone bisync` |
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
+
+OneDrive Offline mirrors created by earlier versions with `abraunegg/onedrive` keep
+working for one transition release, cannot be newly created, and are then removed;
+users recreate them as rclone connections. See the
+[OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
 
 SharePoint is a provider for document libraries, including Teams files, with separate Online mount and
 Offline mirror milestones, described below; it is not in the supported matrix
@@ -42,11 +47,10 @@ until implementation and acceptance are complete.
 
 - `jstaf/onedriver` provides an on-demand OneDrive filesystem, local caching, and
   read-only access to previously opened files while offline.
-- `abraunegg/onedrive` provides a complete local OneDrive mirror, continuous
-  monitoring, bidirectional synchronization, conflict handling, and recovery
-  safeguards.
 - A current stable release of `rclone` provides the common mount and
-  bidirectional synchronization engine for Google Drive, Box, SMB, and SFTP.
+  bidirectional synchronization engine for Google Drive, Box, SMB, and SFTP,
+  the Offline mirror for OneDrive, and SharePoint document libraries. OneDrive
+  Offline is scheduled synchronization plus Sync Now, not continuous monitoring.
 - The applet requires current supported releases of its external tools. It
   detects missing or outdated dependencies and provides installation or upgrade
   guidance, but does not install or update software.
@@ -135,8 +139,9 @@ directory, so cloud connectivity cannot block normal browsing and editing.
   local work.
 - Offline Repair is a separately confirmed recovery-and-pause operation. For
   rclone bisync it disables the schedule, stops the finite service, and retains
-  the bisync lock and recovery state. For `abraunegg/onedrive` it stops and
-  disables only the continuous monitor while preserving the client's token,
+  the bisync lock and recovery state. During the transition release, for a legacy
+  `abraunegg/onedrive` connection it stops and disables only the continuous
+  monitor while preserving the client's token,
   database, lock/state, mirror, and recovery data. Neither path synchronizes,
   resyncs, authenticates, deletes recovery state, or uses Online-mount FUSE
   Repair. The final row state comes from observed coordinator and systemd state,
@@ -422,10 +427,10 @@ its own configuration.
 
 For OneDrive Online mount, setup uses `jstaf/onedriver` with applet-owned
 configuration and cache paths. For OneDrive Offline mirror, setup uses
-`abraunegg/onedrive` with applet-owned configuration, sync, and recovery paths.
-The applet first attempts the interactive browser authorization flow and offers
-a manual auth handoff/helper fallback when the redirect cannot be captured
-cleanly.
+rclone's browser OAuth with rclone's default client and applet-owned sync and
+recovery paths. The applet shows the signed-in account or drive for confirmation,
+binds the connection to that drive, and refuses to sync if a later run finds a
+different one. It stores no OneDrive tokens, client IDs or secrets.
 
 Credentials remain in the selected provider tool or operating-system secret
 store and are not copied into the applet's configuration.
@@ -515,9 +520,7 @@ The applet shows **SharePoint** for document-library storage, including
 Microsoft Teams files; rclone calls its backend `onedrive`.
 
 Offline mirror uses the verified library's rclone remote with a separate local
-directory and bisync state. The University's tenant requires administrator
-approval for the separate `abraunegg/onedrive` app, so that client cannot
-currently authenticate to this work library. SharePoint Offline provides
+directory and bisync state. SharePoint Offline provides
 manual Preview and Sync Now after scoped disposable tests of conflicts,
 deletion recovery, Office-file rewrites, and interrupted sync. Background
 scheduling remains disabled pending unattended safety checks.
@@ -614,4 +617,3 @@ confirmed cleanup action says otherwise.
 - [rclone bisync](https://rclone.org/bisync/)
 - [rclone downloads](https://rclone.org/downloads/)
 - [jstaf/onedriver](https://github.com/jstaf/onedriver)
-- [OneDrive Client for Linux](https://github.com/abraunegg/onedrive)

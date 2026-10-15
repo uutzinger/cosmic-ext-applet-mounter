@@ -6,9 +6,10 @@ Status: Accepted interface, implemented and fixture-verified; new hosted accepta
 
 Created: October 13, 2026
 
-Last reviewed: October 13, 2026
+Last reviewed: October 15, 2026
 
-Scope: Hosted/local tooling, setup reporting and Debian/native/Flatpak inspection.
+Scope: Hosted/local tooling, setup reporting, Debian/native/Flatpak inspection
+and OneDrive guard-investigation receipts.
 Associated task: script-tooling P1–P3. No installation, package matrix or publication
 is authorized merely by implementing this interface.
 
@@ -231,3 +232,41 @@ Read-only live metadata checks are optional and distinct. A real hosted build or
 publication is not required to test this control flow. P2/P3 wrapper and setup
 reporting fixtures add their stated coverage; runtime authentication remains
 outside this script-tooling scope.
+
+
+## OneDrive guard investigation schema 2 (October 15, 2026)
+
+The existing guard wrapper opts into the extended experiment with `--round-trip`;
+its shared `summary.json` remains schema 1. New `results.json` uses schema 2 and is
+checkpointed before/after operations, including exceptions/cancellation. Legacy
+runs remain schema 1 and must not be interpreted as original-byte evidence.
+
+Fields include status/verdict/issues, drive label/remote, source SHA and dirty
+flag (unknown outside Git), SHA-256 of the two implementation modules, opaque
+rclone version text (`rclone_version = {format: "text", output: ...}`), observation
+interval and timestamps, baseline/source manifests,
+round-trip original/remote/download evidence, profile flags and stages, individual
+command exit codes and counters, and per-folder ownership/cleanup outcomes.
+Source SHA on a dirty checkout is not proof of exact source bytes; module hashes
+identify the implementation. Drive label still comes from the operator; no new
+account-identity verification is implied. Tokens here are random cleanup markers,
+not authentication credentials. Sample names remain in private local evidence.
+
+Transfers use rclone's structured JSON `stats` fields (bytes/transfers/errors),
+never localized status prose; diagnostic copies are explicitly separate from
+bisync counters. Local SHA-256 and byte lengths establish actual downloaded
+content independently of remote QuickXorHash and size claims. Missing statistics,
+missing hash evidence, byte rewrites, failed operations and unobserved requested
+web edits cannot pass. A compatibility bundle passing does not identify the
+smallest necessary settings; its verdict remains inconclusive pending targeted
+follow-up. No whole-drive operation, mounted UI or installed-service acceptance.
+
+Each profile uses fresh copies of one baseline and a distinct random cloud tree.
+Ownership is established by uploading a marker before bulk data and verified by
+reading its exact token before purge. Failed ownership confirmation leaves the
+folder recorded for operator review. Cancellation reaps the active child through
+TaskReport; cleanup is bounded to 60 seconds per read/purge and partial evidence
+is retained. `--keep` is an explicit cleanup exception. Local evidence is retained.
+The input sample directory is never a transfer destination, and its final snapshot
+must equal its initial snapshot. Observation intervals are bounded 0..60 seconds;
+no assertion about delayed changes beyond the measured window is made.

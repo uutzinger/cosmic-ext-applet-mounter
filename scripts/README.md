@@ -39,7 +39,7 @@ so standalone users do not need Python or checkout-relative support files.
 | [check-ui-translations.py](check-ui-translations.py) | Catalog/reference and selected hardcoded UI-string checks. | Source checks, not full Fluent compilation or rendered UI review. |
 | [check-release-publication.sh](check-release-publication.sh) | Version/metadata/finalized-note preflight (wrapper for `lib/publication_check.py`). | Read-only; does not prove package acceptance or grant approval. |
 | [archive-release.sh](archive-release.sh) | After a release, move completed task-list and completion-note history to `docs/archive/` and carry open items forward. | Edits the two Markdown files and `docs/archive/` only; no commit. Needs `--tasks-from` / `--notes-from` heading prefixes; `--dry-run` reports counts. Refuses existing archives and uncommitted edits to the two files. |
-| [onedrive-mirror-guard-check.sh](onedrive-mirror-guard-check.sh) | Live check of which rclone bisync compatibility handling a OneDrive drive type needs (Office-rewrite behavior). | **Changes cloud data:** creates one `CloudMounter-GuardTest-<token>` folder on the named rclone OneDrive remote, syncs a local test tree, and purges only that folder after its marker is confirmed. Run by the operator against a disposable area; `--plan` validates without changes; `--web-edit` pauses for a web-editor edit; results in `results.json`. |
+| [onedrive-mirror-guard-check.sh](onedrive-mirror-guard-check.sh) | Live OneDrive compatibility investigation. | **Changes cloud data:** only fresh `CloudMounter-GuardTest-<token>` folders. `--round-trip` adds immutable originals, independent downloads, measured sync transfers and schema-2 partial evidence; cleanup verifies marker content. `--settle-seconds` is bounded 0..60 (default 10); `--web-edit` pauses for an Office edit. `--plan` only checks configured backend presence. Legacy mode retains schema 1. |
 | [run_github_linux_build.sh](run_github_linux_build.sh) | Dispatch or retrieve a hosted Debian build. | Unique dispatch correlation, structured polling and verified downloads/cache. `--run-id` or `--resume-report` does not dispatch. No installation/publication. |
 | [build_release.sh](build_release.sh) | Tag/push and start one hosted matrix or reuse an exact-commit run. | Tag/push approval required. `--dry-run` is non-mutating; `--resume --run-id` reuses the original tag/run without implicit rebuilding. Does not publish. |
 | [promote_release.py](promote_release.py) | Validate/download an existing accepted build and optionally publish its packages. | Inspection default; publication requires `--publish --accepted` and approval. Persistent inspection receipt, no rebuild. |
@@ -80,6 +80,7 @@ legacy/unrelated directories are not overwritten or silently adopted.
 | [lib/publication_check.py](lib/publication_check.py) | Version, AppStream and release-note preflight using `tomllib`, behind `check-release-publication.sh`. | Read-only; exercised by `tests/release_publication_test.py`. |
 | [lib/archive_tasks.py](lib/archive_tasks.py) | Implementation behind `archive-release.sh`: split at a heading, repair links, extract outermost open checkbox items. | Exercised by `tests/archive_release_test.py` on a synthetic repository. |
 | [lib/mirror_guard_check.py](lib/mirror_guard_check.py) | Implementation behind `onedrive-mirror-guard-check.sh`: generic versus compatibility bisync profiles compared by stability of a no-edit second sync. | Mirrors the settings in `src/sync.rs`; exercised by `tests/mirror_guard_check_test.py` with a fake rclone only. |
+| [lib/mirror_guard_roundtrip.py](lib/mirror_guard_roundtrip.py) | Explicit `--round-trip` implementation called by mirror_guard_check.py. | Schema-2 byte/metadata comparisons, structured transfer counters, opaque `rclone version` text provenance, bounded observations and marker-content cleanup; fixtures and optional real-rclone local-only smoke in `tests/mirror_guard_roundtrip_test.py`. |
 | [lib/artifact_inspection.py](lib/artifact_inspection.py) | Shared Debian identity checks and streaming hashes, used by inspection and promotion (also through the hosted task driver). | Importable offline policy; reads metadata using a caller-provided command adapter, never installs or executes artifacts. |
 | [lib/dev_tasks.py](lib/dev_tasks.py) | Allowlisted just dispatch behind `dev.sh`, using the shared reporter. | Records recipe, HEAD, dirty-state flag and loose Git object counts (stderr warning if a task creates more than 2000); no independent build/test policy. |
 | [lib/flatpak_tasks.py](lib/flatpak_tasks.py) | Validates tracked/pinned inputs, observes required runtimes, builds/exports and records inspected candidate receipts. | Uses shared export/bundle comparison against built metadata; no independent policy approval or shipping acceptance. |
@@ -175,3 +176,33 @@ or distribution differ, also update `lib/artifact_inspection.py`,
 - `tests/repo_hygiene_test.py` fails if an entry point loses its git executable
   bit, is missing from this catalog, or if a relative Markdown link in the
   maintained docs breaks.
+
+## OneDrive original/upload/download investigation
+
+From the repository directory, first inspect with `--plan`; omit it to run:
+
+```bash
+bash scripts/onedrive-mirror-guard-check.sh --remote onedrive_personal --drive personal \
+  --files-dir "$HOME/Cloud/OneDrive_Mirrors/test_folder" --round-trip --web-edit --plan
+```
+
+Use the corresponding business remote and label for a separate run. The directory
+must contain 1..20 regular files (no subdirectories/symlinks), at most 5 MB. The
+source is read-only. Baseline, upload and independent download copies remain in
+`target/task-runs/onedrive-guard-check-*/work/`; only token-owned cloud folders are
+purged. `--keep` deliberately retains them. Logs/results may contain sample names;
+keep them private. Each command is bounded; per-transfer JSON logs rotate at 8 MB
+with one backup and are read with an 8 MB cap. Cancelling terminates/reaps the
+active command, attempts bounded marker-verified cleanup and retains partial JSON.
+
+The new mode compares SHA-256/actual byte lengths separately from remote-reported
+sizes, timestamps and QuickXorHash. It measures two no-edit syncs, and with
+`--web-edit` verifies an actual local content change followed by a quiet sync.
+Diagnostic downloads are labelled separately from bisync transfer totals.
+Generic failure triggers an independent compatibility candidate including one
+convergence pass; even a passing candidate remains inconclusive until the required
+settings are minimized and any original-byte rewrite is explained. It never
+silently ignores independent byte differences. Missing evidence, failed transfers,
+incomplete cleanup or unresolved changes give a nonzero exit and partial results.
+The default 10-second interval is an observation window, not a guarantee about
+later service rewrites. Without `--web-edit`, no web-edit acceptance is claimed.

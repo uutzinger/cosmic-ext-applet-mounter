@@ -18,6 +18,12 @@ Flatpak package acceptance/submission is deferred to 0.5.4, whose engine-retenti
 decision must precede implementation or migration. Long-term sandbox requirements
 remain planned requirements, not a claim of 0.5.3 delivered support.
 
+Engine decision for 0.5.4 (October 14, 2026): `abraunegg/onedrive` is dropped and
+OneDrive Offline mirrors move to `rclone bisync`; see
+[OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
+The statements above describe the 0.5.3 delivery; the requirements below describe
+the target and name the transition for existing connections.
+
 ## 1. Purpose
 
 The Cloud Mounter Applet manages cloud and network storage connections from the
@@ -64,7 +70,7 @@ mechanism.
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| Microsoft OneDrive | ``jstaf/onedriver`` | `abraunegg/onedrive` |
+| Microsoft OneDrive | ``jstaf/onedriver`` | `rclone bisync` |
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
@@ -88,8 +94,9 @@ are tracked in Section 17 and
   over D-Bus.
 - OpenConnect interactive authentication through NetworkManager and a host
   `nm-applet` secret agent when the selected profile requires it.
-- Dependency and version checks for rclone, `jstaf/onedriver`,
-  `abraunegg/onedrive`, FUSE, and supporting utilities.
+- Dependency and version checks for rclone, `jstaf/onedriver`, FUSE, and
+  supporting utilities (plus `abraunegg/onedrive` for legacy connections until
+  its removal).
 - Import of compatible legacy services found in
   `~/.config/systemd/user/`.
 - Localized UI strings and accessible controls.
@@ -125,8 +132,12 @@ trees when required connectivity is available.
 
 Offline mirror mode uses:
 
-- `abraunegg/onedrive` for Microsoft OneDrive.
-- `rclone bisync` for Google Drive, Box, SMB, and SFTP.
+- `rclone bisync` for Microsoft OneDrive, Google Drive, Box, SMB, and SFTP
+  (SharePoint document libraries use rclone as well).
+
+OneDrive Offline uses scheduled synchronization plus Sync Now, not continuous
+monitoring. Existing `abraunegg/onedrive` mirrors are a transition case; see
+FR-031C.
 
 ### 4.3 Google cloud-native documents
 
@@ -434,20 +445,26 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-030:** Rclone and `jstaf/onedriver` authentication shall be delegated to their
   supported setup flows.
 - **FR-031:** OneDrive Offline mirror authentication and state shall be delegated
-  to `abraunegg/onedrive`.
-- **FR-031A:** For OneDrive Offline mirror setup launched by the applet, the
-  applet shall first use `abraunegg/onedrive`'s interactive browser OAuth flow
-  with its upstream local redirect listener by running against the app-owned
-  configuration directory. If automatic redirect capture fails or is unsuitable
-  for the user's browser or tenant, the applet shall offer the supported
-  non-interactive auth-file fallback: create transient auth URL and response URL
-  files, open the generated Microsoft authorization URL for the user, accept the
-  final redirect URL in the UI, and write it to the response file. Authorization
-  shall not use `--dry-run`; bounded dry-run preview occurs only after
-  authentication.
+  to rclone. The applet shall store no OneDrive tokens, client IDs or secrets.
+- **FR-031A:** For OneDrive Offline mirror setup the applet shall run rclone's
+  browser OAuth for backend `onedrive` with rclone's default client, using the
+  same create-and-continue flow as SharePoint setup and the desktop portal for
+  browser opening in Flatpak. It shall verify the remote type and drive type
+  (personal or business), show the signed-in account or drive name from Microsoft
+  Graph for user confirmation, and record the drive identity in the connection.
+  Later runs shall be blocked when the identity differs, and reauthentication
+  shall yield the same identity. The applet shall not offer client ID, secret or
+  tenant entry. Authorization shall not use `--dry-run`; bounded preview occurs
+  only after authentication.
 - **FR-031B:** The applet shall prevent concurrent `jstaf/onedriver` Online mount and
-  `abraunegg/onedrive` Offline mirror operation against the same OneDrive
-  account or an overlapping remote subtree.
+  OneDrive Offline mirror operation against the same OneDrive account or an
+  overlapping remote subtree, and shall prevent an rclone OneDrive mirror from
+  sharing or overlapping a local tree with a legacy `abraunegg/onedrive` mirror.
+- **FR-031C:** Existing `abraunegg/onedrive` OneDrive Offline connections shall keep
+  running unchanged for one transition release with a deprecation notice, shall not
+  be newly creatable, and shall load as unsupported after the removal release with
+  their units not regenerated and local data untouched. No conversion tool is
+  provided; the abraunegg database, cache and token are never reused.
 - **FR-032:** SMB passwords shall remain in rclone's credential mechanism.
 - **FR-033:** Google cloud-native documents shall be excluded from Offline
   mirrors and reported in the UI.
@@ -554,8 +571,9 @@ Settings`. This revision does not reintroduce embedded applet child windows.
 - **FR-051:** The default periodic interval for engines without continuous
   monitoring shall be 15 minutes after the previous run completes.
 - **FR-052:** The user shall have Sync Now, Pause, and Resume actions.
-- **FR-053:** `abraunegg/onedrive` continuous monitoring shall be used for
-  OneDrive when supported by the installed release.
+- **FR-053:** OneDrive Offline mirrors shall use scheduled rclone bisync plus Sync
+  Now; continuous monitoring is not required. Legacy `abraunegg/onedrive`
+  connections keep their monitor service during the transition release.
 - **FR-054:** Only one synchronization operation may run per connection.
 - **FR-055:** Automatic synchronization shall pause on metered networks by
   default, with Sync Now and a per-connection override available.
@@ -585,7 +603,8 @@ Settings`. This revision does not reintroduce embedded applet child windows.
   inactive/non-failed. It shall preserve the renewable bisync lock and direct
   the user to wait through its two-minute maximum or use reviewed manual
   recovery; it shall never delete the lock or trigger implicit resync.
-- **FR-060C:** `abraunegg/onedrive` Repair shall stop and disable only its
+- **FR-060C:** During the transition release, `abraunegg/onedrive` Repair for a
+  legacy connection shall stop and disable only its
   continuous monitor service, reset only observed failed state, and preserve
   its configuration, token, sync database, lock/state, local mirror, recovery
   data, selection, and initialization markers. It shall not create an rclone
@@ -840,35 +859,22 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 | Google Drive, Box, SMB, SFTP, SharePoint Online mount | `rclone` 1.74.3 or newer and FUSE 3 |
 | Google Drive, Box, SMB, SFTP, SharePoint Offline mirror | `rclone` 1.74.3 or newer with required bisync safety features |
 | OneDrive Online mount | `jstaf/onedriver` 0.15.0 or newer |
-| OneDrive Offline mirror | `abraunegg/onedrive` 2.5.10 or newer |
+| OneDrive Offline mirror | `rclone` 1.74.3 or newer with bisync safety features (OneDrive-specific minimum pending) |
+| Legacy OneDrive Offline mirror (transition release only) | `abraunegg/onedrive` 2.5.10 or newer |
 | User service/timer control and optional sleep cleanup | Host systemd user-manager and logind D-Bus services |
 | NetworkManager VPN | NetworkManager D-Bus service |
 | OpenConnect VPN | Host `network-manager-openconnect` plugin and authentication dialog |
 | Interactive OpenConnect authentication | Host `nm-applet` secret agent |
-| Optional OneDrive Offline Mirror sign-in helper | Python 3/PyGObject, GTK 3 and WebKitGTK 4.1 runtime/introspection libraries |
+| Legacy OneDrive sign-in helper (transition release only) | Python 3/PyGObject, GTK 3 and WebKitGTK 4.1 runtime/introspection libraries |
 
 Dependencies shall be checked independently. An unavailable mode shall not
 disable unrelated modes.
 
-The Debian package shall recommend, not require for unrelated storage modes,
-the OneDrive helper runtime (`python3`, `python3-gi`, `gir1.2-gtk-3.0`,
-`gir1.2-webkit2-4.1`). Source dependency setup shall include an explicit helper
-selection and manual-handoff opt-out, validate GI imports without opening a GUI,
-and include the helper check when Offline OneDrive is selected even if its engine
-already meets the minimum. Unverified distribution package variants shall receive
-manual guidance rather than guessed package/USE-flag changes. Flatpak must supply
-the helper runtime inside the accepted sandbox base/runtime; host installation
-does not establish sandbox availability. Manual browser/response-URL handoff
-shall remain available when this optional sign-in window is omitted.
-
-For the accepted Flatpak 25.08 runtime without Python GI, OneDrive Offline setup
-shall select manual browser/response-URL handoff and never spawn the unusable
-WebKit helper. Browser opening shall use the desktop portal asynchronously with
-a bounded request wait, and request acceptance shall not imply authentication
-completion. Handoff files shall be scoped by connection identity in private
-app-owned host-visible state, accessible to both sandbox and host engine, and
-cleaned after setup. Late browser-launch replies shall not update another draft.
-Native setup shall retain its existing interactive/helper behavior.
+The OneDrive sign-in helper (Python 3/PyGObject, GTK 3, WebKitGTK 4.1) and the
+manual browser/response-URL handoff exist only for legacy `abraunegg/onedrive`
+connections. They remain unchanged during the transition release and are removed,
+with the Debian recommendations and the dependency installer options for them, in
+the removal release. rclone OneDrive setup needs neither.
 
 ### 8.3 Permissions
 
@@ -889,7 +895,7 @@ COSMIC configuration, and systemd user services.
 | `app` | COSMIC model, messages, popup, and settings |
 | `model` | Connection, mode, provider, VPN, operation, and status types |
 | `config` | Versioning, validation, migration, and atomic persistence |
-| `providers` | rclone, `jstaf/onedriver`, and `abraunegg/onedrive` adapters |
+| `providers` | rclone and `jstaf/onedriver` adapters (and the legacy `abraunegg/onedrive` adapter until removal) |
 | `mounts` | Mount lifecycle, mount-table inspection, and VFS health |
 | `sync` | Preview, scheduling, conflict/recovery state, and sync lifecycle |
 | `services` | systemd unit/timer rendering and user-manager D-Bus control |
@@ -998,7 +1004,7 @@ a Flatpak-private credential or configuration store:
 
 - the applet's own saved connection list and VPN profile references;
 - existing rclone remotes and credentials;
-- `jstaf/onedriver` and `abraunegg/onedrive` authentication state;
+- `jstaf/onedriver` authentication state (and legacy `abraunegg/onedrive` state until removal);
 - generated user systemd services and timers under the host user session;
 - user-selected mountpoints, mirror directories, cache directories, and
   recovery directories;
@@ -1322,9 +1328,10 @@ not silently restore shell execution.
 ### 11.3 OneDrive services
 
 - Online mount shall use `jstaf/onedriver`'s supported user-service behavior.
-- Offline mirror shall use a dedicated `abraunegg/onedrive` configuration and
-  sync directory per connection.
-- OneDrive monitor mode shall be used when supported.
+- Offline mirror shall use an rclone OneDrive remote, a dedicated local directory
+  and bisync state per connection, and the restricted scheduled worker.
+- Legacy `abraunegg/onedrive` connections keep a dedicated configuration, sync
+  directory and monitor service during the transition release only.
 - Destructive resync/state rebuild options require explicit reviewed recovery.
 
 ### 11.4 Ownership
@@ -1485,8 +1492,8 @@ Remote deletion shall:
      Place SFTP immediately to the right of SMB with matching button styling.
   2. Choose access mode: Online mount or Offline mirror. The provider/mode
      matrix determines the engine.
-  3. Choose account or remote. OneDrive Online uses `jstaf/onedriver`; OneDrive Offline
-     uses `abraunegg/onedrive`; Google Drive, Box, SMB, and SFTP use rclone remotes.
+  3. Choose account or remote. OneDrive Online uses `jstaf/onedriver`; OneDrive Offline,
+     Google Drive, Box, SMB, and SFTP use rclone remotes.
   4. Choose whole remote or remote subtree.
   5. Choose local target: mountpoint for Online mount or mirror directory for
      Offline mirror. Mountpoints and mirror directories are not interchangeable.
@@ -1702,7 +1709,7 @@ evidence boundary.
 - Deletion propagation and recovery retention.
 - Metered-network pause and Sync Now.
 - Google cloud-native document exclusion.
-- OneDrive Offline mirror with `abraunegg/onedrive`.
+- OneDrive Offline mirror with `rclone bisync`.
 - NetworkManager VPN readiness, OpenConnect multi-field authentication through
   the host agent, missing-agent guidance, and non-OpenConnect independence from
   `nm-applet`.
@@ -1764,8 +1771,8 @@ The following decisions are approved and are no longer implementation choices:
    for 30 days; pause automatic sync on metered networks; preview and confirm
    initial synchronization; skip Google cloud-native documents.
 4. **Tool selection:** Use `jstaf/onedriver` for OneDrive Online mount,
-   `abraunegg/onedrive` for OneDrive Offline mirror, and current stable rclone
-   for Google Drive, Box, SMB, and SFTP.
+   and current stable rclone for OneDrive Offline mirror, Google Drive, Box, SMB,
+   and SFTP.
 5. **Legacy imports:** Scan `~/.config/systemd/user/` and allow confirmed import
    of compatible existing rclone and `jstaf/onedriver` services while preserving
    originals by default.
@@ -2026,10 +2033,8 @@ applet must confirm which library it denotes using authenticated metadata.
 
 ### 18.3 Second deliverable: Offline mirror with rclone bisync
 
-- Reuse the verified SharePoint rclone `onedrive` document-library remote. The
-  separate `abraunegg/onedrive` Microsoft app requires tenant administrator
-  approval for the University work account, so it is not a usable default
-  engine here. Keep SharePoint bisync listings, lock, local directory, and recovery
+- Reuse the verified SharePoint rclone `onedrive` document-library remote. Keep
+  SharePoint bisync listings, lock, local directory, and recovery
   data separate from every Online mount and other mirror. Never copy or expose
   rclone tokens in applet configuration.
 - Bind every Preview, Sync Now, and eventual scheduled run to the saved site,
@@ -2166,11 +2171,10 @@ applet update without restarting active mounts.
   with the unit's D-Bus `InvocationID`, tolerate a partially written final
   record, and reject malformed or oversized state. Production code shall not
   scrape `journalctl` output for pending counts.
-- Use the configured abraunegg/onedrive client's read-only
-  `--display-sync-status` for OneDrive mirrors when supported, interpreting its
-  textual status and pending directions rather than its exit code alone.
-  SharePoint rclone mirrors shall use the same coordinator progress path and
-  retain their additional saved-target/access-anchor safety guards.
+- OneDrive and SharePoint rclone mirrors shall use the same coordinator progress
+  path and a bounded bisync Preview for pending counts, and keep their saved-target
+  and access-anchor safety guards. Legacy `abraunegg/onedrive` connections keep
+  their read-only `--display-sync-status` reading during the transition release.
 - onedriver Online mounts expose no supported pending-upload count. Display
   `+` while mounted or `-` while inactive, with an explanation until a reliable
   engine-supported source exists;

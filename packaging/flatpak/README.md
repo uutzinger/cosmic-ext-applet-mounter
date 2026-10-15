@@ -370,6 +370,8 @@ defaults), exact source/runtime identity, generated worker/guard units, and live
 Tasks (5)/(6) behavior before release. Do not enable `development-probes` in the
 shipping build, advance the tag prematurely, or substitute a different base/runtime.
 
+> **Planned (0.5.4):** `abraunegg/onedrive`, its host command and this auth helper are being dropped in favor of `rclone bisync` for OneDrive Offline, so the Flatpak will not need them; see the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md). The text below describes the current state until the removal phase.
+
 The packaged optional OneDrive auth helper uses Python GI, GTK 3, and WebKit2
 4.1 introspection. Final sandbox acceptance must verify those imports and its
 sign-in handoff inside the accepted runtime/base (or document manual URL handoff).
