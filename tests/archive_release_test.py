@@ -84,6 +84,16 @@ class ArchiveRelease(unittest.TestCase):
             self.assertIn("Evidence for 1.0.", (root / "docs/archive/task-list-completion-notes-through-v1.0.0.md").read_text())
             self.assertIn("task-list-completion-notes-through-v1.0.0.md", notes)
 
+    def test_pre_release_label_is_accepted_and_bad_version_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.fixture(tmp)
+            bad = self.run_tool(root, "1.0", "## Release 1.1 work", "### Entry two")
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertFalse((root / "docs").exists())
+            result = self.run_tool(root, "1.0.0-pre", "## Release 1.1 work", "### Entry two")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "docs/archive/task-list-through-v1.0.0-pre.md").exists())
+
     def test_dry_run_writes_nothing_and_reports_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = self.fixture(tmp)

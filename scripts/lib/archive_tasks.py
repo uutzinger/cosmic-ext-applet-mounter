@@ -160,7 +160,7 @@ def apply(args, report):
 
 def main():
     parser = argparse.ArgumentParser(prog="scripts/archive-release.sh", description=__doc__)
-    parser.add_argument("version", help="Released version, for example 0.5.3")
+    parser.add_argument("version", help="Released version, for example 0.5.3, or a pre-release label such as 0.5.4-pre")
     parser.add_argument("--tasks-from", required=True,
                         help="Heading prefix of the first task-list section that stays active")
     parser.add_argument("--notes-from", required=True,
@@ -169,8 +169,8 @@ def main():
     parser.add_argument("--allow-dirty", action="store_true", help="Allow uncommitted edits to the two files")
     parser.add_argument("--log-dir")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
-        parser.error("version must look like 1.2.3")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?", args.version):
+        parser.error("version must look like 1.2.3 or 1.2.3-pre")
     os.chdir(Path(os.environ.get("ARCHIVE_ROOT") or Path(__file__).resolve().parents[2]))
     with TaskReport("archive-release", args.log_dir) as report:
         report.update(ref=f"v{args.version}")
