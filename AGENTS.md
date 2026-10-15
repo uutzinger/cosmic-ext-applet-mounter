@@ -47,6 +47,9 @@ without waiving the general safeguards.
 ### Working rules
 
 - Read a file before editing it. Never revert or reformat changes you did not make.
+- Read only the ${TASK_LIST_FILE} section for the current task and the files it
+  names. Do not read the full ${SPECIFICATION_FILE} or ${DESCRIPTION_FILE} unless the
+  task cites a requirement ID; search for that ID instead.
 - Keep patches to one purpose. Update ${TASK_LIST_FILE} when a task starts and when
   it finishes; mark `[x]` only for what was actually verified.
 - Never put real credentials, tokens or organization names in source, fixtures,
@@ -65,9 +68,13 @@ Use `bash scripts/dev.sh <task>`; it logs to `target/task-runs/`, keeps the real
 exit status and prints a one-line JSON receipt (check `status` and `source_dirty`).
 
 1. After a Rust edit: `check`, then the focused test (`cargo test --locked <name>`).
-2. Before reporting done: `gate` (= `fmt-check`, `lint`, `test`). Add `localization-check`
-   if UI strings or `.ftl` files changed, `metadata-check` if desktop/AppStream
-   files changed.
+   For script/Python changes run only the focused test (for example
+   `python3 -m pytest tests/<name>_test.py`). Do not run `test`, `lint` or `gate`
+   between edits.
+2. Run `gate` (= `fmt-check`, `lint`, `test`) once, only when the whole task is
+   implemented and you are about to report done. Add `localization-check` if UI
+   strings or `.ftl` files changed, `metadata-check` if desktop/AppStream files
+   changed. If `gate` fails, fix, rerun the focused test, then rerun `gate` once more.
 3. Run `verify` only when asked or before a release; it repeats step 2.
 4. On failure read the stderr excerpt, then at most the failing section of
    `task.log`. Do not paste whole logs into the conversation.
