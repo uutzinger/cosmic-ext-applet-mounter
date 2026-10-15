@@ -373,7 +373,7 @@ Plan, decisions and section order:
   - [x] Step 2: sections 12, 10, 11 (124.1 KB to 123.5 KB; IDs unchanged; contracts already dense, little to cut).
   - [x] Step 3: sections 7, 8 (already concise; two edits only).
   - [x] Step 4: section 13 with 6.1 and 6.2 (123.6 KB to 120.0 KB; layout-only 13, tooltip rules merged into FR-011H).
-  - [ ] Step 5 (high effort): sections 6.3-6.5 and 6.7.
+  - [x] Step 5 (high effort): sections 6.3-6.5 and 6.7 (already compact; FR-023 and FR-044D corrected, no size change).
   - [ ] Step 6: section 14.
   - [ ] Step 7 (high effort): sections 17 and 18, folding the unnumbered blocks into 6.x.
   - [ ] Step 8 (high effort): sections 9.4 and 9.5.
