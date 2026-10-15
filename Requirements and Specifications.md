@@ -791,7 +791,7 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 | Google Drive, Box, SMB, SFTP, SharePoint Online mount | `rclone` 1.74.3 or newer and FUSE 3 |
 | Google Drive, Box, SMB, SFTP, SharePoint Offline mirror | `rclone` 1.74.3 or newer with required bisync safety features |
 | OneDrive Online mount | `jstaf/onedriver` 0.15.0 or newer |
-| OneDrive Offline mirror | `rclone` 1.74.3 or newer with bisync safety features (OneDrive-specific minimum pending) |
+| OneDrive Offline mirror | `rclone` 1.74.3 or newer with bisync safety features (a OneDrive-specific minimum is an open item in the [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md)) |
 | Legacy OneDrive Offline mirror (transition release only) | `abraunegg/onedrive` 2.5.10 or newer |
 | User service/timer control and optional sleep cleanup | Host systemd user-manager and logind D-Bus services |
 | NetworkManager VPN | NetworkManager D-Bus service |
@@ -802,11 +802,10 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 Dependencies shall be checked independently. An unavailable mode shall not
 disable unrelated modes.
 
-The OneDrive sign-in helper (Python 3/PyGObject, GTK 3, WebKitGTK 4.1) and the
-manual browser/response-URL handoff exist only for legacy `abraunegg/onedrive`
-connections. They remain unchanged during the transition release and are removed,
-with the Debian recommendations and the dependency installer options for them, in
-the removal release. rclone OneDrive setup needs neither.
+The OneDrive sign-in helper and the manual browser/response-URL handoff exist only
+for legacy `abraunegg/onedrive` connections. They are unchanged during the
+transition release and removed, with their Debian recommendations and installer
+options, in the removal release. rclone OneDrive setup needs neither.
 
 ### 8.3 Permissions
 
