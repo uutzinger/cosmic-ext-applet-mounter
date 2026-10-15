@@ -199,6 +199,9 @@ Do not run both a recipe and its Cargo equivalent.
   every still-open item verbatim into the active list's "Open items carried forward"
   section. Use `bash scripts/archive-release.sh <version> --tasks-from <heading> --notes-from <heading>`
   (`--dry-run` first); it edits files only and never commits. Do not delete history.
+  The script appends the open items verbatim; afterwards move that verbatim text
+  to `Task List Carry Forward.md` and leave one condensed `[ ]` line per item in the
+  active list, which stays authoritative for status.
 
 ### Engineering records
 
