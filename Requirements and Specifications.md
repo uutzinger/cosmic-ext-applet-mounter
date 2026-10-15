@@ -932,13 +932,18 @@ configuration. Manual and generated scheduled bisync execution shall use the
 shared Rust coordinator, not a host shell wrapper. Display-only manual-auth
 instructions and test/deployment scripts are not applet runtime execution.
 
-Output shall be bounded, decoded safely, and redacted before logging.
+Output shall be bounded, decoded safely, and redacted (secrets, OAuth URLs,
+tokens, passwords) before display or logging. Every host command, native or
+Flatpak, shall have a fixed executable identity, separate validated arguments,
+and a bounded lifetime and cancellation behavior equivalent to the native runner.
 
 ### 9.4 Flatpak execution architecture
 
 Native, Debian, and Flatpak installations shall share the same typed D-Bus and
-native integration interfaces. Flatpak is an additional packaging target, not a
-separate implementation. Because the applet coordinates host storage, FUSE
+native integration interfaces; Flatpak is an additional packaging target, not a
+separate implementation, and its specific behavior is confined to required bus
+permissions, portal/sandbox setup, host-visible paths, and the narrow
+command-runner boundary. Because the applet coordinates host storage, FUSE
 mounts, host user systemd units, existing provider configuration, and host VPN
 state, the sandbox shall receive only the D-Bus and filesystem access required
 for those operations.
@@ -954,74 +959,64 @@ The following host operations shall use D-Bus rather than
   required API.
 
 `flatpak-spawn --host` is not the default host-integration mechanism. It may be
-used only for an invocation classified in `docs/engineering/flatpak-host-command-inventory.md` as an unavoidable
-storage-engine operation, required FUSE/host-namespace helper, or documented, version-gated compatibility
-fallback. Production invocations classified as obsolete shall be removed.
-Tests and standalone transport probes shall not be treated as production
-requirements.
+used only for an invocation classified in
+`docs/engineering/flatpak-host-command-inventory.md` as an unavoidable
+storage-engine operation, required FUSE/host-namespace helper, or documented,
+version-gated compatibility fallback. Production invocations classified as
+obsolete shall be removed. Tests and standalone transport probes are not
+production requirements. Every remaining host command shall meet the Section 9.3
+execution rules.
 
-Every remaining host command shall preserve the safety model:
-
-- fixed executable identities rather than arbitrary shell commands;
-- separate validated arguments;
-- no `sh -c` or command concatenation;
-- bounded stdout and stderr capture;
-- bounded lifetime and cancellation behavior equivalent to the native runner;
-- redaction of secrets, OAuth URLs, tokens, and passwords before display or
-  logging.
-
-Read-only host inspection shall accept only `RcloneConfigDump` and `HostMountInfo`.
-Configuration capture shall be limited to 1 MiB per stream and mountinfo capture
-to 4 MiB, with a 10-second execution deadline, no retries, cancellation, and
-bounded child cleanup. Deadlines shall include output-pipe draining; Flatpak
-inspection children shall exit when their transport disappears (`--watch-bus`).
-Reject truncated, invalid-UTF-8, or malformed results instead of applying partial
-data. Native mountinfo shall use a bounded asynchronous local `/proc` read.
-GUI completions shall carry parsed non-secret metadata, not raw configuration.
-Superseded discovery/prefill shall cancel old work and reject late results after
-identity/revision/user-edit changes. UI rendering shall read a refreshed mount
-snapshot without executing host commands; failed/obsolete reads shall not imply
-mount disappearance. Safety-critical setup, unmount, repair, and shared-VPN
-release shall obtain fresh observations and fail closed on inspection failure,
-including OneDrive isolation after potentially long authentication.
+Read-only host inspection shall accept only `RcloneConfigDump` and
+`HostMountInfo`. Configuration capture shall be limited to 1 MiB per stream and
+mountinfo capture to 4 MiB, with a 10-second execution deadline, no retries,
+cancellation, and bounded child cleanup. Deadlines shall include output-pipe
+draining; Flatpak inspection children shall exit when their transport disappears
+(`--watch-bus`). Reject truncated, invalid-UTF-8, or malformed results instead of
+applying partial data. Native mountinfo shall use a bounded asynchronous local
+`/proc` read. GUI completions shall carry parsed non-secret metadata, not raw
+configuration. Superseded discovery/prefill shall cancel old work and reject late
+results after identity/revision/user-edit changes. UI rendering shall read a
+refreshed mount snapshot without executing host commands; failed or obsolete
+reads shall not imply mount disappearance. Safety-critical setup, unmount,
+repair, and shared-VPN release shall obtain fresh observations and fail closed on
+inspection failure, including OneDrive isolation after potentially long
+authentication.
 
 The following resources are host resources and shall not be silently copied into
 a Flatpak-private credential or configuration store:
 
 - the applet's own saved connection list and VPN profile references;
 - existing rclone remotes and credentials;
-- `jstaf/onedriver` authentication state (and legacy `abraunegg/onedrive` state until removal);
+- `jstaf/onedriver` authentication state (and legacy `abraunegg/onedrive` state
+  until removal);
 - generated user systemd services and timers under the host user session;
 - user-selected mountpoints, mirror directories, cache directories, and
   recovery directories;
 - NetworkManager VPN state.
 
 Flatpak installations shall use the same user-visible applet configuration as
-native source and Debian installations, or shall migrate to that configuration
-with explicit user-visible behavior. A user who switches between native and
-Flatpak packaging shall not be forced to recreate saved connections solely
-because Flatpak changed `XDG_CONFIG_HOME`. The implementation may accomplish
-this with a narrow host-side helper/bridge for configuration and unit writes,
-or with a documented host-visible configuration path, but it shall not silently
-use an isolated sandbox configuration for normal operation.
-
-Any host-side helper or bridge shall keep the same safety constraints as the
-native code path: fixed operations, validated connection IDs and paths, applet
-ownership markers for unit changes, atomic writes, no secret disclosure, and no
-general-purpose shell execution. The helper shall also make clear which state is
-applet-owned and which remains provider-owned by rclone, onedriver, onedrive,
-NetworkManager, OpenConnect, or systemd.
+native source and Debian installations, or shall migrate to it with explicit
+user-visible behavior; a user switching between native and Flatpak packaging
+shall not be forced to recreate saved connections because Flatpak changed
+`XDG_CONFIG_HOME`. This may use a narrow host-side helper/bridge for
+configuration and unit writes, or a documented host-visible configuration path,
+but normal operation shall not silently use an isolated sandbox configuration.
+Any such helper shall keep the native safety constraints (fixed operations,
+validated connection IDs and paths, applet ownership markers for unit changes,
+atomic writes, no secret disclosure, no general-purpose shell execution) and
+shall make clear which state is applet-owned and which remains provider-owned by
+rclone, onedriver, onedrive, NetworkManager, OpenConnect, or systemd.
 
 Flatpak permissions shall start from the accepted COSMIC applet pattern with
 Wayland/session access. Add narrowly scoped access to NetworkManager, the
 systemd user manager, logind, portals, and the applet runtime interface as each
 feature requires. Retain `--talk-name=org.freedesktop.Flatpak` only while a
-justified `flatpak-spawn --host` invocation remains. Broader filesystem access, including
-`--filesystem=host`, is permitted only if prototype testing proves narrower
-permissions cannot support user-selected storage targets, generated host
-services, or host-visible FUSE mounts. Any broader permission must be documented
-in the Flatpak manifest notes, README, and submission pull request.
-
+justified `flatpak-spawn --host` invocation remains. Broader filesystem access,
+including `--filesystem=host`, is permitted only if prototype testing proves
+narrower permissions cannot support user-selected storage targets, generated host
+services, or host-visible FUSE mounts, and any broader permission shall be
+documented in the Flatpak manifest notes, README, and submission pull request.
 Flatpak publication shall be rejected or postponed if testing shows that the
 package cannot expose mounts to ordinary host applications, cannot manage the
 intended host user services, silently uses different rclone or OneDrive
@@ -1030,81 +1025,75 @@ requires unjustified unrestricted host access.
 
 The Documents portal implementation shall use sandbox-capable `GetHostPaths`
 when portal version 5 or newer is available. On supported systems exposing only
-portal version 4, a narrowly version-gated `flatpak document-info` host fallback
-may remain because `Info` and `Lookup` are forbidden to the sandbox and
-`GetHostPaths` is unavailable. The fallback shall be removed when portal v5 can
-be required and shall not establish a general host-command exception.
+version 4, a narrowly version-gated `flatpak document-info` host fallback may
+remain because `Info` and `Lookup` are forbidden to the sandbox and
+`GetHostPaths` is unavailable; it shall be removed when portal v5 can be required
+and shall not establish a general host-command exception. A nested or ungated
+`flatpak document-info` path is not permitted. Portal results shall support
+direct and app-scoped document IDs, decode NUL-terminated byte paths safely, and
+reject non-absolute host paths. Native execution may use portal `Info`; sandbox
+execution shall not rely on portal methods forbidden to sandbox callers. Standard
+portal access shall not acquire an unnecessary additional Flatpak permission.
 
-Portal results shall support direct and app-scoped document IDs, decode
-NUL-terminated byte paths safely, and reject non-absolute host paths. Native
-execution may use portal `Info`; sandbox execution shall not rely on portal
-methods forbidden to sandbox callers. Standard portal access shall not acquire
-an unnecessary additional Flatpak permission.
+OpenConnect authentication-agent startup and the rule that the Flatpak never
+executes `nm-applet`, `systemctl`, or the authentication dialog are specified in
+FR-084 through FR-084D.
 
-For an OpenConnect profile only, the applet shall start the installed static
-`cosmic-mounter-openconnect-agent.service` through the systemd user-manager
-D-Bus and wait for successful job completion before asking NetworkManager to
-activate the profile. NetworkManager, not the applet, owns the subsequent D-Bus
-secret exchange and launches the host authentication dialog. The Flatpak shall
-not execute `nm-applet`, `systemctl`, or the dialog and shall not require
-`nm-applet` for other VPN service types.
-
-Migration completion requires reconciliation against `docs/engineering/flatpak-host-command-inventory.md`. Every
-production row shall end as **Replaced by D-Bus**, **Removed**, or an explicitly
-justified **Unavoidable invocation**; no unresolved replaceable, obsolete, or
-mixed disposition may remain. A production-reachability scan shall exclude only
-test code, examples, and the standalone transport probe and shall confirm that
+Migration completion requires reconciliation against
+`docs/engineering/flatpak-host-command-inventory.md`. Every production row shall
+end as **Replaced by D-Bus**, **Removed**, or an explicitly justified
+**Unavoidable invocation**; no unresolved replaceable, obsolete, or mixed
+disposition may remain. A production-reachability scan shall exclude only test
+code, examples, and the standalone transport probe and shall confirm that
 obsolete executable variants, parsers, permissions, translations, and
-documentation are removed. A nested or ungated `flatpak document-info` path is
-not permitted.
-
-Native source and Debian packages shall use the same typed NetworkManager and
-systemd adapters as the Flatpak. Flatpak-specific behavior shall be confined to
-required bus permissions, portal/sandbox setup, host-visible paths, and the
-narrow command-runner boundary. Packaging documentation and the submission
-rationale shall identify every remaining host command and host-visible path and
-justify its permission.
+documentation are removed. Packaging documentation and the submission rationale
+shall identify every remaining host command and host-visible path and justify its
+permission.
 
 ### 9.5 General Settings runtime coordination
 
 - Add a distinct General Settings launch mode and `--app-settings` argument.
-  Preserve existing `--settings`/`--add-connection` aliases for the connection
-  wizard, avoiding a silent change to scripts or existing launch paths.
-- Use one standalone General Settings process, with repeat gear activation
-  focusing that window. Reuse existing native/Flatpak executable resolution.
+  Preserve the existing `--settings`/`--add-connection` aliases for the
+  connection wizard, avoiding a silent change to scripts or existing launch
+  paths. Use one standalone General Settings process, with repeat gear
+  activation focusing that window, and reuse existing native/Flatpak executable
+  resolution.
 - Add a session-bus runtime interface owned by the panel applet (bus name
   `io.github.uutzinger.cosmic-ext-applet-mounter.Runtime`). It shall support
   applying sleep preferences, Refresh, reading runtime/cleanup status, and
   notification of saved connection changes. Use request/reply completion and
   status updates so General Settings never reports success for a request that
-  did not reach the owner. Poll status every two seconds while Settings is open;
-  background polls shall not disable or visually blink Refresh or the sleep
-  controls. Disable controls for user-requested actions and unavailable runtime
-  state as appropriate. Discard replies from polls predating a user action,
-  including stale errors, even if the action finishes first.
-  Serialize preference writes and acknowledge saved preferences separately
-  from the listener's readiness status. Reserve both Runtime and Settings bus
-  names without replacement to prevent duplicate owners/listeners. If multiple
-  panel instances contain the applet, non-owning instances shall use the
-  existing runtime service as clients and shall not report the expected name
-  ownership collision as a communication failure. Check the corresponding Flatpak bus grants during
-  implementation; do not assume a separately launched process shares memory.
+  did not reach the owner.
+  - Poll status every two seconds while Settings is open; background polls shall
+    not disable or visually blink Refresh or the sleep controls. Disable
+    controls for user-requested actions and unavailable runtime state as
+    appropriate. Discard replies from polls predating a user action, including
+    stale errors, even if the action finishes first.
+  - Serialize preference writes and acknowledge saved preferences separately
+    from the listener's readiness status.
+  - Reserve both Runtime and Settings bus names without replacement to prevent
+    duplicate owners/listeners. If multiple panel instances contain the applet,
+    non-owning instances shall use the existing runtime service as clients and
+    shall not report the expected name-ownership collision as a communication
+    failure.
+  - The corresponding Flatpak bus grants shall be checked during implementation;
+    do not assume a separately launched process shares memory.
 - The runtime owner shall reload the latest document, validate and persist only
   the requested settings, update its in-memory config and subscriptions, then
-  acknowledge the change. Preserve unrelated fields, defaults and current keys
+  acknowledge the change. Preserve unrelated fields, defaults and the current keys
   `unmount_before_sleep` and `restore_after_wake`. Preload updates shall apply
   one complete validated provider policy at a time so concurrent settings
   replies cannot combine stale enabled, duration, or depth values.
-- Refresh shall retain configuration reload and asynchronous VPN/status checks
-  in the running applet and return completion/failure to General Settings. It
-  shall not mount, unmount, sync, or replace an in-flight operation as a side
-  effect. Preserve unresolved errors separately from the Refresh result.
+- Refresh shall retain configuration reload and asynchronous VPN/status checks in
+  the running applet and return completion/failure to General Settings. It shall
+  not mount, unmount, sync, or replace an in-flight operation as a side effect.
+  Preserve unresolved errors separately from the Refresh result.
 - Add Connection shall reuse the existing wizard launch path. On a successful
   save, notify the runtime owner to reload the connection list; retain popup
   reopen/reload as a recovery path if the owner is temporarily unavailable.
 - General Settings shall not start another sleep listener or execute duplicate
-  mount operations. If the runtime owner is unavailable, show that explicitly
-  and do not silently claim that runtime settings/Refresh were applied.
+  mount operations. If the runtime owner is unavailable, show that explicitly and
+  do not silently claim that runtime settings/Refresh were applied.
 - Closing General Settings or the editor shall not exit the applet, cancel
   unrelated work, or release the applet-owned inhibitor. Keep settings-action
   notices distinct from popup runtime notices and editor-local notices.

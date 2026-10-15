@@ -2,7 +2,7 @@
 
 Type: Design
 
-Status: Approved plan (October 15, 2026); steps 1-7 done (all sections except 9.4 and 9.5).
+Status: Approved plan (October 15, 2026); steps 1-8 done (all sections; step 9 final checks remain).
 This record is an observed baseline of the specification at commit 936c2f0, not a
 claim about the product.
 
