@@ -1447,11 +1447,8 @@ Details shall show:
 
 ### 14.1 Automated tests
 
-Planned A/B acceptance coverage is tracked in `Task List.md`, section “VPN
-Authentication Wait and Sleep Cleanup”: fake-clock VPN deadlines/cancellation,
-sleep lifecycle and service-stop races, plus native/Flatpak live acceptance.
-
-
+- Fake-clock VPN deadlines and cancellation, and sleep lifecycle and
+  service-stop races.
 - Configuration serialization, migration, and invalid-data recovery.
 - Mode/path overlap and recursive-sync validation.
 - Dependency version and capability checks.
@@ -1513,60 +1510,53 @@ evidence boundary.
 
 ### 14.3 Manual acceptance tests
 
-- Open/focus General Settings using the title-row gear, including an empty
-  popup, and open the existing Add Connection wizard from that window.
-- Verify that the popup contains only title/gear, status/notices and connections;
-  enabling sleep options does not add popup controls or shrink the list.
+- General Settings: open/focus from the title-row gear (including an empty popup)
+  and open the Add Connection wizard from it; check gear focus, icon fallback,
+  standalone title, duplicate-window handling and runtime-owner unavailability.
+- Verify the popup contains only title/gear, status/notices and connections, and
+  that enabling sleep options neither adds popup controls nor shrinks the list.
 - Verify Refresh from General Settings updates the actual applet, including
   asynchronous VPN status, without clearing unrelated unresolved errors.
 - Change sleep settings with the popup closed and confirm one runtime listener
-  updates immediately; closing settings shall leave that listener active.
-- Verify gear focus, icon fallback, standalone title, duplicate-window handling,
-  runtime-owner unavailability, native/Flatpak IPC, and save/reload propagation.
+  updates immediately and stays active when settings close; verify native and
+  Flatpak IPC and save/reload propagation.
 - Verify mount/unmount/repair failures remain visible in popup status, while
-  remote creation, authentication, detection and save feedback remain in the
-  connection editor. Check sleep warnings with General Settings closed.
-- Verify Google Drive, Box and SMB remote-name help covers creation and existing
-  remote selection in Add mode and avoids hidden-action instructions in Modify.
+  remote creation, authentication, detection and save feedback stay in the
+  connection editor; check sleep warnings with General Settings closed.
+- Place Cloud Mounter on two panels and verify one runtime owner serves both
+  without a Settings communication warning or duplicate sleep listener.
 - Expire or invalidate a disposable rclone OAuth credential and verify Mount
   fails before FUSE starts, reports reauthorization guidance, and leaves the
   local mountpoint responsive.
-- Place Cloud Mounter on two panels and verify one runtime owner serves both
-  instances without a Settings communication warning or duplicate sleep listener.
 - For Google Drive, compare cold first-level and nested browsing with a
-  recursive fast-list VFS refresh; verify the refresh remains in the background
-  and is cancelled by unmount and sleep. Inject a top-level successful RC job
-  containing a provider error in `output.result` and verify it is reported as a
-  failure.
+  recursive fast-list VFS refresh; verify the refresh stays in the background and
+  is cancelled by unmount and sleep. Inject a top-level successful RC job with a
+  provider error in `output.result` and verify it is reported as a failure.
 - For OneDrive, verify the directory-only preload stops at the configured
-  60-second default, does not read file contents, and is cancelled before
-  unmount and sleep. Check completion/timeout notices only if implemented.
+  60-second default, does not read file contents, is cancelled before unmount and
+  sleep, and shows the completion/timeout notices.
 - For Box, verify depth 2 warms first browsing without HTTP 429, preserves
   partial progress at timeout, and cancels before unmount and sleep.
 - For SMB, test at least one LAN and one VPN connection. Verify depth 3 warms
   first browsing, global defaults and per-connection overrides remain
   independent, timeout preserves partial progress, and cancellation precedes
   unmount and sleep.
-- Verify each popup row shows a clickable connection name, one primary
-  compact state control, and no separate static provider/local/VPN chips.
-- Verify popup primary operation controls dispatch Mount, Unmount, Start, or
-  Stop requests as applicable.
-- Verify Preview, Sync Now, Retry, Repair, Details, Remove, provider, mode,
-  local path, remote details, and detailed status are available from Add/Modify
-  or diagnostics workflows rather than repeated in the main popup.
-- Verify Add/Modify/Import workflows can add, edit, test, enable, disable,
-  import, and remove connections without editing files by hand.
-- Verify the Add/Modify/Import window title is `Cloud Mounter Connection
-  Settings`.
-- Verify Add/Modify workflows expose all approved provider, mode, local path, cache, sync,
-  metered, VPN, dependency, import, recovery, and confirmation options.
-- Verify Add mode starts with an empty display-name field and suggested
-  placeholder text.
-- Verify Modify mode locks provider and access-mode changes unless a future
-  conversion flow is implemented.
-- Verify rclone-backed Add mode can detect remotes, create provider-specific
-  remotes, wrap detected remote choices, refuse removal of in-use remotes, and
-  remove only a selected unused remote after confirmation.
+- Popup rows: each shows a clickable name and one compact primary state control
+  that dispatches Mount, Unmount, Start or Stop, with no static provider, path
+  or VPN chips; Preview, Sync Now, Retry, Repair, Details, Remove and static
+  settings are available from Add/Modify or diagnostics, not repeated in the
+  popup.
+- Add/Modify/Import: workflows add, edit, test, enable, disable, import and remove
+  connections without hand-editing files; the window title is `Cloud Mounter
+  Connection Settings`; all approved provider, mode, path, cache, sync, metered,
+  VPN, dependency, import, recovery and confirmation options are present; Add
+  starts with an empty display-name field and placeholder text; Modify locks
+  provider and access mode.
+- rclone-backed Add mode detects remotes, creates provider-specific remotes,
+  wraps detected choices, refuses removal of in-use remotes, and removes only a
+  selected unused remote after confirmation. Remote-name help covers creation and
+  existing-remote selection in Add mode and avoids hidden-action instructions in
+  Modify.
 - Online mount with a disposable rclone remote.
 - Safe connectivity loss with an empty write queue.
 - Connectivity loss while writes are pending.
