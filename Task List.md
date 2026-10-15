@@ -369,7 +369,7 @@ Plan, decisions and section order:
 - [ ] Condense `Requirements and Specifications.md` section by section in the
   planned order, keeping every requirement ID and every safety-critical "shall";
   commit after each step.
-  - [ ] Step 1: preamble, sections 1-5, 15, 16.
+  - [x] Step 1: preamble, sections 1-5, 15, 16 (130 KB to 124 KB; 199 IDs unchanged; section 16 reduced to application identity).
   - [ ] Step 2: sections 12, 10, 11.
   - [ ] Step 3: sections 7, 8.
   - [ ] Step 4: section 13 with 6.1 and 6.2.

@@ -2,7 +2,7 @@
 
 Type: Design
 
-Status: Approved plan (October 15, 2026); no specification section condensed yet.
+Status: Approved plan (October 15, 2026); step 1 (preamble, sections 1-5, 15, 16) done.
 This record is an observed baseline of the specification at commit 936c2f0, not a
 claim about the product.
 

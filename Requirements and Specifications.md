@@ -2,67 +2,40 @@
 
 ## Requirements and Specifications
 
-This document translates `Applet Description.md`, existing scripts, existing
-systemd user services, and archived cloud-drive connection examples into
-testable product requirements and a proposed technical design.
-
-`Applet Description.md` is the source of truth when this document and the source description disagree.
-
-### Release delivery boundary — October 13, 2026
-
-Release 0.5.3 shall support native source and Debian delivery with the current
-engine matrix. Native OneDrive Offline setup shall retain engine-interactive
-authentication and the optional installed WebKit helper for Manual Auth Handoff;
-it shall not inherit the experimental Flatpak forced-copy/paste default. Final
-Flatpak package acceptance/submission is deferred to 0.5.4, whose engine-retention
-decision must precede implementation or migration. Long-term sandbox requirements
-remain planned requirements, not a claim of 0.5.3 delivered support.
-
-Engine decision for 0.5.4 (October 14, 2026): `abraunegg/onedrive` is dropped and
-OneDrive Offline mirrors move to `rclone bisync`; see
-[OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
-The statements above describe the 0.5.3 delivery; the requirements below describe
-the target and name the transition for existing connections.
+This document translates `Applet Description.md` into testable product
+requirements and a technical design. `Applet Description.md` is the source of
+truth, including product status and acceptance-pending scope; if the two
+disagree, the description wins.
 
 ## 1. Purpose
 
-The Cloud Mounter Applet manages cloud and network storage connections from the
-COSMIC™ desktop panel. Each connection uses one of two mutually exclusive
-access modes:
-
-- **Online mount:** A network-backed filesystem that provides on-demand access.
-- **Offline mirror:** An ordinary local directory synchronized bidirectionally
-  with a remote location.
-
-A connection may depend on a VPN. The applet prepares and verifies that VPN
-before mounting or synchronizing.
-
-The applet replaces manually maintained desktop shortcuts, shell scripts, and
-service files while retaining systemd user services as the durable runtime
-mechanism.
+The applet manages cloud and network storage connections from the COSMIC™ panel.
+Each connection uses one of two mutually exclusive access modes: **Online mount**
+(a network-backed filesystem with on-demand access) or **Offline mirror** (an
+ordinary local directory synchronized bidirectionally with a remote location). A
+connection may depend on a VPN that the applet prepares and verifies before
+mounting or synchronizing. The applet replaces manually maintained shortcuts,
+scripts and service files while keeping systemd user services as the durable
+runtime mechanism.
 
 ## 2. Goals
 
-- Show every applet-managed storage connection and its current state.
-- Let the user choose Online mount or Offline mirror for each connection.
-- Prevent cloud connectivity from blocking the file manager when Offline mirror mode is selected.
-- Reduce file-manager stalls for Online mounts through health monitoring,
-  bounded timeouts, safe detachment, and automatic recovery.
-- Mount, unmount, synchronize, pause, resume, and inspect individual
-  connections.
-- Treat the popup connection switch as the persistent desired state: Online
-  mounts that are on return at the next login, while stopped mounts and mirrors
-  remain stopped.
-- Configure optional NetworkManager VPN dependencies, including
-  Cisco-compatible gateways provided through the OpenConnect plugin.
-- Detect, create, select, and safely remove unused rclone remotes for Google
-  Drive, Box, SMB, and SFTP workflows.
-- Generate and manage applet-owned systemd user services and timers.
-- Import compatible existing rclone and `jstaf/onedriver` user services.
+- Show every applet-managed connection and its state, and let the user mount,
+  unmount, synchronize, pause, resume and inspect each one.
+- Prevent cloud connectivity from blocking the file manager in Offline mirror mode,
+  and reduce stalls for Online mounts through health monitoring, bounded
+  timeouts, safe detachment and automatic recovery.
+- Treat the popup switch as the persistent desired state: Online mounts that are
+  on return at the next login; stopped mounts and mirrors stay stopped.
+- Configure optional NetworkManager VPN dependencies, including Cisco-compatible
+  gateways through the OpenConnect plugin.
+- Detect, create, select and safely remove unused rclone remotes for Google Drive,
+  Box, SMB and SFTP.
+- Generate and manage applet-owned systemd user services and timers, and import
+  compatible existing rclone and `jstaf/onedriver` services.
 - Preserve both sides of synchronization conflicts and provide recovery copies.
 - Detect missing or outdated dependencies without installing software.
-- Keep credentials out of applet configuration, generated units, logs, and
-  notifications.
+- Keep credentials out of configuration, generated units, logs and notifications.
 
 ## 3. Current Scope
 
@@ -70,45 +43,41 @@ mechanism.
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| Microsoft OneDrive | ``jstaf/onedriver`` | `rclone bisync` |
+| Microsoft OneDrive | `jstaf/onedriver` | `rclone bisync` |
 | Google Drive | `rclone mount` | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
 
-Only the providers and engines in this matrix are included. SFTP editor support is implemented; remaining implementation and acceptance
-are tracked in Section 17 and
-`Task List.md`.
+Only the providers and engines in this matrix are included. SharePoint document
+libraries are specified in Section 18. Implementation and acceptance status is
+kept in `Applet Description.md` and `Task List.md`.
 
 ### 3.2 Included
 
-- COSMIC panel icon, popup, and standalone connection settings window.
-- Live connection, mount, synchronization, network, and VPN status.
-- Add, edit, validate, test, enable, disable, and remove connections.
-- Applet-driven rclone remote detection, creation, selection, and confirmed
+- COSMIC panel icon, popup, and standalone settings windows.
+- Live connection, mount, synchronization, network and VPN status.
+- Add, edit, validate, test, enable, disable and remove connections.
+- Applet-driven rclone remote detection, creation, selection and confirmed
   removal of unused remotes.
 - Online mount lifecycle and health management.
 - Offline mirror initialization, scheduling, synchronization, conflict
-  preservation, deletion propagation, and recovery retention.
-- NetworkManager VPN enumeration, activation, deactivation, and state monitoring
-  over D-Bus.
-- OpenConnect interactive authentication through NetworkManager and a host
-  `nm-applet` secret agent when the selected profile requires it.
-- Dependency and version checks for rclone, `jstaf/onedriver`, FUSE, and
-  supporting utilities (plus `abraunegg/onedrive` for legacy connections until
-  its removal).
-- Import of compatible legacy services found in
-  `~/.config/systemd/user/`.
+  preservation, deletion propagation and recovery retention.
+- NetworkManager VPN enumeration, activation, deactivation and state monitoring
+  over D-Bus, including OpenConnect authentication through a host `nm-applet`
+  secret agent when the profile requires it.
+- Dependency and version checks for the external tools.
+- Import of compatible legacy services from `~/.config/systemd/user/`.
 - Localized UI strings and accessible controls.
 
 ### 3.3 Non-goals
 
-- Implementing storage, synchronization, or VPN protocols in the applet.
+- Implementing storage, synchronization or VPN protocols in the applet.
 - Supporting providers outside the approved matrix.
 - Creating or editing VPN profiles, handling VPN credentials, or implementing a
   VPN authentication client.
 - Treating an Online mount cache as a complete offline copy.
-- Automatically installing packages, adding repositories, or updating tools.
+- Automatically installing packages, adding repositories or updating tools.
 - Storing provider or VPN secrets.
 - Running arbitrary user-entered shell commands.
 - Presenting synchronization as a replacement for backups.
@@ -117,112 +86,68 @@ are tracked in Section 17 and
 
 ### 4.1 Online mount limitations
 
-A FUSE filesystem can still cause an application to wait while the remote
-provider, network, or VPN is unavailable. Bounded timeouts and automatic
-detachment reduce this risk but cannot eliminate it.
-
-The applet shall recommend Offline mirror mode when uninterrupted local browsing
-and editing are required.
+A FUSE filesystem can still make an application wait while the provider, network
+or VPN is unavailable. Bounded timeouts and automatic detachment reduce but cannot
+eliminate this. The applet shall recommend Offline mirror mode when uninterrupted
+local browsing and editing are required. Lazy unmount shall be offered only after
+clean unmount fails and the user explicitly confirms the warned action; queued or
+in-progress writes shall prevent lazy unmount.
 
 ### 4.2 Offline mirror behavior
 
 Offline mirror is a full local working tree, not a mount cache. Applications
-interact only with local files. A background engine compares the local and remote
-trees when required connectivity is available.
-
-Offline mirror mode uses:
-
-- `rclone bisync` for Microsoft OneDrive, Google Drive, Box, SMB, and SFTP
-  (SharePoint document libraries use rclone as well).
-
-OneDrive Offline uses scheduled synchronization plus Sync Now, not continuous
-monitoring. Existing `abraunegg/onedrive` mirrors are a transition case; see
-FR-031C.
+interact only with local files; a background engine compares local and remote
+trees when required connectivity is available. All Offline mirrors use
+`rclone bisync` (SharePoint document libraries included), as scheduled
+synchronization plus Sync Now, not continuous monitoring. Existing
+`abraunegg/onedrive` mirrors are a transition case; see FR-031C.
 
 ### 4.3 Google cloud-native documents
 
-Google Docs, Sheets, and Slides do not round-trip safely through exported file
-formats. Offline mirror mode shall skip these cloud-native documents, report
-them to the user, and offer to open them in the browser.
+Google Docs, Sheets and Slides do not round-trip safely through exported formats.
+Offline mirror mode shall skip them, report them to the user, and offer to open
+them in the browser.
 
 ### 4.4 NetworkManager VPN control
 
 NetworkManager state is authoritative for saved VPN profile discovery and
-lifecycle. The applet shall use D-Bus for enumeration, activation, state, and
-deactivation and shall not invoke `nmcli` or a proprietary Cisco client.
-
-Cisco-compatible gateways shall use a NetworkManager OpenConnect profile. For an
-OpenConnect profile requiring interactive authentication, NetworkManager shall
-obtain secrets from a host `nm-applet` secret agent over D-Bus. The agent, not
-the applet, launches the multi-field OpenConnect authentication dialog. The
-applet shall neither handle credentials nor invoke the dialog directly.
-For an OpenConnect profile only, the applet shall start the installed static
-authentication-agent user service through the systemd user-manager D-Bus and
-wait for successful job completion before asking NetworkManager to activate the
-profile. It shall never execute `nm-applet` directly. `nm-applet` is an
-OpenConnect-specific dependency in this design; other NetworkManager VPN
-plugins shall not require it unless separately specified.
+lifecycle, and the applet uses D-Bus only (Section 6.9). Cisco-compatible gateways
+use a NetworkManager OpenConnect profile; interactive secrets come from a host
+`nm-applet` agent, an OpenConnect-specific dependency that other VPN plugins shall
+not require unless separately specified.
 
 ### 4.5 Settings windows
 
-General Settings, Add, Modify, and Import run in standalone COSMIC
-application windows launched from the panel applet. They shall not be implemented as embedded applet child
-windows, because embedded child windows may inherit toolkit window titles such
-as `Cosmic - Iced` and may not support reliable title updates in the active
-libcosmic revision. Add/Modify/Import shall retain the title `Cloud Mounter
-Connection Settings`; the new app-wide window shall use `Cloud Mounter
-Settings`. This revision does not reintroduce embedded applet child windows.
+General Settings, Add, Modify and Import run in standalone COSMIC application
+windows launched from the panel applet, not as embedded applet child windows,
+which may inherit toolkit titles such as `Cosmic - Iced` and cannot reliably
+update titles. Add/Modify/Import shall be titled `Cloud Mounter Connection
+Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 
 ## 5. User Workflows
 
-### 5.1 Configure a connection
-
-1. The user selects a provider and one access mode.
-2. The user selects, detects, or creates a remote account and optional remote
-   subtree.
-3. The user selects a mountpoint or local mirror directory.
-4. The applet validates paths, disk space, dependencies, and tool versions.
-5. The applet launches the supported authentication flow or provides exact
-   setup instructions.
-6. The user optionally selects a VPN dependency and readiness checks.
-7. The applet tests the connection and shows a preview.
-8. The user confirms creation.
-9. The applet writes configuration and generated units atomically.
-
-### 5.2 Use an Online mount
-
-1. The user turns on the connection in the popup. This records the persistent
-   intent to mount now and at future logins.
-2. The applet prepares and verifies any required VPN.
-3. The applet starts the mount service.
-4. The applet verifies the actual mount and provider health.
-5. The applet monitors pending writes and connectivity.
-6. On a safe connectivity failure, the applet detaches the mount.
-7. When readiness returns, the applet remounts the connection if it remains
-   enabled.
-8. When the user turns the popup switch off, the applet unmounts the connection
-   and records that it shall remain off at future logins.
-
-### 5.3 Use an Offline mirror
-
-1. The applet estimates remote size and available local space.
-2. The applet runs a dry preview of the initial synchronization.
-3. The UI shows expected uploads, downloads, deletions, and conflicts.
-4. The user explicitly confirms the initial synchronization.
-5. Applications use the local directory whether online or offline.
-6. The applet synchronizes after connectivity returns, periodically while
-   online, and when the user selects Sync Now.
-7. Conflicts preserve both versions and are presented for user review.
-
-### 5.4 Import a legacy connection
-
-1. The applet scans `~/.config/systemd/user/` for compatible rclone and
-   `jstaf/onedriver` services.
-2. It parses only a documented safe subset of unit syntax and arguments.
-3. It shows an import preview, unsupported options, and target conflicts.
-4. The user confirms creation of an applet-managed replacement.
-5. The original service is preserved unless the user separately confirms
-   disabling it.
+1. **Configure:** the user selects a provider and one access mode; selects,
+   detects or creates a remote and optional subtree; chooses a mountpoint or
+   mirror directory; optionally selects a VPN and readiness checks. The applet
+   validates paths, disk space, dependencies and versions, runs the supported
+   authentication flow or shows exact setup instructions, tests the connection,
+   shows a preview, and after confirmation writes configuration and generated
+   units atomically.
+2. **Online mount:** turning the popup switch on records the intent to mount now
+   and at future logins. The applet prepares and verifies any VPN, starts the
+   service, verifies the actual mount and provider health, and monitors pending
+   writes and connectivity. On a safe connectivity failure it detaches, and when
+   readiness returns it remounts while the connection remains enabled. Turning
+   the switch off unmounts and keeps it off at future logins.
+3. **Offline mirror:** the applet estimates remote size and local space, runs a dry
+   preview, and shows expected uploads, downloads, deletions and conflicts. The
+   user explicitly confirms the initial synchronization. Afterwards it
+   synchronizes when connectivity returns, periodically while online, and on Sync
+   Now; conflicts preserve both versions for review.
+4. **Import:** the applet scans `~/.config/systemd/user/`, parses only a documented
+   safe subset of unit syntax, and shows a preview with unsupported options and
+   target conflicts. After confirmation it creates an applet-managed replacement;
+   the original is preserved unless the user separately confirms disabling it.
 
 ## 6. Functional Requirements
 
@@ -1728,7 +1653,7 @@ each manual test session.
 
 ## 15. Current Acceptance Criteria
 
-The current implemented scope is acceptable when:
+The implemented scope is acceptable when:
 
 1. The applet builds and runs in the target COSMIC environment.
 2. Every provider in the approved matrix supports its specified modes.
@@ -1743,79 +1668,31 @@ The current implemented scope is acceptable when:
 10. Compatible legacy services can be previewed and imported without modifying
     the originals by default.
 11. Missing or outdated dependencies produce actionable guidance.
-12. Logs, units, configuration, and notifications contain no secrets.
+12. Logs, units, configuration and notifications contain no secrets.
 13. Automated tests and approved manual acceptance tests pass.
-14. The v0.2 popup and Add/Modify UI refinements pass user-guided visual review,
-    including compact popup rows, bounded scrolling, action-row layout, help
-    tooltip placement, and rclone remote management.
+14. The popup and Add/Modify UI pass user-guided visual review, including compact
+    popup rows, bounded scrolling, action-row layout, help tooltip placement and
+    rclone remote management.
 15. The host-command inventory has no unresolved replaceable or obsolete
     production invocation, and each retained invocation and permission has a
     documented justification.
-16. Focused adapter tests, formatting, all-target compilation, strict Clippy,
-    the full test suite, `just build`, and `just build-changed` pass before the
-    Flatpak packaging pull request.
+16. Focused adapter tests, formatting, all-target compilation, strict Clippy, the
+    full test suite, `just build` and `just build-changed` pass before the Flatpak
+    packaging pull request.
 17. The installed rebuilt Flatpak passes live NetworkManager/OpenConnect and
     generated mount/mirror service lifecycle tests before submission.
 
-## 16. Decisions Required Before Development
+## 16. Application Identity
 
-### 16.1 Resolved decisions
+Behavioral decisions formerly listed here live in the functional requirements,
+Sections 3 and 9; this section keeps only the fixed identity.
 
-The following decisions are approved and are no longer implementation choices:
+- Package and binary: `cosmic-ext-applet-mounter`
+- App ID: `io.github.uutzinger.cosmic-ext-applet-mounter`
+- Repository: `https://github.com/uutzinger/cosmic-ext-applet-mounter`
+- License: MIT
+- Authors: Urs Utzinger and OpenAI Codex
 
-1. **Provider scope:** Support only Microsoft OneDrive, Google Drive, Box, SMB, and
-   SFTP using the matrix in Section 3.1.
-2. **Access modes:** Include both Online mount and Offline mirror in version 0.1.
-3. **Offline synchronization:** Use bidirectional synchronization; propagate
-   deletions; preserve both conflict versions; retain deleted/overwritten files
-   for 30 days; pause automatic sync on metered networks; preview and confirm
-   initial synchronization; skip Google cloud-native documents.
-4. **Tool selection:** Use `jstaf/onedriver` for OneDrive Online mount,
-   and current stable rclone for OneDrive Offline mirror, Google Drive, Box, SMB,
-   and SFTP.
-5. **Legacy imports:** Scan `~/.config/systemd/user/` and allow confirmed import
-   of compatible existing rclone and `jstaf/onedriver` services while preserving
-   originals by default.
-6. **Default rclone cache:** Use 20 GiB per Online mount, configurable in advanced
-   settings.
-7. **Application identity:**
-   - Package and binary: `cosmic-ext-applet-mounter`
-   - App ID: `io.github.uutzinger.cosmic-ext-applet-mounter`
-   - Planned repository:
-     `https://github.com/uutzinger/cosmic-ext-applet-mounter`
-   - License: MIT
-   - Authors: Urs Utzinger and OpenAI Codex
-   - Repository creation: performed manually by Urs Utzinger later
-8. **Lazy unmount:** Offer lazy unmount only after clean unmount fails and the
-   user explicitly confirms the warned action. Queued or in-progress writes
-   shall prevent lazy unmount.
-9. **VPN shutdown:** Automatically disconnect only a VPN the applet activated,
-   and only when no active connection still depends on it.
-10. **Applet-driven rclone setup:** The applet may create Google Drive, Box, SMB, and
-    SFTP rclone remotes through fixed validated `rclone config create` commands.
-    Provider authentication and SMB/SFTP password storage remain with rclone
-    or the selected SSH agent.
-11. **Rclone remote removal:** The applet may remove unused rclone remotes from
-    rclone configuration only after explicit confirmation and only when no saved
-    applet connection references the remote.
-12. **Version 0.2 popup UI:** The main popup uses compact connection rows with a
-    clickable name and one primary slider/toggle-style state control. Static
-    provider, mode, local path, and remote details belong in Add/Modify.
-13. **Version 0.2 Add/Modify UI:** Add and Modify share one editor. Modify locks
-    provider and access-mode changes, moves secondary actions such as Preview
-    and Sync Now into the editor, and uses tooltips for field-specific help.
-14. **Flatpak host integration:** Use stable D-Bus or native APIs before host
-    process execution. NetworkManager, the systemd user manager, logind, and the
-    Documents portal use D-Bus where the supported host API permits it. Retain
-    `flatpak-spawn --host` only for inventoried unavoidable storage-engine calls
-    and narrowly version-gated compatibility fallbacks.
-15. **VPN scope:** Support saved NetworkManager VPN profiles only. A
-    Cisco-compatible gateway uses the NetworkManager OpenConnect plugin. For an
-    OpenConnect profile only, NetworkManager obtains interactive secrets from a
-    host `nm-applet` agent over D-Bus; the applet never controls proprietary
-    Cisco software or handles VPN credentials.
-
-All current design decisions required for the implemented scope are resolved.
 Future feature work shall update this specification and `Task List.md` before
 implementation.
 
