@@ -359,6 +359,26 @@ onedrive-guard-check: check-complete
 - [ ] Finalize 0.5.4 metadata/notes/checksums, inspect native/final Flatpak artifacts
   and obtain release publication/COSMIC packaging submission approval.
 
+## Agent context reduction — October 15, 2026
+
+Plan, decisions and section order:
+[requirements condensation plan](docs/engineering/requirements-specification-condensing-design.md).
+
+- [x] Archive completed history through `0.5.4-pre`, condense the carried-forward
+  items into `Task List Carry Forward.md`, and condense `Applet Description.md`.
+- [ ] Condense `Requirements and Specifications.md` section by section in the
+  planned order, keeping every requirement ID and every safety-critical "shall";
+  commit after each step.
+  - [ ] Step 1: preamble, sections 1-5, 15, 16.
+  - [ ] Step 2: sections 12, 10, 11.
+  - [ ] Step 3: sections 7, 8.
+  - [ ] Step 4: section 13 with 6.1 and 6.2.
+  - [ ] Step 5: sections 6.3-6.5 and 6.7.
+  - [ ] Step 6: section 14.
+  - [ ] Step 7: sections 17 and 18, folding the unnumbered blocks into 6.x.
+  - [ ] Step 8: sections 9.4 and 9.5.
+  - [ ] Step 9: stale-tool grep, ID-list diff, update the line 447 item.
+
 # Cloud Mounter Applet Future Task List
 
 Items that will be activated at some time in the future.
