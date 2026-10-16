@@ -2784,3 +2784,32 @@ profile data remain unchanged while the replacement candidate is prepared.
   for the updated pin. Source 5e9f5b8, packaging edits dirty; no dependency/runtime
   changes. Unchanged application checks reuse dev-gate-xqjx8r62 as above.
   `git diff --check`: exit 0.
+
+- Packaging source pin/records committed as db66196560bb42e461425fa7f8a9f4a3c1f78d01
+  (`Pin legacy-compatible Flatpak acceptance candidate`). Clean detached checkout
+  /tmp/cloud-mounter-flatpak-packaging-db66196 created at that revision.
+- Ran maintained `bash scripts/build-flatpak.sh` from the root repository with
+  --manifest /tmp/cloud-mounter-flatpak-packaging-db66196/packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json,
+  --source-sha db66196560bb42e461425fa7f8a9f4a3c1f78d01,
+  --arch x86_64 --branch master, root Git repository as --local-source-repo,
+  --output-dir target/artifacts/candidates/flatpak-db66196-x86_64-master,
+  --log-dir target/task-runs/flatpak-candidate-db66196 (absolute output/log paths
+  supplied). Exit 0, status succeeded; summary.json/task.log/artifacts.json in
+  that log directory. No build failure or retry. Exact app source
+  5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d fetched through recorded local Git
+  transport; shipping locked/offline release Cargo build retained.
+- Repository and private bundle-import inspection agree on ref
+  app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master, commit
+  968e0ac9c1acfa722db89e43d6452d31dd73c9e6dacb26b08043fadf2308252c.
+  Bundle 13,509,600 bytes, SHA256
+  ee7b385dcd4c96d40fbaf85a2bcadc396a6167763f666143aa8b592be8a8125c.
+  Complete metadata and all four runtime-provenance entries exactly match the
+  prior cf00f2a candidate. Metadata SHA256 unchanged:
+  f791b92fc3866e73e401ea29f45367f7f7834fa7c6458171d71d1dfa3ae82cc3.
+
+Boundary: source/fake tests and replacement build/export/metadata verified; new
+package not installed or exercised. Existing installed applet, saved profiles,
+legacy recovery state, remote and services unchanged during build. No push or
+publication. Next operator step: close unsaved editor and remove panel applet for
+replacement installation, then existing-remote/subtree verification and Save
+retest. Post-build evidence is a separate records-only commit; no rebuild needed.

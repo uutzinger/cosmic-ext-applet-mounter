@@ -428,7 +428,9 @@ drive types use the same tested generic profile; only identity/auth differs.
   check, eight focused configuration tests and final gate. Installer executable
   Git mode corrected after gate exposed it. Replacement build/Save retest pending.
   Compatibility fix committed as 5e9f5b8; candidate source pin updated to that
-  exact revision for the approved replacement build.
+  exact revision. Replacement built from packaging db66196, with export/bundle
+  identity verified and unchanged complete metadata/runtime provenance.
+  Updated installation and Save retest remain outstanding.
   Paused Save and mirror/service acceptance remain pending.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
