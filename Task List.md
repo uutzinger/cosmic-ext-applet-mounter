@@ -403,7 +403,20 @@ drive types use the same tested generic profile; only identity/auth differs.
   accepted runtime/SDK/BaseApp/extension refs present. Corrected BaseApp app-ref
   validation in build/reuse tooling; 25 focused script tests and final gate passed.
   Accepted implementation is now cf5da32 and its full manifest pin/Cargo inputs
-  are checked. Packaging commit, candidate build and approved install remain next.
+  are checked. Packaging committed as de8d779; source-based candidate built and
+  export/bundle identity verified. Approved installation and integrated acceptance
+  remain next; see the October 16 completion evidence. Installation/acceptance
+  authorized October 16 and started; maintained receipt-verified installer added.
+  Candidate installed and ref/commit/metadata verified; native launcher backed up
+  and initial launcher copy caused floating applets (failed panel acceptance).
+  Corrected discovery by parking the user override so COSMIC recognizes the
+  real Flatpak export; package unchanged. Panel retest passed (operator observed
+  embedding/popup; running Flatpak identity confirmed), final installer gate
+  passed. Disposable account/mirror acceptance remains outstanding.
+  Personal browser consent/setup succeeded; automatic remote inventory then
+  reported invalid data. JSON-safe credential redaction fixed in source;
+  regression reproduced before fix, then check, focused tests and final gate
+  passed. Updated candidate build/installed retest remains outstanding.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 
@@ -452,12 +465,15 @@ drive types use the same tested generic profile; only identity/auth differs.
   cf5da32f622ac7b03efb42facba9e9102da365ca for the development candidate. October 16:
   all 620 registry archives/checksums and 12 dependency Git pins/selectors checked;
   generated inline/shell source support fixed, focused tests and full gate passed.
-  COSMIC BaseApp/Freedesktop 25.08 unchanged. Packaging edits still need a commit
-  and the pinned source must be available to the builder before the next step.
-- [ ] Build source-based candidate/final Flatpak with shipping features only (in progress October 16);
+  COSMIC BaseApp/Freedesktop 25.08 unchanged. Packaging committed as de8d779;
+  builder used validated local Git transport for the exact pinned app commit.
+- [ ] Build source-based candidate/final Flatpak with shipping features only (candidate built October 16);
   verify source/runtime identity, helper/worker payloads and size. Inspect effective
   grants including BaseApp/global overrides; no silent blanket host filesystem/
   bus grants or restoration of obsolete shell wrappers.
+  Candidate export/bundle ref, commit and complete metadata agree; bundle is
+  13,511,896 bytes. Payload review and installed effective-grant acceptance remain
+  open; build receipt: target/task-runs/flatpak-candidate-de8d779/artifacts.json.
 - [ ] Prove selected engine auth and sandbox mirror/recovery/state access through
   reviewed grants/portal authorization. Host-path resolution is not an access
   grant. Verify Platform capabilities, not merely SDK imports or host packages.

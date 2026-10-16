@@ -15,6 +15,22 @@ is authorized merely by implementing this interface.
 
 ## Common receipt
 
+`bash scripts/install-flatpak.sh --candidate-receipt PATH` is a separate,
+explicitly approved state-changing entry point. Task `flatpak-install` first uses
+the complete candidate-reuse checks, then writes `installation.json` before
+installation with previous and expected ref/commit and `installation=pending`.
+Only observed installed ref/commit/complete metadata agreement promotes it to
+`verified`; failure retains the pending receipt and real exit status. Global and
+application user overrides are recorded, but `acceptance=not-run` remains until
+the independent installed UI/engine checks. No process stop, launch, service,
+dependency update or automatic rollback is part of installation.
+Optional `--activate-panel-entry` records a pending panel-entry operation and
+private previous-launcher copy before parking the overriding user launcher.
+The actual Flatpak export path/hash is recorded; copying it to ordinary user
+applications would break COSMIC's location-based socket forwarding. This
+does not start the applet, remove native packages or change panel configuration.
+`--panel-entry-only` requires that exact candidate installed and never reinstalls.
+
 Each started task creates a private, unique directory under `target/task-runs/`
 (or a new explicit `--log-dir`). It contains `task.log` and atomically updated
 `summary.json`. Never overwrite a previous task directory. Files are private;

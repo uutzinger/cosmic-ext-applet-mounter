@@ -851,6 +851,54 @@ fn resolve_candidate(candidate: &str) -> Option<PathBuf> {
 
 #[must_use]
 pub fn redact_text(value: &str) -> String {
+    // Structured command output is consumed by policy code as JSON. Redacting
+    // whitespace-delimited fragments can break escaped OAuth token strings or
+    // expose their remainder. Remove sensitive fields before serializing again.
+    if let Ok(mut structured) = serde_json::from_str::<serde_json::Value>(value) {
+        redact_json_value(&mut structured);
+        return serde_json::to_string(&structured).expect("JSON values serialize");
+    }
+    redact_plain_text(value)
+}
+
+fn redact_json_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                let key = key.to_ascii_lowercase();
+                if matches!(
+                    key.as_str(),
+                    "pass"
+                        | "password"
+                        | "passwd"
+                        | "token"
+                        | "secret"
+                        | "credential"
+                        | "credentials"
+                        | "authorization"
+                        | "client_id"
+                        | "client_secret"
+                        | "key_pem"
+                        | "key_file_pass"
+                        | "private_key"
+                ) || key.ends_with("_token")
+                    || key.ends_with("_password")
+                    || key.ends_with("_secret")
+                    || key.ends_with("_credentials")
+                {
+                    *value = serde_json::Value::String("[REDACTED]".into());
+                } else {
+                    redact_json_value(value);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(redact_json_value),
+        serde_json::Value::String(text) => *text = redact_plain_text(text),
+        _ => {}
+    }
+}
+
+fn redact_plain_text(value: &str) -> String {
     let mut redact_remaining = 0_u8;
     let mut result = String::with_capacity(value.len());
     let mut rest = value;
@@ -1301,8 +1349,11 @@ mod tests {
             "client_id [REDACTED] client_secret=[REDACTED]"
         );
         assert_eq!(
-            redact_text(r#"{"client_id": "private-id", "client_secret": "private-secret"}"#),
-            r#"{"client_id": "[REDACTED]", "client_secret": "[REDACTED]"}"#
+            serde_json::from_str::<serde_json::Value>(&redact_text(
+                r#"{"client_id": "private-id", "client_secret": "private-secret"}"#
+            ))
+            .unwrap(),
+            serde_json::json!({"client_id": "[REDACTED]", "client_secret": "[REDACTED]"})
         );
         let redacted_dump = redact_text(
             r#"{
@@ -1318,6 +1369,35 @@ mod tests {
             serde_json::from_str(&redacted_dump).expect("redacted config dump stays valid JSON");
         assert_eq!(parsed["uutzinger_gdrive"]["client_id"], "[REDACTED]");
         assert_eq!(parsed["uutzinger_gdrive"]["client_secret"], "[REDACTED]");
+    }
+
+    #[test]
+    fn structured_config_redaction_preserves_escaped_tokens_and_metadata() {
+        let original = serde_json::json!({
+            "personal_fixture": {
+                "type": "onedrive", "drive_type": "personal", "drive_id": "synthetic-drive",
+                "token": "{\"access_token\":\"synthetic-access==\",\"refresh_token\":\"synthetic-refresh==\"}",
+                "client_secret": "synthetic secret with spaces = punctuation",
+                "client_id": "synthetic-client",
+                "nested": {"password": "synthetic-password", "key_pem": "synthetic-private-key"}
+            }
+        });
+        let text = redact_text(&serde_json::to_string_pretty(&original).unwrap());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).expect("redaction preserves JSON");
+        assert_eq!(parsed["personal_fixture"]["type"], "onedrive");
+        assert_eq!(parsed["personal_fixture"]["drive_type"], "personal");
+        assert_eq!(parsed["personal_fixture"]["drive_id"], "synthetic-drive");
+        for secret in [
+            "synthetic-access",
+            "synthetic-refresh",
+            "synthetic secret",
+            "synthetic-client",
+            "synthetic-password",
+            "synthetic-private-key",
+        ] {
+            assert!(!text.contains(secret));
+        }
     }
 
     #[test]

@@ -30,6 +30,20 @@ preserved data and script-first repeatable workflows. See [AGENTS.md](../../AGEN
 
 ## Active scripts and callers
 
+October 16 installed acceptance: `scripts/install-flatpak.sh` and
+`scripts/lib/flatpak_install.py` provide the missing approved candidate-install
+entry point. Packaging guide/operator calls it with the existing candidate receipt.
+It reuses full candidate verification, refuses competing native/Flatpak owners,
+retains prior ref/commit, installs only the user bundle without dependency/related
+updates, verifies installed identity/metadata and records user overrides.
+Fake-adapter tests cover invalid candidates, running owners, partial failure,
+post-install mismatch and reversible panel launcher selection. Optional
+`--activate-panel-entry` backs up and parks the user override so COSMIC discovers
+the real Flatpak export (location determines socket forwarding); symbolic
+destination paths are refused. `--panel-entry-only` verifies an already-installed
+candidate and only corrects discovery. No automatic
+rollback, app launch or service changes.
+
 | Script in scripts/ | Category | Current evidence/callers | Disposition |
 |---|---|---|---|
 | `install-dependencies.sh` | Project host setup | Dependency guide, installer/reporting fixtures, component selections | P2 optional --log-dir implemented; visible prompts, private logs/atomic result. October 16: help distinguishes new rclone mirrors from legacy engine/helper; --all selections unchanged and --rclone-only isolation tested. No-options installation is not read-only. |

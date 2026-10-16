@@ -2445,3 +2445,180 @@ Focused checks before commit/build:
   source_dirty=true). Formatting, all-feature lint, all-target Rust and maintained
   Python tests passed. Authorized outside-sandbox access used for just scripts.
   Source pin/Cargo checks are reused from the preceding accepted receipt.
+
+- Commit: de8d7796047656cc088d70a96047b62448c09cff,
+  `Pin Flatpak candidate source and validate Cargo build inputs`; root master
+  clean after commit. Created clean detached packaging worktree
+  /tmp/cloud-mounter-flatpak-packaging-de8d779 at that commit.
+- Ran maintained `bash scripts/build-flatpak.sh` with that worktree's manifest,
+  `--source-sha de8d7796047656cc088d70a96047b62448c09cff --arch x86_64 --branch master`,
+  root repository as `--local-source-repo`, output
+  target/artifacts/candidates/flatpak-de8d779-x86_64-master and log directory
+  target/task-runs/flatpak-candidate-de8d779. Exit 0, status succeeded;
+  summary.json, task.log and artifacts.json retained in that log directory.
+- Builder fetched the exact app commit cf5da32f622ac7b03efb42facba9e9102da365ca
+  through receipt-recorded local Git transport. Shipping release features,
+  locked/offline Cargo build, Freedesktop 25.08 and COSMIC BaseApp stable retained.
+  Four installed build/runtime refs and immutable source/input hashes recorded.
+- Export and private bundle-import inspection agree on
+  app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master, OSTree commit
+  cfa15ec80e68374319cda2749291939880badb88bcdc86b64190bc4f37a28e57,
+  and complete metadata. Bundle size 13,511,896 bytes; SHA256
+  85ad69c87594157d4f7736e9e23e76c738d5ea3572e234df4e7d53b627e324ad.
+  Built metadata contains scoped filesystem paths and named D-Bus policies;
+  no blanket home/host filesystem or wildcard bus grant is declared.
+
+Verification level: final candidate built/exported and inspected, not installed
+or exercised. No build failure occurred. No installation, app launch, cloud data,
+service, push or publication action performed. Payload and effective installed
+grants, then integrated disposable mirror/UI acceptance, remain outstanding.
+Task/evidence records updated after the build; these result-only edits are not
+part of the committed packaging source or candidate and do not require rebuilding.
+
+### October 16, 2026 — Approved Flatpak installation and acceptance start
+
+Operator approved installing and testing the exact candidate. Initial observations
+found the native /usr/bin applet running, with a higher-precedence user desktop
+launcher selecting it despite an older user Flatpak installation. Operator
+confirmed mirror syncs paused, windows closed and applet removed from the panel.
+
+The build wrapper intentionally has no install operation. Added maintained
+scripts/install-flatpak.sh and scripts/lib/flatpak_install.py with focused fake
+adapters, catalog/inventory/output contract and packaging instructions. Installer
+reuses the existing full schema-2 candidate/source/input/hash/repository/bundle
+verification, rejects running owners, requires matching existing user ref, retains
+previous commit and installs only the bundle without dependency/related updates.
+It compares installed identity and complete metadata; no build/launch/stop/service
+or automatic rollback. Optional panel-entry activation retains the original
+launcher privately before atomic replacement with the installed Flatpak export.
+
+Focused `python3 -m unittest discover -s tests -p flatpak_install_test.py -q`:
+exit 0, five tests passed, covering candidate rejection, both running owners,
+partial failure/post-install mismatch, rollback records and launcher preservation/
+symlink refusal. First gate target/task-runs/dev-gate-3df9t36h/ passed before the
+additional launcher capability; final gate target/task-runs/dev-gate-c03vn42f/
+failed exit 101 on existing Rust process test
+private_config_failure_hides_both_output_streams (expected exit 7). No Rust source
+changed. Isolated `cargo test --locked private_config_failure_hides_both_output_streams`
+passed exit 0; full gate rerun follows, keeping the failure chronology.
+
+Ran `bash scripts/install-flatpak.sh --candidate-receipt
+target/task-runs/flatpak-candidate-de8d779/artifacts.json --activate-panel-entry
+--log-dir target/task-runs/flatpak-install-de8d779` (absolute paths supplied).
+Exit 0, installation verified. Private summary.json/task.log/installation.json
+retained in that log directory. Installed ref
+app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master,
+commit cfa15ec80e68374319cda2749291939880badb88bcdc86b64190bc4f37a28e57
+matches candidate; previous commit
+d0f101c60a1e4fb78700184e3dac11c2544904989c3e171ec12d73e07d7138d7
+retained as rollback identity. No native package removal or dependency updates.
+
+Previous user launcher preserved at
+target/task-runs/flatpak-install-de8d779/previous-panel.desktop; receipt records
+destination and matching installed-export SHA256. Restore that saved copy to the
+recorded destination to reverse launcher selection. Prior Flatpak deployment
+rollback uses the recorded previous commit, not a rebuild. No rollback performed.
+User global overrides only add read-only GTK/KDE theme/config paths; application
+override empty. Actual mirror/recovery access is still unverified.
+
+Read-only candidate payload inspection confirmed applet binary (33,231,048 bytes),
+retained auth helper (6,598 bytes), English Fluent catalog and desktop entry.
+Worker/guard are integrated binary entry points, not separate shell payloads.
+An initial source search included two nonexistent historical filenames (exit 2);
+corrected search found worker/guard definitions in src/bisync_worker.rs and
+src/onedrive.rs. No product source changed or candidate rebuild needed.
+
+Installation acceptance boundary: identity/metadata and launcher replacement
+verified; panel rendering, both OAuth account flows, selected-folder access and
+disposable integrated mirror/service lifecycle remain outstanding. Operator
+asked to re-add Cloud Mounter and open the popup; no cloud or service mutation
+performed by the installer. New installer sources/records remain uncommitted.
+
+Subsequent execution, preserving failure/fix order:
+
+- Full gate rerun target/task-runs/dev-gate-z8u6es5g/: exit 0, all checks passed.
+  Earlier Rust process-error failure did not reproduce; no Rust edits made.
+- Operator reported floating desktop applets instead of panel embedding, with
+  another instance when changing panel position. This is a failed rendered-panel
+  acceptance check, despite successful package installation. Read-only observation
+  then found no remaining Cloud Mounter process; no unrelated app was stopped.
+- Diagnosis: the installer copied the Flatpak desktop export into ordinary user
+  applications. Locally available COSMIC panel source classifies Flatpak by
+  desktop-file PathSource, not X-Flatpak alone (panel_space.rs is_flatpak).
+  wrapper_space.rs adds inherited Wayland socket and env forwarding only for that
+  class. The copy hid the Flatpak path identity and therefore panel connection.
+  This was an installer defect, not accepted OneDrive behavior.
+- Corrected --activate-panel-entry to back up and park the overriding user
+  launcher, leaving the actual Flatpak export discoverable. Added
+  --panel-entry-only to require the exact candidate already installed, verify it
+  and fix launcher discovery without reinstalling. Focused installer suite now
+  six tests, exit 0, including no-copy/no-reinstall boundaries.
+- Ran maintained installer with the same candidate receipt,
+  --activate-panel-entry --panel-entry-only and new log directory
+  target/task-runs/flatpak-panel-entry-de8d779/: exit 0. Retained previous copied
+  launcher and actual export path/hash in installation.json. The original native
+  launcher backup in flatpak-install-de8d779 remains unchanged. App package,
+  native package, panel configuration and cloud data unchanged by this correction.
+- Operator asked to remove/re-add the panel entry and retest embedding. Final gate
+  after this installer correction is recorded next. OAuth and mirror/service
+  acceptance still have not run.
+
+- Final corrected-installer `bash scripts/dev.sh gate`: exit 0, receipt/log
+  target/task-runs/dev-gate-oj9_r083/ (source de8d779, dirty=true). All formatting,
+  all-feature lint, all-target Rust tests and maintained Python tests passed.
+  `git diff --check`: exit 0. No installed app inputs changed; no rebuild needed.
+- Operator confirmed re-added Cloud Mounter embeds in the panel and opens there.
+  Read-only `flatpak ps --columns=instance,application,pid` confirms application
+  io.github.uutzinger.cosmic-ext-applet-mounter, instance 3932016410, host PID
+  115373. Panel rendering/installed sandbox launch now verified after the fix;
+  no earlier floating-window result counted as acceptance.
+- Next operator step: create an empty disposable personal cloud folder, configure
+  a fresh personal remote in installed Add Connection with that exact subtree and
+  a separate local directory selected through the portal, then browser sign-in.
+  No existing real mirror tree or whole-drive root is part of acceptance.
+
+### October 16, 2026 — Personal Flatpak consent and configuration inventory defect
+
+Operator completed browser sign-in/consent and observed the success page. Editor
+showed verified OneDrive setup together with an invalid-data notice for rclone
+config dump. Source inspection shows these are distinct operations: successful
+OneDriveRcloneCompleted stores verified identity and starts detect_rclone_remotes;
+that later inventory failure overwrites the global notice. Authentication itself
+was not reported as failed. Installed post-setup inventory acceptance failed.
+
+Screenshot also showed an empty remote-subtree field (whole-drive selection).
+Operator instructed not to Save/Sync and to fill the exact disposable personal
+folder. Operator subsequently confirmed that folder exists remotely. No sync,
+Save, service setup or cloud deletion was executed by the agent.
+
+Diagnosis/reproduction: process::redact_text previously applied whitespace-token
+redaction to JSON before HostInspection parsed it. An escaped encoded OAuth token
+with padding or a spaced client secret could lose JSON string boundaries. Added
+synthetic structured_config_redaction_preserves_escaped_tokens_and_metadata:
+failed before fix, exit 101, reproducing invalid JSON without reading real config.
+Changed src/process.rs to parse complete JSON first, recursively replace secret
+fields, sanitize remaining text values, and serialize structurally valid JSON;
+non-JSON diagnostics retain existing text redaction. Private OAuth capture is
+unchanged. Metadata needed by remote detection remains available; no raw
+credentials are logged or used in tests. Existing whitespace-sensitive assertion
+now checks JSON values rather than serialized spacing.
+
+Checks at source de8d779, dirty=true:
+
+- `just fmt`: exit 0.
+- `bash scripts/dev.sh check`: exit 0; target/task-runs/dev-check-ci6gzl88/.
+- `cargo test --locked --lib process::`: exit 0, 20 passed, one explicit live test
+  ignored (not counted as live acceptance).
+- `cargo test --locked --lib host_inspection::`: exit 0, four passed; bounded
+  requests, malformed/truncated data rejection, cancellation and safe errors.
+- Final gate receipt follows. This source fix is not yet in the installed
+  cf5da32-based candidate; updated source/package and installed retest are needed.
+
+- Final `bash scripts/dev.sh gate`: exit 0, receipt/log
+  target/task-runs/dev-gate-tzawhxc8/ (source de8d779, dirty=true). Formatting,
+  all-feature lint, all-target Rust tests and maintained Python tests passed.
+  `git diff --check`: exit 0. No Fluent or desktop metadata source changed in
+  this redaction fix. Source changes remain uncommitted; no rebuilt/installed
+  fix is claimed. Next: approved source commit/pin and replacement candidate,
+  then Verify selected remote with the explicit disposable subtree. Preserve the
+  already-authenticated remote rather than repeating OAuth or deleting it.

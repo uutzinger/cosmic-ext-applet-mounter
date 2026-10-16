@@ -84,6 +84,30 @@ baselines, not signed attestations. No installation/publication is implied.
 
 ## Integrated OneDrive acceptance preflight
 
+After an approved candidate build, close settings/editors, pause mirror syncs,
+and temporarily remove the native/present applet from the panel. Install the
+reviewed existing bundle through the maintained entry point (separate approval):
+
+```sh
+bash scripts/install-flatpak.sh --candidate-receipt /absolute/path/to/artifacts.json \
+  --activate-panel-entry
+```
+
+The installer repeats candidate verification, requires an existing matching user
+ref for rollback identity, refuses running Cloud Mounter owners and installs no
+dependencies/related packages. It records previous ref/commit and verified new
+identity/metadata/user overrides in private `installation.json`. It does not
+launch the app or alter services. Optional `--activate-panel-entry` preserves and
+parks the overriding user desktop launcher in the private receipt directory, so
+COSMIC discovers the real Flatpak export. Do not copy that export into ordinary
+user applications: COSMIC classifies Flatpak applets by desktop-file location
+and needs that identity to forward the panel socket. The receipt records both
+paths/hashes; restoring the saved launcher reverses the selection. With the exact
+candidate already installed, `--panel-entry-only --activate-panel-entry` verifies
+it and corrects discovery without reinstalling. The native package is retained.
+Re-add the Flatpak panel entry afterwards;
+confirm the sandboxed process, since a native installation may also be present.
+
 Use the maintained wrapper for read-only host observations before building:
 
 ```sh
