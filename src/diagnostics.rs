@@ -44,6 +44,32 @@ pub enum DependencyKind {
     SystemdUser,
 }
 
+impl DependencyKind {
+    /// Inventory lists all supported tools; warnings follow configured engines.
+    #[must_use]
+    pub fn required_for(self, connections: &[crate::model::Connection]) -> bool {
+        use crate::model::{ConnectionMode, OfflineEngine, Provider};
+        match self {
+            Self::NetworkManager | Self::SystemdUser => true,
+            Self::Rclone => connections.iter().any(|connection| {
+                connection.provider != Provider::OneDrive
+                    || connection.offline_engine() == Some(OfflineEngine::Rclone)
+            }),
+            Self::Onedriver => connections.iter().any(|connection| {
+                connection.provider == Provider::OneDrive
+                    && matches!(connection.mode, ConnectionMode::OnlineMount(_))
+            }),
+            Self::OneDriveSync => connections.iter().any(|connection| {
+                connection.provider == Provider::OneDrive
+                    && connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive)
+            }),
+            Self::Fuse3 => connections
+                .iter()
+                .any(|connection| matches!(connection.mode, ConnectionMode::OnlineMount(_))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DependencyState {
     Available,

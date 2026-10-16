@@ -37,7 +37,7 @@ The following connection engines are used to connect to the providers:
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`abraunegg/onedrive`](https://github.com/abraunegg/onedrive) |
+| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) for new mirrors; legacy `abraunegg/onedrive` retained |
 | Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
@@ -46,9 +46,9 @@ The following connection engines are used to connect to the providers:
 
 `jstaf/onedriver` is ideal for on-demand access to OneDrive.
 
-> **Planned change (0.5.4):** OneDrive Offline mirrors will move from `abraunegg/onedrive` to `rclone bisync` (scheduled sync plus Sync Now). Existing `abraunegg/onedrive` connections are intended to keep working for one transition release, cannot then be created, and are removed afterwards; there is no conversion tool, so recreate the mirror as an rclone connection. This note describes the plan, not shipped behavior; see the [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
+> **0.5.4 development:** new OneDrive Offline mirrors use `rclone bisync` with a 15-minute default schedule and Sync Now. Save keeps the schedule paused until Preview and confirmed initial sync; Start enables it explicitly. Existing `abraunegg/onedrive` profiles retain their engine for one transition release. There is no automatic conversion. Source and automated tests are complete for this integration; installed native/Flatpak acceptance remains pending. See the [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
 
-`abraunegg/onedrive` is ideal to monitor local and remote changes in a bidirectional mirror and does not need sync scheduler. Microsoft 365 tenants may require [administrator consent](https://github.com/abraunegg/onedrive/blob/master/docs/usage.md#business--enterprise-authentication-and-admin-consent). To use your own Microsoft Entra application ID, see [Microsoft cloud authentication setup](docs/microsoft-cloud-auth-setup.md).
+New OneDrive mirrors need **rclone 1.74.3 or newer** and use the primary personal or work/school drive. In Add/Modify, choose the drive type, enter the expected account, and connect a new remote or verify an existing one. Custom Microsoft clients and alternate roots are not supported for these mirrors. SharePoint and legacy custom-client guidance is in [Microsoft cloud authentication setup](docs/microsoft-cloud-auth-setup.md).
 
 `rclone` is best suited to mount documnet libraries from Microsoft Teams or SharePoint but its bisync mirror needs sync scheduling.
 
@@ -182,8 +182,7 @@ Google Cloud Desktop OAuth application managed through the
 [Google Auth Platform](https://console.cloud.google.com/auth/overview). Leaving
 both blank uses rclone's shared client for compatibility, but that shared client
 is scheduled foris scheduled for retirement during 2026; configure a private client before
- retirement during 2026; configure a private client before
-then.is scheduled for retirement during 2026; configure a private client before
+then.
 
 To configure a private __Google Drive OAuth__ client, follow
 [Google Cloud authentication setup](docs/google-cloud-auth-setup.md).
@@ -191,7 +190,7 @@ This applet does not provide a Google Cloud project or client ID/secret for you.
 
 In Modify mode, **Update Google OAuth Client** changes an existing Drive remote
 and opens browser authorization to issue a new token for the selected Google
-account. The same private client can authorize personal and Google Workspace
+account. Your personal Google client can authorize also Google Workspace
 accounts when the Workspace policy permits it.
 
 ## VPN Integration
@@ -279,16 +278,17 @@ The requirements drive [Task List.md](Task%20List.md), and its execution history
 is documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md).
 The author supervises and approves each task and its verification.
 
+Task List and Task List Completion notes are archived to docs/archive after releases so that token usage is reduced.
+
 ## Contributing & Feature Requests
 
 ### Feature Requests
 
 For a feature contribution, update the [description](Applet%20Description.md)
-and [requirements](Requirements%20and%20Specifications.md), then append its
+and use your AI agent to update [requirements](Requirements%20and%20Specifications.md) and append its
 implementation and verification steps to the [task list](Task%20List.md).
-Implement and test the change, record the result in
-[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md), and submit
-a pull request. You can use an AI agent to assist, but you must review the description and tasklist changes and complete the tests yourself.
+Instruct your AI agent to implement and test each step individually in the task list. It will record the completion in
+[Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). You will need to approve each task individually. When your feature works submit a pull request. 
 
 ### Bug Reports
 

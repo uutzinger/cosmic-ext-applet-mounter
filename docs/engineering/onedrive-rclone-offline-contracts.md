@@ -13,7 +13,7 @@ personal and business sample trees on October 15, 2026
 
 Created: October 14, 2026
 
-Last reviewed: October 15, 2026
+Last reviewed: October 16, 2026
 
 Scope: OneDrive Offline mirror connections after `abraunegg/onedrive` is dropped.
 Associated task: Task List "Engine decision and OneDrive Offline migration to
@@ -66,7 +66,7 @@ describes the target behavior; it is not a claim of tested behavior.
    client. Phase 4 extracted the shared rclone create/continue machinery from
    `sharepoint_setup.rs` and the tested prototype into `microsoft_oauth.rs`. Both the
    production SharePoint wrapper and gated OneDrive prototype use that module;
-   production OneDrive backend setup now uses `onedrive.rs`; editor integration remains pending. `sharepoint_setup.rs` remains
+   production OneDrive backend setup now uses `onedrive.rs`; Add/Modify editor integration is implemented. `sharepoint_setup.rs` remains
    the SharePoint-specific wrapper for library URL/selection/verification, while
    OneDrive keeps primary-drive and account-type identity handling. The browser opens
    through the desktop portal in Flatpak.
@@ -307,7 +307,7 @@ rclone Offline mirror with a syntactically valid identity; provider-only routing
 continues to reject OneDrive, preserving the Online onedriver path. The legacy
 planner rejects explicit rclone mirrors. October 15 follow-up enabled the production planner/coordinator only for explicit
 rclone OneDrive mirrors with a valid identity; legacy and Online routing remain
-unchanged. Editor and lifecycle dispatch integration are still pending.
+unchanged. Editor and lifecycle dispatch integration were completed in subsequent October 15 steps; installed acceptance remains pending.
 
 New rclone OneDrive mirrors cannot overlap another connection's local or recovery
 paths, including legacy paths; existing legacy-only document semantics are
@@ -504,3 +504,95 @@ reconnect rejection, cancellation, stale results, serialization and referenced
 remote protection. Compilation and the final gate are recorded in completion
 notes. Rendered controls, browser consent, installed services and final Flatpak
 acceptance still require the planned disposable operator tests.
+
+
+## Phase-4 focused test coverage (October 15)
+
+The focused-test consolidation reuses implemented coverage and adds missing race
+and reconnect cases. All new cases use synthetic identities, fake rclone/Graph
+adapters and temporary state; no real accounts or services are used. Results and
+receipts are retained in Task List Completion Notes.md.
+
+| Checklist area | Coverage |
+|---|---|
+| Old/new configuration and routing | `tests/onedrive_configuration.rs` checks legacy wire compatibility, both primary-drive types, malformed/misplaced identities, engine selection and Online onedriver; app configuration/editor/runtime tests cover draft round trips and engine dispatch. |
+| Plans, units, scheduling and deletion safety | `tests/onedrive_setup.rs` checks generic arguments, 50% max-delete and target-bound workdirs; app runtime tests cover paused Save, owned units, partial-install rollback, Start observation/rollback, Pause and status. Existing shared Repair/VPN/readiness tests remain authoritative. |
+| Identity, anchors and malformed/partial state | Setup/guard tests reject edited/remapped bindings, denied/partial Graph metadata, unsupported config and incomplete folder stat. Coordinator tests cover missing, altered and linked anchors, incomplete owner reads and success-marker failure boundaries. |
+| Cancellation and setup rollback | Shared OAuth/coordinator tests retain timeout, cancellation, incomplete capture and failed-cleanup coverage. New `onedrive_focused_mid_setup_cancellation_cleans_only_new_remote_with_fresh_token` cancels the actual token after creation and proves cleanup uses a fresh token and deletes only the new remote for both types. |
+| Reauthentication/replacement | Existing tests reject a different saved drive and preserve existing configuration. New `onedrive_focused_reconnect_accepts_same_drive_for_both_types_and_preserves_old_remote` accepts the saved drive through a replacement remote without touching the old remote. |
+| Editor races | Existing editor tests cover discovery, invalidation, cancellation, blocked Save and stale setup generations. New focused app tests reject late successful Test/Save after remote edits and reject setup completion when the saved identity changes during authentication. |
+| Unsupported items and Preview estimates | Setup tests cover notebook/shortcut/foreign roots and `.one`, `.onepkg`, `.lnk`, `.url` filters. Structured Preview tests cover bounded inventories, malformed/truncated metadata, offsets, expiry and foreign/linked reports; the accepted temporary local-engine metadata probe is reused. |
+| Unchanged Online behavior | Existing onedriver setup/validation/overlap/request tests and configuration/runtime routing tests cover the Online path. No new Online behavior or live cloud scenario was introduced. |
+
+The October 15 check, four added focused tests and final gate passed (receipt in
+completion notes). This completes automated source coverage; it does not replace
+browser consent, installed native lifecycle, rendered UI or integrated
+Flatpak acceptance. The accepted personal/business prototype scenarios and shared
+fault tests remain historical live evidence and are not repeated here.
+
+
+## Dependency and documentation reconciliation (October 16)
+
+The minimum remains rclone 1.74.3 in diagnostics, the dependency installer and
+Debian recommendations. OneDrive Online retains onedriver >= 0.15.0; legacy
+Offline profiles retain onedrive >= 2.5.10 and optional GUI-helper dependencies
+through the transition release. No dependency or packaged helper was removed.
+No-options/--all installation still includes all engines; --rclone alone covers
+the engine for new OneDrive mirrors without installing the legacy engine/helper.
+
+Inventory still discovers supported tools without version/help processes.
+Controller missing-tool warnings now follow configured provider/mode/engine,
+including disabled saved profiles: new OneDrive Offline requires rclone, Online
+requires onedriver/FUSE, legacy Offline requires onedrive. Other provider mounts
+require rclone/FUSE and mirrors require rclone. NetworkManager/systemd remain
+common prerequisites. Actual missing-rclone failures in the OneDrive backend
+name the supported minimum through a typed localized diagnostic.
+
+Dependency, README, Microsoft auth, documentation index and Flatpak guides now
+distinguish development source from installed acceptance, and new default-client
+OneDrive mirrors from custom-client SharePoint/legacy instructions. The host
+command and script inventories retain explicit legacy ownership/removal scope.
+No installer, package, credential, service or browser action was executed by this
+reconciliation. Installed native/Flatpak acceptance is still a separate step.
+
+
+## Integrated Flatpak operator sequence (October 16)
+
+Status: preparation/preflight only; installed acceptance has not run.
+
+1. Freeze the accepted implementation/test/docs in an approved source commit.
+   Check generated Cargo inputs, replace the scaffold's old v0.5.2 tag with that
+   full commit, and record the packaging revision in a clean separate checkout.
+   No push or release tag is implied. Use the existing source-based manifest,
+   shipping features and Freedesktop 25.08/COSMIC BaseApp target.
+2. Run the maintained candidate wrapper once against those pinned inputs, with a
+   new output/log directory under ignored target output. Changed application
+   source requires this build; prior old-version/probe binaries are not reusable
+   acceptance evidence. Retain source/runtime/checksum and export/bundle receipts.
+   The operator runs the supplied exact command for this potentially long build.
+3. Inspect the candidate payload, worker/guard commands, metadata and effective
+   grants, including BaseApp and global/app overrides. Obtain installation approval
+   for the actual bundle/branch, retaining the existing installed ref/OSTree commit
+   and rollback route. Native and Flatpak must not compete for runtime ownership.
+4. In the installed applet, create disposable personal and business rclone mirror
+   profiles with the expected accounts, using only dedicated disposable remote
+   folders and separate empty local mirror/recovery directories. Do not use whole
+   drives or existing user mirror trees. Complete browser consent per account;
+   check type/identity acceptance, remote selection and folder-picker host paths.
+5. For one profile, run Preview and confirmed initial sync, inspect both directions
+   and checksum success, then a quiet manual run. Verify saved units invoke the
+   installed Flatpak guard/worker, Save is paused, Start/observed status works and
+   Pause disables the timer. Observe one scheduled execution without changing the
+   15-minute policy. Reuse accepted unchanged native scenarios and shared fault
+   coverage; do not duplicate all business/network/cancellation tests here.
+6. Check sandbox mirror/recovery/state access under the actual grants; path
+   resolution alone is not authorization. Record UI notices, coordinator receipts,
+   structured status and ownership. Cleanup only the disposable profiles/units and
+   proven-owned remote test folders, through the approved applet/test operation;
+   preserve user remotes and earlier rollback state. Confirm final Paused/stopped
+   observations. Record any limits toward phase 7/consolidated acceptance.
+
+Preflight and source/fake tests do not satisfy steps 3–6. Runtime/BaseApp changes,
+credential migration, package installation, service changes, data deletion and
+publication are not authorized by preparing this procedure. Their existing
+approval boundaries remain in force.

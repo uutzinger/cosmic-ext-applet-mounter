@@ -6,7 +6,7 @@ Status: Source reconciliation complete; final release-package acceptance pending
 
 Created: October 7, 2026
 
-Last reviewed: October 15, 2026
+Last reviewed: October 16, 2026
 
 ## Scope and method
 
@@ -44,7 +44,7 @@ The shipping typed runner contains only these nine variants:
 | `flatpak` | **Unavoidable invocation** | Version-gated Documents portal compatibility lookup. |
 | `rclone` | **Unavoidable invocation** | Provider configuration, authentication, storage operations, and private RC client. |
 | `onedriver` | **Unavoidable invocation** | Online OneDrive authentication. |
-| `onedrive` | **Unavoidable invocation** | Offline OneDrive authentication, preview, sync, and status. |
+| `onedrive` | **Unavoidable invocation** | Legacy Offline OneDrive authentication, preview, sync, and status only; retained for the transition release. |
 | `fusermount3` | **Unavoidable invocation** | Clean detach and confirmed lazy recovery. |
 | `cat` | **Unavoidable invocation** | Host mount-namespace inspection. |
 | `mountpoint` | **Unavoidable invocation** | Host mount readiness. |
@@ -191,10 +191,10 @@ portal implements its storage/configuration semantics.
 | `rclone lsf --dirs-only --max-depth 1 <remote-recovery-root>` | **Unavoidable invocation** | Inspect retention candidates after successful synchronization. |
 | `rclone purge <verified-owned-expired-day>` | **Unavoidable invocation** | Remove only validated, applet-owned expired remote recovery data. |
 | `onedriver --auth-only --config-file <file> --cache-dir <dir> <mountpoint>` | **Unavoidable invocation** | Engine-owned Online OneDrive authentication; validation otherwise inspects metadata. |
-| `onedrive --confdir <dir> --reauth [--auth-files <url-file:response-file>]` | **Unavoidable invocation** | Interactive/manual Offline OneDrive authentication. |
-| `onedrive --confdir <dir> --syncdir <dir> --sync --dry-run --verbose [--single-directory <path>]` | **Unavoidable invocation** | Offline OneDrive preview/validation. |
-| `onedrive --confdir <dir> --syncdir <dir> --sync [--resync --resync-auth] [--single-directory <path>]` | **Unavoidable invocation** | Confirmed initial and ordinary Offline OneDrive synchronization. |
-| `onedrive --confdir <dir> --syncdir <dir> --display-sync-status [--single-directory <path>]` | **Unavoidable invocation** | Read-only pending/status inspection. |
+| `onedrive --confdir <dir> --reauth [--auth-files <url-file:response-file>]` | **Unavoidable invocation** | Legacy Offline OneDrive authentication. |
+| `onedrive --confdir <dir> --syncdir <dir> --sync --dry-run --verbose [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive preview/validation. |
+| `onedrive --confdir <dir> --syncdir <dir> --sync [--resync --resync-auth] [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive initial/ordinary synchronization. |
+| `onedrive --confdir <dir> --syncdir <dir> --display-sync-status [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive pending/status inspection. |
 
 RC CLI calls already use rclone's structured private API. A future direct
 Unix-socket client could reduce spawns; that is an engine-transport optimization,
@@ -214,8 +214,8 @@ rollback delete uses ordinary redacted execution. rclone has no D-Bus/portal API
 for these configuration operations. Transport still uses the existing scoped
 `org.freedesktop.Flatpak` gateway permission, with no filesystem/bus grant added.
 Removal criterion: replace spawning only if an equivalent reviewed engine API
-can preserve OAuth, credential ownership and cancellation. OneDrive backend setup/guard ownership is now `src/onedrive.rs`; editor integration
-and installed portal/host-transport acceptance remain pending. The production
+can preserve OAuth, credential ownership and cancellation. OneDrive backend setup/guard ownership is now `src/onedrive.rs`; Add/Modify editor integration is implemented;
+installed portal/host-transport acceptance remains pending. The production
 OneDrive guard reuses the applet helper/worker launch transport and fixed rclone
 stat/config/anchor operations. Graph verification stays in-process HTTPS, not a
 host command. Host credentials remain in rclone configuration; local/work/recovery
@@ -263,7 +263,7 @@ reviewed to avoid overlooking an indirect host executable.
 |---|---|---|
 | `rclone mount ...` | **Unavoidable invocation** | Host systemd Online service; lifecycle control is D-Bus. |
 | `onedriver --config-file ... --cache-dir ... <mountpoint>` | **Unavoidable invocation** | Host systemd Online OneDrive service. |
-| `onedrive --confdir ... --syncdir ... --monitor ...` | **Unavoidable invocation** | Host systemd continuous Offline OneDrive monitor. |
+| `onedrive --confdir ... --syncdir ... --monitor ...` | **Unavoidable invocation** | Retained legacy Offline OneDrive monitor; new mirrors use the shared rclone worker/timer. |
 | Installed applet `--run-bisync scheduled <UUID>` | **Unavoidable invocation** | Native/Debian service runs the installed binary; Flatpak service uses fixed `/usr/bin/flatpak run --command=... <app-id> ...`. Both enter the same coordinator before GUI/IPC ownership. |
 | App-owned readiness/mount guards | **Unavoidable invocation** | Fixed flags and validated saved identities through that package-specific launcher. |
 | User-installed OpenConnect secret-agent service | **Replaced by D-Bus** | Applet starts/restarts the fixed service through the user manager. Its external nm-applet/plugin process is required authentication infrastructure, not an applet host CLI control path. |
@@ -333,3 +333,12 @@ list, and correct no-active-mounts display were confirmed on October 12.
 Final source identity,
 native packaging, and rebuilt-Flatpak worker/VPN/mount acceptance still gate
 release publication and closure of Tasks (5) and (6).
+
+
+October 16 dependency/docs reconciliation: new OneDrive Offline mirrors require
+host rclone >= 1.74.3; Online uses onedriver >= 0.15.0, and retained legacy
+Offline profiles use onedrive >= 2.5.10. The legacy host command/helper remain
+until the separate removal phase. Installer --all selections and package
+recommendations are unchanged. Configured engine/mode selects missing-tool
+warnings; no startup version/help probe, new host executable, filesystem grant
+or bus permission was added. Integrated Flatpak acceptance remains pending.

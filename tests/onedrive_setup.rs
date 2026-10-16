@@ -541,3 +541,119 @@ async fn onedrive_guard_rejects_unsupported_configuration_before_graph() {
         );
     }
 }
+
+#[tokio::test]
+async fn onedrive_focused_reconnect_accepts_same_drive_for_both_types_and_preserves_old_remote() {
+    for kind in [DriveType::Personal, DriveType::Business] {
+        let runner = FakeCommandRunner::default();
+        for text in [
+            json!({"retained_old_remote":{"type":"onedrive"}}).to_string(),
+            r#"{"State":""}"#.into(),
+            "{}".into(),
+            config(kind, "primary"),
+        ] {
+            runner.push(Ok(output(&text)));
+        }
+        let mut setup = setup(kind);
+        let saved = OneDriveIdentity {
+            drive_id: "primary".into(),
+            drive_type: kind,
+        };
+        setup.previous_identity = Some(saved.clone());
+        let verified = authenticate(
+            &runner,
+            &FakeGraph::account(kind),
+            &setup,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(verified.identity, saved);
+        let commands = runner
+            .requests()
+            .iter()
+            .map(|request| request.sanitized_command())
+            .collect::<Vec<_>>();
+        assert_eq!(commands.len(), 4);
+        assert!(commands[1].contains("config create example_remote onedrive"));
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("retained_old_remote")
+                    && !command.contains("config delete")
+                    && !command.contains("bisync")
+                    && !command.contains("purge"))
+        );
+    }
+}
+
+struct CancelAfterCreate {
+    inner: FakeCommandRunner,
+    cancellation: CancellationToken,
+}
+impl CommandRunner for CancelAfterCreate {
+    fn resolve(&self, executable: Executable) -> Option<std::path::PathBuf> {
+        self.inner.resolve(executable)
+    }
+    fn private_config<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        Box::pin(async move {
+            // Cleanup must receive a fresh token even though the caller cancelled.
+            assert!(!cancellation.is_cancelled());
+            let created = request.sanitized_command().contains("config create");
+            let output = self.inner.private_config(request, cancellation).await;
+            if created {
+                self.cancellation.cancel();
+            }
+            output
+        })
+    }
+    fn run<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> CommandFuture<'a> {
+        assert!(!cancellation.is_cancelled());
+        self.inner.run(request, cancellation)
+    }
+}
+
+#[tokio::test]
+async fn onedrive_focused_mid_setup_cancellation_cleans_only_new_remote_with_fresh_token() {
+    for kind in [DriveType::Personal, DriveType::Business] {
+        let runner = CancelAfterCreate {
+            inner: FakeCommandRunner::default(),
+            cancellation: CancellationToken::new(),
+        };
+        for text in [
+            json!({"retained_old_remote":{}}).to_string(),
+            r#"{"State":""}"#.into(),
+            json!({"example_remote":{},"retained_old_remote":{}}).to_string(),
+            "".into(),
+        ] {
+            runner.inner.push(Ok(output(&text)));
+        }
+        let graph = FakeGraph::new([]);
+        let result = authenticate(&runner, &graph, &setup(kind), runner.cancellation.clone()).await;
+        assert_eq!(result.unwrap_err(), OneDriveError::Cancelled);
+        assert!(runner.cancellation.is_cancelled());
+        assert!(graph.calls.lock().unwrap().is_empty());
+        let commands = runner
+            .inner
+            .requests()
+            .iter()
+            .map(|request| request.sanitized_command())
+            .collect::<Vec<_>>();
+        assert_eq!(commands.len(), 4);
+        assert!(commands[3].ends_with("config delete example_remote"));
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("retained_old_remote")
+                    && !command.contains("bisync"))
+        );
+    }
+}

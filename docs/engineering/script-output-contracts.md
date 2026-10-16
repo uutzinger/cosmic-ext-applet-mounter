@@ -6,7 +6,7 @@ Status: Accepted interface, implemented and fixture-verified; new hosted accepta
 
 Created: October 13, 2026
 
-Last reviewed: October 15, 2026
+Last reviewed: October 16, 2026
 
 Scope: Hosted/local tooling, setup reporting, Debian/native/Flatpak inspection
 and OneDrive guard-investigation receipts.
@@ -348,3 +348,22 @@ is read_only_copy_verified_at_prepare. Representative_tree=false and
 cadence_exercised=false explicitly prohibit inferring representative performance
 or five-minute service behavior from a small project baseline. Cleanup retains
 local sample/evidence and purges only the owned UUID cloud root.
+
+
+## Flatpak read-only preflight (October 16)
+
+`build-flatpak.sh --preflight --manifest PATH --arch ARCH --branch BRANCH`
+uses task `flatpak-preflight`, common schema-1 summary and a private schema-1
+`preflight.json` receipt. No source SHA/output directory is required for inspection;
+output/reuse arguments are rejected. The receipt observes source/manifest pins,
+dirty state, typed runtime/SDK/extension and BaseApp refs/commits, existing user and
+system application ref/commit/metadata, and read-only global/application overrides.
+Tool invocations have 20-second deadlines and shared bounded capture/cancellation.
+
+`status=succeeded` means inspection completed. `ready_for_candidate_build=false`
+plus blockers is a valid inspection result; `acceptance=not-run` and
+`installation=not-performed` prevent promotion to acceptance. Unexpected errors
+fail the task. No build, installation, launch, override write, service or cloud
+operation is reachable from this mode. Candidate/reuse validation now compares
+full typed refs (`runtime/...` versus BaseApp `app/...`) and includes declared SDK
+extensions; inaccurate older provenance cannot silently satisfy a changed ref set.

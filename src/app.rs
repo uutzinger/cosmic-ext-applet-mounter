@@ -18300,4 +18300,77 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn onedrive_focused_late_test_and_save_validation_cannot_accept_edited_draft() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        for kind in [DriveType::Personal, DriveType::Business] {
+            let mut draft = onedrive_editor_draft(kind);
+            draft.onedrive_identity = Some(OneDriveIdentity {
+                drive_id: "primary-drive".into(),
+                drive_type: kind,
+            });
+            let verified = connection_from_draft(&draft).unwrap();
+            for save in [false, true] {
+                let mut app = AppModel {
+                    draft: draft.clone(),
+                    ..AppModel::default()
+                };
+                let _ = app.update(Message::DraftRemote("another_remote".into()));
+                assert!(app.draft.onedrive_identity.is_none());
+                let _ = app.update(if save {
+                    Message::SaveDraftValidated(verified.clone(), Ok("stale success".into()))
+                } else {
+                    Message::DraftTested(verified.clone(), Ok("stale success".into()))
+                });
+                assert!(app.validated_draft.is_none());
+                assert!(app.draft.onedrive_identity.is_none());
+                assert!(app.config.document.connections.is_empty());
+                assert_eq!(app.draft.remote_reference, "another_remote");
+                assert!(!app.draft_primary_actions_ready());
+            }
+        }
+    }
+
+    #[test]
+    fn onedrive_focused_setup_result_rejects_saved_identity_changed_during_authentication() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        let mut draft = onedrive_editor_draft(DriveType::Business);
+        let original_identity = OneDriveIdentity {
+            drive_id: "original-drive".into(),
+            drive_type: DriveType::Business,
+        };
+        draft.onedrive_identity = Some(original_identity.clone());
+        let saved = connection_from_draft(&draft).unwrap();
+        let mut app = AppModel {
+            draft,
+            ..AppModel::default()
+        };
+        app.config.document.connections.push(saved);
+        let request =
+            OneDriveEditorRequest::from_draft(&app.draft, &app.config.document.connections, true)
+                .unwrap();
+        app.draft.onedrive_identity = None;
+        app.onedrive_editor_generation = 1;
+        app.onedrive_editor_pending = Some(OneDriveEditorPending {
+            cancellation: CancellationToken::new(),
+        });
+        let changed_identity = OneDriveIdentity {
+            drive_id: "changed-drive".into(),
+            drive_type: DriveType::Business,
+        };
+        app.config.document.connections[0].onedrive_identity = Some(changed_identity.clone());
+        let _ = app.update(Message::OneDriveRcloneCompleted(
+            1,
+            request,
+            Ok(original_identity),
+        ));
+        assert!(app.onedrive_editor_pending.is_none());
+        assert!(app.draft.onedrive_identity.is_none());
+        assert!(app.validated_draft.is_none());
+        assert_eq!(
+            app.config.document.connections[0].onedrive_identity,
+            Some(changed_identity)
+        );
+    }
 }

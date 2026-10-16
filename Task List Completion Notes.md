@@ -2142,3 +2142,198 @@ These are compilation and synthetic/fake-adapter tests,
 not browser sign-in, rendered controls, installed native services or final-package
 acceptance. No cloud remote/configuration, user data, service, installation, commit
 or publication was changed. Installed native/Flatpak acceptance remains pending.
+
+
+### October 15, 2026 — Phase-4 focused-test consolidation
+
+Reviewed the focused-test checklist against the committed implementation rather
+than duplicating accepted live scenarios. Existing configuration, routing, units,
+identity/anchor, malformed/partial-state, setup rollback, item-filter, Preview,
+checksum and unchanged Online tests are mapped in the existing OneDrive contract.
+Retained earlier native cloud/prototype and temporary local-engine evidence with
+its original acceptance boundaries; no live scenario was repeated.
+
+Added four tests for remaining integration cases:
+
+- Successful replacement/reconnect for personal and business accepts the saved
+  primary-drive identity and never addresses or deletes the retained old remote.
+- Cancellation of the actual token after remote creation makes both setup flows
+  stop before Graph access and delete only the newly-created remote. The adapter
+  asserts that rollback requests use fresh uncancelled tokens.
+- Late successful Test/Save validation after a remote edit cannot accept identity,
+  validate the changed draft or save any configuration.
+- Authentication completion is rejected when authoritative saved identity changed
+  during the operation; the newer saved identity remains intact.
+
+Files changed: tests/onedrive_setup.rs, the test module in src/app.rs,
+Task List.md, this record, docs/engineering/onedrive-rclone-offline-contracts.md
+and docs/engineering/README.md. No production behavior, scripts, Fluent strings,
+dependencies or installed state changed. Unrelated README.md edits were preserved.
+
+Verification (HEAD 5d312f5ca329af23619eefb86f599316a04988ef,
+source_dirty=true):
+
+- `just fmt`: exit 0.
+- `bash scripts/dev.sh check`: exit 0; receipt/log
+  target/task-runs/dev-check-njz2nbpl/.
+- `cargo test --locked --test onedrive_setup onedrive_focused_`: exit 0,
+  two tests passed, exercising both drive types.
+- `cargo test --locked --bin cosmic-ext-applet-mounter onedrive_focused_`:
+  exit 0, two editor race tests passed.
+- Existing unchanged checks are retained from the previous implementation receipt
+  target/task-runs/dev-gate-0ipai5h1/ and its preceding completion entry; the
+  final gate below also covers the complete current suite. No localization check
+  repeated because Fluent/UI content is unchanged.
+
+- Final `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-aayjw5vv/. Formatting, all-feature lint, all-target Rust
+  tests and maintained Python tests passed. Used the authorized outside-sandbox
+  access needed for just temporary scripts. No check or test failure in this task.
+- Final scoped `git diff --check`: exit 0; unrelated README.md edits excluded.
+
+Marked the automated focused-test checklist complete. These tests use synthetic
+accounts, fake adapters and local state only. Installed native lifecycle, browser/consent, rendered applet and
+integrated Flatpak acceptance remain outstanding. No cloud remote, user service,
+installation, commit, push or publication was performed by this test task.
+
+
+### October 16, 2026 — Dependency and documentation reconciliation
+
+Kept the rclone minimum at 1.74.3 in diagnostics, the maintained installer and
+Debian recommendations. Kept onedriver >= 0.15.0 for Online OneDrive, onedrive
+>= 2.5.10 and optional GUI dependencies for legacy Offline profiles. No package
+recommendation, manifest permission or shipped helper was removed; removal stays
+in its later task. Installer defaults/--all selections are unchanged; help now
+explains new rclone mirrors versus retained legacy engine/helper selections.
+
+Fixed dependency warnings to use configured provider, mode and resolved engine.
+The inventory still lists supported tools; only configured engine requirements
+become missing-tool warnings, including disabled saved profiles. New OneDrive
+Offline needs rclone, Online needs onedriver/FUSE, legacy Offline needs onedrive;
+other providers retain rclone and Online FUSE requirements. NetworkManager/systemd
+remain common requirements. No startup version/help process was added. The actual
+OneDrive missing-rclone error now gives localized minimum-version guidance from
+the typed failure, without inspecting raw error text.
+
+Updated dependency installation, README OneDrive engine/setup paragraphs, docs
+index, Microsoft auth guide and Flatpak guide. Custom-client instructions are now
+explicitly scoped to SharePoint/legacy profiles: new OneDrive Offline rejects
+custom client/tenant/root settings. Documented personal required profile access,
+business drive-ownership policy and optional SharePoint labels. Checked the
+upstream rclone OneDrive configuration/custom-client page while reconciling scope:
+https://rclone.org/onedrive/ . The applet-specific restrictions come from current
+src/onedrive.rs and src/microsoft_oauth.rs, not from upstream rclone restrictions.
+Source/test implementation is distinguished from pending installed acceptance.
+
+Updated the host-command inventory and script catalog/inventory, including the
+legacy command/helper ownership and removal boundary. Earlier unrelated README
+edits and all uncommitted focused-test work were preserved.
+
+Changed files for this task: src/diagnostics.rs, src/controller.rs,
+src/onedrive.rs, English Fluent catalog, scripts/install-dependencies.sh,
+tests/dependency_installer_test.py, README.md, docs/dependency-installation.md,
+docs/index.md, docs/microsoft-cloud-auth-setup.md, packaging/flatpak/README.md,
+scripts/README.md, engineering README/OneDrive contract/host-command inventory/
+script-tooling inventory, Task List.md and this record.
+
+Verification (HEAD 5d312f5ca329af23619eefb86f599316a04988ef,
+source_dirty=true):
+
+- Initial `bash scripts/dev.sh check`: exit 101; used a nonexistent Connection
+  access_mode accessor in the new diagnostic policy. Corrected this to typed
+  ConnectionMode matching. Receipt: target/task-runs/dev-check-uyepopsd/.
+- `just fmt`: exit 0. Subsequent check: exit 0; receipt/log
+  target/task-runs/dev-check-roy4cf93/.
+- `cargo test --locked --lib dependency_warnings`: exit 0, two passed, including
+  empty/mixed configuration, explicit rclone, explicit/implicit legacy and Online
+  routing. No host tools or services are invoked by these synthetic checks.
+- `cargo test --locked --lib onedrive_missing_rclone_guidance`: exit 0, one typed
+  diagnostic/minimum-version test passed.
+- Initial pytest invocation could not run because pytest is absent (exit 1).
+  Used the file's standard-library unittest runner, not a package installation:
+  `python3 -m unittest discover -s tests -p dependency_installer_test.py -v`:
+  exit 0, ten tests passed, including --rclone-only isolation and retained --all.
+- `bash -n scripts/install-dependencies.sh` and its `--help`: exit 0 each;
+  help/syntax checks only. No installing option was executed.
+- `bash scripts/dev.sh localization-check`: exit 0; receipt/log
+  target/task-runs/dev-localization-check-esg5puot/.
+- Scoped `git diff --check`: exit 0; excluded preexisting unrelated README
+  whitespace. No unrelated prose was reformatted or reverted.
+
+- Final `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-2wve0nue/. Formatting, all-feature lint, all-target Rust
+  tests and maintained Python tests passed, with authorized outside-sandbox access
+  for just temporary scripts. Final scoped `git diff --check`: exit 0.
+
+Marked dependency/docs reconciliation complete. This is source/fake-adapter and
+documentation evidence, not installation, system-package upgrade, browser consent, native service/UI or
+final Flatpak acceptance. No cloud, credentials, services, commit, push or release
+publication changed. Next: planned installed integration acceptance, with remaining
+legacy deprecation work tracked separately in phase 5.
+
+
+### October 16, 2026 — Integrated Flatpak acceptance preparation
+
+Started the integrated acceptance task without re-running the accepted native
+cloud scenarios. Reviewed package procedure, existing source/prototype manifests,
+build/reuse guards and installed-state boundaries. The source scaffold still
+selects v0.5.2, while new implementation tests/diagnostics/docs are uncommitted;
+building that old source or accepting a transport probe would not test the current
+integration. The source wrapper correctly requires clean immutable inputs. No
+such gate was bypassed and no build, installation or launch was performed.
+
+Added --preflight to the maintained build-flatpak entry point, with bounded
+read-only observations and private schema-1 summary/preflight.json: source dirtiness
+and pin blockers, tools, runtime/SDK/extension refs, BaseApp, installed user/system
+application metadata and overrides. Success means inspection completed, not that
+build or acceptance passed. Fixed an existing candidate/reuse ref bug exposed by
+the live inspection: BaseApp is app/com.system76.Cosmic.BaseApp, not runtime/... .
+Required SDK extension refs now participate in build/reuse provenance too; no
+runtime, BaseApp or permission was changed.
+
+Chronology/evidence:
+
+- Initial live preflight target/task-runs/flatpak-preflight-ufc21brf/ completed
+  successfully but falsely classified installed BaseApp as unavailable because of
+  the old runtime-ref assumption. Retained this report as failure/fix evidence.
+- Corrected preflight target/task-runs/flatpak-preflight-tzwup1c8/; final branch-
+  explicit preflight target/task-runs/flatpak-preflight-f28r8mmf/: exit 0 each.
+  Final receipt observes all four refs available: Freedesktop Platform/SDK and
+  rust-stable extension 25.08, COSMIC BaseApp stable. Build readiness is false only
+  because checkout is dirty and Git manifest source lacks a full immutable pin.
+- Existing user app ref: app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master,
+  installed OSTree commit d0f101c60a1e4fb78700184e3dac11c2544904989c3e171ec12d73e07d7138d7.
+  No system installation. User global overrides exist; no application-specific
+  override was observed. Full metadata/overrides remain in the private receipt;
+  candidate effective-grant review is still required before installed acceptance.
+- `python3 -m unittest discover -s tests -p flatpak_wrapper_test.py -q`: exit 0,
+  ten tests (including two new preflight tests) passed before the typed-ref fix.
+- `python3 -m unittest discover -s tests -p 'flatpak_*_test.py' -q`: exit 0,
+  25 wrapper/reuse/inspection tests passed with typed BaseApp/extension checks.
+- After adding explicit preflight branch/architecture receipt fields,
+  `python3 -m unittest discover -s tests -p flatpak_wrapper_test.py -k preflight -q`:
+  exit 0, two passed. Help and scoped whitespace checks passed.
+
+Prepared the concrete operator sequence in the existing OneDrive contract:
+source commit/Cargo-input check, immutable candidate source/packaging pin, one
+shipping-feature build, payload/effective-grant review, separately approved install
+with rollback identity and one runtime owner, both disposable account flows and
+one installed initial/checksum/scheduling/Pause/cleanup smoke. No whole user drives
+or duplicate business fault suite. Longer build commands will be supplied against
+actual pinned inputs; no placeholder was executed as a build.
+
+Files changed for this preparation: scripts/build-flatpak.sh,
+scripts/lib/flatpak_tasks.py, tests/flatpak_wrapper_test.py, packaging/flatpak/README.md,
+scripts/README.md, script-tooling inventory, script-output contracts, OneDrive
+contracts, Task List.md and this record. Earlier uncommitted work is preserved.
+Final `bash scripts/dev.sh gate`: exit 0, receipt/log
+`target/task-runs/dev-gate-qjnhjpw2/` (HEAD
+5d312f5ca329af23619eefb86f599316a04988ef, source_dirty=true). Formatting,
+all-feature lint, all-target Rust and maintained Python tests passed. Used
+authorized outside-sandbox access for just temporary scripts. Final scoped
+`git diff --check` passed, excluding preexisting unrelated README whitespace.
+
+Acceptance remains open: commit/pinning, build and installed/operator steps have
+not run. AGENTS.md requires separate approval for
+commits and package installation; the current commit request applied to earlier
+work, not these subsequent changes. No cloud/credentials/services/data changed.

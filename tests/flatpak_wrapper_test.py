@@ -40,9 +40,11 @@ elif tool=='ostree':
    with target.open('a') as stream: stream.write(' ')
   sys.exit(28 if cfg.get('fsck_failure') else 0)
  else: sys.exit(93)
+elif tool=='flatpak' and args[0]=='override': print('')
 elif tool=='flatpak' and args[0]=='info':
+ if '--user' in args or '--system' in args: sys.exit(1)
  if cfg.get('missing_runtime'): sys.exit(24)
- print(cfg.get('runtime_ref','runtime/'+args[-1]) if args[1]=='--show-ref' else 'b'*64)
+ print(cfg.get('runtime_ref',args[-1]) if args[1]=='--show-ref' else 'b'*64)
 elif tool=='flatpak-builder':
  if cfg.get('sleep'):
   (root/'pid').write_text(str(os.getpid()));time.sleep(60)
@@ -100,6 +102,47 @@ class FlatpakTests(unittest.TestCase):
     def calls(self, root):
         return [json.loads(line) for line in (root / "calls").read_text().splitlines()]
 
+    def test_preflight_records_dirty_unpinned_blockers_without_building(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env, args, manifest = self.fixture(tmp, dirty=True)
+            manifest["modules"][0]["sources"][0].pop("commit")
+            manifest["modules"][0]["sources"][0]["tag"] = "mutable-tag"
+            (root / "source/manifest.json").write_text(json.dumps(manifest))
+            index = args.index("--output-dir")
+            args[index:index + 2] = []
+            result = self.invoke(env, [*args, "--preflight"])
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            summary = json.loads(result.stdout.splitlines()[-1])
+            receipt = json.loads(Path(summary["artifact_receipt_path"]).read_text())
+            self.assertFalse(receipt["ready_for_candidate_build"])
+            self.assertTrue(receipt["source_dirty"])
+            self.assertEqual(len(receipt["blockers"]), 2)
+            self.assertEqual(receipt["acceptance"], "not-run")
+            self.assertEqual(receipt["installation"], "not-performed")
+            self.assertFalse((root / "candidate").exists())
+            calls = self.calls(root)
+            self.assertTrue(all(c[0] in ["git", "flatpak", "flatpak-builder", "ostree"] for c in calls))
+            self.assertTrue(all(c[1:] == ["--version"] for c in calls if c[0] in ["flatpak-builder", "ostree"]))
+            self.assertTrue(all(c[1] in ["--version", "info", "override"] for c in calls if c[0] == "flatpak"))
+            self.assertTrue(all("--show" in c for c in calls if c[0] == "flatpak" and c[1] == "override"))
+
+    def test_preflight_clean_inputs_are_ready_without_an_installed_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env, args, manifest = self.fixture(tmp)
+            manifest["sdk-extensions"] = ["org.example.Rust"]
+            (root / "source/manifest.json").write_text(json.dumps(manifest))
+            index = args.index("--output-dir")
+            args[index:index + 2] = []
+            index = args.index("--source-sha")
+            args[index:index + 2] = []
+            result = self.invoke(env, [*args, "--preflight"])
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            summary = json.loads(result.stdout.splitlines()[-1])
+            receipt = json.loads(Path(summary["artifact_receipt_path"]).read_text())
+            self.assertTrue(receipt["ready_for_candidate_build"])
+            self.assertEqual(len(receipt["runtimes"]), 4)
+            self.assertTrue(all(item["ref"] is None for item in receipt["installations"]))
+
     def test_candidate_records_inputs_runtime_metadata_and_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:
             root, env, args, _ = self.fixture(tmp)
@@ -108,6 +151,7 @@ class FlatpakTests(unittest.TestCase):
             summary = json.loads(result.stdout.splitlines()[-1])
             receipt = json.loads(Path(summary["artifact_receipt_path"]).read_text())
             self.assertEqual(receipt["kind"], "unaccepted-flatpak-candidate")
+            self.assertEqual(receipt["runtimes"][2]["ref"], "app/org.example.Base/x86_64/1")
             self.assertEqual(receipt["application_id"], APP)
             self.assertEqual(len(receipt["artifacts"]), 2)
             self.assertEqual(len(receipt["runtimes"]), 3)

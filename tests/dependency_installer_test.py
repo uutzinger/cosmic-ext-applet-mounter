@@ -40,6 +40,9 @@ class DependencyInstallerTests(unittest.TestCase):
         self.assertEqual(self.flow(), expected)
         self.assertEqual(self.flow("--all"), expected)
 
+    def test_rclone_only_does_not_install_legacy_engines_or_helper(self):
+        self.assertEqual(self.flow("--rclone"), ["step-rclone"])
+
     def test_current_onedrive_still_checks_helper(self):
         self.assertEqual(self.flow("--onedrive"), ["step-onedrive-current", "step-helper"])
 

@@ -1,4 +1,4 @@
-"""Build/export a fixed-input Flatpak candidate without installation or submission."""
+"""Inspect Flatpak prerequisites or build/export a fixed-input candidate; never install."""
 
 import argparse
 import json
@@ -8,6 +8,18 @@ import re
 from artifact_inspection import digest, regular_file
 from task_output import TaskReport, atomic_json
 from flatpak_inspection import expected_policy, inspect_repository, inspect_bundle, repository_directory
+
+
+def required_refs(data, arch):
+    version = data["runtime-version"]
+    refs = [f"runtime/{data[key]}/{arch}/{version}" for key in ["runtime", "sdk"]]
+    if data.get("base"):
+        refs.append(f"app/{data['base']}/{arch}/{data.get('base-version', version)}")
+    for extension in data.get("sdk-extensions", []):
+        if not isinstance(extension, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", extension):
+            raise ValueError("Invalid SDK extension identity")
+        refs.append(f"runtime/{extension}/{arch}/{version}")
+    return refs
 
 
 def within(path, parent):
@@ -59,7 +71,7 @@ def reuse_candidate(args, report, output, manifest, checkout, sha, data, inputs,
         raise ValueError("Original build tool provenance is incomplete")
     runtimes = prior.get("runtimes")
     if (not isinstance(runtimes, list) or len(runtimes) != len(required)
-            or any(not isinstance(item, dict) or item.get("ref") != "runtime/" + ref
+            or any(not isinstance(item, dict) or item.get("ref") != ref
                    or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("commit", "")))
                    for item, ref in zip(runtimes, required))):
         raise ValueError("Original runtime provenance is incomplete or mismatched")
@@ -192,10 +204,7 @@ def run(args, report):
             raise ValueError("Invalid runtime identity component")
     if not all([runtime, sdk, version]):
         raise ValueError("Explicit runtime, SDK and runtime-version are required")
-    required = [f"{name}/{args.arch}/{version}" for name in [runtime, sdk]]
-    if manifest_data.get("base"):
-        base_version = manifest_data.get("base-version", version)
-        required.append(f"{manifest_data['base']}/{args.arch}/{base_version}")
+    required = required_refs(manifest_data, args.arch)
     output = Path(args.output_dir).absolute()
     if any(p.is_symlink() for p in [output, *output.parents]):
         raise ValueError("Symbolic output paths are not accepted")
@@ -216,7 +225,7 @@ def run(args, report):
     for ref in required:
         observed = report.capture("flatpak", "info", "--show-ref", ref)
         commit = report.capture("flatpak", "info", "--show-commit", ref)
-        if observed != "runtime/" + ref or not re.fullmatch(r"[0-9a-f]{64}", commit):
+        if observed != ref or not re.fullmatch(r"[0-9a-f]{64}", commit):
             raise ValueError("Required installed runtime identity mismatch")
         runtimes.append({"ref": observed, "commit": commit})
     output.mkdir(mode=0o700)
@@ -265,24 +274,90 @@ def run(args, report):
                  next_action="Unaccepted candidate only: inspect exported metadata and obtain separate installed acceptance; no installation or submission performed.")
 
 
+def preflight(args, report):
+    """Read-only observations, including blockers; success is not acceptance."""
+    manifest = regular_file(args.manifest).resolve()
+    data = json.loads(manifest.read_text())
+    appid = data.get("id", data.get("app-id", ""))
+    component = r"[A-Za-z0-9_.-]+"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*){2,}", appid):
+        raise ValueError("Invalid application ID")
+    for key in ["runtime", "sdk", "runtime-version", "base", "base-version"]:
+        if data.get(key) and not re.fullmatch(component, data[key]):
+            raise ValueError("Invalid runtime identity component")
+    if not all(data.get(key) for key in ["runtime", "sdk", "runtime-version"]):
+        raise ValueError("Explicit runtime and SDK required")
+    checkout = Path(report.capture("git", "-C", str(manifest.parent), "rev-parse", "--show-toplevel")).resolve()
+    sha = report.capture("git", "-C", str(checkout), "rev-parse", "HEAD^{commit}")
+    dirty = bool(report.capture("git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"))
+    report.update(source_sha=sha, source_dirty=dirty, ref=args.branch)
+    blockers = ["Packaging checkout is dirty"] if dirty else []
+    if args.source_sha and args.source_sha != sha:
+        blockers.append("Expected source SHA differs from checkout")
+    try:
+        _, inputs, pins = inspect_inputs(manifest, checkout, report)
+    except ValueError as error:
+        inputs, pins = {}, []
+        blockers.append(str(error))
+    tools = {name: report.capture(name, "--version", timeout=20) for name in ["flatpak", "flatpak-builder", "ostree"]}
+    refs = required_refs(data, args.arch)
+    runtimes = []
+    for ref in refs:
+        observed = report.capture("flatpak", "info", "--show-ref", ref, allowed=(0, 1), timeout=20)
+        available = observed == ref
+        commit = report.capture("flatpak", "info", "--show-commit", ref, timeout=20) if available else None
+        if available and not re.fullmatch(r"[0-9a-f]{64}", commit):
+            raise ValueError("Invalid installed runtime commit")
+        if not available:
+            blockers.append(f"Required runtime unavailable: {ref}")
+        runtimes.append({"requested": ref, "observed": observed or None, "available": available, "commit": commit})
+    installations = []
+    for scope in ["--user", "--system"]:
+        ref = report.capture("flatpak", "info", "--show-ref", scope, appid, allowed=(0, 1), timeout=20)
+        item = {"scope": scope, "ref": ref or None}
+        if ref:
+            if not ref.startswith(f"app/{appid}/{args.arch}/"):
+                raise ValueError("Unexpected installed application identity")
+            item["commit"] = report.capture("flatpak", "info", "--show-commit", scope, appid, timeout=20)
+            item["metadata"] = report.capture("flatpak", "info", "--show-metadata", scope, appid, timeout=20)
+        item["global_overrides"] = report.capture("flatpak", "override", scope, "--show", timeout=20)
+        item["app_overrides"] = report.capture("flatpak", "override", scope, "--show", appid, timeout=20)
+        installations.append(item)
+    receipt = report.directory / "preflight.json"
+    atomic_json(receipt, {"schema_version": 1, "kind": "flatpak-read-only-preflight",
+        "application_id": appid, "branch": args.branch, "architecture": args.arch,
+        "source_sha": sha, "source_dirty": dirty,
+        "manifest_path": str(manifest), "input_sha256": inputs, "source_pins": pins,
+        "tools": tools, "runtimes": runtimes, "installations": installations,
+        "ready_for_candidate_build": not blockers, "blockers": blockers,
+        "acceptance": "not-run", "installation": "not-performed"})
+    report.phase("preflight-complete", artifact_receipt_path=str(receipt),
+        next_action="Read preflight.json blockers; no build, install, launch, service or cloud change performed.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, prog="scripts/build-flatpak.sh")
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--source-sha", required=True, help="Expected clean packaging checkout commit")
+    parser.add_argument("--source-sha", help="Expected clean packaging checkout commit (required for builds)")
     parser.add_argument("--arch", required=True, choices=["x86_64", "aarch64"])
     parser.add_argument("--branch", required=True)
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--output-dir", help="New candidate output (required for builds)")
+    parser.add_argument("--preflight", action="store_true", help="Read-only source/runtime/installed metadata and overrides; never build or install")
     parser.add_argument("--log-dir")
     parser.add_argument("--reuse-receipt", type=Path, help="Verify/reuse existing candidate using its successful schema-2 receipt; never rebuild")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=7200)
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9a-f]{40}", args.source_sha) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", args.branch):
+    if args.preflight and (args.output_dir or args.reuse_receipt):
+        parser.error("Preflight does not accept candidate output/reuse arguments")
+    if not args.preflight and (not args.source_sha or not args.output_dir):
+        parser.error("Build requires --source-sha and --output-dir")
+    if (args.source_sha and not re.fullmatch(r"[0-9a-f]{40}", args.source_sha)) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", args.branch):
         parser.error("Full source SHA and a safe explicit branch are required")
     if not 1 <= args.timeout_seconds <= 86400:
         parser.error("--timeout-seconds must be between 1 and 86400")
-    with TaskReport("flatpak-build", args.log_dir) as report:
-        run(args, report)
+    with TaskReport("flatpak-preflight" if args.preflight else "flatpak-build", args.log_dir) as report:
+        (preflight if args.preflight else run)(args, report)
 
 
 if __name__ == "__main__":

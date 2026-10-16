@@ -9,7 +9,10 @@ COSMIC desktop. It supports OneDrive, SharePoint, Google Drive, Box, SMB, and
 SFTP connections through online mounts and offline mirrors.
 
 Cloud Mounter uses locally installed connection engines, including rclone,
-onedriver, and onedrive. For Google Drive, rclone communicates directly between
+onedriver, and legacy onedrive. In the 0.5.4 development source, new OneDrive
+Offline mirrors use rclone; Online mounts retain onedriver and existing legacy
+Offline profiles retain onedrive. Installed acceptance of the new integration is
+pending. For Google Drive, rclone communicates directly between
 the user's computer and Google. Cloud Mounter does not operate an intermediary
 server and does not receive users' Google Drive files or OAuth tokens.
 
@@ -35,7 +38,8 @@ rclone remote.
 - [Google Cloud authentication setup](google-cloud-auth-setup.md): private
   Google OAuth clients for rclone.
 - [Microsoft cloud authentication setup](microsoft-cloud-auth-setup.md): your own
-  Microsoft Entra application ID for OneDrive and SharePoint.
+  supported Microsoft sign-in policy, with custom-client instructions for
+  SharePoint and legacy OneDrive only.
 
 Run commands that refer to repository files from the checkout's root directory.
 

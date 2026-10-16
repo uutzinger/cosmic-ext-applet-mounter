@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Explicit-manifest candidate build/export only; never installs or publishes.
+# Read-only preflight or pinned candidate build/export; never installs or publishes.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

@@ -149,7 +149,8 @@ pub enum PopupLayout {
 
 #[must_use]
 pub fn restore(snapshot: &ControllerSnapshot) -> ControllerViewState {
-    let dependency_warnings = dependency_warnings(snapshot.dependencies.as_ref());
+    let dependency_warnings =
+        dependency_warnings(snapshot.dependencies.as_ref(), &snapshot.config.connections);
     let rows = snapshot
         .config
         .connections
@@ -689,11 +690,18 @@ fn aggregate(rows: &[ConnectionRowState], dependency_warning_count: usize) -> Ag
     }
 }
 
-fn dependency_warnings(inventory: Option<&DependencyInventory>) -> Vec<String> {
+fn dependency_warnings(
+    inventory: Option<&DependencyInventory>,
+    connections: &[Connection],
+) -> Vec<String> {
     inventory
         .into_iter()
         .flat_map(|inventory| &inventory.reports)
-        .filter(|report| report.required && report.state != DependencyState::Available)
+        .filter(|report| {
+            report.required
+                && report.kind.required_for(connections)
+                && report.state != DependencyState::Available
+        })
         .map(|report| {
             use crate::diagnostics::DependencyKind;
             let dependency = match report.kind {
@@ -1322,5 +1330,73 @@ mod tests {
         assert!(text.contains("Paused on metered network"));
         assert!(text.contains("Sync Now"));
         assert!(text.contains("No warnings"));
+    }
+
+    #[test]
+    fn dependency_warnings_follow_configured_mode_and_offline_engine() {
+        use crate::model::{OfflineEngine, OnlineMountConfig};
+        let inventory = DependencyInventory {
+            reports: [
+                DependencyKind::Rclone,
+                DependencyKind::Onedriver,
+                DependencyKind::OneDriveSync,
+                DependencyKind::Fuse3,
+            ]
+            .into_iter()
+            .map(|kind| DependencyReport {
+                kind,
+                required: true,
+                state: DependencyState::Missing,
+                version: None,
+                path: None,
+                capabilities: BTreeSet::new(),
+                missing_capabilities: BTreeSet::new(),
+                summary: "synthetic missing executable".into(),
+                guidance_url: "https://example.invalid/",
+            })
+            .collect(),
+        };
+        let mut connection = offline(id("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"));
+        connection.provider = Provider::OneDrive;
+        let mut snapshot = ControllerSnapshot {
+            dependencies: Some(inventory),
+            ..ControllerSnapshot::default()
+        };
+        assert!(restore(&snapshot).dependency_warnings.is_empty());
+        for (engine, expected) in [
+            (OfflineEngine::Rclone, "rclone:"),
+            (OfflineEngine::LegacyOnedrive, "onedrive:"),
+        ] {
+            if let ConnectionMode::OfflineMirror(ref mut options) = connection.mode {
+                options.engine = Some(engine);
+            }
+            snapshot.config.connections = vec![connection.clone()];
+            let warnings = restore(&snapshot).dependency_warnings;
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].starts_with(expected), "{warnings:?}");
+        }
+        // Old profiles with absent engine still need the legacy tool.
+        if let ConnectionMode::OfflineMirror(ref mut options) = connection.mode {
+            options.engine = None;
+        }
+        snapshot.config.connections = vec![connection.clone()];
+        assert!(restore(&snapshot).dependency_warnings[0].starts_with("onedrive:"));
+        connection.mode = ConnectionMode::OnlineMount(OnlineMountConfig::default());
+        snapshot.config.connections = vec![connection.clone()];
+        let warnings = restore(&snapshot).dependency_warnings;
+        assert_eq!(warnings.len(), 2);
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.starts_with("onedriver:"))
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|warning| warning.starts_with("rclone:") || warning.starts_with("onedrive:"))
+        );
+        connection.provider = Provider::Box;
+        snapshot.config.connections.push(connection);
+        assert_eq!(restore(&snapshot).dependency_warnings.len(), 3);
     }
 }

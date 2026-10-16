@@ -382,20 +382,28 @@ drive types use the same tested generic profile; only identity/auth differs.
   results are guarded. Legacy Offline and Online controls preserved. October 15:
   check, six editor tests, discovery/removal regressions, localization-check and
   full gate passed. Browser/rendered/installed acceptance remains pending.
-- [ ] Focused tests: old/new config round trips, routing, plans/units, identity and
-  anchor guards, malformed/partial state, cancellation, setup rollback,
-  reauthentication, item filters and unchanged onedriver Online. Reuse unchanged
-  shared coverage and accepted live scenarios; add tests for changed behavior.
-- [ ] Dependency/docs reconciliation: reflect mode/engine selection in guidance,
-  diagnostics and host-command inventory. Retain rclone >= 1.74.3 and legacy
-  dependencies until phase 6; no new startup version/help probes.
-- [ ] Integrated Flatpak acceptance (transferred from phase 3 October 15): reuse
+- [x] Focused tests: mapped existing config/routing, units, identity/anchor,
+  malformed/partial-state, rollback, filter and Online coverage; added both-drive
+  reconnect, actual mid-setup cancellation/cleanup and late editor validation/
+  saved-identity race cases. October 15: check, four added focused tests and full
+  gate passed. Reused accepted live scenarios; installed acceptance remains below.
+- [x] Dependency/docs reconciliation: guidance, diagnostics and host-command/script
+  inventories distinguish new rclone mirrors, Online and legacy engines. Retained
+  rclone >= 1.74.3 and legacy dependencies until phase 6; no new startup probes.
+  October 16: check, focused diagnostic/installer tests, localization and full gate
+  passed. Installed native/Flatpak acceptance remains below.
+- [ ] Integrated Flatpak acceptance (started October 16; transferred from phase 3 October 15): reuse
   applet manifests/runtime/probes after integration. Check both account flows,
   OAuth/browser portal, selected paths, host/sandbox boundaries and integrated
   units/status; run one disposable initial-sync/verification/cleanup smoke.
   Reuse unchanged native scenario/fault evidence; no separate prototype sandbox
   or repeated business faults. Record results toward phase-7/consolidated Flatpak
   acceptance, not as another duplicate suite; probe-only evidence is insufficient.
+  October 16: read-only installed/runtime preflight added and exercised; all four
+  accepted runtime/SDK/BaseApp/extension refs present. Corrected BaseApp app-ref
+  validation in build/reuse tooling; 25 focused script tests and final gate passed.
+  Current source is dirty and scaffold still
+  pins v0.5.2; source freeze/pinning and an approved candidate install remain next.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 

@@ -6,7 +6,7 @@ Status: P0–P3 source/fixture gates complete; separate live/hosted package acce
 
 Created: October 13, 2026
 
-Last reviewed: October 15, 2026
+Last reviewed: October 16, 2026
 
 ## Scope and method
 
@@ -32,7 +32,7 @@ preserved data and script-first repeatable workflows. See [AGENTS.md](../../AGEN
 
 | Script in scripts/ | Category | Current evidence/callers | Disposition |
 |---|---|---|---|
-| `install-dependencies.sh` | Project host setup | Dependency guide, installer/reporting fixtures, component selections | P2 optional --log-dir implemented; visible prompts, private logs/atomic result, unchanged selections. No-options installation is not read-only. |
+| `install-dependencies.sh` | Project host setup | Dependency guide, installer/reporting fixtures, component selections | P2 optional --log-dir implemented; visible prompts, private logs/atomic result. October 16: help distinguishes new rclone mirrors from legacy engine/helper; --all selections unchanged and --rclone-only isolation tested. No-options installation is not read-only. |
 | `setup-openconnect.sh` | Project host setup | OpenConnect guide and fake package/service/setting/report fixtures | P2 optional --log-dir implemented; installs/changes service and icon as before. Uninstall retains packages/profiles. No live setup execution counted. |
 | `cosmic-ext-applet-mounter-onedrive-auth-helper` | Installed runtime payload | just/debian installation, app helper launcher, localization tests and package contracts | Keep as an actively called runtime payload. Not a build wrapper or archive candidate; no behavior changes in this tooling plan. |
 | `check-ui-localization.sh` | Development gate | just localization-check; calls translation checker plus helper localization tests | Keep wrapper: it adds test coverage beyond the checker alone. |
@@ -45,7 +45,7 @@ preserved data and script-first repeatable workflows. See [AGENTS.md](../../AGEN
 | `promote_release.py` | Artifact inspection/promotion | promotion workflow, guide, policy/package/fake-command tests | P1 reporting/resumption implemented; P2 delegates package verification to shared inspection policy. Default remains no-publication. |
 | `inspect-artifacts.py` | Offline artifact inspection | Shared Debian/native and Flatpak metadata verifiers; fixtures registered in just/Debian tests | Implemented: package/byte identity and explicit-baseline repository/bundle metadata comparison. No builds/network/install, provenance or installed-acceptance claim. |
 | `dev.sh` | Logged native development | Fixed just recipes through lib/dev_tasks.py; fixture tests in just/Debian gates | Implemented: private logs, concise results (including `source_dirty` and a bounded failure excerpt on stderr), recipe/HEAD/dirty identity, real exit status and cancellation; `gate` = fmt-check, lint, test. No install/cleanup/release tasks. |
-| `build-flatpak.sh` | Candidate Flatpak build/export/reuse | Explicit clean manifest checkout, pinned sources and fake-command fixtures | Implemented: build/export, shared inspection and explicit schema-2 reuse with fsck/hashes/successful producer summary. No implicit rebuild or install/launch/submission; mutable-tag manifest is not silently fixed. |
+| `build-flatpak.sh` | Read-only preflight and candidate build/export/reuse | Explicit clean manifest checkout, pinned sources and fake-command fixtures | Implemented: read-only --preflight source/installed metadata and override receipts; typed runtime/SDK/extension refs and BaseApp app ref; build/export, shared inspection and explicit schema-2 reuse with fsck/hashes/successful producer summary. No implicit rebuild or install/launch/submission; mutable-tag manifest is not silently fixed. |
 
 These tools contain project bindings even where their underlying task is
 reusable. Do not move installers into generic build tooling, rename public

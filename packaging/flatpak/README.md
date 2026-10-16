@@ -68,6 +68,40 @@ Legacy candidates remain inspectable with the standalone inspector but are not
 silently promoted to reusable schema-2 candidates. Local receipts are comparison
 baselines, not signed attestations. No installation/publication is implied.
 
+## Integrated OneDrive acceptance preflight
+
+Use the maintained wrapper for read-only host observations before building:
+
+```sh
+bash scripts/build-flatpak.sh --preflight \
+  --manifest packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json \
+  --arch x86_64 --branch master
+```
+
+This writes private `summary.json`, `task.log` and `preflight.json` under
+`target/task-runs/`. It does not build, install, download, launch, edit overrides,
+change services or access cloud accounts. It observes source dirtiness/pins,
+Platform/SDK/Rust extension **runtime refs**, COSMIC BaseApp **app ref**, installed
+user/system application metadata and global/application overrides. Missing apps
+are valid observations; unexpected command failures remain failures. Existing
+source-build checks also use these typed ref identities, including SDK extensions.
+
+A successful inspection receipt is not a ready build or acceptance pass: inspect
+`ready_for_candidate_build`, `blockers` and `acceptance=not-run`. Uncommitted source
+and mutable manifest pins remain build blockers. Actual build still requires a
+clean pinned packaging checkout, full source commit, new output directory and
+separate logs. Preflight does not relax or bypass those checks. Source manifests
+for the acceptance candidate keep the shipping feature set and existing
+Freedesktop 25.08/COSMIC BaseApp target; the old v0.5.2 source is not current evidence.
+
+The existing installed application ID is shared with native configuration and
+worker identities. Use its reviewed branch explicitly; installing a replacement
+requires approval and retained rollback identity. Do not run competing native
+and Flatpak owners. The full operator sequence is in the
+[OneDrive acceptance procedure](../../docs/engineering/onedrive-rclone-offline-contracts.md#integrated-flatpak-operator-sequence-october-16).
+Transport-only probes and local-binary GUI prototypes do not establish final
+source-based package acceptance.
+
 ## Offline artifact inspection
 
 Select the expected metadata keyfile explicitly after reviewing it. For example:
@@ -270,7 +304,7 @@ Retained command families are reconciled in the
 |---|---|
 | `rclone` | Remote setup/auth/configuration; scoped access checks; private RC readiness, queue/health/refresh/job operations; coordinator preview/sync, recovery markers, checksum verification, and ownership-checked retention. |
 | `onedriver` | Online OneDrive authentication; generated service runs the mount engine directly. |
-| `onedrive` | Offline OneDrive authentication, preview/sync/status; generated service runs its monitor directly. |
+| `onedrive` | Legacy Offline OneDrive authentication, preview/sync/status only; its retained service runs the monitor directly. New OneDrive mirrors use rclone. |
 | `fusermount3` | Clean FUSE detach and confirmed lazy recovery. |
 | `mountpoint`, `find`, `cat` | Host mount readiness, path/emptiness/preload checks, and mount-namespace inspection; native mountinfo instead reads local `/proc`. |
 | `flatpak document-info` | Explicit Documents portal-v4 compatibility exception, selected only for the unsupported sandbox interface-version result. |
@@ -370,15 +404,15 @@ defaults), exact source/runtime identity, generated worker/guard units, and live
 Tasks (5)/(6) behavior before release. Do not enable `development-probes` in the
 shipping build, advance the tag prematurely, or substitute a different base/runtime.
 
-> **Planned (0.5.4):** `abraunegg/onedrive`, its host command and this auth helper are being dropped in favor of `rclone bisync` for OneDrive Offline, so the Flatpak will not need them; see the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md). The text below describes the current state until the removal phase.
+> **0.5.4 development:** new OneDrive Offline mirrors use host rclone >= 1.74.3 and the shared applet OAuth/coordinator path. The `onedrive` host command and auth helper remain for legacy profiles for one transition release; removal is a later phase. Integrated Flatpak/browser acceptance is still pending. See the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md).
 
-The packaged optional OneDrive auth helper uses Python GI, GTK 3, and WebKit2
+The packaged optional legacy OneDrive auth helper uses Python GI, GTK 3, and WebKit2
 4.1 introspection. Final sandbox acceptance must verify those imports and its
 sign-in handoff inside the accepted runtime/base (or document manual URL handoff).
 Host Debian recommendations/installer packages do not supply sandbox libraries.
 
 The accepted 25.08 Platform currently lacks Python GI. Flatpak therefore uses
-manual browser/response-URL handoff for OneDrive Offline setup, not the packaged
+manual browser/response-URL handoff for legacy OneDrive Offline setup, not the packaged
 WebKit helper: start setup, open sign-in through the desktop portal, then paste
 and submit the full final Microsoft native-client redirect URL. Browser request
 acceptance is not sign-in completion. Transient auth files live in the private

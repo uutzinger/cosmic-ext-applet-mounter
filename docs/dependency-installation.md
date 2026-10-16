@@ -7,9 +7,11 @@ applet does not run startup version/help probes or install or upgrade
 dependencies. The installer and packaging requirements below enforce the
 supported minimum versions.
 
-You likely will need to **update rclone**. If you want to connect to OneDrive storage, you
-need to install onedriver and/or onedrive. All other components should be
-preinstalled by the operating system.
+For the 0.5.4 development source, **rclone 1.74.3 or newer** handles new
+OneDrive Offline mirrors. OneDrive Online mounts still need `onedriver`;
+`onedrive` and its optional GUI helper are needed only for retained legacy
+Offline profiles. Installed native/Flatpak acceptance of the new integration is
+pending; an older installed applet keeps its existing engine behavior.
 
 The automated installer supports Debian, Ubuntu, Pop!_OS, Fedora, Arch Linux,
 openSUSE Tumbleweed, and Gentoo:
@@ -23,6 +25,16 @@ Or run it locally after cloning the repository:
 ```sh
 bash scripts/install-dependencies.sh --all
 ```
+
+To install only the engine for new OneDrive mirrors, select `--rclone`:
+
+```sh
+bash scripts/install-dependencies.sh --rclone
+```
+
+No options and `--all` retain all engines and the legacy helper for compatibility.
+Use `--onedriver` for OneDrive Online or `--onedrive` for existing legacy mirrors.
+These commands install/update packages; the applet never installs them itself.
 
 Optionally add `--log-dir /tmp/dependency-setup-report` (a new directory with
 an existing parent) to retain private logs and a JSON result. Prompts/output
@@ -46,25 +58,25 @@ Manual instructions are retained below for reference and for other distributions
 
 | Tool | Used For | Required/Tested Version |
 |---|---|---|
-| [`rclone`](https://rclone.org/) | Google Drive, Box, SMB, SFTP, and SharePoint Online mount and Offline mirror | 1.74.3 or newer |
+| [`rclone`](https://rclone.org/) | Google Drive, Box, SMB, SFTP and SharePoint mounts/mirrors; new OneDrive Offline mirrors | 1.74.3 or newer |
 | [`onedriver`](https://github.com/jstaf/onedriver) | OneDrive Online mount | 0.15.0 or newer |
-| [`onedrive`](https://github.com/abraunegg/onedrive) | OneDrive Offline mirror | 2.5.10 or newer |
+| [`onedrive`](https://github.com/abraunegg/onedrive) | Legacy OneDrive Offline mirror only | 2.5.10 or newer |
 | [`fusermount3`](https://github.com/libfuse/libfuse) / FUSE 3 | Online mounts | installed |
 | [NetworkManager](https://networkmanager.dev/) | network and VPN readiness over D-Bus | installed |
 | systemd user manager and logind | service/timer control and optional sleep cleanup over D-Bus | host services available |
 | OpenConnect NetworkManager plugin | Cisco-compatible VPN authentication | see [OpenConnect setup](openconnect.md) |
-| Python 3 / PyGObject, GTK 3, WebKitGTK 4.1 | Optional OneDrive Offline Mirror sign-in window | Debian packages below |
+| Python 3 / PyGObject, GTK 3, WebKitGTK 4.1 | Optional legacy OneDrive Offline sign-in window | Debian packages below |
 
-The planned 0.5.4 rclone OneDrive Offline mirror uses the same **1.74.3 minimum**;
+The implemented 0.5.4 development rclone OneDrive Offline mirror uses the same **1.74.3 minimum**;
 it does not require another upgrade beyond this existing requirement. Its generic
 bisync flags are present in the pinned 1.74.3 source; personal/business live
 prototype tests used 1.75.0. This is source compatibility evidence for 1.74.3,
 not a live test of that release. See the
 [version and flag assessment](engineering/onedrive-rclone-offline-contracts.md#rclone-version-and-flag-assessment).
 
-### OneDrive sign-in helper
+### Legacy OneDrive sign-in helper
 
-The supported OneDrive Offline Mirror GUI helper needs these runtime packages
+The retained legacy OneDrive Offline GUI helper needs these runtime packages
 on Debian/Ubuntu/Pop!_OS (not compiler/development packages):
 
 ```sh
@@ -91,6 +103,15 @@ handoff instead. The helper path checks imports without opening a GUI or
 authenticating. Debian/Ubuntu/Pop!_OS, Fedora, and Arch package mappings are
 automated; openSUSE/Gentoo report explicit manual runtime guidance when missing.
 
+### Dependency diagnostics
+
+The inventory lists supported executables. Missing-tool warnings follow saved
+connections: new OneDrive mirrors use rclone, Online OneDrive uses onedriver,
+and legacy Offline OneDrive uses onedrive. FUSE is needed for Online mounts;
+NetworkManager and the systemd user manager remain common host prerequisites.
+Saved disabled profiles still retain their engine requirements. Version/capability
+probes are not run at applet startup; actual operations report typed failures.
+
 ### Host integration prerequisites
 
 Flatpak does not bundle or upgrade these host engines. OpenConnect additionally
@@ -108,10 +129,10 @@ fallback; the applet does not upgrade the portal. See the
 If you build from source you can check dependencies with:
 
 ```sh
-cargo run --example dependency_inventory
+cargo run --locked --example dependency_inventory
 ```
 
-## rclone (Google Drive, Box, SMB)
+## rclone (mounts and Offline mirrors)
 
 Check the installed version and configuration location:
 
@@ -180,9 +201,9 @@ Reference:
 
 - <https://github.com/jstaf/onedriver>
 
-## abraunegg/onedrive (OneDrive Mirror)
+## abraunegg/onedrive (legacy OneDrive Mirror)
 
-> **Planned deprecation (0.5.4):** OneDrive Offline mirrors will move to `rclone bisync`. Install `onedrive` and the sign-in helper below only to keep existing OneDrive mirror connections working during the transition release; they will no longer be needed afterwards. This note describes the plan, not shipped behavior; see the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
+> **Transition release:** the 0.5.4 source creates OneDrive Offline mirrors with `rclone bisync`. Retain `onedrive` and its helper for existing legacy profiles for one release; removal is a later phase. There is no automatic conversion. See the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
 
 Ubuntu 24.04 repositories may provide an obsolete 2.4.x package. Use an
 upstream-supported package source that provides version 2.5.10 or newer.

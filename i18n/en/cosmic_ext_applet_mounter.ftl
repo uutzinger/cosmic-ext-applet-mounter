@@ -1407,3 +1407,5 @@ onedrive-editor-verification-required = Verify this remote and selected folder b
 onedrive-editor-result-discarded = OneDrive setup was cancelled or the editor changed. The result was not applied. Detect remotes to review any newly created remote.
 onedrive-editor-remote-help = Enter a new remote name to connect, or detect and select an existing OneDrive remote. Reconnecting a saved mirror must verify the same drive. Existing remotes are never overwritten by Connect new remote.
 onedrive-editor-result-discarded-error = OneDrive setup result was not applied: { $error } Detect remotes to review any remaining remote.
+
+onedrive-rclone-missing = rclone is missing. Install rclone { $minimum } or newer on the host before using this OneDrive Offline mirror.

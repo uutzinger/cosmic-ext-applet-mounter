@@ -911,6 +911,13 @@ impl std::fmt::Display for OneDriveError {
             Self::UnsupportedQuestion => crate::fl!("microsoft-oauth-invalid-response"),
             Self::InvalidState => crate::fl!("onedrive-binding-changed"),
             Self::Ownership => crate::fl!("onedrive-anchor-invalid"),
+            Self::RcloneFailed {
+                failure: RcloneFailure::MissingExecutable,
+                ..
+            } => crate::fl!(
+                "onedrive-rclone-missing",
+                minimum = crate::diagnostics::MIN_RCLONE_VERSION
+            ),
             Self::Io
             | Self::VerificationFailed
             | Self::CommandFailed
@@ -949,5 +956,16 @@ mod tests {
                 .is_err()
             );
         }
+    }
+    #[test]
+    fn onedrive_missing_rclone_guidance_uses_supported_minimum() {
+        let message = OneDriveError::RcloneFailed {
+            operation: RcloneOperation::IdentityAccess,
+            failure: RcloneFailure::MissingExecutable,
+        }
+        .to_string();
+        assert!(message.contains("rclone"));
+        assert!(message.contains(crate::diagnostics::MIN_RCLONE_VERSION));
+        assert!(!message.contains("abraunegg"));
     }
 }

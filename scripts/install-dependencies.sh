@@ -598,13 +598,13 @@ Usage: $0 [OPTION]...
 Install or update host dependencies for cosmic-ext-applet-mounter.
 
 Options:
-  --all                Install/update base tools, engines, and OneDrive GUI runtime.
+  --all                Install/update all engines, including legacy OneDrive GUI runtime.
   --base               Install base tools only (fuse3, network-manager).
-  --rclone             Install/update rclone using the official installer.
+  --rclone             Install/update rclone (new OneDrive mirrors and other providers).
   --rclone-selfupdate  Try rclone's package-aware selfupdate first (opt-in).
-  --onedriver          Install/update jstaf/onedriver.
-  --onedrive           Install/update abraunegg/onedrive and its optional GUI runtime.
-  --onedrive-auth-helper Install/check only the optional OneDrive GUI runtime.
+  --onedriver          Install/update jstaf/onedriver (OneDrive Online mounts).
+  --onedrive           Install/update legacy OneDrive mirror engine and optional GUI runtime.
+  --onedrive-auth-helper Install/check only the optional legacy OneDrive GUI runtime.
   --skip-onedrive-auth-helper Omit GUI runtime; use manual browser/URL handoff.
   --help               Show this help message.
   --log-dir DIR        Mirror visible output to a new private log/report directory.
