@@ -2642,3 +2642,34 @@ vendor regeneration. Pin-focused packaging check and build receipt follow.
   four passed. Source f5c3841, packaging docs/manifest dirty. Unchanged app source
   and Cargo inputs retain full gate target/task-runs/dev-gate-tzawhxc8/; only
   affected source-pin packaging contracts rerun. `git diff --check`: exit 0.
+
+- Packaging pin/records committed as cf00f2a76a26adfd96636dc064043d14021bbaa2
+  (`Pin corrected Flatpak acceptance candidate source`). Clean detached worktree
+  /tmp/cloud-mounter-flatpak-packaging-cf00f2a created at that exact commit.
+- Ran maintained `bash scripts/build-flatpak.sh` from the root tooling checkout:
+  --manifest /tmp/cloud-mounter-flatpak-packaging-cf00f2a/packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json,
+  --source-sha cf00f2a76a26adfd96636dc064043d14021bbaa2,
+  --arch x86_64 --branch master, root repository as --local-source-repo,
+  --output-dir target/artifacts/candidates/flatpak-cf00f2a-x86_64-master,
+  --log-dir target/task-runs/flatpak-candidate-cf00f2a (absolute output/log paths
+  supplied). Exit 0, status succeeded. summary.json, task.log and artifacts.json
+  retained in the log directory; no build errors or retries.
+- App source fetched through exact-pin local Git transport:
+  f5c384126460fc4c912e62be0c4ed75d8068dfac. Shipping release feature set,
+  locked/offline Cargo build and all four runtime/SDK/BaseApp identities recorded.
+- Repository and private bundle-import verification agree on ref
+  app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master and commit
+  48e7cabc6280678b999521499f475efd82395d2487da114ce60d4a887c97f8fd.
+  Bundle 13,396,600 bytes; SHA256
+  98d7aae7c7c11d96ab9686aa922953adf9313745e034975de1953490b1ddc521.
+  Complete metadata and four runtime-provenance entries exactly match the prior
+  de8d779 candidate. Built metadata SHA256 remains
+  f791b92fc3866e73e401ea29f45367f7f7834fa7c6458171d71d1dfa3ae82cc3.
+
+Verification boundary: replacement built/exported and inspected, not installed
+or exercised. Current installed applet, authenticated remote, services and cloud
+data unchanged during this build; no push or publication. Next: close/remove the
+running applet for replacement installation, then select the existing remote,
+fill the disposable subtree and Verify selected remote before saving/syncing.
+These post-build task/evidence updates are a separate records-only commit and
+do not alter candidate source/packaging identity or require another build.
