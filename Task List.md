@@ -417,6 +417,9 @@ drive types use the same tested generic profile; only identity/auth differs.
   reported invalid data. JSON-safe credential redaction fixed in source;
   regression reproduced before fix, then check, focused tests and final gate
   passed. Updated candidate build/installed retest remains outstanding.
+  Fixes/installer/acceptance records committed as f5c3841; replacement manifest
+  pins that exact source. Replacement candidate build started October 16;
+  existing authenticated remote retained for verification after the update.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 

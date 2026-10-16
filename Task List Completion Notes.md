@@ -2622,3 +2622,23 @@ Checks at source de8d779, dirty=true:
   fix is claimed. Next: approved source commit/pin and replacement candidate,
   then Verify selected remote with the explicit disposable subtree. Preserve the
   already-authenticated remote rather than repeating OAuth or deleting it.
+
+### October 16, 2026 — Approved replacement Flatpak commit and build
+
+Operator approved committing the corrections and building the replacement.
+Advised closing Add Connection without saving; existing authenticated remote
+remains in rclone. Installed applet may run during the build; replacement
+installation still requires closing/removing the running applet beforehand.
+
+Committed JSON-safe redaction, corrected receipt-verified installer and the
+preceding acceptance records as f5c384126460fc4c912e62be0c4ed75d8068dfac
+(`Fix JSON credential redaction and Flatpak applet discovery`). Reused passing
+check/focused/full-gate receipts from the preceding entry; no application code
+changed after those checks. Updated source manifest/documentation to pin that
+full app commit for the replacement. No dependency/runtime/permission change or
+vendor regeneration. Pin-focused packaging check and build receipt follow.
+
+- Replacement-pin `cargo test --locked --test flatpak_packaging_contract`: exit 0,
+  four passed. Source f5c3841, packaging docs/manifest dirty. Unchanged app source
+  and Cargo inputs retain full gate target/task-runs/dev-gate-tzawhxc8/; only
+  affected source-pin packaging contracts rerun. `git diff --check`: exit 0.

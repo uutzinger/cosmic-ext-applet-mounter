@@ -621,3 +621,14 @@ availability, download integrity after transfer, sandbox compilation or installa
 Commit the packaging changes into the required clean checkout and establish
 availability of the pinned app source before invoking the candidate builder.
 No remote publication or installation is implied by this pin.
+
+October 16 replacement candidate: the initial cf5da32-based package built and
+installed successfully. Panel embedding passed after parking a shadowing native
+desktop entry; the personal browser consent/setup then passed but automatic
+remote inventory failed because text credential redaction corrupted JSON.
+Replacement source pin is `f5c384126460fc4c912e62be0c4ed75d8068dfac`, with
+JSON-structural redaction, synthetic regression coverage and the maintained
+receipt-verified installer/discovery correction. Cargo inputs, runtime, shipping
+features and grants are unchanged. Source checks passed; replacement build and
+installed inventory/mirror acceptance remain separate. Earlier prototype and
+package receipts remain historical evidence in the completion notes.
