@@ -2767,3 +2767,20 @@ Validation (source 4fdd537, dirty=true):
   executable mode and task/evidence records. Installer mode is staged; source
   fix/records remain uncommitted. No installed Save success is claimed. Next:
   approved commit/source pin/replacement build, then installed Save/Paused retest.
+
+### October 16, 2026 — Approved legacy-compatible replacement candidate
+
+Operator approved committing and replacing the candidate. Committed the source
+fix, synthetic regression, installer executable mode and chronological acceptance
+records as 5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d
+(`Preserve legacy OneDrive recovery paths during profile saves`). Reused final
+gate target/task-runs/dev-gate-xqjx8r62/ and focused evidence above: application
+code unchanged since validation. Updated manifest/current packaging docs to that
+full app-source pin; runtime, Cargo inputs, features and permissions unchanged.
+Pinned packaging contracts/build evidence follow. Installed applet and existing
+profile data remain unchanged while the replacement candidate is prepared.
+
+- `cargo test --locked --test flatpak_packaging_contract`: exit 0, four passed
+  for the updated pin. Source 5e9f5b8, packaging edits dirty; no dependency/runtime
+  changes. Unchanged application checks reuse dev-gate-xqjx8r62 as above.
+  `git diff --check`: exit 0.

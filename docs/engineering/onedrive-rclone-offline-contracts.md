@@ -632,3 +632,13 @@ receipt-verified installer/discovery correction. Cargo inputs, runtime, shipping
 features and grants are unchanged. Source checks passed; replacement build and
 installed inventory/mirror acceptance remain separate. Earlier prototype and
 package receipts remain historical evidence in the completion notes.
+
+Further October 16 acceptance: the f5c3841-based replacement passed installed
+personal folder verification and Test Connection. Save's document-wide work-root
+guard rejected an existing legacy profile's historical recovery default.
+Latest candidate source pin is `5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d`.
+Its narrow compatibility exception permits only legacy OneDrive's exact normalized
+<work-root>/onedrive-recovery/<own-connection-id> path; all new rclone recovery,
+mirror/cache and other work-root overlaps remain guarded. Eight focused config
+tests and final gate passed. Candidate rebuild and installed Save/Paused retest
+remain separate; no existing profile or legacy state is migrated.

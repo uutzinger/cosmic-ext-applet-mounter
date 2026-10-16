@@ -427,6 +427,8 @@ drive types use the same tested generic profile; only identity/auth differs.
   under the historic app-owned state namespace; narrow compatibility fix passes
   check, eight focused configuration tests and final gate. Installer executable
   Git mode corrected after gate exposed it. Replacement build/Save retest pending.
+  Compatibility fix committed as 5e9f5b8; candidate source pin updated to that
+  exact revision for the approved replacement build.
   Paused Save and mirror/service acceptance remain pending.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
