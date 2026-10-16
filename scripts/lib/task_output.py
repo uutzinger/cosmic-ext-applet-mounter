@@ -63,13 +63,13 @@ class TaskReport:
             self.log.flush()
             print(f"{self.state['task']}: {name}", flush=True)
 
-    def run(self, argv, capture=False, allowed=(0,), timeout=120):
+    def run(self, argv, capture=False, allowed=(0,), timeout=120, env=None):
         # Do not echo arbitrary arguments: auth/file paths can be sensitive.
         self.log.write(f"\n[command: {Path(argv[0]).name}]\n")
         self.log.flush()
         with tempfile.TemporaryFile() as stdout:
             process = subprocess.Popen(argv, stdout=stdout if capture else self.log,
-                                       stderr=self.log, start_new_session=True)
+                                       stderr=self.log, start_new_session=True, env=env)
             try:
                 code = process.wait(timeout=timeout)
             except BaseException:

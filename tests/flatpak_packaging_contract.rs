@@ -178,6 +178,10 @@ fn flatpak_build_identity_and_assets_preserve_release_boundaries() {
     }
     let source = &manifests[0]["modules"][0]["sources"][0];
     assert_eq!(source["type"], "git");
-    assert!(source.get("tag").or_else(|| source.get("commit")).is_some());
+    let commit = source["commit"].as_str().expect("immutable source commit");
+    assert_eq!(commit.len(), 40);
+    assert!(commit.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(source.get("tag").is_none());
+    assert!(source.get("branch").is_none());
     assert_eq!(manifests[1]["modules"][0]["sources"][1]["type"], "file");
 }

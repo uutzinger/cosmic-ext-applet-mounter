@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 
@@ -163,7 +164,10 @@ def inspect_inputs(manifest, checkout, report):
                 raise ValueError("Local file/patch paths required")
             for path in paths:
                 local(base / path)
-        elif kind == "script" and isinstance(value.get("commands"), list):
+        elif kind == "inline":
+            if not isinstance(value.get("contents"), str) or not isinstance(value.get("dest-filename"), str):
+                raise ValueError("Malformed inline source")
+        elif kind in ("script", "shell") and isinstance(value.get("commands"), list):
             if not all(isinstance(command, str) for command in value["commands"]):
                 raise ValueError("Malformed script source")
         else:
@@ -182,6 +186,33 @@ def inspect_inputs(manifest, checkout, report):
 
     data = load(manifest, "manifest")
     return data, inputs, pins
+
+
+def build_source_transport(data, repository, report):
+    if repository is None:
+        return None, {"kind": "manifest-url"}
+    repository = repository.resolve(strict=True)
+    if not repository.is_dir():
+        raise ValueError("Local source Git repository must be a directory")
+    source = data.get("modules", [{}])[0].get("sources", [{}])[0]
+    if (not isinstance(source, dict) or source.get("type") != "git"
+            or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", ""))
+            or not isinstance(source.get("url"), str) or not source["url"].startswith("https://")
+            or any(character.isspace() for character in source["url"])):
+        raise ValueError("Local transport requires an explicit pinned HTTPS app Git source")
+    commit = report.capture("git", "-C", str(repository), "rev-parse", "--verify",
+                            source["commit"] + "^{commit}", timeout=20)
+    if commit != source["commit"]:
+        raise ValueError("Local Git repository does not contain the pinned source commit")
+    environment = os.environ.copy()
+    count = int(environment.get("GIT_CONFIG_COUNT", "0"))
+    if not 0 <= count < 64:
+        raise ValueError("Unsupported inherited Git config environment")
+    environment["GIT_CONFIG_COUNT"] = str(count + 1)
+    environment[f"GIT_CONFIG_KEY_{count}"] = f"url.{repository.as_uri()}/.insteadOf"
+    environment[f"GIT_CONFIG_VALUE_{count}"] = source["url"]
+    return environment, {"kind": "local-git", "repository": str(repository),
+                         "source_url": source["url"], "commit": commit}
 
 
 def run(args, report):
@@ -220,6 +251,7 @@ def run(args, report):
         return
     if output.exists():
         raise ValueError("Output must be new unless --reuse-receipt is explicitly selected")
+    build_environment, source_transport = build_source_transport(manifest_data, args.local_source_repo, report)
     tools = {tool: report.capture(tool, "--version") for tool in ["flatpak", "flatpak-builder", "ostree"]}
     runtimes = []
     for ref in required:
@@ -237,7 +269,7 @@ def run(args, report):
         command.append("--disable-download")
     # A manifest may intentionally run build commands; the operator authorizes
     # that selected manifest, not arbitrary shell payloads passed to this wrapper.
-    report.run([*command, str(build), str(manifest)], timeout=args.timeout_seconds)
+    report.run([*command, str(build), str(manifest)], timeout=args.timeout_seconds, env=build_environment)
     metadata = regular_file(build / "metadata")
     if metadata.stat().st_size > 1024 * 1024:
         raise ValueError("Built metadata exceeds size budget")
@@ -263,7 +295,7 @@ def run(args, report):
                 "source_sha": sha, "manifest_path": str(manifest), "input_sha256": inputs,
                 "manifest_relative_path": str(manifest.relative_to(checkout)), "output_dir": str(output),
                 "build_options": {"disable_updates": True, "offline": args.offline},
-                "source_pins": pins, "tools": tools, "runtimes": runtimes,
+                "source_pins": pins, "source_transport": source_transport, "tools": tools, "runtimes": runtimes,
                 "application_id": appid, "branch": args.branch, "architecture": args.arch,
                 "sdk_extensions_declared": manifest_data.get("sdk-extensions", []),
                 "finish_args_declared": manifest_data.get("finish-args", []),
@@ -344,10 +376,13 @@ def main():
     parser.add_argument("--output-dir", help="New candidate output (required for builds)")
     parser.add_argument("--preflight", action="store_true", help="Read-only source/runtime/installed metadata and overrides; never build or install")
     parser.add_argument("--log-dir")
+    parser.add_argument("--local-source-repo", type=Path, help="Build-only local Git transport for the pinned app commit; no global Git config change")
     parser.add_argument("--reuse-receipt", type=Path, help="Verify/reuse existing candidate using its successful schema-2 receipt; never rebuild")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=7200)
     args = parser.parse_args()
+    if args.local_source_repo and (args.preflight or args.reuse_receipt):
+        parser.error("Local Git transport is build-only, not preflight/reuse")
     if args.preflight and (args.output_dir or args.reuse_receipt):
         parser.error("Preflight does not accept candidate output/reuse arguments")
     if not args.preflight and (not args.source_sha or not args.output_dir):

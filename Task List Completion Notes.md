@@ -2337,3 +2337,111 @@ Acceptance remains open: commit/pinning, build and installed/operator steps have
 not run. AGENTS.md requires separate approval for
 commits and package installation; the current commit request applied to earlier
 work, not these subsequent changes. No cloud/credentials/services/data changed.
+
+
+### October 16, 2026 — Flatpak candidate source pin and Cargo validation
+
+Pinned the source manifest to accepted implementation commit
+cf5da32f622ac7b03efb42facba9e9102da365ca, replacing v0.5.2. This is the committed
+OneDrive integration plus focused tests, dependency/docs and preflight tooling;
+no release tag or version metadata was advanced. Runtime/BaseApp, grants,
+shipping build features and payload paths are unchanged. Source and packaging
+revisions remain distinct: the packaging update still needs its own commit.
+
+Validated the existing Cargo source list against Cargo.lock instead of needlessly
+regenerating it. All 620 registry archives match package versions, canonical
+archive URLs and SHA-256 values; their vendor checksum metadata and registry
+replacement config match. Existing Rust tests cover all 12 dependency Git pins
+and locked source selectors. Cargo.toml, Cargo.lock and cargo-sources.json match
+the cf5da32 source snapshot exactly (`git diff --exit-code cf5da32 -- ...`: exit 0).
+
+Added two Python source-contract checks and strengthened the Rust manifest
+contract to require a full immutable commit and reject tag/branch source refs.
+The first Python run passed registry coverage but failed the checksum comparison:
+Git vendor metadata has package=null, not a registry archive checksum. Corrected
+the test to distinguish those supported cases; both checks then passed. No change
+to generated Cargo data was needed.
+
+Pinned-source preflight exposed another pre-existing wrapper gap: the tracked
+Cargo source JSON includes 725 inline and 52 shell entries, previously rejected
+as unsupported. Added typed validation for inline contents/filenames and native
+shell command arrays, matching the existing script-source policy. The entire
+tracked JSON (including commands/contents) remains fingerprinted. Added synthetic
+success/fingerprint and malformed-source rejection tests. This is build-time
+manifest support, not runtime UI shell execution or a new permission grant.
+
+Verification (HEAD cf5da32f622ac7b03efb42facba9e9102da365ca, source_dirty=true):
+
+- `just fmt`: exit 0; `bash scripts/dev.sh check`: exit 0, receipt/log
+  target/task-runs/dev-check-wbr3cwd6/.
+- Initial Python source check: one passed, one failed as described above;
+  corrected `python3 -m unittest discover -s tests -p flatpak_cargo_sources_test.py -v`:
+  exit 0, two passed.
+- `cargo test --locked --test flatpak_packaging_contract`: exit 0, four passed:
+  immutable source/payload/features/runtime identity, grants, dependency Git
+  source selectors and existing sandbox module source pins.
+- `python3 -m unittest discover -s tests -p flatpak_wrapper_test.py -k sources -q`:
+  exit 0, three passed, including generated inline/shell metadata fingerprints
+  and invalid types rejected before the builder.
+- Pinned preflight target/task-runs/flatpak-preflight-mnbwt9fv/: exit 0,
+  recorded unsupported generated sources as a blocker (not an acceptance pass).
+- Corrected preflight target/task-runs/flatpak-preflight-nxc0skxl/: exit 0,
+  633 immutable source pins inspected (app plus 12 dependency Git pins and
+  620 archives), all four runtime/BaseApp refs available. Its only build blocker
+  is dirty packaging checkout. This does not verify remote source availability.
+- A gate was started before that preflight exposed the wrapper gap; a final gate
+  after the source-validation fix is required below rather than treating an
+  in-flight run as validation of later edits.
+
+Changed files: source manifest, tests/flatpak_packaging_contract.rs,
+tests/flatpak_cargo_sources_test.py, scripts/lib/flatpak_tasks.py,
+tests/flatpak_wrapper_test.py, packaging guide, script catalog/inventory/output
+contract, OneDrive contract/index, Task List.md and this record. No desktop or
+Fluent strings changed. No package build/install, cloud/service/data mutation,
+commit, push or publication occurred in this pin/validation task.
+- The earlier in-flight gate completed successfully at
+  target/task-runs/dev-gate-792f4fvm/; not used as the final check of later edits.
+- Final `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-xl5ldun_/. Formatting, all-feature lint, all-target Rust
+  tests and maintained Python tests passed. Used authorized outside-sandbox access
+  for just temporary scripts. Final `git diff --check`: exit 0.
+
+Marked source pin/Cargo-input validation complete. Packaging edits are uncommitted;
+clean packaging source and pinned-source availability remain build prerequisites.
+Integrated installed acceptance remains outstanding.
+
+
+### October 16, 2026 — Commit and source-based Flatpak build
+
+Operator explicitly approved committing the packaging update and building the
+candidate. Read-only GitHub master lookup returned
+4b5bb2824fdc566f0e1d5e7d9153a7b63f68cf21, older than the selected local app source
+cf5da32f622ac7b03efb42facba9e9102da365ca. No push is authorized or needed for a
+local candidate: added build-only --local-source-repo to the maintained wrapper.
+It requires that exact commit in a real Git repository and gives only the builder
+child an environment-scoped URL rewrite for the selected app source. The manifest
+and source pin remain unchanged; working-tree files are not used as app source.
+This transport is recorded separately in the candidate receipt. Source packaging
+still must be clean/pinned, and reuse keeps original provenance without needing
+the local repository. No global Git configuration was changed.
+
+Changed scripts/lib/flatpak_tasks.py, the shared task runner's optional child-env
+argument, focused wrapper fixtures and related catalog/inventory/contracts/guide.
+These necessary build-transport changes are included with the approved pending
+packaging commit. No runtime app source or dependency version changed.
+
+Focused checks before commit/build:
+
+- `python3 -m unittest discover -s tests -p flatpak_wrapper_test.py -k local_source_transport -q`:
+  exit 0, two tests passed: exact-pin/provenance and builder-only environment;
+  mismatched source commit prevents builder/output creation.
+- `python3 -m unittest discover -s tests -p task_output_test.py -q`: exit 0,
+  six task logging/timeout/failure tests passed (expected negative-case excerpts).
+- Final gate, commit and build receipts follow. Previous source-pin/full-gate
+  evidence remains in the preceding entry. No build failure is hidden by reuse.
+
+- Final transport/packaging `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-hnmyltem/ (source cf5da32f622ac7b03efb42facba9e9102da365ca,
+  source_dirty=true). Formatting, all-feature lint, all-target Rust and maintained
+  Python tests passed. Authorized outside-sandbox access used for just scripts.
+  Source pin/Cargo checks are reused from the preceding accepted receipt.

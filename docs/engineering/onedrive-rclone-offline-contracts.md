@@ -596,3 +596,28 @@ Preflight and source/fake tests do not satisfy steps 3–6. Runtime/BaseApp chan
 credential migration, package installation, service changes, data deletion and
 publication are not authorized by preparing this procedure. Their existing
 approval boundaries remain in force.
+
+
+## Candidate source pin and Cargo inputs (October 16)
+
+The source manifest now selects accepted implementation commit
+`cf5da32f622ac7b03efb42facba9e9102da365ca` by full Git commit rather than the old
+v0.5.2 tag. This includes the integrated engine/editor, focused tests, dependency
+reconciliation and corrected Flatpak preflight. Runtime/BaseApp, permissions,
+shipping features, application identity and installed helper/worker paths are
+unchanged. It is a development-candidate pin, not a release tag or 0.5.4 metadata
+finalization; installed acceptance remains pending.
+
+The checked-in Cargo source list matches the pinned Cargo.lock: all 620 registry
+packages have matching archive URLs and SHA-256 values, vendor checksum metadata
+and registry replacement configuration. Git checksum files correctly use null
+package checksums; existing Rust checks verify the 12 pinned Git repositories and
+locked branch/tag/revision selectors. No vendor source regeneration or dependency
+version changes were required. New offline contract tests preserve these checks
+and reject mutable application source tags/branches.
+
+Validation is offline metadata/source-contract evidence. It does not prove archive
+availability, download integrity after transfer, sandbox compilation or installation.
+Commit the packaging changes into the required clean checkout and establish
+availability of the pinned app source before invoking the candidate builder.
+No remote publication or installation is implied by this pin.

@@ -402,8 +402,8 @@ drive types use the same tested generic profile; only identity/auth differs.
   October 16: read-only installed/runtime preflight added and exercised; all four
   accepted runtime/SDK/BaseApp/extension refs present. Corrected BaseApp app-ref
   validation in build/reuse tooling; 25 focused script tests and final gate passed.
-  Current source is dirty and scaffold still
-  pins v0.5.2; source freeze/pinning and an approved candidate install remain next.
+  Accepted implementation is now cf5da32 and its full manifest pin/Cargo inputs
+  are checked. Packaging commit, candidate build and approved install remain next.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 
@@ -448,10 +448,13 @@ drive types use the same tested generic profile; only identity/auth differs.
   Source implementation and focused checks handled by
   [Release build workflow follow-up](#release-build-workflow-follow-up--october-13-2026);
   next hosted promotion acceptance remains explicitly open there.
-- [ ] Commit accepted implementation and generate/check Cargo sources; pin
-  immutable 0.5.4 candidate/final source. Keep COSMIC BaseApp/Freedesktop 25.08
-  unless a separate reviewed runtime decision explicitly changes the target.
-- [ ] Build source-based candidate/final Flatpak with shipping features only;
+- [x] Commit accepted implementation and check Cargo sources; manifest pins
+  cf5da32f622ac7b03efb42facba9e9102da365ca for the development candidate. October 16:
+  all 620 registry archives/checksums and 12 dependency Git pins/selectors checked;
+  generated inline/shell source support fixed, focused tests and full gate passed.
+  COSMIC BaseApp/Freedesktop 25.08 unchanged. Packaging edits still need a commit
+  and the pinned source must be available to the builder before the next step.
+- [ ] Build source-based candidate/final Flatpak with shipping features only (in progress October 16);
   verify source/runtime identity, helper/worker payloads and size. Inspect effective
   grants including BaseApp/global overrides; no silent blanket host filesystem/
   bus grants or restoration of obsolete shell wrappers.

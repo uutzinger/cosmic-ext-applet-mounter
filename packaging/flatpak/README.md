@@ -9,9 +9,10 @@ final COSMIC repository submission.
 submission. It requires a selected JSON manifest in a separate clean checkout
 at an expected commit, tracked referenced inputs, full Git source commit pins
 and SHA-256 for remote archives/files. Tags alone and directory-source prototypes
-are rejected. The existing source manifest still needs its mutable tag replaced
-by an accepted commit before this wrapper can build it; this tooling does not
-change that manifest or choose a runtime.
+are rejected. The source manifest now pins accepted implementation commit
+`cf5da32f622ac7b03efb42facba9e9102da365ca` for the development candidate.
+The wrapper does not change that pin or choose a runtime. The packaging changes
+must also be committed before a clean-checkout candidate build.
 
 Example interface (placeholders, not a request to build now):
 
@@ -35,6 +36,19 @@ are unaccepted candidates, not installed or store-ready packages. Shared metadat
 inspection now compares both repository and bundle to built metadata before
 success. Existing destinations are refused unless --reuse-receipt is explicitly
 selected. The wrapper also requires the local `ostree` CLI.
+
+### Building a locally committed candidate
+
+If the pinned application commit is local and has not been published, add
+`--local-source-repo /absolute/path/to/application-git-repository` to the build
+command. This must be a Git repository containing the exact full app source commit
+selected by the manifest. It never copies an uncommitted working tree or relaxes
+clean packaging/pin checks. Only the builder child receives an environment-scoped
+Git URL substitution for that one app repository; global Git configuration and
+the manifest URL/pin stay unchanged. Registry/dependency Git sources keep their
+normal transports. `artifacts.json` records the local repository, logical URL and
+commit as `source_transport`. This option is build-only; verified reuse preserves
+original provenance without needing the local repository again.
 
 ### Reuse instead of rebuilding
 
@@ -131,9 +145,11 @@ Final Flatpak packaging is deferred to 0.5.4, starting with the engine decision 
 Retain candidates/probes as evidence; do not ship unvalidated WebKit modules or
 claim native success completes sandbox acceptance.
 
-The permission review below targets the pending 0.5.3 working tree. The source
-manifest still pins `v0.5.2`; it does not build the newly migrated coordinator or
-inspection adapter until the release gate advances it to an accepted 0.5.3 tag.
+The permission review below applies to the 0.5.4 development candidate. Its source
+manifest pins implementation commit `cf5da32f622ac7b03efb42facba9e9102da365ca`,
+including the integrated OneDrive rclone editor/runtime and subsequent tests and
+diagnostics. This is a development source pin, not a release tag or installed
+acceptance result. Version/release metadata is finalized in the later release task.
 The GUI prototype copies local artifacts and is not reproducible release proof.
 Both manifests use the same application ID: installing either replaces that
 user's existing Flatpak installation, not the native/Debian package. Do not run
@@ -276,7 +292,14 @@ manifest scaffold intended to be copied into the COSMIC Flatpak repository as:
 app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext-applet-mounter.json
 ```
 
-The current manifest pins `v0.5.2` and uses generated `cargo-sources.json`.
+The current manifest pins implementation commit
+`cf5da32f622ac7b03efb42facba9e9102da365ca` and uses generated `cargo-sources.json`.
+Offline contract tests compare every registry archive/checksum with Cargo.lock,
+check vendor checksum metadata/config, and verify Git commits and source selectors.
+The checked-in vendor list already matches this revision; regeneration is not
+needed. The wrapper now validates and fingerprints generated Cargo `inline` and
+`shell` entries as well as Git/archive sources. These checks do not prove remote
+availability or a completed offline build.
 Rebuild and retest after dependency or permission changes; public COSMIC
 repository submission remains pending.
 

@@ -22,7 +22,9 @@ with (root/'calls').open('a') as log: log.write(json.dumps([tool,*args])+'\n')
 if tool=='git':
  command=args[2:]
  if command[:2]==['rev-parse','--show-toplevel']: print(root/'source')
- elif command[0]=='rev-parse': print(cfg.get('sha','a'*40))
+ elif command[0]=='rev-parse':
+  target=command[-1].split('^',1)[0]
+  print(cfg.get('local_source_sha',target) if len(target)==40 else cfg.get('sha','a'*40))
  elif command[0]=='status': print(' M dirty' if cfg.get('dirty') else '',end='')
  elif command[0]=='ls-files': sys.exit(19 if cfg.get('untracked') else 0)
  else: sys.exit(91)
@@ -46,6 +48,11 @@ elif tool=='flatpak' and args[0]=='info':
  if cfg.get('missing_runtime'): sys.exit(24)
  print(cfg.get('runtime_ref',args[-1]) if args[1]=='--show-ref' else 'b'*64)
 elif tool=='flatpak-builder':
+ if os.environ.get('GIT_CONFIG_COUNT'):
+  index=int(os.environ['GIT_CONFIG_COUNT'])-1
+  (root/'transport-env.json').write_text(json.dumps({
+   'key':os.environ.get('GIT_CONFIG_KEY_'+str(index)),
+   'value':os.environ.get('GIT_CONFIG_VALUE_'+str(index))}))
  if cfg.get('sleep'):
   (root/'pid').write_text(str(os.getpid()));time.sleep(60)
  if cfg.get('build_failure'): sys.exit(25)
@@ -142,6 +149,58 @@ class FlatpakTests(unittest.TestCase):
             self.assertTrue(receipt["ready_for_candidate_build"])
             self.assertEqual(len(receipt["runtimes"]), 4)
             self.assertTrue(all(item["ref"] is None for item in receipt["installations"]))
+
+    def test_generated_cargo_inline_and_shell_sources_are_fingerprinted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env, args, manifest = self.fixture(tmp)
+            generated = [
+                {"type": "inline", "contents": "synthetic vendor metadata", "dest-filename": "config", "dest": "cargo"},
+                {"type": "shell", "commands": ["cp -r synthetic-git-package cargo/vendor/synthetic"]},
+            ]
+            (root / "source/vendor.json").write_text(json.dumps(generated))
+            manifest["modules"][0]["sources"].append("vendor.json")
+            (root / "source/manifest.json").write_text(json.dumps(manifest))
+            result = self.invoke(env, args)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            receipt = json.loads((root / "logs/artifacts.json").read_text())
+            import hashlib
+            self.assertEqual(receipt["input_sha256"]["vendor.json"],
+                             hashlib.sha256((root / "source/vendor.json").read_bytes()).hexdigest())
+
+    def test_malformed_inline_and_shell_sources_prevent_build(self):
+        for source in [{"type": "inline", "contents": 7, "dest-filename": "config"},
+                       {"type": "inline", "contents": "text"},
+                       {"type": "shell", "commands": "unstructured"},
+                       {"type": "shell", "commands": [None]}]:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as tmp:
+                root, env, args, manifest = self.fixture(tmp)
+                manifest["modules"][0]["sources"].append(source)
+                (root / "source/manifest.json").write_text(json.dumps(manifest))
+                result = self.invoke(env, args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[0] == "flatpak-builder" for call in self.calls(root)))
+
+    def test_local_source_transport_preserves_pin_and_records_builder_only_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env, args, _ = self.fixture(tmp)
+            local = root / "source"
+            result = self.invoke(env, [*args, "--local-source-repo", str(local)])
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            receipt = json.loads((root / "logs/artifacts.json").read_text())
+            self.assertEqual(receipt["source_transport"], {"kind": "local-git", "repository": str(local),
+                "source_url": "https://example.invalid/repo.git", "commit": "c" * 40})
+            transport = json.loads((root / "transport-env.json").read_text())
+            self.assertEqual(transport, {"key": f"url.{local.as_uri()}/.insteadOf", "value": "https://example.invalid/repo.git"})
+            self.assertEqual(receipt["source_pins"][0]["commit"], "c" * 40)
+            self.assertFalse(any("config" in call for call in self.calls(root) if call[0] == "git"))
+
+    def test_local_source_transport_rejects_mismatched_commit_before_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env, args, _ = self.fixture(tmp, local_source_sha="d" * 40)
+            result = self.invoke(env, [*args, "--local-source-repo", str(root / "source")])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(any(call[0] == "flatpak-builder" for call in self.calls(root)))
+            self.assertFalse((root / "candidate").exists())
 
     def test_candidate_records_inputs_runtime_metadata_and_bundle(self):
         with tempfile.TemporaryDirectory() as tmp:

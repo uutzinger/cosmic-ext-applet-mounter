@@ -142,7 +142,10 @@ metadata inspection. P3.3 reuse must not mistake this for full repository fsck.
 The manifest must be JSON inside a clean Git checkout at the expected SHA;
 referenced JSON/source/patch inputs must be tracked inside that checkout.
 Git sources require full commit pins, remote file/archive inputs require SHA-256,
-and local regular-file inputs are hashed. Mutable tags alone, directory sources,
+and local regular-file inputs are hashed. Generated Cargo inline sources require
+string contents and destination filenames; shell/script command lists require
+strings. Their enclosing tracked JSON is fingerprinted, including all contents
+and commands. Mutable tags alone, directory sources,
 unsupported input forms and symbolic paths fail closed. This intentionally does
 not accept existing prototype/loosely pinned manifests automatically.
 
@@ -150,8 +153,8 @@ The wrapper records packaging-checkout identity separately from manifest engine/
 application source pins. It invokes fixed flatpak-builder build, flatpak
 build-export and build-bundle operations, with no installation, launch, runtime
 substitution, dependency generation, cleanup, signing or submission. Required
-runtime/SDK/BaseApp are checked read-only and their installed commits recorded;
-extensions may additionally fail in the builder. --offline disables source
+runtime/SDK/BaseApp and declared SDK extensions are checked read-only and their
+installed commits recorded. --offline disables source
 downloads; otherwise pinned-source downloads are permitted, not runtime installs.
 Build state lives under the new candidate directory, so offline operation needs
 sources already available to the builder; no cache population is implied.
@@ -367,3 +370,18 @@ fail the task. No build, installation, launch, override write, service or cloud
 operation is reachable from this mode. Candidate/reuse validation now compares
 full typed refs (`runtime/...` versus BaseApp `app/...`) and includes declared SDK
 extensions; inaccurate older provenance cannot silently satisfy a changed ref set.
+
+
+## Local Git transport for candidate builds (October 16)
+
+Optional `--local-source-repo PATH` validates the selected application's pinned
+commit with bounded read-only Git, then gives only the builder child an appended
+Git config environment rewriting that exact logical HTTPS app URL to the local
+Git repository. The manifest's full commit and input hashes remain authoritative;
+no worktree/directory source or mutable ref is accepted, and no global Git config,
+source manifest URL, dependency transport or installed application is changed.
+The additive `source_transport` receipt records manifest-url or local-git plus
+repository/logical URL/commit. Existing schema-2 reuse retains original provenance
+without requiring the local repository. The option is rejected for preflight/reuse.
+The shared task runner accepts an optional child environment; existing callers
+inherit unchanged behavior and no environment values are printed by the runner.
