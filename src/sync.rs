@@ -9,8 +9,8 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use crate::model::{
-    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OfflineMirrorStatus, Provider,
-    RecoveryReason, RecoveryRecord,
+    Connection, ConnectionId, ConnectionMode, OfflineEngine, OfflineMirrorConfig,
+    OfflineMirrorStatus, Provider, RecoveryReason, RecoveryRecord,
 };
 use crate::process::{CommandError, CommandRequest, Executable, RetryPolicy};
 use crate::services::{ServiceCommand, ServiceSpec, TimerSpec};
@@ -18,6 +18,9 @@ use crate::services::{ServiceCommand, ServiceSpec, TimerSpec};
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
 const DEFAULT_ONEDRIVE: &str = "/usr/bin/onedrive";
 const RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+// Bisync interprets max-delete as a percentage of each previous listing, unlike
+// one-way sync's file-count flag. Match bisync's default; never bypass with force.
+const BISYNC_MAX_DELETE_PERCENT: u8 = 50;
 const ONEDRIVE_PREVIEW_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +29,8 @@ pub enum SyncError {
     UnsupportedProvider(Provider),
     InvalidRemoteReference,
     InvalidRemoteSubpath,
-    InvalidTeamsIdentity,
+    InvalidSharePointIdentity,
+    InvalidOneDriveIdentity,
     InvalidWorkDirectory,
     InvalidRecoveryDirectory,
     InitialPreviewRequired,
@@ -54,7 +58,10 @@ impl fmt::Display for SyncError {
             Self::InvalidRemoteSubpath => {
                 formatter.write_str(&crate::fl!("ui-sync-invalid-remote-subpath"))
             }
-            Self::InvalidTeamsIdentity => {
+            Self::InvalidOneDriveIdentity => {
+                formatter.write_str(&crate::fl!("onedrive-wrong-drive"))
+            }
+            Self::InvalidSharePointIdentity => {
                 formatter.write_str(&crate::fl!("ui-sync-invalid-sharepoint-library-identity"))
             }
             Self::InvalidWorkDirectory => {
@@ -217,6 +224,10 @@ pub fn rclone_bisync_plan(
     work_root: &Path,
 ) -> Result<RcloneBisyncPlan, SyncError> {
     match connection.provider {
+        Provider::OneDrive if connection.offline_engine() == Some(OfflineEngine::Rclone) => {
+            crate::onedrive::MirrorGuardBinding::from_connection(connection)
+                .map_err(|_| SyncError::InvalidOneDriveIdentity)?;
+        }
         Provider::Teams
         | Provider::GoogleDrive
         | Provider::Box
@@ -224,17 +235,26 @@ pub fn rclone_bisync_plan(
         | Provider::Sftp => {}
         provider => return Err(SyncError::UnsupportedProvider(provider)),
     }
+    rclone_bisync_plan_inner(connection, work_root)
+}
+
+// Shared planner for production providers and the explicitly gated development
+// prototype. Production entry points still reject legacy OneDrive connections.
+fn rclone_bisync_plan_inner(
+    connection: &Connection,
+    work_root: &Path,
+) -> Result<RcloneBisyncPlan, SyncError> {
     let options = offline_options(connection)?;
     if connection.provider == Provider::Teams {
         let identity = connection
             .teams_identity
             .as_ref()
-            .ok_or(SyncError::InvalidTeamsIdentity)?;
+            .ok_or(SyncError::InvalidSharePointIdentity)?;
         if identity.drive_id.trim().is_empty()
-            || crate::teams::parse_library_url(&identity.library_url)
+            || crate::sharepoint::parse_library_url(&identity.library_url)
                 .map_or(true, |parsed| parsed.site_url != identity.site_url)
         {
-            return Err(SyncError::InvalidTeamsIdentity);
+            return Err(SyncError::InvalidSharePointIdentity);
         }
         if connection.remote_subpath.is_none() {
             return Err(SyncError::InvalidRemoteSubpath);
@@ -261,9 +281,19 @@ pub fn rclone_bisync_plan(
         .join("rclone-bisync")
         .join(connection.id.to_string());
     if connection.provider == Provider::Teams {
-        let binding = crate::teams::MirrorGuardBinding::from_connection(connection)
-            .map_err(|_| SyncError::InvalidTeamsIdentity)?;
-        let encoded = serde_json::to_vec(&binding).map_err(|_| SyncError::InvalidTeamsIdentity)?;
+        let binding = crate::sharepoint::MirrorGuardBinding::from_connection(connection)
+            .map_err(|_| SyncError::InvalidSharePointIdentity)?;
+        let encoded =
+            serde_json::to_vec(&binding).map_err(|_| SyncError::InvalidSharePointIdentity)?;
+        work_directory = work_directory.join(format!("target-{:x}", Sha256::digest(encoded)));
+    }
+    if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(OfflineEngine::Rclone)
+    {
+        let binding = crate::onedrive::MirrorGuardBinding::from_connection(connection)
+            .map_err(|_| SyncError::InvalidOneDriveIdentity)?;
+        let encoded =
+            serde_json::to_vec(&binding).map_err(|_| SyncError::InvalidOneDriveIdentity)?;
         work_directory = work_directory.join(format!("target-{:x}", Sha256::digest(encoded)));
     }
     let remote_recovery_path = rclone_remote_recovery_path(
@@ -301,7 +331,7 @@ pub fn rclone_bisync_plan(
             "size,modtime".to_owned()
         },
         "--max-delete".to_owned(),
-        "1000".to_owned(),
+        BISYNC_MAX_DELETE_PERCENT.to_string(),
     ];
     if connection.provider == Provider::Teams {
         // SharePoint may rewrite Office files after upload. Bisync still tracks
@@ -329,8 +359,15 @@ pub fn rclone_bisync_plan(
     ]);
     let preflight_command = if connection.provider == Provider::Teams {
         Some(
-            crate::teams::mirror_guard_command(connection)
-                .map_err(|_| SyncError::InvalidTeamsIdentity)?,
+            crate::sharepoint::mirror_guard_command(connection)
+                .map_err(|_| SyncError::InvalidSharePointIdentity)?,
+        )
+    } else if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(OfflineEngine::Rclone)
+    {
+        Some(
+            crate::onedrive::mirror_guard_command(connection)
+                .map_err(|_| SyncError::InvalidOneDriveIdentity)?,
         )
     } else {
         None
@@ -345,8 +382,14 @@ pub fn rclone_bisync_plan(
         filters_file,
         preflight_command,
         verify_after_sync: connection.provider == Provider::Teams,
-        access_marker_name: (connection.provider == Provider::Teams)
-            .then(|| format!(".cloud-mounter-sharepoint-anchor-{}", connection.id)),
+        access_marker_name: match connection.provider {
+            Provider::Teams => Some(format!(
+                ".cloud-mounter-sharepoint-anchor-{}",
+                connection.id
+            )),
+            Provider::OneDrive => Some(format!(".cloud-mounter-onedrive-anchor-{}", connection.id)),
+            _ => None,
+        },
         service: ServiceSpec {
             connection_id: connection.id,
             description: crate::fl!(
@@ -372,6 +415,30 @@ pub fn rclone_bisync_plan(
             persistent: true,
         },
     })
+}
+
+#[cfg(any(test, feature = "development-probes"))]
+pub(crate) fn onedrive_prototype_plan(
+    connection: &Connection,
+    work_root: &Path,
+    remote_recovery: String,
+) -> Result<RcloneBisyncPlan, SyncError> {
+    if connection.provider != Provider::OneDrive {
+        return Err(SyncError::UnsupportedProvider(connection.provider));
+    }
+    let mut plan = rclone_bisync_plan_inner(connection, work_root)?;
+    let backup = plan
+        .service
+        .arguments
+        .iter()
+        .position(|a| a == "--backup-dir1")
+        .ok_or(SyncError::InvalidRecoveryDirectory)?;
+    plan.service.arguments[backup + 1] = remote_recovery.clone();
+    plan.remote_recovery_path = remote_recovery;
+    plan.access_marker_name = Some(format!(".cloud-mounter-onedrive-anchor-{}", connection.id));
+    // Full verification is explicit/initial-only; no SharePoint convergence.
+    plan.verify_after_sync = false;
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -461,7 +528,9 @@ pub fn one_drive_mirror_plan(
     config_root: &Path,
     isolation: &OneDriveIsolationReport,
 ) -> Result<OneDriveMirrorPlan, SyncError> {
-    if connection.provider != Provider::OneDrive {
+    if connection.provider != Provider::OneDrive
+        || connection.offline_engine() != Some(OfflineEngine::LegacyOnedrive)
+    {
         return Err(SyncError::UnsupportedProvider(connection.provider));
     }
     let options = offline_options(connection)?;
@@ -715,6 +784,7 @@ pub fn google_native_filter_file() -> String {
 pub fn rclone_bisync_filter_file(provider: Provider) -> String {
     match provider {
         Provider::GoogleDrive => google_native_filter_file(),
+        Provider::OneDrive => "# OneDrive recovery stays outside the synchronized set.\n- /.cosmic-mounter-recovery/\n- **.one\n- **.onepkg\n- **.lnk\n- **.url\n+ **\n".into(),
         Provider::Teams => "# Keep SharePoint recovery outside the synchronized set.\n- /.cosmic-mounter-recovery/\n+ **\n".into(),
         _ => "+ **\n".into(),
     }
@@ -888,7 +958,7 @@ fn rclone_remote_recovery_path(
 ) -> Result<String, SyncError> {
     validate_remote_name(reference)?;
     let recovery_name = format!(".cosmic-mounter-recovery/{connection_id}");
-    if provider == Provider::Teams {
+    if matches!(provider, Provider::Teams | Provider::OneDrive) && subpath.is_some() {
         let subpath = subpath.ok_or(SyncError::InvalidRemoteSubpath)?;
         validate_remote_subpath(subpath)?;
         return rclone_remote_path(reference, Some(&format!("{subpath}/{recovery_name}")));
@@ -986,7 +1056,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::model::{ConnectionMode, OfflineMirrorConfig, TeamsLibraryIdentity, TuningProfile};
+    use crate::model::{
+        ConnectionMode, OfflineMirrorConfig, SharePointLibraryIdentity, TuningProfile,
+    };
     use crate::services::UnitDocument;
 
     fn id() -> ConnectionId {
@@ -1001,6 +1073,7 @@ mod tests {
             name: "Engineering Mirror".into(),
             provider,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory: PathBuf::from(
                     "/home/example/.local/share/cosmic-mounter/recovery/eng",
                 ),
@@ -1024,6 +1097,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -1077,8 +1151,58 @@ mod tests {
             plan.service
                 .arguments
                 .windows(2)
-                .any(|pair| pair == ["--max-delete", "1000"])
+                .any(|pair| pair == ["--max-delete", "50"])
         );
+    }
+
+    #[test]
+    fn bisync_deletion_limit_is_shared_without_disabling_recovery() {
+        for provider in [
+            Provider::Teams,
+            Provider::OneDrive,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut connection = offline(provider);
+            if provider == Provider::Teams {
+                connection.teams_identity = Some(crate::model::SharePointLibraryIdentity {
+                    site_url: "https://example.sharepoint.com/sites/test".into(),
+                    library_url: "https://example.sharepoint.com/sites/test/Documents".into(),
+                    drive_id: "b!synthetic-drive".into(),
+                });
+            }
+            let plan = if provider == Provider::OneDrive {
+                onedrive_prototype_plan(
+                    &connection,
+                    Path::new("/state"),
+                    "unused:disposable-recovery".into(),
+                )
+                .unwrap()
+            } else {
+                rclone_bisync_plan(&connection, Path::new("/state")).unwrap()
+            };
+            let args = &plan.service.arguments;
+            assert_eq!(args.iter().filter(|arg| *arg == "--max-delete").count(), 1);
+            assert!(
+                args.windows(2).any(|pair| pair == ["--max-delete", "50"]),
+                "{provider:?}"
+            );
+            assert!(!args.iter().any(|arg| arg == "--force" || arg == "--resync"));
+            for (flag, path) in [
+                ("--backup-dir1", plan.remote_recovery_path),
+                (
+                    "--backup-dir2",
+                    plan.recovery_directory.display().to_string(),
+                ),
+            ] {
+                assert!(
+                    args.windows(2).any(|pair| pair == [flag, &path]),
+                    "{provider:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1092,7 +1216,7 @@ mod tests {
         ] {
             let mut connection = offline(provider);
             if provider == Provider::Teams {
-                connection.teams_identity = Some(TeamsLibraryIdentity {
+                connection.teams_identity = Some(SharePointLibraryIdentity {
                     site_url: "https://example.sharepoint.com/sites/Engineering".into(),
                     library_url:
                         "https://example.sharepoint.com/sites/Engineering/Shared%20Documents".into(),
@@ -1228,7 +1352,7 @@ mod tests {
     fn teams_bisync_recovery_stays_inside_selected_folder_and_is_excluded() {
         let mut connection = offline(Provider::Teams);
         connection.remote_subpath = Some("CloudMounter-TeamsMirror-Test-20261002".into());
-        connection.teams_identity = Some(TeamsLibraryIdentity {
+        connection.teams_identity = Some(SharePointLibraryIdentity {
             site_url: "https://example.sharepoint.com/sites/assessment".into(),
             library_url: "https://example.sharepoint.com/sites/assessment/Documents".into(),
             drive_id: "b!verified-drive".into(),
@@ -1267,7 +1391,7 @@ mod tests {
     fn sharepoint_bisync_state_is_bound_to_the_verified_target() {
         let mut connection = offline(Provider::Teams);
         connection.remote_subpath = Some("Disposable".into());
-        connection.teams_identity = Some(TeamsLibraryIdentity {
+        connection.teams_identity = Some(SharePointLibraryIdentity {
             site_url: "https://example.sharepoint.com/sites/assessment".into(),
             library_url: "https://example.sharepoint.com/sites/assessment/Documents".into(),
             drive_id: "b!verified-drive".into(),

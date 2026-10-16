@@ -23,14 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from task_output import TaskReport, atomic_json
 
 PREFIX = "CloudMounter-GuardTest-"
+# Bisync uses a percentage, not one-way sync's file-count interpretation.
+MAX_DELETE_PERCENT = "50"
 # Mirrors the generic rclone bisync settings in src/sync.rs (without recovery dirs).
 GENERIC = ["--resilient", "--recover", "--conflict-resolve", "none", "--conflict-loser", "pathname",
            "--conflict-suffix", "conflict", "--create-empty-src-dirs", "--compare", "size,modtime",
-           "--max-delete", "1000"]
+           "--max-delete", MAX_DELETE_PERCENT]
 # Mirrors the SharePoint-specific additions in src/sync.rs.
 COMPAT = ["--resilient", "--recover", "--conflict-resolve", "none", "--conflict-loser", "pathname",
           "--conflict-suffix", "conflict", "--create-empty-src-dirs", "--compare", "modtime,checksum",
-          "--max-delete", "1000", "--modify-window", "1s", "--ignore-size", "--ignore-checksum",
+          "--max-delete", MAX_DELETE_PERCENT, "--modify-window", "1s", "--ignore-size", "--ignore-checksum",
           "--check-sync", "false"]
 PROFILES = {"generic": GENERIC, "compat": COMPAT}
 RCLONE_TIMEOUT = 900

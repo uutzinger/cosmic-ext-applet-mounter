@@ -82,6 +82,7 @@ impl BisyncMode {
 #[derive(Debug)]
 pub struct BisyncOutcome {
     pub output: CommandOutput,
+    pub preview_pending: Option<Result<u64, String>>,
     pub warnings: Vec<String>,
 }
 
@@ -195,16 +196,94 @@ pub async fn run<R: CommandRunner>(
 ) -> Result<BisyncOutcome, String> {
     validate_connection(connection)?;
     let plan = rclone_bisync_plan(connection, work_root).map_err(|error| error.to_string())?;
+    let graph = if connection.provider == Provider::OneDrive {
+        Some(crate::onedrive::MicrosoftGraph::new().map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
+    run_plan(
+        connection,
+        mode,
+        work_root,
+        &plan,
+        runner,
+        cancellation,
+        graph
+            .as_ref()
+            .map(|graph| graph as &dyn crate::onedrive::Graph),
+    )
+    .await
+}
+
+// Called only after the prototype's in-process identity/ownership guard. The
+// production entry point above keeps its existing provider validation.
+#[cfg(any(test, feature = "development-probes"))]
+pub(crate) async fn run_onedrive_prototype<R: CommandRunner>(
+    connection: &Connection,
+    mode: BisyncMode,
+    work_root: &Path,
+    plan: &RcloneBisyncPlan,
+    runner: &R,
+    cancellation: CancellationToken,
+) -> Result<BisyncOutcome, String> {
+    if connection.provider != Provider::OneDrive || plan.connection_id != connection.id {
+        return Err(crate::fl!(
+            "ui-bisync-coordinator-the-saved-connection-is-not-an-rclone"
+        ));
+    }
+    run_plan(
+        connection,
+        mode,
+        work_root,
+        plan,
+        runner,
+        cancellation,
+        None,
+    )
+    .await
+}
+
+async fn run_plan<R: CommandRunner>(
+    connection: &Connection,
+    mode: BisyncMode,
+    work_root: &Path,
+    plan: &RcloneBisyncPlan,
+    runner: &R,
+    cancellation: CancellationToken,
+    graph: Option<&dyn crate::onedrive::Graph>,
+) -> Result<BisyncOutcome, String> {
     // Serialize before publishing filters, anchors, markers, or result state.
     // This makes the lock the first coordinator-owned mutation and prevents a
     // timer and a manual request from racing during input preparation.
     let _lock = acquire_operation_guard(work_root, connection.id)?;
-    validate_mode_markers(mode, &plan)?;
+    validate_mode_markers(mode, plan)?;
     if connection.provider == Provider::Teams {
-        let binding = crate::teams::MirrorGuardBinding::from_connection(connection)?;
-        crate::teams::verify_mirror_binding(&binding, connection, runner).await?;
+        let binding = crate::sharepoint::MirrorGuardBinding::from_connection(connection)?;
+        crate::sharepoint::verify_mirror_binding(&binding, connection, runner).await?;
     }
-    prepare_inputs(connection, &plan)?;
+    if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
+    {
+        let binding = crate::onedrive::MirrorGuardBinding::from_connection(connection)
+            .map_err(|error| error.to_string())?;
+        crate::onedrive::verify_mirror_binding(
+            &binding,
+            connection,
+            runner,
+            graph.ok_or_else(|| crate::onedrive::OneDriveError::InvalidState.to_string())?,
+            cancellation.child_token(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    prepare_inputs(connection, plan, mode)?;
+    if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
+    {
+        remove_if_exists(&crate::pending_count::preview_count_path(
+            &plan.work_directory,
+        ))?;
+    }
     let state = state_path(work_root, connection.id);
     if read_state(&state)?.is_some_and(|existing| existing.state == OfflineOperationState::Running)
     {
@@ -220,7 +299,7 @@ pub async fn run<R: CommandRunner>(
             OfflineOperationState::Running,
         ),
     )?;
-    let result = run_transaction(connection, &plan, mode, runner, cancellation.clone()).await;
+    let result = run_transaction(connection, plan, mode, runner, cancellation.clone()).await;
     let final_state = if result.is_ok() {
         OfflineOperationState::Succeeded
     } else if cancellation.is_cancelled() {
@@ -251,6 +330,11 @@ fn validate_connection(connection: &Connection) -> Result<(), String> {
         ));
     }
     match connection.provider {
+        Provider::OneDrive
+            if connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone) =>
+        {
+            Ok(())
+        }
         Provider::Teams
         | Provider::GoogleDrive
         | Provider::Box
@@ -292,7 +376,11 @@ fn validate_mode_markers(mode: BisyncMode, plan: &RcloneBisyncPlan) -> Result<()
     }
 }
 
-fn prepare_inputs(connection: &Connection, plan: &RcloneBisyncPlan) -> Result<(), String> {
+fn prepare_inputs(
+    connection: &Connection,
+    plan: &RcloneBisyncPlan,
+    mode: BisyncMode,
+) -> Result<(), String> {
     if fs::symlink_metadata(&plan.recovery_directory)
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
@@ -322,7 +410,19 @@ fn prepare_inputs(connection: &Connection, plan: &RcloneBisyncPlan) -> Result<()
         &plan.filters_file,
         rclone_bisync_filter_file(connection.provider).as_bytes(),
     )?;
-    ensure_local_access_marker(connection, plan)
+    if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
+        && mode == BisyncMode::InitialPreview
+    {
+        return Ok(());
+    }
+    ensure_local_access_marker(connection, plan).map_err(|error| {
+        if connection.provider == Provider::OneDrive {
+            crate::onedrive::OneDriveError::Ownership.to_string()
+        } else {
+            error
+        }
+    })
 }
 
 fn ensure_local_access_marker(
@@ -385,18 +485,61 @@ async fn run_transaction<R: CommandRunner>(
         prepare_scheduled_progress(plan)?;
     }
     validate_remote_access_marker(connection, plan, mode, runner, cancellation.child_token())
-        .await?;
+        .await
+        .map_err(|error| {
+            if connection.provider == Provider::OneDrive {
+                crate::onedrive::OneDriveError::Ownership.to_string()
+            } else {
+                error
+            }
+        })?;
     let request = bisync_request(plan, mode, &day, &stamp)?;
     if mode.preview() {
-        let output = runner.run(request, cancellation).await.map_err(|error| {
-            command_failure(
-                &crate::fl!(
-                    "ui-bisync-coordinator-bisync-value1",
-                    value1 = (mode.as_str()).to_string()
-                ),
-                error,
+        let output = runner
+            .run(request, cancellation.child_token())
+            .await
+            .map_err(|error| {
+                command_failure(
+                    &crate::fl!(
+                        "ui-bisync-coordinator-bisync-value1",
+                        value1 = (mode.as_str()).to_string()
+                    ),
+                    error,
+                )
+            })?;
+        let preview_pending = if connection.provider == Provider::OneDrive
+            && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
+        {
+            let estimate = crate::pending_count::rclone_preview_snapshot(
+                runner,
+                &plan.path1_remote,
+                &plan.path2_local,
+                &plan.filters_file,
+                cancellation.child_token(),
             )
-        })?;
+            .await;
+            if cancellation.is_cancelled() {
+                return Err(crate::fl!("microsoft-oauth-cancelled"));
+            }
+            let report = crate::pending_count::PreviewCount {
+                version: 1,
+                connection_id: connection.id,
+                observed_unix_seconds: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|_| crate::fl!("pending-count-response-incomplete"))?
+                    .as_secs(),
+                files: estimate.as_ref().ok().copied(),
+            };
+            let bytes = serde_json::to_vec(&report)
+                .map_err(|_| crate::fl!("pending-count-response-incomplete"))?;
+            write_atomic(
+                &crate::pending_count::preview_count_path(&plan.work_directory),
+                &bytes,
+            )?;
+            Some(estimate)
+        } else {
+            None
+        };
         if mode == BisyncMode::InitialPreview {
             write_atomic(
                 &initial_preview_marker(plan),
@@ -405,6 +548,7 @@ async fn run_transaction<R: CommandRunner>(
         }
         return Ok(BisyncOutcome {
             output,
+            preview_pending,
             warnings: Vec::new(),
         });
     }
@@ -462,6 +606,28 @@ async fn run_transaction<R: CommandRunner>(
                 )
             })?;
     }
+    if connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
+        && matches!(mode, BisyncMode::InitialSync | BisyncMode::Sync)
+    {
+        runner
+            .run(
+                rclone_request(
+                    [
+                        "check",
+                        &plan.path1_remote,
+                        &plan.path2_local.display().to_string(),
+                        "--checksum",
+                        "--filter-from",
+                        &plan.filters_file.display().to_string(),
+                    ],
+                    Duration::from_secs(15 * 60),
+                )?,
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|_| crate::fl!("onedrive-checksum-verification-failed"))?;
+    }
     let warnings = cleanup_retention(connection, plan, runner, cancellation.child_token()).await;
     if mode == BisyncMode::InitialSync {
         write_atomic(
@@ -470,7 +636,11 @@ async fn run_transaction<R: CommandRunner>(
         )?;
         remove_if_exists(&initial_preview_marker(plan))?;
     }
-    Ok(BisyncOutcome { output, warnings })
+    Ok(BisyncOutcome {
+        output,
+        warnings,
+        preview_pending: None,
+    })
 }
 
 fn bisync_request(
@@ -1261,6 +1431,7 @@ mod tests {
             name: "Coordinator test".into(),
             provider: Provider::GoogleDrive,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory: root.join("recovery"),
                 sync_interval_minutes: 15,
                 sync_on_metered: false,
@@ -1274,6 +1445,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -1912,6 +2084,11 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, "bisync sync failed with exit status 9");
         assert_eq!(runner.requests().len(), 5);
+        let command = runner.requests()[4].sanitized_command();
+        assert!(command.contains("--max-delete 50"));
+        assert!(!command.contains("--force"));
+        assert!(!command.contains("--resync"));
+        assert!(initial_sync_marker(&plan).exists());
         assert!(
             !runner
                 .requests()
@@ -2089,5 +2266,236 @@ mod tests {
         assert!(outcome.warnings[0].contains("could not remove 1"));
         assert!(!outcome.warnings[0].contains("secret"));
         assert!(outcome.warnings[0].len() < 300);
+    }
+    fn onedrive_connection(root: &Path) -> Connection {
+        let mut connection = connection(root);
+        connection.provider = Provider::OneDrive;
+        let ConnectionMode::OfflineMirror(ref mut options) = connection.mode else {
+            unreachable!()
+        };
+        options.engine = Some(crate::model::OfflineEngine::Rclone);
+        connection.onedrive_identity = Some(crate::model::OneDriveIdentity {
+            drive_id: "synthetic-primary".into(),
+            drive_type: crate::model::OneDriveDriveType::Personal,
+        });
+        connection
+    }
+
+    struct OneDriveGraph;
+    impl crate::onedrive::Graph for OneDriveGraph {
+        fn get<'a>(
+            &'a self,
+            target: crate::onedrive::GraphTarget<'a>,
+            _token: &'a str,
+            _cancel: CancellationToken,
+        ) -> crate::onedrive::GraphFuture<'a> {
+            Box::pin(async move {
+                Ok(match target {
+                    crate::onedrive::GraphTarget::PrimaryDrive => {
+                        serde_json::json!({"id":"synthetic-primary","driveType":"personal"})
+                    }
+                    crate::onedrive::GraphTarget::Folder { .. } => {
+                        serde_json::json!({"id":"folder","folder":{},"parentReference":{"driveId":"synthetic-primary"}})
+                    }
+                    _ => panic!("recurring guard must not query an account profile"),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn onedrive_initial_preview_runs_required_guard_without_creating_anchor() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_connection(root.path());
+        let work = root.path().join("work");
+        let plan = rclone_bisync_plan(&connection, &work).unwrap();
+        let runner = FakeCommandRunner::default();
+        for text in [
+            "{}",
+            r#"{"test_remote":{"type":"onedrive","drive_type":"personal","drive_id":"synthetic-primary","token":{"access_token":"synthetic"}}}"#,
+            r#"{"IsDir":true}"#,
+            "",
+            "[]",
+            "[]",
+        ] {
+            runner.push(Ok(output(text)));
+        }
+        run_plan(
+            &connection,
+            BisyncMode::InitialPreview,
+            &work,
+            &plan,
+            &runner,
+            CancellationToken::new(),
+            Some(&OneDriveGraph),
+        )
+        .await
+        .unwrap();
+        assert!(initial_preview_marker(&plan).is_file());
+        assert!(!initial_sync_marker(&plan).exists());
+        assert!(
+            !connection
+                .local_path
+                .join(plan.access_marker_name.as_ref().unwrap())
+                .exists()
+        );
+        assert_eq!(runner.requests().len(), 6);
+        assert!(
+            runner
+                .requests()
+                .get(3)
+                .unwrap()
+                .sanitized_command()
+                .contains("--dry-run")
+        );
+    }
+
+    #[tokio::test]
+    async fn onedrive_initial_checksum_failure_never_initializes_or_repeats_bisync() {
+        for success in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let connection = onedrive_connection(root.path());
+            let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+            prepare_inputs(&connection, &plan, BisyncMode::InitialSync).unwrap();
+            let runner = FakeCommandRunner::default();
+            push_successful_sync_prefix(&runner);
+            runner.push(if success {
+                Ok(output(""))
+            } else {
+                Err(CommandError::NonZero {
+                    command: "synthetic".into(),
+                    code: Some(1),
+                    stdout: output("").stdout,
+                    stderr: output("synthetic-private-diagnostic").stdout,
+                    attempts: 1,
+                })
+            });
+            if success {
+                runner.push(Ok(output("")));
+            }
+            let result = run_transaction(
+                &connection,
+                &plan,
+                BisyncMode::InitialSync,
+                &runner,
+                CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(result.is_ok(), success);
+            assert_eq!(initial_sync_marker(&plan).is_file(), success);
+            if let Err(error) = result {
+                assert!(!error.contains("synthetic-private-diagnostic"));
+            }
+            let requests = runner.requests();
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request.sanitized_command().contains(" bisync "))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request.sanitized_command().contains(" check "))
+                    .count(),
+                1
+            );
+            assert!(
+                fs::read_to_string(
+                    connection
+                        .local_path
+                        .join(plan.access_marker_name.as_ref().unwrap())
+                )
+                .unwrap()
+                .contains(&connection.id.to_string())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn onedrive_anchor_guards_reject_missing_changed_and_linked_markers() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_connection(root.path());
+        let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+        prepare_inputs(&connection, &plan, BisyncMode::InitialSync).unwrap();
+        write_atomic(&initial_sync_marker(&plan), b"initialized\n").unwrap();
+        let path = connection
+            .local_path
+            .join(plan.access_marker_name.as_ref().unwrap());
+        fs::write(&path, "wrong-uuid\n").unwrap();
+        assert!(ensure_local_access_marker(&connection, &plan).is_err());
+        fs::remove_file(&path).unwrap();
+        assert!(ensure_local_access_marker(&connection, &plan).is_err());
+        std::os::unix::fs::symlink(root.path(), &path).unwrap();
+        assert!(ensure_local_access_marker(&connection, &plan).is_err());
+        for text in ["wrong-uuid", ""] {
+            let runner = FakeCommandRunner::default();
+            runner.push(Ok(output(text)));
+            assert!(
+                validate_remote_access_marker(
+                    &connection,
+                    &plan,
+                    BisyncMode::Scheduled,
+                    &runner,
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(runner.requests().len(), 1);
+        }
+    }
+    #[tokio::test]
+    async fn onedrive_runtime_normal_manual_sync_requires_one_checksum_check() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_connection(root.path());
+        let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+        prepare_inputs(&connection, &plan, BisyncMode::InitialSync).unwrap();
+        for success in [false, true] {
+            let runner = FakeCommandRunner::default();
+            runner.push(Ok(output(&connection.id.to_string())));
+            push_successful_sync_prefix(&runner);
+            runner.push(if success {
+                Ok(output(""))
+            } else {
+                Err(CommandError::Timeout {
+                    command: "synthetic".into(),
+                    timeout: Duration::from_secs(60),
+                })
+            });
+            if success {
+                runner.push(Ok(output("")));
+            }
+            let result = run_transaction(
+                &connection,
+                &plan,
+                BisyncMode::Sync,
+                &runner,
+                CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(result.is_ok(), success);
+            let commands = runner
+                .requests()
+                .iter()
+                .map(CommandRequest::sanitized_command)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|command| command.contains(" bisync "))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|command| command.contains(" check "))
+                    .count(),
+                1
+            );
+            assert!(!commands.iter().any(|command| command.contains("--resync")));
+        }
     }
 }

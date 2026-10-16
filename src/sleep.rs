@@ -695,6 +695,7 @@ mod tests {
             tuning_profile: TuningProfile::default(),
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }

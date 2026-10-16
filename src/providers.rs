@@ -11,11 +11,13 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::model::{Connection, ConnectionId, ConnectionMode, OnlineMountConfig, Provider};
+use crate::model::{
+    Connection, ConnectionId, ConnectionMode, OfflineEngine, OnlineMountConfig, Provider,
+};
 use crate::mount_guard;
 use crate::process::{CommandError, CommandRequest, CommandRunner, Executable, RetryPolicy};
 use crate::services::{ActiveState, ServiceSpec, UnitStatus};
-use crate::teams;
+use crate::sharepoint;
 
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
 const DEFAULT_ONEDRIVER: &str = "/usr/bin/onedriver";
@@ -32,7 +34,7 @@ pub enum ProviderError {
     MissingExecutable(Executable),
     Command(CommandError),
     InvalidResponse(String),
-    InvalidTeamsIdentity(String),
+    InvalidSharePointIdentity(String),
     InvalidMountpointGuard(String),
     Unauthenticated,
 }
@@ -62,7 +64,7 @@ impl fmt::Display for ProviderError {
                 "ui-providers-invalid-provider-response-message",
                 message = (message).to_string()
             )),
-            Self::InvalidTeamsIdentity(message) => formatter.write_str(message),
+            Self::InvalidSharePointIdentity(message) => formatter.write_str(message),
             Self::InvalidMountpointGuard(message) => formatter.write_str(message),
             Self::Unauthenticated => {
                 formatter.write_str(&crate::fl!("ui-providers-provider-is-not-authenticated"))
@@ -81,6 +83,7 @@ impl From<CommandError> for ProviderError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RcloneBackend {
+    OneDrive,
     Teams,
     GoogleDrive,
     Box,
@@ -91,6 +94,7 @@ pub enum RcloneBackend {
 impl RcloneBackend {
     const fn expected_type(self) -> &'static str {
         match self {
+            Self::OneDrive => "onedrive",
             Self::Teams => "onedrive",
             Self::GoogleDrive => "drive",
             Self::Box => "box",
@@ -112,6 +116,28 @@ impl TryFrom<Provider> for RcloneBackend {
             Provider::Sftp => Ok(Self::Sftp),
             Provider::OneDrive => Err(ProviderError::UnsupportedProvider(provider)),
         }
+    }
+}
+
+impl TryFrom<&Connection> for RcloneBackend {
+    type Error = ProviderError;
+
+    fn try_from(connection: &Connection) -> Result<Self, Self::Error> {
+        if connection.provider == Provider::OneDrive {
+            if connection.offline_engine() == Some(OfflineEngine::Rclone)
+                && connection
+                    .onedrive_identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.is_valid())
+            {
+                return Ok(Self::OneDrive);
+            }
+            return Err(ProviderError::UnsupportedProvider(connection.provider));
+        }
+        if connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive) {
+            return Err(ProviderError::UnsupportedProvider(connection.provider));
+        }
+        Self::try_from(connection.provider)
     }
 }
 
@@ -293,7 +319,7 @@ impl<R: CommandRunner> CommandRcloneProvider<R> {
         cancellation: CancellationToken,
     ) -> ProviderFuture<'a, ()> {
         Box::pin(async move {
-            let expected = RcloneBackend::try_from(connection.provider)?.expected_type();
+            let expected = RcloneBackend::try_from(connection)?.expected_type();
             let remotes = self.list_remotes(cancellation).await?;
             let Some(remote) = remotes
                 .iter()
@@ -399,7 +425,8 @@ pub fn rclone_mount_plan(
     }
 
     let pre_start_condition = Some(if connection.provider == Provider::Teams {
-        teams::service_guard_command(connection).map_err(ProviderError::InvalidTeamsIdentity)?
+        sharepoint::service_guard_command(connection)
+            .map_err(ProviderError::InvalidSharePointIdentity)?
     } else {
         mount_guard::service_guard_command(connection)
             .map_err(ProviderError::InvalidMountpointGuard)?
@@ -887,6 +914,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -964,7 +992,7 @@ mod tests {
         );
         assert!(RcloneBackend::try_from(Provider::OneDrive).is_err());
         let mut teams = connection(Provider::Teams);
-        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+        teams.teams_identity = Some(crate::model::SharePointLibraryIdentity {
             site_url: "https://example.sharepoint.com/sites/engineering".into(),
             library_url: "https://example.sharepoint.com/sites/engineering/Documents".into(),
             drive_id: "drive-123".into(),

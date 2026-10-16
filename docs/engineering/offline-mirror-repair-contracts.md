@@ -125,3 +125,12 @@ missing/external units, and that no filesystem or engine mutation is requested.
 Installed acceptance must separately interrupt and repair one disposable
 rclone bisync mirror and one disposable OneDrive Offline Mirror. Success for
 one engine is not evidence for the other.
+
+
+October 15, 2026 source integration: explicit rclone OneDrive mirrors now use the
+shared rclone timer/service Repair plan and coordinator cancellation path. Legacy
+OneDrive profiles retain the monitor-service plan; Online OneDrive remains separate.
+Focused fake-manager coverage verifies engine dispatch, Pause ordering, failed
+transitions and Start rollback. This is source/fake-adapter evidence; installed
+native and Flatpak acceptance remains pending. The engine distinction in this
+record is rclone versus legacy OneDrive, not the cloud provider name alone.

@@ -55,6 +55,13 @@ Manual instructions are retained below for reference and for other distributions
 | OpenConnect NetworkManager plugin | Cisco-compatible VPN authentication | see [OpenConnect setup](openconnect.md) |
 | Python 3 / PyGObject, GTK 3, WebKitGTK 4.1 | Optional OneDrive Offline Mirror sign-in window | Debian packages below |
 
+The planned 0.5.4 rclone OneDrive Offline mirror uses the same **1.74.3 minimum**;
+it does not require another upgrade beyond this existing requirement. Its generic
+bisync flags are present in the pinned 1.74.3 source; personal/business live
+prototype tests used 1.75.0. This is source compatibility evidence for 1.74.3,
+not a live test of that release. See the
+[version and flag assessment](engineering/onedrive-rclone-offline-contracts.md#rclone-version-and-flag-assessment).
+
 ### OneDrive sign-in helper
 
 The supported OneDrive Offline Mirror GUI helper needs these runtime packages

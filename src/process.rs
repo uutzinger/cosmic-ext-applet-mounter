@@ -20,6 +20,78 @@ use tokio_util::sync::CancellationToken;
 pub type CommandFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CommandOutput, CommandError>> + Send + 'a>>;
 
+// Microsoft authorization needs credential-bearing config JSON in memory.
+// This response deliberately has no Display/Serialize or public raw output fields.
+pub struct PrivateConfigOutput(CommandOutput);
+impl fmt::Debug for PrivateConfigOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PrivateConfigOutput([REDACTED])")
+    }
+}
+impl PrivateConfigOutput {
+    pub(crate) fn is_complete(&self) -> bool {
+        !self.0.stdout.truncated
+            && !self.0.stdout.invalid_utf8
+            && !self.0.stderr.truncated
+            && !self.0.stderr.invalid_utf8
+    }
+    /// A browser launcher may surround the OAuth JSON with diagnostics. Keep
+    /// parsing inside the opaque capture; never expose either raw stream.
+    pub(crate) fn oauth_json(&self) -> Result<serde_json::Value, CommandError> {
+        if !self.is_complete() {
+            return Err(CommandError::InvalidArgument);
+        }
+        for text in [&self.0.stdout.text, &self.0.stderr.text] {
+            for (start, _) in text.match_indices('{').take(32) {
+                let mut values = serde_json::Deserializer::from_str(&text[start..])
+                    .into_iter::<serde_json::Value>();
+                if let Some(Ok(value)) = values.next()
+                    && value
+                        .get("State")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some()
+                {
+                    return Ok(value);
+                }
+            }
+        }
+        Err(CommandError::InvalidArgument)
+    }
+
+    pub fn json(&self) -> Result<serde_json::Value, CommandError> {
+        if !self.is_complete() {
+            return Err(CommandError::InvalidArgument);
+        }
+        serde_json::from_str(&self.0.stdout.text).map_err(|_| CommandError::InvalidArgument)
+    }
+    #[cfg(test)]
+    pub(crate) fn test_output(output: CommandOutput) -> Self {
+        Self(output)
+    }
+}
+pub type PrivateConfigFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<PrivateConfigOutput, CommandError>> + Send + 'a>>;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CapturePolicy {
+    Redacted,
+    PrivateConfig,
+}
+fn validate_private_config(request: &CommandRequest) -> Result<(), CommandError> {
+    if request.executable != Executable::Rclone
+        || request.launch_only
+        || request.output_limit > 1024 * 1024
+        || request.timeout > Duration::from_secs(300)
+        || request.args.first().and_then(|a| a.value.to_str()) != Some("config")
+        || !matches!(
+            request.args.get(1).and_then(|a| a.value.to_str()),
+            Some("dump" | "create" | "update")
+        )
+    {
+        return Err(CommandError::InvalidArgument);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Executable {
     FlatpakSpawn,
@@ -130,10 +202,19 @@ impl Executable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CommandArg {
     value: OsString,
     sensitive: bool,
+}
+
+impl fmt::Debug for CommandArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandArg")
+            .field("value", &self.sanitized())
+            .field("sensitive", &self.sensitive)
+            .finish()
+    }
 }
 
 impl CommandArg {
@@ -331,6 +412,15 @@ impl std::error::Error for CommandError {}
 
 pub trait CommandRunner: Send + Sync {
     fn resolve(&self, executable: Executable) -> Option<PathBuf>;
+    /// Explicit, restricted in-memory config capture. Ordinary command output
+    /// remains redacted; adapters must opt in rather than silently return a dump.
+    fn private_config<'a>(
+        &'a self,
+        _request: CommandRequest,
+        _cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        Box::pin(async { Err(CommandError::InvalidArgument) })
+    }
 
     fn run<'a>(
         &'a self,
@@ -359,7 +449,22 @@ impl CommandRunner for SystemCommandRunner {
             let path = self
                 .resolve(request.executable)
                 .ok_or(CommandError::MissingExecutable(request.executable))?;
-            run_with_retries(path, request, cancellation).await
+            run_with_retries(path, request, cancellation, CapturePolicy::Redacted).await
+        })
+    }
+    fn private_config<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        Box::pin(async move {
+            validate_private_config(&request)?;
+            let path = self
+                .resolve(Executable::Rclone)
+                .ok_or(CommandError::MissingExecutable(Executable::Rclone))?;
+            run_with_retries(path, request, cancellation, CapturePolicy::PrivateConfig)
+                .await
+                .map(PrivateConfigOutput)
         })
     }
 }
@@ -411,7 +516,23 @@ impl CommandRunner for FlatpakHostCommandRunner {
                 .resolve(Executable::FlatpakSpawn)
                 .ok_or(CommandError::MissingExecutable(Executable::FlatpakSpawn))?;
             let request = Self::host_request(request)?;
-            run_with_retries(path, request, cancellation).await
+            run_with_retries(path, request, cancellation, CapturePolicy::Redacted).await
+        })
+    }
+    fn private_config<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        Box::pin(async move {
+            validate_private_config(&request)?;
+            let path = SystemCommandRunner
+                .resolve(Executable::FlatpakSpawn)
+                .ok_or(CommandError::MissingExecutable(Executable::FlatpakSpawn))?;
+            let request = Self::host_request(request)?;
+            run_with_retries(path, request, cancellation, CapturePolicy::PrivateConfig)
+                .await
+                .map(PrivateConfigOutput)
         })
     }
 }
@@ -474,12 +595,23 @@ impl CommandRunner for RuntimeCommandRunner {
             Self::FlatpakSpawnHost(runner) => runner.run(request, cancellation),
         }
     }
+    fn private_config<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        match self {
+            Self::Native(runner) => runner.private_config(request, cancellation),
+            Self::FlatpakSpawnHost(runner) => runner.private_config(request, cancellation),
+        }
+    }
 }
 
 async fn run_with_retries(
     path: PathBuf,
     request: CommandRequest,
     cancellation: CancellationToken,
+    capture: CapturePolicy,
 ) -> Result<CommandOutput, CommandError> {
     let started = Instant::now();
     let command = request.sanitized_command();
@@ -514,7 +646,7 @@ async fn run_with_retries(
     let max_attempts = request.retry.max_attempts.max(1);
 
     for attempt in 1..=max_attempts {
-        match run_once(&path, &request, &cancellation).await {
+        match run_once(&path, &request, &cancellation, capture).await {
             Ok((status, stdout, stderr)) if status.success() => {
                 return Ok(CommandOutput {
                     command,
@@ -524,7 +656,12 @@ async fn run_with_retries(
                     duration: started.elapsed(),
                 });
             }
-            Ok((status, stdout, stderr)) => {
+            Ok((status, mut stdout, mut stderr)) => {
+                if capture != CapturePolicy::Redacted {
+                    // Even failed private commands return only opaque output.
+                    stdout.text = "[REDACTED]".into();
+                    stderr.text = "[REDACTED]".into();
+                }
                 if attempt == max_attempts || !request.retry.retry_nonzero {
                     return Err(CommandError::NonZero {
                         command,
@@ -553,6 +690,7 @@ async fn run_once(
     path: &Path,
     request: &CommandRequest,
     cancellation: &CancellationToken,
+    capture: CapturePolicy,
 ) -> Result<(std::process::ExitStatus, CapturedOutput, CapturedOutput), CommandError> {
     let command = request.sanitized_command();
     let mut command_builder = Command::new(path);
@@ -575,8 +713,8 @@ async fn run_once(
 
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
-    let mut stdout_task = tokio::spawn(read_bounded(stdout, request.output_limit));
-    let mut stderr_task = tokio::spawn(read_bounded(stderr, request.output_limit));
+    let mut stdout_task = tokio::spawn(read_bounded(stdout, request.output_limit, capture));
+    let mut stderr_task = tokio::spawn(read_bounded(stderr, request.output_limit, capture));
 
     // The deadline covers pipe draining too: a descendant can hold a pipe open
     // after the direct child exits. Save its process group before wait reaps it.
@@ -656,7 +794,11 @@ async fn terminate_command_tree(child: &mut tokio::process::Child, process_group
     let _ = child.wait().await;
 }
 
-async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> CapturedOutput {
+async fn read_bounded(
+    mut reader: impl AsyncRead + Unpin,
+    limit: usize,
+    capture: CapturePolicy,
+) -> CapturedOutput {
     let mut retained = Vec::with_capacity(limit.min(8192));
     let mut buffer = [0_u8; 8192];
     let mut total = 0_usize;
@@ -674,7 +816,11 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> Captu
 
     let invalid_utf8 = std::str::from_utf8(&retained).is_err();
     CapturedOutput {
-        text: redact_text(&String::from_utf8_lossy(&retained)),
+        text: if capture == CapturePolicy::Redacted {
+            redact_text(&String::from_utf8_lossy(&retained))
+        } else {
+            String::from_utf8_lossy(&retained).into_owned()
+        },
         truncated: total > retained.len(),
         invalid_utf8,
     }
@@ -843,6 +989,18 @@ impl CommandRunner for FakeCommandRunner {
                         message: "no fake response queued".into(),
                     })
                 })
+        })
+    }
+    fn private_config<'a>(
+        &'a self,
+        request: CommandRequest,
+        cancellation: CancellationToken,
+    ) -> PrivateConfigFuture<'a> {
+        Box::pin(async move {
+            validate_private_config(&request)?;
+            self.run(request, cancellation)
+                .await
+                .map(PrivateConfigOutput)
         })
     }
 }
@@ -1168,5 +1326,98 @@ mod tests {
             CommandArg::plain("unsafe\nargument"),
             Err(CommandError::InvalidArgument)
         ));
+    }
+}
+
+#[cfg(test)]
+mod private_config_tests {
+    use super::*;
+    use serde_json::json;
+    fn config_request() -> CommandRequest {
+        CommandRequest::new(Executable::Rclone)
+            .arg("config")
+            .unwrap()
+            .arg("dump")
+            .unwrap()
+            .with_timeout(Duration::from_secs(10))
+            .with_output_limit(64 * 1024)
+    }
+    #[test]
+    fn private_config_is_restricted_and_debug_is_opaque() {
+        for req in [
+            CommandRequest::new(Executable::Rclone).arg("cat").unwrap(),
+            CommandRequest::new(Executable::Cat)
+                .arg("config")
+                .unwrap()
+                .arg("dump")
+                .unwrap(),
+            config_request().launch_only(),
+            config_request().with_output_limit(2 * 1024 * 1024),
+        ] {
+            assert!(validate_private_config(&req).is_err());
+        }
+        let out = PrivateConfigOutput(CommandOutput {
+            command: "private".into(),
+            stdout: CapturedOutput {
+                text: json!({"secret":"synthetic-opaque"}).to_string(),
+                truncated: false,
+                invalid_utf8: false,
+            },
+            stderr: empty_output(),
+            attempts: 1,
+            duration: Duration::ZERO,
+        });
+        assert_eq!(out.json().unwrap()["secret"], "synthetic-opaque");
+        assert!(!format!("{out:?}").contains("synthetic-opaque"));
+    }
+    #[tokio::test]
+    async fn private_config_failure_hides_both_output_streams() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("fake-rclone");
+        std::fs::write(&file,"#!/bin/sh\nprintf 'synthetic-stdout-secret'\nprintf 'synthetic-stderr-secret' >&2\nexit 7\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let error = run_with_retries(
+            file,
+            config_request(),
+            CancellationToken::new(),
+            CapturePolicy::PrivateConfig,
+        )
+        .await
+        .unwrap_err();
+        let message = format!("{error:?}");
+        assert!(!message.contains("synthetic-stdout-secret"));
+        assert!(!message.contains("synthetic-stderr-secret"));
+        assert!(matches!(error, CommandError::NonZero { code: Some(7), .. }));
+    }
+    #[tokio::test]
+    #[ignore = "requires installed rclone; isolated synthetic config only, no network or user configuration"]
+    async fn private_config_real_encoded_token_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("rclone.conf");
+        // '=' inside an encoded token demonstrates why the display sanitizer
+        // must never be used as the input to a credential JSON decoder.
+        let token=json!({"access_token":"synthetic-private-access=encoded","refresh_token":"synthetic-private-refresh=encoded"}).to_string();
+        std::fs::write(&config,format!("[probe]\ntype = onedrive\ndrive_type = personal\ndrive_id = synthetic-drive\ntoken = {token}\n")).unwrap();
+        let request = config_request()
+            .arg("--config")
+            .unwrap()
+            .arg(config.as_os_str())
+            .unwrap();
+        let ordinary = SystemCommandRunner
+            .run(request.clone(), CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&ordinary.stdout.text).is_err());
+        let private = SystemCommandRunner
+            .private_config(request, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(!format!("{private:?}").contains("synthetic-private-access"));
+        let value = private.json().unwrap();
+        assert_eq!(
+            crate::sharepoint::oauth_access_token(&value.to_string(), "probe").unwrap(),
+            "synthetic-private-access=encoded"
+        );
     }
 }

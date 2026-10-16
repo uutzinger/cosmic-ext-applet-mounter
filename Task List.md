@@ -109,8 +109,8 @@ Online. No other mount engine is added or changed.
 
   | Drive type | Compatibility profile | Evidence |
   |---|---|---|
-  | Personal OneDrive | generic (provisional; round-trip check pending) | October 15, 2026: `target/task-runs/onedrive-guard-check-qmyfk3fx/results.json`; stable before/after web edit, 15 equal files |
-  | OneDrive Business | generic (provisional; round-trip check pending) | October 15, 2026: `target/task-runs/onedrive-guard-check-rsx8nj5g/results.json`; stable before/after web edit, 15 equal files |
+  | Personal OneDrive | generic (`--compare size,modtime`) | October 15, 2026: `target/task-runs/onedrive-guard-check-8zm9owl_/results.json`; original/download bytes and sizes match; no-edit/post-edit transfers 0 |
+  | OneDrive Business | generic (`--compare size,modtime`) | October 15, 2026: `target/task-runs/onedrive-guard-check-xpn4ex9d/results.json`; original/download bytes and sizes match; no-edit/post-edit transfers 0 |
 
 - [x] Microsoft app registration (decided October 14, 2026): use rclone's default
   client only; no client ID, secret or tenant fields in the OneDrive Offline
@@ -171,14 +171,14 @@ script creates and purges only its own `CloudMounter-GuardTest-<token>` folder.
 Extend `scripts/onedrive-mirror-guard-check.sh` and its Python module, rather than
 using ad hoc commands. Phase 2 established stability after initial sync, not
 original-byte preservation during upload or absence of redundant transfers.
-Profiles remain provisional until this follow-up passes, before phase 3. Preserve
-the completed checks and their receipts.
+Follow-up passed for both drive types October 15, 2026; generic profiles are
+confirmed for the tested sample set and observation window. Preserve the earlier
+completed checks and their receipts.
 
-October 15: `--round-trip` extension implemented; focused fake-rclone and local-only
-rclone checks and the broader gate passed. First operator attempt failed before
-cloud setup on unsupported `rclone version --json`; provenance fix and regression
-verification in progress. No live round-trip verdict yet.
-Implementation checks below do not imply live cloud acceptance.
+October 15: extension, version-provenance fix and verification completed. Both
+operator-run extended live tests passed (exit 0); dated receipts, comparisons and
+transfer counts are in the completion notes. This closes phase 2a; phase 3 remains
+outstanding.
 
 - [x] Add a separately recorded round-trip stage. Before upload, create an isolated
   baseline from the samples; record relative paths, byte lengths, SHA-256, timestamps
@@ -196,100 +196,206 @@ Implementation checks below do not imply live cloud acceptance.
   stage: unchanged snapshots alone do not prove zero transfers. Exclude deliberate
   diagnostic downloads from sync transfer totals. Define bounded service-settling
   observations and record timing; unresolved drift is inconclusive.
-- [ ] If generic settings cause repeated transfers or drift, test compatibility
+- [o] If generic settings cause repeated transfers or drift, test compatibility
   settings on independent fresh trees with identical samples. Identify the smallest
   justified settings and any required convergence pass. A size discrepancy or byte
   rewrite alone does not prove a workaround is needed. Ignoring size/hash for sync
   must not bypass downloaded-byte verification; explain rewrites before accepting
-  a profile, otherwise leave the result unresolved.
+  a profile, otherwise leave the result unresolved. Not triggered: both extended
+  live runs passed with generic settings and zero idle transfers; no SharePoint
+  workaround or convergence pass is justified by these results.
 - [x] Add fake-rclone tests for unchanged round trips, reported-size-only differences,
   byte rewrites, redundant transfers despite unchanged snapshots, missing evidence,
   transfer failures, cancellation and partial cleanup. Preserve marker-scoped
   deletion and original samples; retain partial failure evidence. Version results,
   record tool/source identity and effective settings, update help/catalog/inventory,
   then run focused tests and the routine gate.
-- [ ] Run separately for personal and business with operator web-edit handoffs.
+- [x] Run separately for personal and business with operator web-edit handoffs.
   Record dated results paths, original/downloaded comparisons, transfer counts,
   cleanup and limitations in completion notes. Finalize both profile tables from
   these results only. No whole-drive sync or installed-app acceptance is implied.
 
-Test script(s) output
-
-uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$ bash scripts/onedrive-mirror-guard-check.sh   --remote onedrive_personal   --drive personal   --files-dir "$HOME/Cloud/OneDrive_Mirrors/test_folder"   --round-trip   --web-edit
-onedrive-guard-check: roundtrip-upload
-onedrive-guard-check: roundtrip-download-0
-onedrive-guard-check: roundtrip-download-1
-onedrive-guard-check: generic-initial
-onedrive-guard-check: generic-no-edit-1
-onedrive-guard-check: generic-no-edit-2
-onedrive-guard-check: generic-verification
-
-Open CloudMounter-GuardTest-5ed5484e249fb4d9b65974043e2ecb54/ on the drive in the web editor, change and save one Office file, then press Enter.
-
-onedrive-guard-check: generic-web-edit
-onedrive-guard-check: generic-post-edit
-onedrive-guard-check: generic-post-edit-verification
-verdict (personal): generic passed round-trip and measured sync stages
-results: /home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/results.json
-onedrive-guard-check: check-complete
-{"task": "onedrive-guard-check", "status": "succeeded", "exit_code": 0, "source_sha": "7d78d2ef0c9e95965658cbc15d104588eb6d7650", "source_dirty": true, "run_id": null, "summary_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/summary.json", "log_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-8zm9owl_/task.log", "artifact_receipt_path": null, "next_action": "Inspect the task log if this operation does not complete."}
-uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$
-
-
-uutzinger@urslabtop:~/Build/cosmic-ext-applet-mounter$ bash scripts/onedrive-mirror-guard-check.sh   --remote onedrive_business   --drive business   --files-dir "$HOME/Cloud/OneDrive_Mirrors/test_folder"   --round-trip   --web-edit
-onedrive-guard-check: roundtrip-upload
-onedrive-guard-check: roundtrip-download-0
-onedrive-guard-check: roundtrip-download-1
-onedrive-guard-check: generic-initial
-onedrive-guard-check: generic-no-edit-1
-onedrive-guard-check: generic-no-edit-2
-onedrive-guard-check: generic-verification
-
-Open CloudMounter-GuardTest-5887ffe0a0abbcaf9d742291943f3169/ on the drive in the web editor, change and save one Office file, then press Enter.
-
-onedrive-guard-check: generic-web-edit
-onedrive-guard-check: generic-post-edit
-onedrive-guard-check: generic-post-edit-verification
-verdict (business): generic passed round-trip and measured sync stages
-results: /home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/results.json
-onedrive-guard-check: check-complete
-{"task": "onedrive-guard-check", "status": "succeeded", "exit_code": 0, "source_sha": "7d78d2ef0c9e95965658cbc15d104588eb6d7650", "source_dirty": true, "run_id": null, "summary_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/summary.json", "log_path": "/home/uutzinger/Build/cosmic-ext-applet-mounter/target/task-runs/onedrive-guard-check-xpn4ex9d/task.log", "artifact_receipt_path": null, "next_action": "Inspect the task log if this operation does not complete."}
-
 #### 3. Prototype on disposable accounts (no real data)
 
-- [ ] Personal and business OneDrive via rclone browser OAuth in a native and a
-  Flatpak-style run. Verify the signed-in drive differs from other accounts (see
-  the earlier wrong-account incident) using the existing in-process Graph
-  identity check.
-- [ ] Bisync on disposable trees: first sync, edits both sides, deletes, conflicts,
-  large files, network loss and pending uploads, cancellation, Repair. Measure
-  runtime at a 5-minute interval on a representative tree, with and without
-  full-tree checksum verification, to set its cadence.
-- [ ] Confirm the minimum rclone version and flags; update the dependency checks.
+October 15: isolated development harness implemented and verified. Per operator
+steering, reuse the existing SharePoint planner/coordinator transaction path,
+initial Preview/confirmation, anchors, recovery, retention and cancellation.
+OneDrive uses its verified identity and generic profile, without SharePoint
+workarounds/convergence. Applet routing and saved formats remain phase 4.
+Prototype source/fixture checks do not complete live native/Flatpak-style acceptance.
+
+October 15 follow-up: first personal inspect returned invalid_metadata before
+identity verification. Private in-memory config-response capture is fixed;
+13 focused tests and the full gate passed. The operator retry reached Graph,
+as recorded below; no cloud mutation occurred during diagnosis.
+
+The retry reached Graph but returned HTTP 401. October 15 follow-up implemented:
+the prototype's /me account lookup needs User.Read, absent from rclone's default
+file scopes. New prototype OAuth remotes request explicit profile consent;
+existing remotes stay unchanged. Eleven focused prototype tests and the full gate
+passed, including refusal without mutation. New native personal OAuth and identity
+verification passed October 15; business and Flatpak-style acceptance remain open.
+HTTP 401 alone does not establish its exact provider-side cause.
+
+- [x] Implement and verify the isolated `onedrive-mirror-prototype.sh` harness;
+  10 focused Rust tests (including explicit local engine integration), 2 driver
+  fixtures and the full gate passed. Receipts are in completion notes; the following
+  cloud checks remain outstanding.
+- [x] Native personal OneDrive browser OAuth and signed-in account/primary-drive
+  identity verification on the new prototype remote; October 15 receipt in
+  completion notes. No mirror lifecycle acceptance is implied.
+- [x] Native business OneDrive browser OAuth and signed-in account/primary-drive
+  identity verification on a separate prototype remote. October 15 attempt
+  encountered admin approval; prototype added User.Read while working SharePoint
+  and business remotes use default file scopes. Business auth now uses default
+  scopes and server drive/owner binding without profile access; 15 focused tests
+  and the full gate passed. Operator business auth retry passed October 15;
+  account/primary-drive binding accepted; native scenario results follow below.
+- [x] Native business disposable-session preparation and shared initial Preview;
+  October 15 passed on session 8v4nz4pi.
+- [x] Native business initial bisync and independent downloaded-byte verification;
+  October 15 passed on session 8v4nz4pi.
+- [x] Native business disposable scenario: edits/deletes both sides, conflicts,
+  16 MiB upload and byte verification; October 15 passed. Synthetic quiet sync
+  22.7 s, sync plus checksum verification 31.9 s; cadence remains undecided.
+- [o] Repeat shared native cancellation/network-failure/Repair tests for business:
+  deliberately omitted per October 15 operator instruction; use the accepted
+  personal fault tests below for shared coordinator/runner coverage. This is
+  not business-specific live fault acceptance; repeat only for changed behavior
+  or evidence of a drive-specific failure.
+- [o] Flatpak transport/OAuth checks transferred October 15 to
+  [Implementation](#4-implementation), after routing, setup, coordinator, units
+  and editor integration. No separate prototype environment is required before
+  implementation; sandbox acceptance remains outstanding there.
+- [x] Clean up business normal-scenario cloud tree, session 8v4nz4pi;
+  October 15 purge succeeded, local evidence retained.
+- [x] Clean up personal normal-scenario cloud tree, session gzpgo0w6;
+  October 15 purge succeeded. All four native prototype sessions now report
+  cleaned=true; local evidence and configured remotes retained.
+- [x] Native personal disposable-session preparation and shared initial Preview;
+  October 15 receipt in completion notes. Initial sync completed, but its action
+  failed in a subsequent guard before byte verification. Safe command diagnostics
+  and a verification-only action passed 12 focused Rust tests, 2 driver tests and
+  the full gate. Operator verification retry passed October 15 on this session.
+- [x] Native personal initial bisync and independent downloaded-byte verification;
+  successful verify retry recorded in completion notes. The earlier post-sync
+  guard failure remains in history with its cause undetermined.
+- [x] Native personal disposable scenario: edits/deletes both sides, conflict
+  preservation, 16 MiB upload and independent verification; October 15 passed.
+  Synthetic quiet sync 31.2 s, sync plus checksum verification 47.0 s; these do
+  not establish representative-tree performance or a verification cadence.
+- [x] Native personal cancellation test: prepare and initialize a fresh session,
+  run fault-cancel, then inspect Repair evidence. Started October 15;
+  fresh preparation/Preview, initial-sync and downloaded-byte verification passed
+  on session zz9bn84r. fault-cancel passed with cancelled coordinator state and
+  16 MiB pending data retained. Repair inspection passed: pending file present,
+  no bisync locks remained, no implicit resync. Disposable cloud cleanup passed;
+  local evidence and pending data retained.
+  Preserve the completed scenario session.
+- [x] Native personal network-failure test: fresh preparation/initial-sync,
+  fault-network, Repair inspection and explicit cleanup. Preparation/Preview
+  and initial-sync/downloaded-byte verification passed on session i7ulanzh;
+  fault-network passed with failed coordinator state and 16 MiB pending file
+  retained. Repair inspection passed: pending data retained, no bisync locks,
+  no implicit resync. Explicit cloud cleanup passed; local pending data and
+  evidence retained. Failure injected only in the bisync child; host networking
+  unchanged.
+- [o] Combined native disposable-tree lifecycle checklist: normal behavior covered
+  by both scenarios above; shared faults/Repair covered by personal sessions.
+  Remaining transport, cleanup and representative measurements are listed
+  separately; do not rerun the completed scenarios.
+- [o] Larger-tree timing and repeated five-minute runs deliberately skipped by
+  operator decision October 15: accept the measured small-project baseline below
+  and reuse existing SharePoint scheduling coverage for unchanged shared machinery.
+  October 15: sample-folder preparation and dedicated timing action implemented;
+  17 focused Rust tests, 2 driver tests and the full gate passed. Business sample
+  preparation/Preview passed on session v02yqke_ (317 files, 39,779,429 bytes).
+  Initial-sync (327.3 s) and downloaded-byte verification (33.0 s) passed.
+  Timing passed: quiet sync 36.0 s, sync plus checksum 52.0 s, small-change sync
+  38.2 s; cloud cleanup passed, local evidence retained. Original-copy hashes
+  matched at preparation.
+  Copy originals read-only; do not repeat functional scenarios.
+  No claim of larger-tree measurements or live five-minute cadence validation.
+- [x] Business small-project timing baseline on 317 copied files completed
+  October 15; quiet/small-change/checksum measurements recorded in completion
+  notes. Timing preparation is complete under the operator's accepted scope above.
+- [x] Confirm minimum rclone version and flags (October 15): retain >= 1.74.3;
+  pinned upstream source supports the generic OneDrive profile. Installer,
+  diagnostics policy constant and Debian dependency already agree; no minimum
+  change needed. Live cloud evidence is from 1.75.0, not a 1.74.3 runtime test.
 
 #### 4. Implementation
 
-- [ ] Routing: `RcloneBackend::try_from(Provider)` (`src/providers.rs:113`) rejects
-  OneDrive for all modes. Introduce mode-aware routing so OneDrive Offline uses the
-  rclone `onedrive` backend while OneDrive Online keeps `onedriver_mount_plan`.
-- [ ] Remote setup and verification: reuse the `teams_oauth.rs` create/continue
-  pattern for OneDrive (personal/business, rclone default client),
-  verify type, authentication, drive identity and subtree access before saving;
-  secrets stay in rclone config only.
-- [ ] Planner/coordinator: add OneDrive bisync planning and the guards chosen above
-  (`src/bisync_coordinator.rs`); exclude cloud-native documents consistently with
-  the existing SharePoint rules; keep recovery, ownership, retention and
-  initialization-marker behavior identical.
-- [ ] Units and status: generated scheduled service/timer (`--run-bisync scheduled
-  <UUID>`), readiness/VPN guards, Start/Stop, Pause, Repair, Preview/Sync Now, and
-  per-connection pending counts via bisync preview (replaces the abraunegg
-  `--display-sync-status` parsing; supersedes the abraunegg part of the carried
-  "Offline mirror counts" item).
-- [ ] Add/Modify editor: replace the abraunegg authentication controls (open URL,
-  paste response, graphical helper) with rclone remote create/select for OneDrive
-  Offline; Fluent keys for every new string and `just localization-check`.
-- [ ] Tests: config round trip with old files, routing, plan/unit generation, fake
-  runner coordinator tests, and a regression proving onedriver Online is unchanged.
+Follow the [accepted contract](docs/engineering/onedrive-rclone-offline-contracts.md);
+reuse existing SharePoint setup/coordinator/services/UI components. Both OneDrive
+drive types use the same tested generic profile; only identity/auth differs.
+
+- [x] Configuration and mode-aware engine selection: add optional
+  `OfflineEngine`/`OneDriveIdentity`,
+  preserve absent-engine legacy behavior, explicitly select rclone for new Offline
+  connections and keep onedriver Online unchanged. Validate identity/engine/mode
+  combinations and local/work/recovery overlap, including legacy connections.
+  October 15: source implemented; ten focused tests, check, localization-check
+  and full gate passed. Legacy serialization preserved. Production planner/worker
+  activation remains in the setup/guards and runtime integration tasks below.
+- [x] Shared planner safety: correct `--max-delete 1000` (bisync clamps it to
+  100%, not 1,000 files); choose/test the intended percentage for SharePoint and
+  OneDrive. Reuse shared recovery, ownership, retention and initialization logic;
+  keep SharePoint compatibility flags/convergence conditional to SharePoint.
+  October 15: all shared planner and guard profiles now use 50%, retaining
+  recovery without an automatic override. All-provider planner/fake failure tests,
+  guard fixtures, explicit local real-rclone 50%/60% checks on both sides, check
+  and full gate passed. No installed services or cloud data were changed.
+- [x] Shared Microsoft OAuth: extracted protected config/create/continue/token
+  handling and new-remote rollback into `microsoft_oauth.rs`; production SharePoint
+  wrapper and OneDrive prototype share it. Provider drive selection stays separate.
+  October 15: seventeen OAuth tests, provider regressions, local-rclone credential
+  capture, check, localization-check and full gate passed; no live sign-in repeated.
+- [x] Common Microsoft identity policy: require resource/account binding, keep
+  display profiles optional, and omit optional profile requests from recurring
+  SharePoint guards. Retain personal OneDrive profile verification. October 15:
+  contract updated; eleven SharePoint and fifteen OneDrive focused tests, check
+  and full gate passed. Production OneDrive integration remains below.
+- [x] Remote setup and guards backend: production `onedrive.rs` reuses shared
+  OAuth and tested personal/business account checks; supports new/read-only
+  existing remotes and rejects changed-drive replacements. Drive/type/subtree
+  guards, UUID anchors and target-bound Preview/initialization state are wired
+  into the shared planner/coordinator. OneNote/shortcut support limits and filters
+  documented. October 15: 51 focused tests, local real-rclone lifecycle, check,
+  localization-check and full gate passed. Editor/lifecycle integration and new
+  production guard live/installed acceptance remain in the following tasks.
+- [x] SharePoint source naming: renamed `teams.rs`/`teams_oauth.rs` to
+  `sharepoint.rs`/`sharepoint_setup.rs` and updated Rust callers/types. Stored
+  profile names, service flags and Fluent keys preserved. October 15: check,
+  24 focused tests (including legacy named RON/JSON) and full gate passed.
+- [x] Shared runtime integration: rclone OneDrive uses shared units, readiness/VPN
+  guards, Start/Stop, Pause, Repair and Preview/Sync Now; legacy/Online routes
+  preserved. Explicit Preview supplies bounded structured difference estimates
+  (supersedes the abraunegg part of carried "Offline mirror counts"). Retained
+  15-minute default, initial/manual checksum verification and paused Save; Start
+  requires initialized state. October 15: check, focused lifecycle/metadata and
+  offline regression tests, temporary local-rclone metadata test, localization
+  check and full gate passed. Editor and installed acceptance remain below.
+- [x] Add/Modify editor: OneDrive Offline uses personal/business selection,
+  production rclone create/select and saved previous_identity for reconnect.
+  Failed drafts remain unaccepted/disabled; cancellation and stale setup/Test/Save
+  results are guarded. Legacy Offline and Online controls preserved. October 15:
+  check, six editor tests, discovery/removal regressions, localization-check and
+  full gate passed. Browser/rendered/installed acceptance remains pending.
+- [ ] Focused tests: old/new config round trips, routing, plans/units, identity and
+  anchor guards, malformed/partial state, cancellation, setup rollback,
+  reauthentication, item filters and unchanged onedriver Online. Reuse unchanged
+  shared coverage and accepted live scenarios; add tests for changed behavior.
+- [ ] Dependency/docs reconciliation: reflect mode/engine selection in guidance,
+  diagnostics and host-command inventory. Retain rclone >= 1.74.3 and legacy
+  dependencies until phase 6; no new startup version/help probes.
+- [ ] Integrated Flatpak acceptance (transferred from phase 3 October 15): reuse
+  applet manifests/runtime/probes after integration. Check both account flows,
+  OAuth/browser portal, selected paths, host/sandbox boundaries and integrated
+  units/status; run one disposable initial-sync/verification/cleanup smoke.
+  Reuse unchanged native scenario/fault evidence; no separate prototype sandbox
+  or repeated business faults. Record results toward phase-7/consolidated Flatpak
+  acceptance, not as another duplicate suite; probe-only evidence is insufficient.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 

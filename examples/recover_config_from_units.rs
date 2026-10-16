@@ -17,8 +17,8 @@ use cosmic::cosmic_config::CosmicConfigEntry;
 use cosmic_ext_applet_mounter::config::{APP_ID, Config, ConfigDocument};
 use cosmic_ext_applet_mounter::import::{LegacyUnit, parse_rclone_backends, preview_import};
 use cosmic_ext_applet_mounter::model::{
-    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, Provider, TeamsLibraryIdentity,
-    TuningProfile,
+    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, Provider,
+    SharePointLibraryIdentity, TuningProfile,
 };
 
 #[derive(Default)]
@@ -138,7 +138,7 @@ fn run() -> Result<(), String> {
                 connection.remote_reference = format!("onedriver-{}", short_id(connection.id));
             }
             if connection.provider == Provider::Teams
-                && let Some(identity) = read_teams_mount_identity(&unit)
+                && let Some(identity) = read_sharepoint_mount_identity(&unit)
             {
                 connection.teams_identity = Some(identity);
             }
@@ -454,6 +454,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
             name,
             provider: Provider::OneDrive,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory,
                 sync_interval_minutes: ((interval_seconds / 60).max(1)) as u32,
                 sync_on_metered: false,
@@ -467,6 +468,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         });
     }
@@ -493,7 +495,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
             .as_str()
             .filter(|s| !s.is_empty())
             .map(String::from);
-        let teams_identity = TeamsLibraryIdentity {
+        let teams_identity = SharePointLibraryIdentity {
             site_url: parsed["site_url"].as_str()?.to_owned(),
             library_url: parsed["library_url"].as_str()?.to_owned(),
             drive_id: parsed["drive_id"].as_str()?.to_owned(),
@@ -511,6 +513,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
             name,
             provider: Provider::Teams,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory,
                 sync_interval_minutes: timer_minutes,
                 sync_on_metered: false,
@@ -524,6 +527,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: Some(teams_identity),
         });
     }
@@ -531,7 +535,7 @@ fn recover_managed_unit(unit: &LegacyUnit, home: &Path) -> Option<Connection> {
     None
 }
 
-fn read_teams_mount_identity(unit: &LegacyUnit) -> Option<TeamsLibraryIdentity> {
+fn read_sharepoint_mount_identity(unit: &LegacyUnit) -> Option<SharePointLibraryIdentity> {
     let content = fs::read_to_string(&unit.path).ok()?;
     let args = extract_double_quoted_arguments(&content, "--verify-teams-mount")?;
     // Older units: connection_id, remote_name, subpath, local_path, drive_id, library_url
@@ -544,10 +548,11 @@ fn read_teams_mount_identity(unit: &LegacyUnit) -> Option<TeamsLibraryIdentity> 
         (args[5].clone(), args[6].clone())
     } else {
         let library_url = decode_systemd_percent(&args[5]);
-        let identity = cosmic_ext_applet_mounter::teams::parse_library_url(&library_url).ok()?;
+        let identity =
+            cosmic_ext_applet_mounter::sharepoint::parse_library_url(&library_url).ok()?;
         (identity.site_url, identity.library_url)
     };
-    Some(TeamsLibraryIdentity {
+    Some(SharePointLibraryIdentity {
         drive_id,
         site_url,
         library_url,

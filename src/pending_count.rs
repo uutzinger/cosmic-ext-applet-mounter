@@ -91,6 +91,166 @@ fn parse_rclone_pending(queue: &str, stats: &str) -> Result<OnlinePendingCount, 
     })
 }
 
+/// A successful coordinated Preview can add a bounded, structured size/modtime
+/// estimate. It counts differing file paths, not transfers, conflicts or bytes.
+pub async fn rclone_preview_snapshot<R: CommandRunner>(
+    runner: &R,
+    remote: &str,
+    local: &Path,
+    filters: &Path,
+    cancellation: CancellationToken,
+) -> Result<u64, String> {
+    if cancellation.is_cancelled() {
+        return Err(fl!("microsoft-oauth-cancelled"));
+    }
+    async fn listing<R: CommandRunner>(
+        runner: &R,
+        target: &str,
+        filters: &Path,
+        cancellation: CancellationToken,
+    ) -> Result<String, String> {
+        let request = CommandRequest::new(Executable::Rclone)
+            .arg("lsjson")
+            .and_then(|request| request.arg(target))
+            .and_then(|request| request.arg("--recursive"))
+            .and_then(|request| request.arg("--files-only"))
+            .and_then(|request| request.arg("--no-mimetype"))
+            .and_then(|request| request.arg("--filter-from"))
+            .and_then(|request| request.arg(filters.as_os_str()))
+            .map_err(|_| fl!("pending-count-request-failed"))?
+            .with_timeout(Duration::from_secs(30))
+            .with_output_limit(4 * 1024 * 1024);
+        let output = runner
+            .run(request, cancellation)
+            .await
+            .map_err(|_| fl!("pending-count-rclone-mirror-unavailable"))?;
+        if output.stdout.truncated || output.stdout.invalid_utf8 {
+            return Err(fl!("pending-count-response-incomplete"));
+        }
+        Ok(output.stdout.text)
+    }
+    let remote = listing(runner, remote, filters, cancellation.child_token()).await?;
+    let local = listing(
+        runner,
+        &local.display().to_string(),
+        filters,
+        cancellation.child_token(),
+    )
+    .await?;
+    if cancellation.is_cancelled() {
+        return Err(fl!("microsoft-oauth-cancelled"));
+    }
+    preview_inventory_difference(&remote, &local)
+}
+
+fn preview_inventory_difference(remote: &str, local: &str) -> Result<u64, String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Item {
+        path: String,
+        size: u64,
+        mod_time: String,
+        is_dir: bool,
+    }
+    fn inventory(text: &str) -> Result<std::collections::BTreeMap<String, (u64, i128)>, String> {
+        let items: Vec<Item> =
+            serde_json::from_str(text).map_err(|_| fl!("pending-count-response-incomplete"))?;
+        let mut map = std::collections::BTreeMap::new();
+        for item in items {
+            if item.is_dir
+                || item.path.is_empty()
+                || item.path.starts_with('/')
+                || item
+                    .path
+                    .split('/')
+                    .any(|part| matches!(part, "" | "." | ".."))
+            {
+                return Err(fl!("pending-count-response-incomplete"));
+            }
+            let timestamp = item
+                .mod_time
+                .parse::<jiff::Timestamp>()
+                .map_err(|_| fl!("pending-count-response-incomplete"))?
+                .as_nanosecond();
+            if map.insert(item.path, (item.size, timestamp)).is_some() {
+                return Err(fl!("pending-count-response-incomplete"));
+            }
+        }
+        Ok(map)
+    }
+    let remote = inventory(remote)?;
+    let local = inventory(local)?;
+    let names = remote
+        .keys()
+        .chain(local.keys())
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(names
+        .into_iter()
+        .filter(|name| match (remote.get(*name), local.get(*name)) {
+            (Some((rs, rt)), Some((ls, lt))) => rs != ls || (rt - lt).abs() >= 1_000_000_000,
+            _ => true,
+        })
+        .count() as u64)
+}
+
+#[derive(serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewCount {
+    pub version: u8,
+    pub connection_id: crate::model::ConnectionId,
+    pub observed_unix_seconds: u64,
+    pub files: Option<u64>,
+}
+
+pub fn preview_count_path(work_directory: &Path) -> std::path::PathBuf {
+    work_directory.join("preview-pending.json")
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreviewPendingCount {
+    pub files: u64,
+    pub age: Duration,
+}
+
+/// Read an estimate published by an explicit Preview, never start another dry run.
+pub async fn rclone_preview_pending(
+    work_directory: &Path,
+    id: crate::model::ConnectionId,
+) -> Result<PreviewPendingCount, String> {
+    use tokio::io::AsyncReadExt;
+    let read = async {
+        let path = preview_count_path(work_directory);
+        let metadata = tokio::fs::symlink_metadata(&path).await.ok()?;
+        if !metadata.is_file() || metadata.len() > 4096 {
+            return None;
+        }
+        let file = tokio::fs::File::open(path).await.ok()?;
+        let mut bytes = Vec::new();
+        file.take(4097).read_to_end(&mut bytes).await.ok()?;
+        if bytes.len() > 4096 {
+            return None;
+        }
+        let count: PreviewCount = serde_json::from_slice(&bytes).ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        let age = now.checked_sub(count.observed_unix_seconds)?;
+        if count.version != 1 || count.connection_id != id || age > 180 {
+            return None;
+        }
+        Some(PreviewPendingCount {
+            files: count.files?,
+            age: Duration::from_secs(age),
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(2), read)
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| fl!("onedrive-preview-count-unavailable"))
+}
+
 /// The OneDrive CLI reports directional pending items separately. A non-clean
 /// status with missing counters is unknown, never a verified zero.
 pub fn parse_onedrive_mirror_status(output: &str) -> Result<u64, String> {
@@ -461,5 +621,156 @@ mod tests {
                 .iter()
                 .all(|request| request.sanitized_command().contains("--unix-socket"))
         );
+    }
+    fn inventory_item(path: &str, size: u64, time: &str) -> Value {
+        serde_json::json!({"Path":path,"Size":size,"ModTime":time,"IsDir":false})
+    }
+
+    #[test]
+    fn onedrive_runtime_preview_inventory_counts_differences_without_logs() {
+        let remote = serde_json::json!([
+            inventory_item("same", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("remote", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("size", 2, "2026-10-15T10:00:00Z"),
+            inventory_item("time", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("zone", 1, "2026-10-15T10:00:00Z")
+        ]);
+        let local = serde_json::json!([
+            inventory_item("same", 1, "2026-10-15T10:00:00.999999999Z"),
+            inventory_item("local", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("size", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("time", 1, "2026-10-15T10:00:01Z"),
+            inventory_item("zone", 1, "2026-10-15T03:00:00-07:00")
+        ]);
+        assert_eq!(
+            preview_inventory_difference(&remote.to_string(), &local.to_string()).unwrap(),
+            4
+        );
+        assert_eq!(preview_inventory_difference("[]", "[]").unwrap(), 0);
+        let duplicate = serde_json::json!([
+            inventory_item("same", 1, "2026-10-15T10:00:00Z"),
+            inventory_item("same", 1, "2026-10-15T10:00:00Z")
+        ]);
+        for invalid in [
+            "broken".into(),
+            "[{}]".into(),
+            duplicate.to_string(),
+            serde_json::json!([inventory_item("../escape", 1, "2026-10-15T10:00:00Z")]).to_string(),
+            serde_json::json!([inventory_item("bad-date", 1, "not a date")]).to_string(),
+        ] {
+            assert!(preview_inventory_difference(&invalid, "[]").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_preview_report_rejects_stale_foreign_partial_and_linked_data() {
+        let root = tempfile::tempdir().unwrap();
+        let id = crate::model::ConnectionId::new();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let path = preview_count_path(root.path());
+        for (version, owner, time, files, ok) in [
+            (1, id, now, Some(4), true),
+            (1, id, now - 181, Some(0), false),
+            (1, crate::model::ConnectionId::new(), now, Some(0), false),
+            (2, id, now, Some(0), false),
+            (1, id, now, None, false),
+            (1, id, now + 60, Some(0), false),
+        ] {
+            let report = PreviewCount {
+                version,
+                connection_id: owner,
+                observed_unix_seconds: time,
+                files,
+            };
+            std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+            assert_eq!(rclone_preview_pending(root.path(), id).await.is_ok(), ok);
+        }
+        std::fs::write(&path, "{broken").unwrap();
+        assert!(rclone_preview_pending(root.path(), id).await.is_err());
+        std::fs::write(&path, "x".repeat(4097)).unwrap();
+        assert!(rclone_preview_pending(root.path(), id).await.is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(root.path(), &path).unwrap();
+        assert!(rclone_preview_pending(root.path(), id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_preview_snapshot_uses_bounded_read_only_filtered_requests() {
+        let runner = crate::process::FakeCommandRunner::default();
+        for _ in 0..2 {
+            runner.push(Ok(response("[]")));
+        }
+        assert_eq!(
+            rclone_preview_snapshot(
+                &runner,
+                "synthetic:Test",
+                Path::new("/tmp/synthetic-local"),
+                Path::new("/tmp/synthetic-filters"),
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(runner.requests().len(), 2);
+        for request in runner.requests() {
+            assert!(request.sanitized_command().starts_with("rclone lsjson "));
+            assert!(request.sanitized_command().contains("--filter-from"));
+            assert_eq!(request.timeout, Duration::from_secs(30));
+        }
+        let runner = crate::process::FakeCommandRunner::default();
+        let mut incomplete = response("[]");
+        incomplete.stdout.truncated = true;
+        runner.push(Ok(incomplete));
+        assert!(
+            rclone_preview_snapshot(
+                &runner,
+                "synthetic:Test",
+                Path::new("/tmp/synthetic-local"),
+                Path::new("/tmp/synthetic-filters"),
+                CancellationToken::new()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(runner.requests().len(), 1);
+    }
+    #[tokio::test]
+    #[ignore = "requires installed rclone; temporary local directories only, no user config or network"]
+    async fn onedrive_runtime_local_preview_metadata_uses_real_rclone() {
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("synthetic-remote");
+        let local = root.path().join("synthetic-local");
+        std::fs::create_dir_all(&remote).unwrap();
+        std::fs::create_dir_all(&local).unwrap();
+        for directory in [&remote, &local] {
+            std::fs::write(directory.join("same"), "same").unwrap();
+        }
+        std::fs::write(remote.join("remote-only"), "remote").unwrap();
+        std::fs::write(local.join("local-only"), "local").unwrap();
+        std::fs::write(remote.join("hidden.one"), "notebook").unwrap();
+        let filters = root.path().join("filters");
+        std::fs::write(
+            &filters,
+            crate::sync::rclone_bisync_filter_file(crate::model::Provider::OneDrive),
+        )
+        .unwrap();
+        assert_eq!(
+            rclone_preview_snapshot(
+                &crate::process::SystemCommandRunner,
+                &remote.display().to_string(),
+                &local,
+                &filters,
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+            2
+        );
+        assert!(!remote.join("local-only").exists());
+        assert!(!local.join("remote-only").exists());
     }
 }

@@ -74,6 +74,8 @@ elif cmd == "mkdir":
     if os.environ.get("FAKE_MKDIR_FAIL"): sys.exit(5)
     remote_dir(args[1]).mkdir(parents=True, exist_ok=True)
 elif cmd == "bisync":
+    if args.count("--max-delete") != 1 or args[args.index("--max-delete") + 1] != "50": sys.exit(95)
+    if "--force" in args: sys.exit(96)
     local, remote = pathlib.Path(args[1]), remote_dir(args[2])
     if not remote.is_dir(): sys.exit(2)
     flags = args[3:]

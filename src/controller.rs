@@ -796,6 +796,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -838,6 +839,7 @@ mod tests {
             name: "Offline".into(),
             provider: Provider::Box,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory: PathBuf::from("/home/example/.local/share/recovery"),
                 sync_interval_minutes: 15,
                 sync_on_metered: false,
@@ -851,6 +853,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }

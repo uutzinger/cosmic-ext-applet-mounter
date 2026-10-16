@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::config::{Config, LoadSource};
-use crate::model::{Connection, ConnectionId, ConnectionMode, Provider, TeamsLibraryIdentity};
+use crate::model::{Connection, ConnectionId, ConnectionMode, Provider, SharePointLibraryIdentity};
 use crate::mount_guard;
 use crate::process::{
     CommandError, CommandRequest, CommandRunner, Executable, RuntimeCommandRunner,
@@ -147,7 +147,7 @@ pub async fn run_service_guard(arguments: &[String]) -> Result<(), String> {
         .teams_identity
         .as_ref()
         .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-connection-has-no-verified-library"))?;
-    verify_remote(
+    verify_remote_identity(
         &RuntimeCommandRunner::detect_current(),
         &binding.remote_name,
         expected,
@@ -279,7 +279,7 @@ pub async fn verify_mirror_binding<R: CommandRunner>(
     let expected = connection.teams_identity.as_ref().ok_or(crate::fl!(
         "ui-teams-the-sharepoint-connection-has-no-verified-library"
     ))?;
-    verify_remote(runner, &binding.remote_name, expected).await?;
+    verify_remote_identity(runner, &binding.remote_name, expected).await?;
     let target = format!("{}:{}", binding.remote_name, binding.remote_subpath);
     runner
         .run(
@@ -329,7 +329,7 @@ fn decoded_segment(segment: &str) -> Result<String, String> {
     Ok(decoded.into_owned())
 }
 
-pub fn parse_library_url(input: &str) -> Result<TeamsLibraryIdentity, String> {
+pub fn parse_library_url(input: &str) -> Result<SharePointLibraryIdentity, String> {
     let url = Url::parse(input.trim())
         .map_err(|_| crate::fl!("ui-teams-enter-a-sharepoint-library-url"))?;
     let host = url
@@ -373,7 +373,7 @@ pub fn parse_library_url(input: &str) -> Result<TeamsLibraryIdentity, String> {
         .map_err(|_| crate::fl!("ui-teams-sharepoint-url-has-an-invalid-path"))?
         .push(&segments[2]);
     let library_url = canonical.as_str().trim_end_matches('/').to_owned();
-    Ok(TeamsLibraryIdentity {
+    Ok(SharePointLibraryIdentity {
         site_url,
         library_url,
         drive_id: String::new(),
@@ -396,8 +396,8 @@ struct RemoteCredentials {
 }
 
 #[derive(Debug, Clone)]
-pub struct VerifiedTeamsLibrary {
-    pub identity: TeamsLibraryIdentity,
+pub struct VerifiedSharePointLibrary {
+    pub identity: SharePointLibraryIdentity,
     pub account: Option<String>,
 }
 
@@ -432,45 +432,19 @@ fn remote_credentials(config_json: &str, remote_name: &str) -> Result<RemoteCred
 /// Read a transient token from rclone's configuration response while a new
 /// Teams remote is still in its drive-selection step. Never persist or log it.
 pub fn oauth_access_token(config_json: &str, remote_name: &str) -> Result<String, String> {
-    let dump: Value = serde_json::from_str(config_json)
-        .map_err(|_| crate::fl!("ui-teams-rclone-returned-invalid-configuration-data"))?;
-    let remote = dump.get(remote_name).ok_or_else(|| {
-        crate::fl!(
-            "ui-teams-rclone-remote-remote-name-was-not-found",
-            remote_name = (remote_name).to_string()
-        )
-    })?;
-    if remote.get("type").and_then(Value::as_str) != Some("onedrive") {
-        return Err(crate::fl!("ui-teams-the-new-remote-is-not-a-microsoft"));
-    }
-    access_token_from_remote(remote)
+    crate::microsoft_oauth::oauth_access_token(config_json, remote_name)
+        .map_err(|error| error.to_string())
 }
 
 fn access_token_from_remote(remote: &Value) -> Result<String, String> {
-    let token = remote
-        .get("token")
-        .ok_or_else(|| crate::fl!("ui-teams-the-sharepoint-remote-is-not-authenticated"))?;
-    let token = if let Some(text) = token.as_str() {
-        serde_json::from_str::<Value>(text)
-            .map_err(|_| crate::fl!("ui-teams-the-sharepoint-remote-has-an-invalid-token"))?
-    } else {
-        token.clone()
-    };
-    let access_token = token
-        .get("access_token")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            crate::fl!("ui-teams-the-sharepoint-remote-needs-browser-reauthorization")
-        })?;
-    Ok(access_token.to_owned())
+    crate::microsoft_oauth::access_token_from_remote(remote).map_err(|error| error.to_string())
 }
 
 pub fn verify_graph_drive(
     graph_response: &Value,
-    expected: &TeamsLibraryIdentity,
+    expected: &SharePointLibraryIdentity,
     configured_drive_id: &str,
-) -> Result<TeamsLibraryIdentity, String> {
+) -> Result<SharePointLibraryIdentity, String> {
     if graph_response.get("id").and_then(Value::as_str) != Some(configured_drive_id)
         || graph_response.get("driveType").and_then(Value::as_str) != Some("documentLibrary")
     {
@@ -574,11 +548,118 @@ pub fn rclone_read_error(error: &CommandError, folder_selected: bool) -> String 
     }
 }
 
+// Profile enrichment is a setup/test concern. Guards use only required identity.
+#[derive(Clone, Copy)]
+enum ProfileLookup {
+    Skip,
+    Optional,
+}
+
+#[derive(Clone, Copy)]
+enum LibraryGraphTarget<'a> {
+    Drive(&'a str),
+    Profile,
+}
+
+trait LibraryGraph: Sync {
+    fn get(
+        &self,
+        target: LibraryGraphTarget<'_>,
+        token: &str,
+    ) -> impl std::future::Future<Output = Result<Value, String>> + Send;
+}
+
+struct MicrosoftLibraryGraph(reqwest::Client);
+
+impl MicrosoftLibraryGraph {
+    fn new() -> Result<Self, String> {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map(Self)
+            .map_err(|_| crate::fl!("ui-teams-could-not-prepare-microsoft-library-verification"))
+    }
+}
+
+impl LibraryGraph for MicrosoftLibraryGraph {
+    async fn get(&self, target: LibraryGraphTarget<'_>, token: &str) -> Result<Value, String> {
+        let url = match target {
+            LibraryGraphTarget::Drive(id) => {
+                format!("https://graph.microsoft.com/v1.0/drives/{id}")
+            }
+            LibraryGraphTarget::Profile => {
+                "https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail".into()
+            }
+        };
+        let mut response = self
+            .0
+            .get(url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| crate::fl!("ui-teams-could-not-contact-microsoft-to-verify-the"))?;
+        if !response.status().is_success() {
+            return Err(graph_identity_error(response.status()));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| crate::fl!("ui-teams-microsoft-returned-invalid-library-metadata"))?
+        {
+            if bytes.len() + chunk.len() > 64 * 1024 {
+                return Err(crate::fl!(
+                    "ui-teams-microsoft-returned-invalid-library-metadata"
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|_| crate::fl!("ui-teams-microsoft-returned-invalid-library-metadata"))
+    }
+}
+
+/// Required library verification plus optional account display information for setup/test.
 pub async fn verify_remote<R: CommandRunner>(
     runner: &R,
     remote_name: &str,
-    expected: &TeamsLibraryIdentity,
-) -> Result<VerifiedTeamsLibrary, String> {
+    expected: &SharePointLibraryIdentity,
+) -> Result<VerifiedSharePointLibrary, String> {
+    verify_remote_with_graph(
+        runner,
+        remote_name,
+        expected,
+        ProfileLookup::Optional,
+        &MicrosoftLibraryGraph::new()?,
+    )
+    .await
+}
+
+/// Verify the saved resource without an optional profile request on recurring guards.
+async fn verify_remote_identity<R: CommandRunner>(
+    runner: &R,
+    remote_name: &str,
+    expected: &SharePointLibraryIdentity,
+) -> Result<SharePointLibraryIdentity, String> {
+    verify_remote_with_graph(
+        runner,
+        remote_name,
+        expected,
+        ProfileLookup::Skip,
+        &MicrosoftLibraryGraph::new()?,
+    )
+    .await
+    .map(|verified| verified.identity)
+}
+
+async fn verify_remote_with_graph<R: CommandRunner, G: LibraryGraph>(
+    runner: &R,
+    remote_name: &str,
+    expected: &SharePointLibraryIdentity,
+    profile: ProfileLookup,
+    graph: &G,
+) -> Result<VerifiedSharePointLibrary, String> {
     // A root listing lets rclone refresh expired OAuth credentials before we
     // consume its current token. No file data is read or changed.
     runner
@@ -595,59 +676,33 @@ pub async fn verify_remote<R: CommandRunner>(
         )
         .await
         .map_err(|error| rclone_read_error(&error, false))?;
-    let output = runner
-        .run(
-            CommandRequest::new(Executable::Rclone)
-                .arg("config")
-                .and_then(|request| request.arg("dump"))
-                .map_err(|error| error.to_string())?
-                .with_timeout(Duration::from_secs(10))
-                .with_output_limit(1024 * 1024),
-            CancellationToken::new(),
-        )
+    let dump = crate::microsoft_oauth::config_dump(runner, CancellationToken::new())
         .await
         .map_err(|_| crate::fl!("ui-teams-could-not-inspect-the-sharepoint-rclone-remote"))?;
-    let credentials = remote_credentials(&output.stdout.text, remote_name)?;
-    let url = format!(
-        "https://graph.microsoft.com/v1.0/drives/{}",
-        credentials.drive_id
-    );
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|_| crate::fl!("ui-teams-could-not-prepare-microsoft-library-verification"))?;
-    let response = client
-        .get(url)
-        .bearer_auth(&credentials.access_token)
-        .send()
-        .await
-        .map_err(|_| crate::fl!("ui-teams-could-not-contact-microsoft-to-verify-the"))?;
-    if !response.status().is_success() {
-        return Err(graph_identity_error(response.status()));
-    }
-    let graph_response: Value = response
-        .json()
-        .await
-        .map_err(|_| crate::fl!("ui-teams-microsoft-returned-invalid-library-metadata"))?;
+    let credentials = remote_credentials(&dump.to_string(), remote_name)?;
+    let graph_response = graph
+        .get(
+            LibraryGraphTarget::Drive(&credentials.drive_id),
+            &credentials.access_token,
+        )
+        .await?;
     let identity = verify_graph_drive(&graph_response, expected, &credentials.drive_id)?;
-    let account = match client
-        .get("https://graph.microsoft.com/v1.0/me?$select=userPrincipalName,mail")
-        .bearer_auth(&credentials.access_token)
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => {
-            response.json::<Value>().await.ok().and_then(|value| {
-                value
-                    .get("userPrincipalName")
-                    .or_else(|| value.get("mail"))
-                    .and_then(Value::as_str)
+    // This request uses the existing token; it never adds OAuth scopes or consent.
+    let account = match profile {
+        ProfileLookup::Skip => None,
+        ProfileLookup::Optional => graph
+            .get(LibraryGraphTarget::Profile, &credentials.access_token)
+            .await
+            .ok()
+            .and_then(|value| {
+                ["userPrincipalName", "mail"]
+                    .iter()
+                    .filter_map(|key| value.get(key).and_then(Value::as_str))
+                    .find(|value| !value.trim().is_empty())
                     .map(str::to_owned)
-            })
-        }
-        _ => None,
+            }),
     };
-    Ok(VerifiedTeamsLibrary { identity, account })
+    Ok(VerifiedSharePointLibrary { identity, account })
 }
 
 fn graph_identity_error(status: reqwest::StatusCode) -> String {
@@ -706,7 +761,8 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
-            teams_identity: Some(TeamsLibraryIdentity {
+            onedrive_identity: None,
+            teams_identity: Some(SharePointLibraryIdentity {
                 site_url: "https://example.sharepoint.com/sites/assessment".into(),
                 library_url: "https://example.sharepoint.com/sites/assessment/Documents".into(),
                 drive_id: "b!assessment".into(),
@@ -747,6 +803,7 @@ mod tests {
     fn mirror_guard_binds_saved_library_folder_and_local_recovery() {
         let mut connection = saved_connection();
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: PathBuf::from("/home/example/Recovery/Assessment"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -793,6 +850,7 @@ mod tests {
     async fn changed_mirror_target_is_blocked_before_remote_access() {
         let mut connection = saved_connection();
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: PathBuf::from("/home/example/Recovery/Assessment"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -955,6 +1013,163 @@ mod tests {
         );
     }
 
+    fn identity_runner() -> FakeCommandRunner {
+        let runner = FakeCommandRunner::default();
+        for text in [
+            "",
+            r#"{"assessment":{"type":"onedrive","drive_type":"documentLibrary","drive_id":"b!example","token":{"access_token":"synthetic"}}}"#,
+        ] {
+            runner.push(Ok(crate::process::CommandOutput {
+                command: "synthetic".into(),
+                stdout: CapturedOutput {
+                    text: text.into(),
+                    truncated: false,
+                    invalid_utf8: false,
+                },
+                stderr: CapturedOutput {
+                    text: String::new(),
+                    truncated: false,
+                    invalid_utf8: false,
+                },
+                attempts: 1,
+                duration: Duration::ZERO,
+            }));
+        }
+        runner
+    }
+
+    struct FakeLibraryGraph {
+        drive: Result<Value, String>,
+        profile: Result<Value, String>,
+        calls: std::sync::Mutex<Vec<&'static str>>,
+    }
+
+    impl FakeLibraryGraph {
+        fn new(profile: Result<Value, String>) -> Self {
+            Self {
+                drive: Ok(
+                    serde_json::json!({"id":"b!example", "driveType":"documentLibrary", "webUrl":"https://example.sharepoint.com/sites/test/Documents"}),
+                ),
+                profile,
+                calls: Default::default(),
+            }
+        }
+    }
+
+    impl LibraryGraph for FakeLibraryGraph {
+        async fn get(&self, target: LibraryGraphTarget<'_>, _token: &str) -> Result<Value, String> {
+            match target {
+                LibraryGraphTarget::Drive(id) => {
+                    assert_eq!(id, "b!example");
+                    self.calls.lock().unwrap().push("drive");
+                    self.drive.clone()
+                }
+                LibraryGraphTarget::Profile => {
+                    self.calls.lock().unwrap().push("profile");
+                    self.profile.clone()
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn teams_optional_profile_failure_does_not_bypass_required_identity() {
+        let expected =
+            parse_library_url("https://example.sharepoint.com/sites/test/Documents").unwrap();
+        for profile in [
+            Err(graph_identity_error(reqwest::StatusCode::UNAUTHORIZED)),
+            Err(graph_identity_error(reqwest::StatusCode::FORBIDDEN)),
+            Err("synthetic transport or parse failure".into()),
+            Ok(serde_json::json!({"userPrincipalName":null})),
+        ] {
+            let graph = FakeLibraryGraph::new(profile);
+            let verified = verify_remote_with_graph(
+                &identity_runner(),
+                "assessment",
+                &expected,
+                ProfileLookup::Optional,
+                &graph,
+            )
+            .await
+            .unwrap();
+            assert_eq!(verified.identity.drive_id, "b!example");
+            assert_eq!(verified.account, None);
+            assert_eq!(*graph.calls.lock().unwrap(), ["drive", "profile"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn teams_guards_skip_profile_and_required_failures_stop_before_enrichment() {
+        let expected =
+            parse_library_url("https://example.sharepoint.com/sites/test/Documents").unwrap();
+        let graph = FakeLibraryGraph::new(Ok(serde_json::json!({"mail":"label@example.invalid"})));
+        let verified = verify_remote_with_graph(
+            &identity_runner(),
+            "assessment",
+            &expected,
+            ProfileLookup::Skip,
+            &graph,
+        )
+        .await
+        .unwrap();
+        assert_eq!(verified.identity.drive_id, "b!example");
+        assert_eq!(verified.account, None);
+        assert_eq!(*graph.calls.lock().unwrap(), ["drive"]);
+
+        for policy in [ProfileLookup::Skip, ProfileLookup::Optional] {
+            for drive in [
+                Err(graph_identity_error(reqwest::StatusCode::FORBIDDEN)),
+                Ok(serde_json::json!({})),
+                Ok(
+                    serde_json::json!({"id":"b!other", "driveType":"documentLibrary", "webUrl":expected.library_url}),
+                ),
+                Ok(
+                    serde_json::json!({"id":"b!example", "driveType":"business", "webUrl":expected.library_url}),
+                ),
+                Ok(
+                    serde_json::json!({"id":"b!example", "driveType":"documentLibrary", "webUrl":"https://example.sharepoint.com/sites/other/Documents"}),
+                ),
+            ] {
+                let mut graph =
+                    FakeLibraryGraph::new(Ok(serde_json::json!({"mail":"label@example.invalid"})));
+                graph.drive = drive;
+                assert!(
+                    verify_remote_with_graph(
+                        &identity_runner(),
+                        "assessment",
+                        &expected,
+                        policy,
+                        &graph
+                    )
+                    .await
+                    .is_err()
+                );
+                assert_eq!(*graph.calls.lock().unwrap(), ["drive"]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn teams_setup_profile_is_only_a_display_label() {
+        let expected =
+            parse_library_url("https://example.sharepoint.com/sites/test/Documents").unwrap();
+        let graph = FakeLibraryGraph::new(Ok(
+            serde_json::json!({"userPrincipalName":null, "mail":"label@example.invalid"}),
+        ));
+        let verified = verify_remote_with_graph(
+            &identity_runner(),
+            "assessment",
+            &expected,
+            ProfileLookup::Optional,
+            &graph,
+        )
+        .await
+        .unwrap();
+        assert_eq!(verified.account.as_deref(), Some("label@example.invalid"));
+        assert_eq!(verified.identity.drive_id, "b!example");
+        assert_eq!(*graph.calls.lock().unwrap(), ["drive", "profile"]);
+    }
+
     #[tokio::test]
     async fn failed_teams_root_listing_reports_specific_safe_error() {
         let runner = FakeCommandRunner::default();
@@ -997,6 +1212,7 @@ mod tests {
         let folder = std::env::var("TEAMS_TEST_FOLDER").expect("TEAMS_TEST_FOLDER");
         let mut connection = saved_connection();
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: PathBuf::from("/tmp/cosmic-teams-mirror-guard-recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,

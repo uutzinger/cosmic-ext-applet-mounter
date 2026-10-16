@@ -699,6 +699,7 @@ mod tests {
             app.rclone_remotes.push(RcloneDraftRemote {
                 name: "remote".into(),
                 backend: "sftp".into(),
+                drive_type: None,
             });
             assert!(!app.sftp_action_highlighted(true));
             let _ = app.update(Message::DraftSftp(field, value.into()));

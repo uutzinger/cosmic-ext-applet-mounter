@@ -236,6 +236,7 @@ pub fn preview_import(
         tuning_profile: crate::model::TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        onedrive_identity: None,
         teams_identity: None,
     };
     Ok(ImportPreview {
@@ -853,6 +854,7 @@ mod tests {
                 tuning_profile: crate::model::TuningProfile::Balanced,
                 smb_preload_override: None,
                 sftp_preload_override: None,
+                onedrive_identity: None,
                 teams_identity: None,
             }],
             &["legacy-work-drive.service".to_owned()]

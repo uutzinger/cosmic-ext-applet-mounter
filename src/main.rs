@@ -56,24 +56,33 @@ fn main() -> cosmic::iced::Result {
     }
     if matches!(
         guard.as_deref(),
-        Some(cosmic_ext_applet_mounter::teams::SERVICE_GUARD_FLAG)
-            | Some(cosmic_ext_applet_mounter::teams::MIRROR_GUARD_FLAG)
+        Some(cosmic_ext_applet_mounter::sharepoint::SERVICE_GUARD_FLAG)
+            | Some(cosmic_ext_applet_mounter::sharepoint::MIRROR_GUARD_FLAG)
+            | Some(cosmic_ext_applet_mounter::onedrive::MIRROR_GUARD_FLAG)
             | Some(cosmic_ext_applet_mounter::mount_guard::SERVICE_GUARD_FLAG)
     ) {
         let arguments = arguments.collect::<Vec<_>>();
         let result = tokio::runtime::Runtime::new()
             .map_err(|_| fl!("mount-guard-runtime-failed"))
             .and_then(|runtime| {
-                if guard.as_deref() == Some(cosmic_ext_applet_mounter::teams::SERVICE_GUARD_FLAG) {
-                    runtime.block_on(cosmic_ext_applet_mounter::teams::run_service_guard(
+                if guard.as_deref()
+                    == Some(cosmic_ext_applet_mounter::sharepoint::SERVICE_GUARD_FLAG)
+                {
+                    runtime.block_on(cosmic_ext_applet_mounter::sharepoint::run_service_guard(
                         &arguments,
                     ))
                 } else if guard.as_deref()
-                    == Some(cosmic_ext_applet_mounter::teams::MIRROR_GUARD_FLAG)
+                    == Some(cosmic_ext_applet_mounter::sharepoint::MIRROR_GUARD_FLAG)
                 {
-                    runtime.block_on(cosmic_ext_applet_mounter::teams::run_mirror_service_guard(
-                        &arguments,
-                    ))
+                    runtime.block_on(
+                        cosmic_ext_applet_mounter::sharepoint::run_mirror_service_guard(&arguments),
+                    )
+                } else if guard.as_deref()
+                    == Some(cosmic_ext_applet_mounter::onedrive::MIRROR_GUARD_FLAG)
+                {
+                    runtime.block_on(
+                        cosmic_ext_applet_mounter::onedrive::run_mirror_service_guard(&arguments),
+                    )
                 } else {
                     runtime.block_on(cosmic_ext_applet_mounter::mount_guard::run_service_guard(
                         &arguments,
@@ -81,12 +90,17 @@ fn main() -> cosmic::iced::Result {
                 }
             });
         if let Err(error) = result {
-            let notice =
-                if guard.as_deref() == Some(cosmic_ext_applet_mounter::teams::MIRROR_GUARD_FLAG) {
-                    fl!("teams-mirror-guard-blocked", error = error)
-                } else {
-                    fl!("mount-guard-blocked", error = error)
-                };
+            let notice = if guard.as_deref()
+                == Some(cosmic_ext_applet_mounter::sharepoint::MIRROR_GUARD_FLAG)
+            {
+                fl!("teams-mirror-guard-blocked", error = error)
+            } else if guard.as_deref()
+                == Some(cosmic_ext_applet_mounter::onedrive::MIRROR_GUARD_FLAG)
+            {
+                fl!("onedrive-mirror-guard-blocked", error = error)
+            } else {
+                fl!("mount-guard-blocked", error = error)
+            };
             eprintln!("{notice}");
             std::process::exit(1);
         }

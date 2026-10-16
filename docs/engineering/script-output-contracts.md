@@ -270,3 +270,81 @@ is retained. `--keep` is an explicit cleanup exception. Local evidence is retain
 The input sample directory is never a transfer destination, and its final snapshot
 must equal its initial snapshot. Observation intervals are bounded 0..60 seconds;
 no assertion about delayed changes beyond the measured window is made.
+
+
+## OneDrive phase-3 prototype receipts (October 15, 2026)
+
+The fixed-action wrapper uses shared TaskReport schema 1, real exit status,
+source HEAD/dirty flag, selected action/transport, private log and an
+artifact_receipt_path to the Rust example's `prototype.json`. The Cargo invocation
+is quiet so account arguments cannot enter its echoed command line. No tokens,
+account names, Graph bodies or rclone config dumps are printed by the example.
+It captures bounded credential responses through the restricted
+CommandRunner private_config method, now shared with production Microsoft OAuth
+(`src/microsoft_oauth.rs`). Identity/setup now delegates to production
+`src/onedrive.rs`; scenario orchestration and the prototype example remain
+development-gated. Receipt schema/actions and the `cm_proto_` creation restriction
+are unchanged.
+Capture is restricted to rclone config dump/create/update
+with a 1 MiB cap and at most 300 seconds. The private response has opaque Debug
+output, no serialization/raw public fields and a bounded JSON decoder. Both output
+bodies are replaced with opaque text on command failure. Ordinary command output
+remains redacted. It emits protocol error codes rather than raw provider errors.
+Profile `/me` refusals use `account_profile_unauthorized` with HTTP 401/403;
+other Graph HTTP errors retain `graph_http`. This distinction does not infer the
+provider's underlying cause. New personal prototype OAuth requests the default
+OneDrive file scopes plus `User.Read`; business uses rclone's default scopes
+without an override. Business identity requires equality of configured drive,
+signed-in `/me/drive` and expected-UPN `/users/{UPN}/drive`, with matching nonempty
+owner user IDs and business types. Personal still uses profile `/me`. Typed Graph
+targets build only fixed-host URLs, encoding the validated business UPN as one
+path segment. Denied/malformed responses fail closed; no JWT-claim identity
+fallback is used. Inspect never changes consent on existing remotes.
+`rclone_failed` contains fixed `operation` and `failure` fields. Operations
+distinguish identity access, config, owner/anchor reads, download verification and
+other engine requests. Failures distinguish missing executable, invalid argument,
+spawn, timeout and nonzero exit (with optional numeric code). Cancellation retains
+its cancellation code. No command text, arguments or stdout/stderr enter this
+diagnostic. Shared coordinator failures retain their existing generic code.
+
+`prototype.json` schema 1 records succeeded/failed, result/error_code and, on a
+successful prepare/session action, its retained session path. Private session.json
+schema 1 retains a UUID, remote reference, identity fingerprints, initialization
+observed from shared coordinator markers, failed/owned/cleaned flags, operation
+durations/outcomes and a labelled synthetic benchmark if measured. Session
+ownership and shared access markers are validated; a setup failure leaves partial
+session evidence in the prepare report directory. Shared coordinator state and
+bisync logs/listings are retained under the session work root. No source SHA
+claims clean or immutable inputs when source_dirty=true.
+
+Later actions require the same explicit remote/drive/account and absolute session
+path. A shared operation guard serializes each CLI session action, in addition to
+the coordinator lock around each transaction. Prepare never automatically confirms initial sync; the separate initial-sync
+action requires shared Preview evidence. Failed sessions block ordinary sync;
+the separate verify action requires an initialized, nonfailed session and reruns
+identity/ownership/access and downloaded-byte checks without another bisync.
+Repair only inspects pending data/locks and no implicit rebuild is offered.
+Explicit cleanup rechecks drive/account/root ownership and purges only that UUID
+cloud tree, retaining local evidence. A forced-host transport run is not final
+installed Flatpak or browser-portal acceptance.
+
+Sample timing extension: prepare accepts an absolute --files-dir only for a new
+session. It reads the source into a session-local sample copy with bounded rclone
+copy, compares source-before/source-after/copy SHA-256 tree inventories, then
+creates the cloud owner/tree and Preview. Links/special files, non-UTF-8 names,
+overlapping paths, depth over 64, over 20,000 entries, over 2 GiB and empty samples
+are rejected. Existing session schema 1 files remain readable: optional sample_tree
+stores aggregate files/bytes/directories/depth and a digest, never source paths,
+filenames or contents. Normal scenario rejects sample sessions.
+
+The timing action requires initialized/nonfailed sample state. It reuses the
+guarded planner/coordinator for two quiet transactions (one followed by full
+checksum verification), changes only a separate synthetic timing file, measures
+that sync and independently verifies downloaded bytes. Benchmark scope is
+operator_sample_tree, with sample_tree aggregates, small_change_sync_ms and
+initial_sync_engine_ms. The latter is read from the successful initial-sync
+stage and excludes entry guards; action timings include guards. Source_policy
+is read_only_copy_verified_at_prepare. Representative_tree=false and
+cadence_exercised=false explicitly prohibit inferring representative performance
+or five-minute service behavior from a small project baseline. Cleanup retains
+local sample/evidence and purges only the owned UUID cloud root.

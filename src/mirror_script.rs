@@ -49,6 +49,7 @@ mod tests {
             name: "Scheduled mirror".into(),
             provider: Provider::Sftp,
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory: root.path().join("recovery"),
                 sync_interval_minutes: 15,
                 sync_on_metered: false,
@@ -62,6 +63,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         };
         let plan = rclone_bisync_plan(&connection, &root.path().join("state")).unwrap();

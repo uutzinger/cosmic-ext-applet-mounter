@@ -11,10 +11,10 @@ use cosmic::cosmic_config::{
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::model::{
-    Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, OnlineMountConfig,
-    PreloadPolicy, PreloadSettings, Provider, VpnProfile, VpnProfileId,
+    Connection, ConnectionId, ConnectionMode, OfflineEngine, OfflineMirrorConfig,
+    OnlineMountConfig, PreloadPolicy, PreloadSettings, Provider, VpnProfile, VpnProfileId,
 };
-use crate::teams;
+use crate::sharepoint;
 
 pub const APP_ID: &str = "io.github.uutzinger.cosmic-ext-applet-mounter";
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
@@ -158,7 +158,13 @@ pub enum ValidationError {
     InvalidPreloadPolicy(&'static str),
     InvalidSmbPreloadOverride(ConnectionId),
     InvalidSftpPreloadOverride(ConnectionId),
-    InvalidTeamsIdentity(ConnectionId),
+    InvalidSharePointIdentity(ConnectionId),
+    InvalidOfflineEngine(ConnectionId),
+    InvalidOneDriveIdentity(ConnectionId),
+    InvalidWorkDirectory {
+        connection: ConnectionId,
+        path: PathBuf,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -248,9 +254,20 @@ impl fmt::Display for ValidationError {
             Self::InvalidSftpPreloadOverride(id) => {
                 crate::fl!("config-invalid-sftp-preload", id = id.to_string())
             }
-            Self::InvalidTeamsIdentity(id) => {
+            Self::InvalidSharePointIdentity(id) => {
                 crate::fl!("config-invalid-sharepoint", id = id.to_string())
             }
+            Self::InvalidOfflineEngine(id) => {
+                crate::fl!("config-invalid-offline-engine", id = id.to_string())
+            }
+            Self::InvalidOneDriveIdentity(id) => {
+                crate::fl!("config-invalid-onedrive-identity", id = id.to_string())
+            }
+            Self::InvalidWorkDirectory { connection, path } => crate::fl!(
+                "config-invalid-work-directory",
+                id = connection.to_string(),
+                path = path.display().to_string()
+            ),
         };
         formatter.write_str(&message)
     }
@@ -605,6 +622,36 @@ impl Config {
         Ok(true)
     }
 
+    /// Validate configured paths against the runtime's resolved shared work root.
+    /// The caller supplies host-visible paths for sandboxed execution.
+    pub fn validate_with_work_root(&self, work_root: &Path) -> Result<(), Vec<ValidationError>> {
+        let mut errors = self.validate().err().unwrap_or_default();
+        for connection in &self.document.connections {
+            let mut paths = vec![&connection.local_path];
+            match &connection.mode {
+                ConnectionMode::OnlineMount(options) => {
+                    paths.extend(options.cache_directory.iter())
+                }
+                ConnectionMode::OfflineMirror(options) => paths.push(&options.recovery_directory),
+            }
+            if normalize_absolute(work_root).is_none_or(|work| {
+                paths.iter().any(|path| {
+                    normalize_absolute(path).is_some_and(|path| paths_overlap(&work, &path))
+                })
+            }) {
+                errors.push(ValidationError::InvalidWorkDirectory {
+                    connection: connection.id,
+                    path: work_root.to_owned(),
+                });
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     pub fn validate(&self) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
         if self.document.schema_version != CONFIG_SCHEMA_VERSION {
@@ -665,12 +712,39 @@ impl Config {
         }
 
         let mut connection_ids = HashSet::new();
+        let rclone_onedrive_ids: HashSet<_> = self
+            .document
+            .connections
+            .iter()
+            .filter(|connection| {
+                connection.provider == Provider::OneDrive
+                    && connection.offline_engine() == Some(OfflineEngine::Rclone)
+            })
+            .map(|connection| connection.id)
+            .collect();
         let mut targets = Vec::new();
         for connection in &self.document.connections {
             if !connection_ids.insert(connection.id) {
                 errors.push(ValidationError::DuplicateConnectionId(connection.id));
             }
             validate_name("connection.name", &connection.name, &mut errors);
+            if connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive)
+                && connection.provider != Provider::OneDrive
+            {
+                errors.push(ValidationError::InvalidOfflineEngine(connection.id));
+            }
+            let needs_onedrive_identity = connection.provider == Provider::OneDrive
+                && connection.offline_engine() == Some(OfflineEngine::Rclone);
+            if if needs_onedrive_identity {
+                !connection
+                    .onedrive_identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.is_valid())
+            } else {
+                connection.onedrive_identity.is_some()
+            } {
+                errors.push(ValidationError::InvalidOneDriveIdentity(connection.id));
+            }
             if connection.remote_reference.trim().is_empty()
                 || has_control_char(&connection.remote_reference)
             {
@@ -685,19 +759,19 @@ impl Config {
             if connection.provider == Provider::Teams {
                 let valid = connection.teams_identity.as_ref().is_some_and(|identity| {
                     !identity.drive_id.trim().is_empty()
-                        && teams::parse_library_url(&identity.library_url)
+                        && sharepoint::parse_library_url(&identity.library_url)
                             .is_ok_and(|parsed| parsed.site_url == identity.site_url)
                 }) && match connection.mode {
                     ConnectionMode::OnlineMount(_) => true,
                     ConnectionMode::OfflineMirror(_) => {
-                        teams::MirrorGuardBinding::from_connection(connection).is_ok()
+                        sharepoint::MirrorGuardBinding::from_connection(connection).is_ok()
                     }
                 };
                 if !valid {
-                    errors.push(ValidationError::InvalidTeamsIdentity(connection.id));
+                    errors.push(ValidationError::InvalidSharePointIdentity(connection.id));
                 }
             } else if connection.teams_identity.is_some() {
-                errors.push(ValidationError::InvalidTeamsIdentity(connection.id));
+                errors.push(ValidationError::InvalidSharePointIdentity(connection.id));
             }
             if let Some(overrides) = connection.smb_preload_override {
                 if connection.provider != Provider::Smb
@@ -762,14 +836,22 @@ impl Config {
                 }
                 ConnectionMode::OfflineMirror(options) => {
                     validate_offline_mirror(connection.id, &local_path, options, &mut errors);
+                    if let Some(recovery) = normalize_absolute(&options.recovery_directory) {
+                        targets.push((connection.id, recovery, false));
+                    }
                 }
             }
-            targets.push((connection.id, local_path));
+            targets.push((connection.id, local_path, true));
         }
 
-        for (index, (first_id, first_path)) in targets.iter().enumerate() {
-            for (second_id, second_path) in &targets[index + 1..] {
-                if paths_overlap(first_path, second_path) {
+        for (index, (first_id, first_path, first_local)) in targets.iter().enumerate() {
+            for (second_id, second_path, second_local) in &targets[index + 1..] {
+                // Preserve existing document semantics; the new recovery overlap
+                // rule protects rclone OneDrive connections against every engine.
+                let must_check = (*first_local && *second_local)
+                    || rclone_onedrive_ids.contains(first_id)
+                    || rclone_onedrive_ids.contains(second_id);
+                if first_id != second_id && must_check && paths_overlap(first_path, second_path) {
                     errors.push(ValidationError::ConflictingTargets {
                         first: *first_id,
                         second: *second_id,
@@ -981,6 +1063,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -1006,6 +1089,7 @@ mod tests {
     fn offline_connection(path: &str) -> Connection {
         Connection {
             mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: None,
                 recovery_directory: PathBuf::from(
                     "/home/example/.local/share/cosmic-mounter/recovery/google",
                 ),
@@ -1185,13 +1269,22 @@ mod tests {
                 .validate()
                 .unwrap_err()
                 .iter()
-                .any(|error| matches!(error, ValidationError::InvalidTeamsIdentity(_)))
+                .any(|error| matches!(error, ValidationError::InvalidSharePointIdentity(_)))
         );
-        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+        teams.teams_identity = Some(crate::model::SharePointLibraryIdentity {
             site_url: "https://example.sharepoint.com/sites/Work".into(),
             library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
             drive_id: "b!verified".into(),
         });
+        // Source naming must not migrate existing profile or named RON fields.
+        let legacy_identity: crate::model::SharePointLibraryIdentity = ron::from_str(
+            r#"TeamsLibraryIdentity(site_url:"https://example.sharepoint.com/sites/Work",library_url:"https://example.sharepoint.com/sites/Work/Documents",drive_id:"b!verified")"#,
+        ).unwrap();
+        assert_eq!(teams.teams_identity.as_ref(), Some(&legacy_identity));
+        let serialized = serde_json::to_value(&teams).unwrap();
+        assert_eq!(serialized["provider"], "Teams");
+        assert!(serialized.get("teams_identity").is_some());
+        assert!(serialized.get("sharepoint_identity").is_none());
         config.document.connections = vec![teams.clone()];
         assert!(config.validate().is_ok());
         if let ConnectionMode::OnlineMount(options) = &mut teams.mode {
@@ -1207,7 +1300,7 @@ mod tests {
         teams.provider = Provider::Teams;
         teams.remote_reference = "assessment".into();
         teams.remote_subpath = Some("Disposable".into());
-        teams.teams_identity = Some(crate::model::TeamsLibraryIdentity {
+        teams.teams_identity = Some(crate::model::SharePointLibraryIdentity {
             site_url: "https://example.sharepoint.com/sites/Work".into(),
             library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
             drive_id: "b!verified".into(),

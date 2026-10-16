@@ -6,7 +6,7 @@ Status: Source reconciliation complete; final release-package acceptance pending
 
 Created: October 7, 2026
 
-Last reviewed: October 12, 2026
+Last reviewed: October 15, 2026
 
 ## Scope and method
 
@@ -170,10 +170,12 @@ portal implements its storage/configuration semantics.
 | Command pattern | Classification | Purpose |
 |---|---|---|
 | `rclone config dump` | **Unavoidable invocation** | Host remote discovery and provider/authentication inspection. |
-| `rclone config create <remote> <backend> ...` | **Unavoidable invocation** | Separate Google Drive, Box, SMB, SFTP, or SharePoint remote setup. |
-| `rclone config update <remote> ...` | **Unavoidable invocation** | Provider updates and SharePoint OAuth continuation. |
+| `rclone config create <remote> <backend> ...` | **Unavoidable invocation** | Separate Google Drive, Box, SMB, SFTP, SharePoint, or OneDrive mirror remote setup. |
+| `rclone config update <remote> ...` | **Unavoidable invocation** | Provider updates and Microsoft OAuth continuation. |
 | `rclone config password <remote> <field> <secret>` | **Unavoidable invocation** | Engine-owned obscured credential storage; arguments are redacted. |
 | `rclone config delete <remote>` | **Unavoidable invocation** | Confirmed unused-remote removal or setup rollback. |
+| `rclone lsjson <remote:path> --stat` | **Unavoidable invocation** | Bounded OneDrive token refresh and selected-directory access; metadata only. |
+| `rclone lsjson <remote-or-local> --recursive --files-only --no-mimetype --filter-from <filters>` | **Unavoidable invocation** | Explicit OneDrive Preview estimate only; two read-only inventories, each 30 seconds/4 MiB, under coordinator lock. Same scoped host gateway and owned paths; no new permission. Remove when an equivalent reviewed structured engine API replaces spawning. |
 | `rclone lsf <remote:path> --max-depth 1` | **Unavoidable invocation** | Read-only remote/library access checks. |
 | `rclone rc --unix-socket <socket> rc/noop` | **Unavoidable invocation** | Private RC readiness. |
 | `rclone rc --unix-socket <socket> vfs/stats` | **Unavoidable invocation** | Cache/upload health and sleep safety. |
@@ -185,7 +187,7 @@ portal implements its storage/configuration semantics.
 | `rclone cat <remote-anchor-or-owner>` | **Unavoidable invocation** | Access-anchor and ownership verification. |
 | `rclone lsf <remote-recovery-day>` | **Unavoidable invocation** | Prove an unmarked recovery day is empty before claiming it. |
 | `rclone copyto <private-owner-file> <remote-owner-marker>` | **Unavoidable invocation** | Publish applet ownership. |
-| `rclone check <remote> <local> --checksum --filter-from <filters>` | **Unavoidable invocation** | SharePoint post-sync verification after the second convergence bisync. |
+| `rclone check <remote> <local> --checksum --filter-from <filters>` | **Unavoidable invocation** | SharePoint post-convergence verification; OneDrive initial/manual verification without convergence workaround. |
 | `rclone lsf --dirs-only --max-depth 1 <remote-recovery-root>` | **Unavoidable invocation** | Inspect retention candidates after successful synchronization. |
 | `rclone purge <verified-owned-expired-day>` | **Unavoidable invocation** | Remove only validated, applet-owned expired remote recovery data. |
 | `onedriver --auth-only --config-file <file> --cache-dir <dir> <mountpoint>` | **Unavoidable invocation** | Engine-owned Online OneDrive authentication; validation otherwise inspects metadata. |
@@ -200,8 +202,25 @@ not an outstanding D-Bus replacement. No production `core/stats` request remains
 Idle rclone mirrors do not launch uncoordinated dry-run bisync for inferred counts.
 
 Sources: `src/app.rs`, `src/app/sftp.rs`, `src/providers.rs`, `src/sync.rs`,
-`src/teams.rs`, `src/teams_oauth.rs`, `src/rclone_refresh.rs`,
+`src/sharepoint.rs`, `src/sharepoint_setup.rs`, `src/microsoft_oauth.rs`, `src/onedrive.rs`, `src/rclone_refresh.rs`,
 `src/pending_count.rs`, `src/sleep.rs`, `src/bisync_coordinator.rs`.
+
+October 15 Microsoft OAuth extraction: `src/microsoft_oauth.rs` now owns shared
+fixed config dump/create/update/rollback requests for the SharePoint wrapper and
+production OneDrive setup, also reused by the development prototype. The engine owns its host rclone config and
+credentials; only bounded, opaque, in-memory capture carries config responses
+back to policy code. The production capture API allows dump/create/update only;
+rollback delete uses ordinary redacted execution. rclone has no D-Bus/portal API
+for these configuration operations. Transport still uses the existing scoped
+`org.freedesktop.Flatpak` gateway permission, with no filesystem/bus grant added.
+Removal criterion: replace spawning only if an equivalent reviewed engine API
+can preserve OAuth, credential ownership and cancellation. OneDrive backend setup/guard ownership is now `src/onedrive.rs`; editor integration
+and installed portal/host-transport acceptance remain pending. The production
+OneDrive guard reuses the applet helper/worker launch transport and fixed rclone
+stat/config/anchor operations. Graph verification stays in-process HTTPS, not a
+host command. Host credentials remain in rclone configuration; local/work/recovery
+paths retain the shared native/Flatpak mapping. No new filesystem or bus grant.
+The command removal criterion above applies to these OneDrive operations too.
 
 ### FUSE and host inspection
 
@@ -267,6 +286,31 @@ Graph identity verification and VPN route/DNS/TCP checks are in-process APIs.
 - Installer scripts and deployment instructions may run host package managers,
   version checks, and user `systemctl` commands; they are not applet runtime
   calls and are not launched by the applet.
+
+### OneDrive phase-3 development harness (October 15, 2026)
+
+The `development-probes`-gated `onedrive_mirror_prototype` example uses the existing
+`RuntimeCommandRunner`/`FlatpakHostCommandRunner` for fixed rclone engine operations:
+config create/update/delete for fresh `cm_proto_` remotes, metadata and ownership
+reads, disposable fixture transfers, shared coordinator bisync/recovery, checksum
+verification and marker-guarded purge. Host execution is required because the host
+owns rclone credentials and engine; Graph identity is an in-process HTTPS API.
+No new executable, CLI desktop control or Flatpak grant is introduced.
+
+Sample timing additionally uses fixed `rclone copy` from an explicitly supplied
+absolute source directory to the generated session's local/sample directory.
+The source is read-only; source/copy SHA-256 inventories must match before cloud
+setup. This uses the same engine runner, bounds and cancellation. Forced-host
+testing requires those paths to be visible at the same absolute locations;
+no additional filesystem permission is implicitly granted by the sample option.
+
+| Command | Permission/path | Owner | Removal/acceptance boundary |
+|---|---|---|---|
+| `flatpak-spawn --host rclone <fixed prototype operation>` | Existing scoped `org.freedesktop.Flatpak` session-bus permission; shared explicit absolute mirror/work/recovery paths and read-only sample source; mutations only in owned session directories, generated UUID cloud trees or a proven-new auth remote | `src/onedrive_prototype.rs`, gated example and `scripts/onedrive-mirror-prototype.sh` | Development-only; retire the harness after phase-3/4 acceptance or retain as an explicitly gated regression probe. Not a new installed runtime helper. |
+
+Native and forced-host runs share identity and safety policy. A forced-host run
+from the host tests transport only; actual sandbox path visibility, browser portal
+behavior and installed effective permissions remain separate acceptance gates.
 
 ## Remaining acceptance and follow-ups
 

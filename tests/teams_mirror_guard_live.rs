@@ -10,8 +10,10 @@ use cosmic_ext_applet_mounter::model::{
     Connection, ConnectionId, ConnectionMode, OfflineMirrorConfig, Provider, TuningProfile,
 };
 use cosmic_ext_applet_mounter::process::SystemCommandRunner;
+use cosmic_ext_applet_mounter::sharepoint::{
+    MIRROR_GUARD_FLAG, MirrorGuardBinding, parse_library_url,
+};
 use cosmic_ext_applet_mounter::sync::rclone_bisync_plan;
-use cosmic_ext_applet_mounter::teams::{MIRROR_GUARD_FLAG, MirrorGuardBinding, parse_library_url};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -87,6 +89,7 @@ fn compiled_guard_passes_approved_folder_and_blocks_changed_targets_before_sync(
         name: "Isolated Teams mirror guard test".into(),
         provider: Provider::Teams,
         mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: temp.path().join("recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -100,6 +103,7 @@ fn compiled_guard_passes_approved_folder_and_blocks_changed_targets_before_sync(
         tuning_profile: TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        onedrive_identity: None,
         teams_identity: Some(identity),
     };
     save_isolated_config(&config_home, original.clone());
@@ -202,6 +206,7 @@ async fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         name: "Isolated SharePoint runner test".into(),
         provider: Provider::Teams,
         mode: ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: temp.path().join("recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -215,6 +220,7 @@ async fn managed_sharepoint_runner_initial_sync_rechecks_both_sides() {
         tuning_profile: TuningProfile::Balanced,
         smb_preload_override: None,
         sftp_preload_override: None,
+        onedrive_identity: None,
         teams_identity: Some(identity),
     };
     save_isolated_config(&config_home, connection.clone());

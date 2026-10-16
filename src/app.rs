@@ -46,9 +46,10 @@ use cosmic_ext_applet_mounter::import::{
 };
 use cosmic_ext_applet_mounter::mirror_script;
 use cosmic_ext_applet_mounter::model::{
-    AccessMode, Connection, ConnectionId, ConnectionMode, ConnectionStatus, OfflineMirrorConfig,
-    OnlineMountConfig, OnlineMountStatus, Operation, PreloadPolicy, PreloadSettings, Provider,
-    SmbPreloadOverride, TuningProfile, VpnKind, VpnProfile, VpnProfileId,
+    AccessMode, Connection, ConnectionId, ConnectionMode, ConnectionStatus, OfflineEngine,
+    OfflineMirrorConfig, OneDriveIdentity, OnlineMountConfig, OnlineMountStatus, Operation,
+    PreloadPolicy, PreloadSettings, Provider, SmbPreloadOverride, TuningProfile, VpnKind,
+    VpnProfile, VpnProfileId,
 };
 use cosmic_ext_applet_mounter::mount_guard;
 #[cfg(test)]
@@ -77,6 +78,8 @@ use cosmic_ext_applet_mounter::services::{
     UnitStore, UnitValidator, start_managed_online_service, systemd_user_status_batch,
     systemd_user_status_blocking,
 };
+use cosmic_ext_applet_mounter::sharepoint;
+use cosmic_ext_applet_mounter::sharepoint_setup::{self, SharePointSetup, SharePointSetupOutcome};
 use cosmic_ext_applet_mounter::sync::{
     OneDriveIsolationReport, SyncDecision, SyncDecisionRejection, SyncReadiness, SyncRequest,
     SyncTrigger, one_drive_auth_files_request, one_drive_auth_request,
@@ -84,8 +87,6 @@ use cosmic_ext_applet_mounter::sync::{
     one_drive_sync_request, parse_preview, rclone_bisync_filter_file, rclone_bisync_plan,
     sync_now_request,
 };
-use cosmic_ext_applet_mounter::teams;
-use cosmic_ext_applet_mounter::teams_oauth::{self, TeamsOAuthOutcome, TeamsOAuthSetup};
 use cosmic_ext_applet_mounter::vpn::{
     DbusNetworkManagerVpn, InProcessReadinessProbe, NetworkManagerVpn, VpnShutdownDecision,
     readiness_report, shutdown_decision,
@@ -307,9 +308,14 @@ struct ConnectionDraft {
     name: String,
     provider: Provider,
     access_mode: AccessMode,
+    offline_engine: Option<OfflineEngine>,
+    legacy_onedrive: bool,
+    onedrive_identity: Option<OneDriveIdentity>,
+    onedrive_drive_type: cosmic_ext_applet_mounter::model::OneDriveDriveType,
+    onedrive_expected_account: String,
     remote_reference: String,
     remote_subpath: String,
-    teams_library_url: String,
+    sharepoint_library_url: String,
     teams_drive_id: String,
     google_client_id: String,
     google_client_secret: String,
@@ -337,6 +343,154 @@ struct ConnectionDraft {
 pub struct RcloneDraftRemote {
     name: String,
     backend: String,
+    drive_type: Option<cosmic_ext_applet_mounter::model::OneDriveDriveType>,
+}
+
+fn draft_is_onedrive_rclone(draft: &ConnectionDraft) -> bool {
+    draft.provider == Provider::OneDrive
+        && draft.access_mode == AccessMode::OfflineMirror
+        && !draft.legacy_onedrive
+}
+
+fn editor_remote_matches(
+    draft: &ConnectionDraft,
+    provider: Provider,
+    remote: &RcloneDraftRemote,
+) -> bool {
+    if provider == Provider::OneDrive {
+        return draft_is_onedrive_rclone(draft)
+            && remote.backend == "onedrive"
+            && remote.drive_type == Some(draft.onedrive_drive_type);
+    }
+    rclone_backend_name(provider) == Some(remote.backend.as_str())
+        && (provider != Provider::Teams || remote.drive_type.is_none())
+}
+
+#[derive(Debug, Clone)]
+pub struct OneDriveEditorRequest {
+    id: ConnectionId,
+    setup: cosmic_ext_applet_mounter::onedrive::RemoteSetup,
+    create: bool,
+}
+
+impl OneDriveEditorRequest {
+    fn from_draft(
+        draft: &ConnectionDraft,
+        saved: &[Connection],
+        create: bool,
+    ) -> Result<Self, String> {
+        if !draft_is_onedrive_rclone(draft) {
+            return Err(fl!("notice-onedrive-only"));
+        }
+        let id = draft.id.ok_or_else(|| fl!("onedrive-invalid-setup"))?;
+        let mut setup = cosmic_ext_applet_mounter::onedrive::RemoteSetup::new(
+            &draft.remote_reference,
+            draft.onedrive_drive_type,
+            &draft.onedrive_expected_account,
+        )
+        .map_err(|error| error.to_string())?;
+        setup.remote_subpath = (!draft.remote_subpath.trim().is_empty())
+            .then(|| draft.remote_subpath.trim().to_owned());
+        // Never accept the editable draft as the authority for reconnect identity.
+        setup.previous_identity = match saved.iter().find(|connection| connection.id == id) {
+            Some(connection) if is_onedrive_rclone_mirror(connection) => Some(
+                connection
+                    .onedrive_identity
+                    .clone()
+                    .ok_or_else(|| fl!("onedrive-binding-changed"))?,
+            ),
+            Some(_) => return Err(fl!("onedrive-binding-changed")),
+            None => None,
+        };
+        if setup
+            .previous_identity
+            .as_ref()
+            .is_some_and(|identity| identity.drive_type != setup.drive_type)
+        {
+            return Err(fl!("onedrive-wrong-drive"));
+        }
+        Ok(Self { id, setup, create })
+    }
+
+    fn matches(&self, draft: &ConnectionDraft) -> bool {
+        draft_is_onedrive_rclone(draft)
+            && draft.id == Some(self.id)
+            && draft.remote_reference.trim() == self.setup.remote_name
+            && draft.remote_subpath.trim() == self.setup.remote_subpath.as_deref().unwrap_or("")
+            && draft.onedrive_drive_type == self.setup.drive_type
+            && draft.onedrive_expected_account.trim() == self.setup.expected_account
+    }
+}
+
+#[derive(Debug)]
+struct OneDriveEditorPending {
+    cancellation: CancellationToken,
+}
+
+impl Drop for OneDriveEditorPending {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
+fn accept_onedrive_editor_result(
+    draft: &mut ConnectionDraft,
+    request: &OneDriveEditorRequest,
+    result: Result<OneDriveIdentity, String>,
+) -> Result<(), String> {
+    if !request.matches(draft) {
+        return Err(fl!("onedrive-editor-result-discarded"));
+    }
+    let identity = match result {
+        Ok(identity)
+            if identity.is_valid()
+                && identity.drive_type == request.setup.drive_type
+                && request
+                    .setup
+                    .previous_identity
+                    .as_ref()
+                    .is_none_or(|saved| saved == &identity) =>
+        {
+            identity
+        }
+        Ok(_) => {
+            draft.onedrive_identity = None;
+            draft.enabled = false;
+            return Err(fl!("onedrive-wrong-drive"));
+        }
+        Err(error) => {
+            draft.onedrive_identity = None;
+            draft.enabled = false;
+            return Err(error);
+        }
+    };
+    draft.offline_engine = Some(OfflineEngine::Rclone);
+    draft.onedrive_identity = Some(identity);
+    Ok(())
+}
+
+fn onedrive_validation_matches_draft(draft: &ConnectionDraft, connection: &Connection) -> bool {
+    draft_is_onedrive_rclone(draft)
+        && connection_from_draft(draft).is_ok_and(|current| current == *connection)
+}
+
+async fn run_onedrive_editor_setup<
+    R: CommandRunner,
+    G: cosmic_ext_applet_mounter::onedrive::Graph,
+>(
+    runner: &R,
+    graph: &G,
+    request: &OneDriveEditorRequest,
+    cancellation: CancellationToken,
+) -> Result<OneDriveIdentity, String> {
+    use cosmic_ext_applet_mounter::onedrive;
+    let verified = if request.create {
+        onedrive::authenticate(runner, graph, &request.setup, cancellation).await
+    } else {
+        onedrive::verify_existing(runner, graph, &request.setup, cancellation).await
+    }
+    .map_err(|error| error.to_string())?;
+    Ok(verified.identity)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -382,9 +536,14 @@ impl Default for ConnectionDraft {
             name: String::new(),
             provider: Provider::GoogleDrive,
             access_mode: AccessMode::OnlineMount,
+            offline_engine: None,
+            legacy_onedrive: false,
+            onedrive_identity: None,
+            onedrive_drive_type: cosmic_ext_applet_mounter::model::OneDriveDriveType::Personal,
+            onedrive_expected_account: String::new(),
             remote_reference: String::new(),
             remote_subpath: String::new(),
-            teams_library_url: String::new(),
+            sharepoint_library_url: String::new(),
             teams_drive_id: String::new(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
@@ -427,7 +586,9 @@ pub struct AppModel {
     removing_connection: Option<ConnectionId>,
     removing_rclone_remote: Option<String>,
     sftp_setup_pending: bool,
-    teams_oauth_pending: bool,
+    sharepoint_setup_pending: bool,
+    onedrive_editor_pending: Option<OneDriveEditorPending>,
+    onedrive_editor_generation: u64,
     sftp_settings_dirty: bool,
     sftp_settings_revision: u64,
     sftp_update_ack: Option<(String, SftpDraft)>,
@@ -506,6 +667,7 @@ struct RuntimeOperationWait {
 pub enum PendingSource {
     RcloneOnline,
     RcloneMirrorLive,
+    OneDriveRclonePreview { age: Duration },
     OneDriveMirror,
 }
 
@@ -565,7 +727,7 @@ pub enum Message {
     DraftName(String),
     DraftRemote(String),
     DraftSubpath(String),
-    DraftTeamsLibraryUrl(String),
+    DraftSharePointLibraryUrl(String),
     DraftGoogleClientId(String),
     DraftGoogleClientSecret(String),
     DraftSftp(SftpField, String),
@@ -597,14 +759,19 @@ pub enum Message {
     GoogleDriveRcloneRemoteApplied(Result<GoogleDriveRemoteApplyResult, String>),
     CreateBoxRcloneRemote,
     BoxRcloneRemoteCreated(Result<String, String>),
-    CreateTeamsRcloneRemote,
-    TeamsRcloneRemoteCreated(Result<TeamsOAuthOutcome, String>),
+    CreateSharePointRcloneRemote,
+    SharePointRcloneRemoteCreated(Result<SharePointSetupOutcome, String>),
     CreateSmbRcloneRemote,
     SmbRcloneRemoteCreated(Result<SmbRemoteApplyResult, String>),
     RequestRemoveRcloneRemote(String),
     RcloneRemoteRemoved(Result<String, String>),
     StartOnedriverSetup,
     OnedriverSetupCompleted(Result<String, String>),
+    DraftOneDriveType(cosmic_ext_applet_mounter::model::OneDriveDriveType),
+    DraftOneDriveAccount(String),
+    SetupOneDriveRclone(bool),
+    CancelOneDriveRclone,
+    OneDriveRcloneCompleted(u64, OneDriveEditorRequest, Result<OneDriveIdentity, String>),
     StartOneDriveMirrorSetup,
     StartOneDriveMirrorManualSetup,
     OneDriveMirrorSetupCompleted(Result<String, String>),
@@ -671,7 +838,9 @@ impl cosmic::Application for AppModel {
             removing_connection: None,
             removing_rclone_remote: None,
             sftp_setup_pending: false,
-            teams_oauth_pending: false,
+            sharepoint_setup_pending: false,
+            onedrive_editor_pending: None,
+            onedrive_editor_generation: 0,
             sftp_settings_dirty: false,
             sftp_settings_revision: 0,
             sftp_update_ack: None,
@@ -1605,6 +1774,10 @@ impl AppModel {
                 self.draft.sftp.clear_secrets();
                 self.reset_sftp_settings_tracking();
                 self.draft.provider = provider;
+                self.draft.onedrive_identity = None;
+                self.draft.onedrive_expected_account.clear();
+                self.draft.legacy_onedrive = false;
+                self.draft.offline_engine = None;
                 if provider == Provider::Teams {
                     if self.draft.id.is_none() {
                         self.draft.id = Some(ConnectionId::new());
@@ -1640,10 +1813,11 @@ impl AppModel {
                 }
                 self.validated_draft = None;
                 self.draft.access_mode = mode;
+                self.draft.onedrive_identity = None;
             }
-            Message::DraftTeamsLibraryUrl(value) => {
+            Message::DraftSharePointLibraryUrl(value) => {
                 self.validated_draft = None;
-                self.draft.teams_library_url = value;
+                self.draft.sharepoint_library_url = value;
                 self.draft.teams_drive_id.clear();
             }
             Message::DraftName(value) => {
@@ -1657,6 +1831,9 @@ impl AppModel {
                 self.pending_rclone_remote_remove = None;
                 self.validated_draft = None;
                 self.draft.remote_reference = value;
+                if draft_is_onedrive_rclone(&self.draft) {
+                    self.draft.onedrive_identity = None;
+                }
                 if self.draft.provider == Provider::Teams {
                     self.draft.teams_drive_id.clear();
                 }
@@ -1669,6 +1846,9 @@ impl AppModel {
                 self.pending_shared_remote_ack = None;
                 self.validated_draft = None;
                 self.draft.remote_subpath = value;
+                if draft_is_onedrive_rclone(&self.draft) {
+                    self.draft.onedrive_identity = None;
+                }
             }
             Message::DraftGoogleClientId(value) => {
                 self.validated_draft = None;
@@ -1861,18 +2041,18 @@ impl AppModel {
                     self.last_notice = Some(fl!("notice-box-failed", error = error));
                 }
             },
-            Message::CreateTeamsRcloneRemote => {
-                return self.create_teams_rclone_remote();
+            Message::CreateSharePointRcloneRemote => {
+                return self.create_sharepoint_rclone_remote();
             }
-            Message::TeamsRcloneRemoteCreated(result) => {
-                self.teams_oauth_pending = false;
+            Message::SharePointRcloneRemoteCreated(result) => {
+                self.sharepoint_setup_pending = false;
                 match result {
                     Ok(outcome) => {
                         inspection_tasks.push(self.detect_rclone_remotes(false));
                         if self.draft.provider == Provider::Teams
                             && self.draft.remote_reference.trim() == outcome.remote_name
-                            && teams::same_library_url(
-                                &self.draft.teams_library_url,
+                            && sharepoint::same_library_url(
+                                &self.draft.sharepoint_library_url,
                                 &outcome.library_url,
                             )
                         {
@@ -1955,6 +2135,57 @@ impl AppModel {
                     self.last_notice = Some(fl!("notice-onedriver-setup-failed", error = error));
                 }
             },
+            Message::DraftOneDriveType(kind) => {
+                self.draft.onedrive_drive_type = kind;
+                self.draft.onedrive_identity = None;
+                self.validated_draft = None;
+            }
+            Message::DraftOneDriveAccount(account) => {
+                self.draft.onedrive_expected_account = account;
+                if draft_is_onedrive_rclone(&self.draft) {
+                    self.draft.onedrive_identity = None;
+                }
+                self.validated_draft = None;
+            }
+            Message::SetupOneDriveRclone(create) => return self.setup_onedrive_rclone(create),
+            Message::CancelOneDriveRclone => {
+                if let Some(pending) = &self.onedrive_editor_pending {
+                    pending.cancellation.cancel();
+                    self.last_notice = Some(fl!("onedrive-editor-cancelling"));
+                }
+            }
+            Message::OneDriveRcloneCompleted(generation, request, result) => {
+                if generation != self.onedrive_editor_generation {
+                    return Task::none();
+                }
+                let cancelled = self
+                    .onedrive_editor_pending
+                    .take()
+                    .is_none_or(|pending| pending.cancellation.is_cancelled());
+                let saved_binding_matches = OneDriveEditorRequest::from_draft(
+                    &self.draft,
+                    &self.config.document.connections,
+                    request.create,
+                )
+                .is_ok_and(|current| {
+                    current.setup.previous_identity == request.setup.previous_identity
+                });
+                if cancelled || !request.matches(&self.draft) || !saved_binding_matches {
+                    self.last_notice = Some(match result {
+                        Err(error) => fl!("onedrive-editor-result-discarded-error", error = error),
+                        Ok(_) => fl!("onedrive-editor-result-discarded"),
+                    });
+                    return Task::none();
+                }
+                self.validated_draft = None;
+                match accept_onedrive_editor_result(&mut self.draft, &request, result) {
+                    Ok(()) => {
+                        inspection_tasks.push(self.detect_rclone_remotes(false));
+                        self.last_notice = Some(fl!("onedrive-editor-verified"));
+                    }
+                    Err(error) => self.last_notice = Some(error),
+                }
+            }
             Message::StartOneDriveMirrorSetup => {
                 return self.start_onedrive_mirror_setup();
             }
@@ -1989,16 +2220,19 @@ impl AppModel {
             Message::SubmitOneDriveMirrorAuthResponse => {
                 self.submit_onedrive_mirror_auth_response();
             }
+            Message::TestDraft | Message::SaveDraft if self.onedrive_editor_pending.is_some() => {
+                self.last_notice = Some(fl!("onedrive-editor-wait"));
+            }
             Message::TestDraft if self.sftp_setup_pending => {
                 self.last_notice = Some(fl!("sftp-wait-test"));
             }
-            Message::TestDraft if self.teams_oauth_pending => {
+            Message::TestDraft if self.sharepoint_setup_pending => {
                 self.last_notice = Some(fl!("teams-oauth-wait-test"));
             }
             Message::SaveDraft if self.sftp_setup_pending => {
                 self.last_notice = Some(fl!("sftp-wait-save"));
             }
-            Message::SaveDraft if self.teams_oauth_pending => {
+            Message::SaveDraft if self.sharepoint_setup_pending => {
                 self.last_notice = Some(fl!("teams-oauth-wait-save"));
             }
             Message::TestDraft => {
@@ -2006,8 +2240,15 @@ impl AppModel {
             }
             Message::DraftTested(connection, result) => match result {
                 Ok(summary) => {
+                    if is_onedrive_rclone_mirror(&connection)
+                        && (self.onedrive_editor_pending.is_some()
+                            || !onedrive_validation_matches_draft(&self.draft, &connection))
+                    {
+                        self.last_notice = Some(fl!("onedrive-editor-result-discarded"));
+                        return Task::none();
+                    }
                     if connection.provider == Provider::Teams {
-                        if !teams_verification_matches_draft(&self.draft, &connection) {
+                        if !sharepoint_verification_matches_draft(&self.draft, &connection) {
                             self.last_notice = Some(fl!("notice-sharepoint-test-changed"));
                             return Task::none();
                         }
@@ -2039,8 +2280,15 @@ impl AppModel {
                 return self.save_draft();
             }
             Message::SaveDraftValidated(connection, validation) => {
+                if is_onedrive_rclone_mirror(&connection)
+                    && (self.onedrive_editor_pending.is_some()
+                        || !onedrive_validation_matches_draft(&self.draft, &connection))
+                {
+                    self.last_notice = Some(fl!("onedrive-editor-result-discarded"));
+                    return Task::none();
+                }
                 if connection.provider == Provider::Teams
-                    && !teams_verification_matches_draft(&self.draft, &connection)
+                    && !sharepoint_verification_matches_draft(&self.draft, &connection)
                 {
                     self.last_notice = Some(fl!("notice-sharepoint-save-changed"));
                     return Task::none();
@@ -2112,7 +2360,7 @@ impl AppModel {
                     .iter()
                     .filter(|connection| {
                         connection.enabled
-                            && (is_onedrive_offline_mirror(connection)
+                            && (is_legacy_onedrive_mirror(connection)
                                 || is_rclone_offline_mirror(connection))
                     })
                     .cloned()
@@ -2165,7 +2413,12 @@ impl AppModel {
                 for connection in mirrors {
                     let live_rclone = is_rclone_offline_mirror(&connection)
                         && self.cached_offline_state(&connection) == SyncRuntimeState::Running;
-                    if is_rclone_offline_mirror(&connection) && !live_rclone {
+                    let preview_count = is_onedrive_rclone_mirror(&connection);
+                    if preview_count && live_rclone {
+                        self.pending_counts.remove(&connection.id);
+                        continue;
+                    }
+                    if is_rclone_offline_mirror(&connection) && !live_rclone && !preview_count {
                         self.pending_counts.remove(&connection.id);
                         continue;
                     }
@@ -2186,14 +2439,34 @@ impl AppModel {
                         continue;
                     }
                     self.pending_poll_inflight.insert(connection.id);
-                    let source = if live_rclone {
+                    let source = if preview_count {
+                        PendingSource::OneDriveRclonePreview {
+                            age: Duration::ZERO,
+                        }
+                    } else if live_rclone {
                         PendingSource::RcloneMirrorLive
                     } else {
                         PendingSource::OneDriveMirror
                     };
                     tasks.push(Task::perform(
                         async move {
-                            let result = if live_rclone {
+                            let mut source = source;
+                            let result = if preview_count {
+                                let plan = rclone_bisync_plan(&connection, &default_work_root());
+                                match plan {
+                                    Ok(plan) => pending_count::rclone_preview_pending(
+                                        &plan.work_directory,
+                                        connection.id,
+                                    )
+                                    .await
+                                    .map(|count| {
+                                        source =
+                                            PendingSource::OneDriveRclonePreview { age: count.age };
+                                        count.files
+                                    }),
+                                    Err(_) => Err(fl!("onedrive-preview-count-unavailable")),
+                                }
+                            } else if live_rclone {
                                 rclone_mirror_live_pending_count(&connection).await
                             } else {
                                 onedrive_mirror_pending_count(&connection).await
@@ -2226,6 +2499,9 @@ impl AppModel {
                             .any(|entry| entry.target == connection.local_path))
                     || (matches!(source, PendingSource::RcloneMirrorLive)
                         && self.cached_offline_state(&connection) != SyncRuntimeState::Running)
+                    || (matches!(source, PendingSource::OneDriveRclonePreview { .. })
+                        && (self.mirror_operations_pending.contains(&connection.id)
+                            || self.cached_offline_state(&connection) == SyncRuntimeState::Running))
                 {
                     return Task::none();
                 }
@@ -2233,7 +2509,12 @@ impl AppModel {
                     connection.id,
                     PendingObservation {
                         files: result.as_ref().ok().copied(),
-                        checked_at: Instant::now(),
+                        checked_at: match source {
+                            PendingSource::OneDriveRclonePreview { age } => {
+                                Instant::now().checked_sub(age).unwrap_or_else(Instant::now)
+                            }
+                            _ => Instant::now(),
+                        },
                         reason: result.err(),
                         source,
                     },
@@ -2738,6 +3019,15 @@ impl AppModel {
                             files.to_string(),
                             if matches!(observation.source, PendingSource::RcloneMirrorLive) {
                                 fl!("pending-count-mirror-live-help", count = files)
+                            } else if matches!(
+                                observation.source,
+                                PendingSource::OneDriveRclonePreview { .. }
+                            ) {
+                                fl!(
+                                    "onedrive-preview-count-help",
+                                    count = files,
+                                    age = observation.checked_at.elapsed().as_secs()
+                                )
                             } else if matches!(observation.source, PendingSource::OneDriveMirror) {
                                 fl!(
                                     "pending-count-mirror-help",
@@ -3153,7 +3443,7 @@ impl AppModel {
                     ));
                 }
                 if self.draft.provider == Provider::Teams {
-                    modify_row = modify_row.push(self.view_teams_oauth_action());
+                    modify_row = modify_row.push(self.view_sharepoint_setup_action());
                 }
                 if self.saved_connection_is_offline_mirror(connection_id) {
                     modify_row = modify_row
@@ -3225,6 +3515,9 @@ impl AppModel {
         if self.draft.provider != Provider::OneDrive {
             return None;
         }
+        if draft_is_onedrive_rclone(&self.draft) {
+            return Some(self.view_onedrive_rclone_actions());
+        }
 
         Some(match self.draft.access_mode {
             AccessMode::OnlineMount => field_with_help(
@@ -3245,6 +3538,76 @@ impl AppModel {
                 ),
             ]),
         })
+    }
+
+    fn view_onedrive_rclone_actions(&self) -> Element<'static, Message> {
+        let ready = self.onedrive_editor_pending.is_none();
+        let mut row = widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(field_with_help(
+                action_button(
+                    fl!("onedrive-editor-create"),
+                    ready,
+                    Message::SetupOneDriveRclone(true),
+                ),
+                fl!("onedrive-editor-create-help"),
+            ))
+            .push(field_with_help(
+                action_button(
+                    fl!("onedrive-editor-select"),
+                    ready,
+                    Message::SetupOneDriveRclone(false),
+                ),
+                fl!("onedrive-editor-select-help"),
+            ));
+        if matches!(self.window_mode, WindowMode::ModifyConnection(_)) {
+            row = row.push(
+                widget::button::standard(fl!("rclone-detect"))
+                    .on_press(Message::DetectRcloneRemotes),
+            );
+        }
+        if !ready {
+            row = row.push(
+                widget::button::standard(fl!("onedrive-editor-cancel"))
+                    .on_press(Message::CancelOneDriveRclone),
+            );
+        }
+        row.into()
+    }
+
+    fn view_onedrive_rclone_fields(&self) -> Element<'_, Message> {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        widget::Column::new()
+            .spacing(8)
+            .push(choice_row(vec![
+                select_button(
+                    fl!("onedrive-editor-personal"),
+                    self.draft.onedrive_drive_type == DriveType::Personal,
+                    Message::DraftOneDriveType(DriveType::Personal),
+                ),
+                select_button(
+                    fl!("onedrive-editor-business"),
+                    self.draft.onedrive_drive_type == DriveType::Business,
+                    Message::DraftOneDriveType(DriveType::Business),
+                ),
+            ]))
+            .push(field_with_help(
+                widget::text_input::text_input(
+                    fl!("onedrive-editor-account"),
+                    &self.draft.onedrive_expected_account,
+                )
+                .on_input(Message::DraftOneDriveAccount),
+                fl!("onedrive-editor-account-help"),
+            ))
+            .push(widget::text::body(
+                if self.draft.onedrive_identity.is_some() {
+                    fl!("onedrive-editor-verified")
+                } else {
+                    fl!("onedrive-editor-verification-required")
+                },
+            ))
+            .into()
     }
 
     fn view_local_target_picker(&self) -> Element<'_, Message> {
@@ -3283,33 +3646,37 @@ impl AppModel {
                 fl!("smb-create-update-help"),
             ),
             Provider::Sftp => self.view_sftp_action(true),
-            Provider::Teams => self.view_teams_oauth_action(),
+            Provider::Teams => self.view_sharepoint_setup_action(),
             Provider::OneDrive => widget::Space::new().width(Length::Shrink).into(),
         }
     }
 
-    fn view_teams_oauth_action(&self) -> Element<'static, Message> {
+    fn view_sharepoint_setup_action(&self) -> Element<'static, Message> {
         field_with_help(
             widget::button::suggested(fl!("teams-oauth-connect")).on_press_maybe(
-                (!self.teams_oauth_pending).then_some(Message::CreateTeamsRcloneRemote),
+                (!self.sharepoint_setup_pending).then_some(Message::CreateSharePointRcloneRemote),
             ),
             fl!("teams-oauth-connect-help"),
         )
     }
 
     fn draft_uses_rclone(&self) -> bool {
-        matches!(
-            self.draft.provider,
-            Provider::Teams
-                | Provider::GoogleDrive
-                | Provider::Box
-                | Provider::Smb
-                | Provider::Sftp
-        )
+        draft_is_onedrive_rclone(&self.draft)
+            || matches!(
+                self.draft.provider,
+                Provider::Teams
+                    | Provider::GoogleDrive
+                    | Provider::Box
+                    | Provider::Smb
+                    | Provider::Sftp
+            )
     }
 
     fn draft_primary_actions_ready(&self) -> bool {
-        if self.sftp_setup_pending || self.teams_oauth_pending {
+        if self.sftp_setup_pending
+            || self.sharepoint_setup_pending
+            || self.onedrive_editor_pending.is_some()
+        {
             return false;
         }
         if self.draft.provider == Provider::OneDrive {
@@ -3324,6 +3691,15 @@ impl AppModel {
     }
 
     fn draft_onedrive_setup_ready(&self) -> bool {
+        if draft_is_onedrive_rclone(&self.draft) {
+            return self
+                .draft
+                .onedrive_identity
+                .as_ref()
+                .is_some_and(|identity| {
+                    identity.is_valid() && identity.drive_type == self.draft.onedrive_drive_type
+                });
+        }
         let Ok(connection) = connection_from_draft(&self.draft) else {
             return false;
         };
@@ -3365,6 +3741,9 @@ impl AppModel {
 
     fn view_remote_account_fields(&self) -> Element<'_, Message> {
         match self.draft.provider {
+            Provider::OneDrive if draft_is_onedrive_rclone(&self.draft) => {
+                self.view_rclone_remote_fields()
+            }
             Provider::OneDrive => self.view_onedrive_account_fields(),
             Provider::Teams
             | Provider::GoogleDrive
@@ -3465,7 +3844,11 @@ impl AppModel {
                 &self.draft.remote_reference,
             )
             .on_input(Message::DraftRemote),
-            rclone_remote_help(provider, self.window_mode == WindowMode::AddConnection),
+            if draft_is_onedrive_rclone(&self.draft) {
+                fl!("onedrive-editor-remote-help")
+            } else {
+                rclone_remote_help(provider, self.window_mode == WindowMode::AddConnection)
+            },
         ));
 
         let matching = self.matching_rclone_remotes(provider);
@@ -3480,6 +3863,9 @@ impl AppModel {
             }
         }
 
+        if draft_is_onedrive_rclone(&self.draft) {
+            column = column.push(self.view_onedrive_rclone_fields());
+        }
         if provider == Provider::Smb {
             column = column.push(self.view_smb_remote_setup_fields());
         } else if provider == Provider::Sftp {
@@ -3490,9 +3876,9 @@ impl AppModel {
             column = column.push(field_with_help(
                 widget::text_input::text_input(
                     fl!("sharepoint-library-url-example"),
-                    &self.draft.teams_library_url,
+                    &self.draft.sharepoint_library_url,
                 )
-                .on_input(Message::DraftTeamsLibraryUrl),
+                .on_input(Message::DraftSharePointLibraryUrl),
                 fl!("sharepoint-library-url-help"),
             ));
         }
@@ -3575,14 +3961,7 @@ impl AppModel {
     }
 
     fn matching_rclone_remotes(&self, provider: Provider) -> Vec<RcloneDraftRemote> {
-        let Some(expected_backend) = rclone_backend_name(provider) else {
-            return Vec::new();
-        };
-        self.rclone_remotes
-            .iter()
-            .filter(|remote| remote.backend == expected_backend)
-            .cloned()
-            .collect()
+        self.matching_rclone_remotes_in(&self.rclone_remotes, provider)
     }
 
     fn view_rclone_remote_choices(
@@ -3876,7 +4255,7 @@ impl AppModel {
                 | Operation::SyncNow
                 | Operation::PauseSync
                 | Operation::ResumeSync,
-            ) if is_onedrive_offline_mirror(&connection) => {
+            ) if is_legacy_onedrive_mirror(&connection) => {
                 self.last_notice = Some(fl!(
                     "notice-operation-requested",
                     operation = label,
@@ -4064,6 +4443,10 @@ impl AppModel {
             return Task::none();
         };
         self.pending_shared_remote_ack = None;
+        if let Some(pending) = self.onedrive_editor_pending.take() {
+            pending.cancellation.cancel();
+        }
+        self.onedrive_editor_generation = self.onedrive_editor_generation.wrapping_add(1);
         self.draft = draft_from_connection(&connection);
         self.last_notice = Some(fl!("notice-modify", name = connection.name.as_str()));
         if matches!(connection.provider, Provider::Smb | Provider::Sftp) {
@@ -4160,6 +4543,10 @@ impl AppModel {
     }
 
     fn save_draft(&mut self) -> Task<cosmic::Action<Message>> {
+        if draft_is_onedrive_rclone(&self.draft) && !self.draft_primary_actions_ready() {
+            self.last_notice = Some(fl!("onedrive-editor-verification-required"));
+            return Task::none();
+        }
         if self.draft.provider == Provider::Teams && self.draft.id.is_none() {
             self.draft.id = Some(ConnectionId::new());
         }
@@ -4217,7 +4604,7 @@ impl AppModel {
             return Task::perform(
                 async move {
                     let mut connection = connection;
-                    let validation = match teams::verify_remote(
+                    let validation = match sharepoint::verify_remote(
                         &app_command_runner(),
                         &connection.remote_reference,
                         connection
@@ -4273,7 +4660,7 @@ impl AppModel {
         let should_install_rclone_online_mount = is_rclone_online_mount(&connection);
         let should_install_rclone_offline_mirror = is_rclone_offline_mirror(&connection);
         let should_install_onedriver_online_mount = is_onedriver_online_mount(&connection);
-        let should_install_onedrive_offline_mirror = is_onedrive_offline_mirror(&connection);
+        let should_install_onedrive_offline_mirror = is_legacy_onedrive_mirror(&connection);
         let saved_connection = connection.clone();
         match load_runtime_config() {
             Ok(config) => self.config = config,
@@ -4409,7 +4796,21 @@ impl AppModel {
             ));
         }
 
-        Ok(())
+        let mut candidate = self.config.clone();
+        candidate
+            .document
+            .connections
+            .retain(|saved| saved.id != connection.id);
+        candidate.document.connections.push(connection.clone());
+        candidate
+            .validate_with_work_root(&default_work_root())
+            .map_err(|errors| {
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
     }
 
     fn shared_remote_warning(&self, connection: &Connection) -> Option<String> {
@@ -4553,7 +4954,7 @@ impl AppModel {
 
     fn rclone_remote_is_referenced(&self, remote_name: &str) -> bool {
         self.config.document.connections.iter().any(|connection| {
-            connection.provider != Provider::OneDrive
+            (connection.provider != Provider::OneDrive || is_onedrive_rclone_mirror(connection))
                 && connection
                     .remote_reference
                     .eq_ignore_ascii_case(remote_name)
@@ -4624,28 +5025,82 @@ impl AppModel {
         )
     }
 
-    fn create_teams_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
+    fn setup_onedrive_rclone(&mut self, create: bool) -> Task<cosmic::Action<Message>> {
+        if self.onedrive_editor_pending.is_some() {
+            return Task::none();
+        }
+        if self.draft.id.is_none() {
+            self.draft.id = Some(ConnectionId::new());
+        }
+        let request = match OneDriveEditorRequest::from_draft(
+            &self.draft,
+            &self.config.document.connections,
+            create,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        };
+        self.validated_draft = None;
+        self.draft.onedrive_identity = None;
+        self.onedrive_editor_generation = self.onedrive_editor_generation.wrapping_add(1);
+        let generation = self.onedrive_editor_generation;
+        let cancellation = CancellationToken::new();
+        self.onedrive_editor_pending = Some(OneDriveEditorPending {
+            cancellation: cancellation.clone(),
+        });
+        self.last_notice = Some(fl!("onedrive-editor-working"));
+        Task::perform(
+            async move {
+                let result = match cosmic_ext_applet_mounter::onedrive::MicrosoftGraph::new() {
+                    Ok(graph) => {
+                        run_onedrive_editor_setup(
+                            &app_command_runner(),
+                            &graph,
+                            &request,
+                            cancellation,
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error.to_string()),
+                };
+                (request, result)
+            },
+            move |(request, result)| {
+                cosmic::Action::App(Message::OneDriveRcloneCompleted(
+                    generation, request, result,
+                ))
+            },
+        )
+    }
+
+    fn create_sharepoint_rclone_remote(&mut self) -> Task<cosmic::Action<Message>> {
         if self.draft.provider != Provider::Teams {
             self.last_notice = Some(fl!("teams-oauth-teams-only"));
             return Task::none();
         }
-        if self.teams_oauth_pending {
+        if self.sharepoint_setup_pending {
             return Task::none();
         }
-        let setup =
-            match TeamsOAuthSetup::new(&self.draft.remote_reference, &self.draft.teams_library_url)
-            {
-                Ok(setup) => setup,
-                Err(error) => {
-                    self.last_notice = Some(error);
-                    return Task::none();
-                }
-            };
-        self.teams_oauth_pending = true;
+        let setup = match SharePointSetup::new(
+            &self.draft.remote_reference,
+            &self.draft.sharepoint_library_url,
+        ) {
+            Ok(setup) => setup,
+            Err(error) => {
+                self.last_notice = Some(error);
+                return Task::none();
+            }
+        };
+        self.sharepoint_setup_pending = true;
         self.last_notice = Some(fl!("teams-oauth-opening", name = setup.remote_name.clone()));
         Task::perform(
-            async move { teams_oauth::create_teams_remote(&app_command_runner(), setup).await },
-            |result| cosmic::Action::App(Message::TeamsRcloneRemoteCreated(result)),
+            async move {
+                sharepoint_setup::create_sharepoint_remote(&app_command_runner(), setup).await
+            },
+            |result| cosmic::Action::App(Message::SharePointRcloneRemoteCreated(result)),
         )
     }
 
@@ -4724,6 +5179,7 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         if self.draft.provider != Provider::OneDrive
             || self.draft.access_mode != AccessMode::OfflineMirror
+            || !self.draft.legacy_onedrive
         {
             self.last_notice = Some(fl!("notice-onedrive-only"));
             return Task::none();
@@ -4768,6 +5224,9 @@ impl AppModel {
     }
 
     fn submit_onedrive_mirror_auth_response(&mut self) {
+        if !self.draft.legacy_onedrive {
+            return;
+        }
         let Some(connection_id) = self.draft.id else {
             self.last_notice = Some(fl!("notice-onedrive-start-before-submit"));
             return;
@@ -4793,6 +5252,9 @@ impl AppModel {
     }
 
     fn open_onedrive_mirror_auth_url(&mut self) -> Task<cosmic::Action<Message>> {
+        if !self.draft.legacy_onedrive {
+            return Task::none();
+        }
         let Some(connection_id) = self.draft.id else {
             self.last_notice = Some(fl!("notice-onedrive-start-before-open"));
             return Task::none();
@@ -4811,12 +5273,9 @@ impl AppModel {
         remotes: &[RcloneDraftRemote],
         provider: Provider,
     ) -> Vec<RcloneDraftRemote> {
-        let Some(expected_backend) = rclone_backend_name(provider) else {
-            return Vec::new();
-        };
         remotes
             .iter()
-            .filter(|remote| remote.backend == expected_backend)
+            .filter(|remote| editor_remote_matches(&self.draft, provider, remote))
             .cloned()
             .collect()
     }
@@ -4899,6 +5358,10 @@ impl AppModel {
     }
 
     fn test_draft_plan(&mut self) -> Task<cosmic::Action<Message>> {
+        if draft_is_onedrive_rclone(&self.draft) && !self.draft_primary_actions_ready() {
+            self.last_notice = Some(fl!("onedrive-editor-verification-required"));
+            return Task::none();
+        }
         if self.draft.provider == Provider::Teams && self.draft.id.is_none() {
             self.draft.id = Some(ConnectionId::new());
         }
@@ -4924,7 +5387,7 @@ impl AppModel {
             async move {
                 let mut connection = connection;
                 let result = if connection.provider == Provider::Teams {
-                    test_teams_draft_connection(&mut connection).await
+                    test_sharepoint_draft_connection(&mut connection).await
                 } else {
                     test_connection_plan_and_access(&connection, None).await
                 };
@@ -5118,7 +5581,7 @@ impl AppModel {
         let service = self.unit_observation.services.get(&connection.id);
         let timer = self.unit_observation.timers.get(&connection.id);
         if service.is_none()
-            || (connection.provider != Provider::OneDrive
+            || (is_rclone_offline_mirror(connection)
                 && timer.is_none()
                 && !service.is_some_and(|status| {
                     matches!(status.active, ActiveState::Active | ActiveState::Activating)
@@ -5126,7 +5589,11 @@ impl AppModel {
         {
             return SyncRuntimeState::Unknown;
         }
-        offline_mirror_state_from_status(connection.provider, service, timer)
+        offline_mirror_state_from_status(
+            connection.offline_engine().expect("offline mirror"),
+            service,
+            timer,
+        )
     }
 
     fn cached_offline_mirror_states(&self) -> RuntimeOfflineMirrorStates {
@@ -5195,9 +5662,7 @@ async fn observe_ui_units(
     for connection in &connections {
         keys.push((connection.id, UnitKind::Service));
         units.push(UnitName::new(connection.id, UnitKind::Service));
-        if matches!(connection.mode, ConnectionMode::OfflineMirror(_))
-            && connection.provider != Provider::OneDrive
-        {
+        if is_rclone_offline_mirror(connection) {
             keys.push((connection.id, UnitKind::Timer));
             units.push(UnitName::new(connection.id, UnitKind::Timer));
         }
@@ -5302,12 +5767,12 @@ fn referenced_active_vpn_profiles(
 }
 
 fn offline_mirror_state_from_status(
-    provider: Provider,
+    engine: OfflineEngine,
     service_status: Option<&UnitStatus>,
     timer_status: Option<&UnitStatus>,
 ) -> SyncRuntimeState {
-    match provider {
-        Provider::OneDrive => {
+    match engine {
+        OfflineEngine::LegacyOnedrive => {
             if service_status.as_ref().is_some_and(|status| {
                 matches!(status.active, ActiveState::Active | ActiveState::Activating)
             }) {
@@ -5321,11 +5786,7 @@ fn offline_mirror_state_from_status(
                 SyncRuntimeState::Paused
             }
         }
-        Provider::Teams
-        | Provider::GoogleDrive
-        | Provider::Box
-        | Provider::Smb
-        | Provider::Sftp => {
+        OfflineEngine::Rclone => {
             if service_status.as_ref().is_some_and(|status| {
                 matches!(status.active, ActiveState::Active | ActiveState::Activating)
             }) {
@@ -5810,9 +6271,21 @@ fn draft_from_connection(connection: &Connection) -> ConnectionDraft {
         name: connection.name.clone(),
         provider: connection.provider,
         access_mode,
+        offline_engine: match &connection.mode {
+            ConnectionMode::OfflineMirror(options) => options.engine,
+            ConnectionMode::OnlineMount(_) => None,
+        },
+        legacy_onedrive: connection.provider == Provider::OneDrive
+            && connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive),
+        onedrive_identity: connection.onedrive_identity.clone(),
+        onedrive_drive_type: connection.onedrive_identity.as_ref().map_or(
+            cosmic_ext_applet_mounter::model::OneDriveDriveType::Personal,
+            |identity| identity.drive_type,
+        ),
+        onedrive_expected_account: String::new(),
         remote_reference: connection.remote_reference.clone(),
         remote_subpath: connection.remote_subpath.clone().unwrap_or_default(),
-        teams_library_url: connection
+        sharepoint_library_url: connection
             .teams_identity
             .as_ref()
             .map_or_else(String::new, |identity| identity.library_url.clone()),
@@ -5869,7 +6342,7 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
     let remote_subpath =
         (!draft.remote_subpath.trim().is_empty()).then(|| draft.remote_subpath.trim().to_owned());
     let teams_identity = if draft.provider == Provider::Teams {
-        let mut identity = teams::parse_library_url(&draft.teams_library_url)?;
+        let mut identity = sharepoint::parse_library_url(&draft.sharepoint_library_url)?;
         identity.drive_id = draft.teams_drive_id.clone();
         Some(identity)
     } else {
@@ -5900,6 +6373,11 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
                 expand_user_path(draft.recovery_directory.trim())
             };
             ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: if draft.provider == Provider::OneDrive && !draft.legacy_onedrive {
+                    Some(OfflineEngine::Rclone)
+                } else {
+                    draft.offline_engine
+                },
                 recovery_directory,
                 sync_interval_minutes,
                 sync_on_metered: draft.sync_on_metered,
@@ -5977,10 +6455,11 @@ fn connection_from_draft(draft: &ConnectionDraft) -> Result<Connection, String> 
             None
         },
         teams_identity,
+        onedrive_identity: draft.onedrive_identity.clone(),
     })
 }
 
-fn teams_verification_matches_draft(draft: &ConnectionDraft, verified: &Connection) -> bool {
+fn sharepoint_verification_matches_draft(draft: &ConnectionDraft, verified: &Connection) -> bool {
     connection_from_draft(draft).is_ok_and(|mut current| {
         current.id = verified.id;
         if let (Some(current_identity), Some(verified_identity)) =
@@ -6032,7 +6511,14 @@ fn recovery_directory_placeholder(draft: &ConnectionDraft) -> String {
 }
 
 fn draft_summary_text(draft: &ConnectionDraft) -> String {
-    let engine = provider_engine_summary(draft.provider, draft.access_mode);
+    let engine = if draft.provider == Provider::OneDrive
+        && draft.access_mode == AccessMode::OfflineMirror
+        && !draft.legacy_onedrive
+    {
+        "rclone bisync"
+    } else {
+        provider_engine_summary(draft.provider, draft.access_mode)
+    };
     let mut parts = vec![crate::fl!(
         "ui-app-engine-engine",
         engine = (engine).to_string()
@@ -7302,11 +7788,19 @@ fn parse_rclone_remotes_for_app(output: &str) -> Result<Vec<RcloneDraftRemote>, 
                 && remote_config
                     .get("drive_type")
                     .and_then(|value| value.as_str())
-                    == Some("documentLibrary"))
+                    .is_some_and(|kind| {
+                        matches!(kind, "documentLibrary" | "personal" | "business")
+                    }))
         {
             remotes.push(RcloneDraftRemote {
                 name: name.clone(),
                 backend: backend.to_owned(),
+                drive_type: remote_config
+                    .get("drive_type")
+                    .and_then(|value| value.as_str())
+                    .and_then(|kind| {
+                        cosmic_ext_applet_mounter::onedrive::DriveType::parse(kind).ok()
+                    }),
             });
         }
     }
@@ -7919,7 +8413,7 @@ fn prepare_onedrive_mirror_setup_plan(
     connection: &Connection,
     config_root: &Path,
 ) -> Result<cosmic_ext_applet_mounter::sync::OneDriveMirrorPlan, String> {
-    if !is_onedrive_offline_mirror(connection) {
+    if !is_legacy_onedrive_mirror(connection) {
         return Err(crate::fl!(
             "ui-app-onedrive-mirror-setup-only-applies-to-onedrive"
         ));
@@ -8458,7 +8952,7 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
             ))
         }
         ConnectionMode::OfflineMirror(_) => match connection.provider {
-            Provider::OneDrive => {
+            Provider::OneDrive if is_legacy_onedrive_mirror(connection) => {
                 let plan = one_drive_mirror_plan(
                     connection,
                     &default_config_root(),
@@ -8474,7 +8968,8 @@ fn managed_plan_summary(connection: &Connection) -> Result<String, String> {
                     value1 = (document.name.file_name()).to_string()
                 ))
             }
-            Provider::Teams
+            Provider::OneDrive
+            | Provider::Teams
             | Provider::GoogleDrive
             | Provider::Box
             | Provider::Smb
@@ -8555,18 +9050,12 @@ const fn is_rclone_online_mount(connection: &Connection) -> bool {
     )
 }
 
-const fn is_rclone_offline_mirror(connection: &Connection) -> bool {
-    matches!(
-        (&connection.provider, &connection.mode),
-        (
-            Provider::Teams
-                | Provider::GoogleDrive
-                | Provider::Box
-                | Provider::Smb
-                | Provider::Sftp,
-            ConnectionMode::OfflineMirror(_)
-        )
-    )
+fn is_rclone_offline_mirror(connection: &Connection) -> bool {
+    connection.offline_engine() == Some(OfflineEngine::Rclone)
+}
+
+fn is_onedrive_rclone_mirror(connection: &Connection) -> bool {
+    connection.provider == Provider::OneDrive && is_rclone_offline_mirror(connection)
 }
 
 const fn is_onedriver_online_mount(connection: &Connection) -> bool {
@@ -8596,11 +9085,9 @@ const fn directory_preload_waits_for_root(connection: &Connection) -> bool {
     )
 }
 
-const fn is_onedrive_offline_mirror(connection: &Connection) -> bool {
-    matches!(
-        (&connection.provider, &connection.mode),
-        (Provider::OneDrive, ConnectionMode::OfflineMirror(_))
-    )
+fn is_legacy_onedrive_mirror(connection: &Connection) -> bool {
+    connection.provider == Provider::OneDrive
+        && connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive)
 }
 
 async fn install_rclone_online_mount_unit(connection: Connection) -> String {
@@ -8712,20 +9199,73 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
     let store = FileUnitStore::user(Arc::new(StructuralUnitValidator))
         .map_err(|error| error.to_string())?;
     let manager = DbusSystemdManager;
-    let controller = UnitController::new(store, manager);
-    let cancellation = CancellationToken::new();
+    install_paused_rclone_units(store, manager, &service, &timer, CancellationToken::new()).await
+}
+
+async fn install_paused_rclone_units<S: UnitStore + Clone, M: SystemdManager + Clone>(
+    store: S,
+    manager: M,
+    service: &UnitDocument,
+    timer: &UnitDocument,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    for document in [service, timer] {
+        match store
+            .state(&document.name)
+            .map_err(|error| error.to_string())?
+        {
+            UnitFileState::External => return Err(fl!("onedrive-runtime-unit-not-owned")),
+            UnitFileState::Managed(owner) if owner != document.name.connection_id() => {
+                return Err(fl!("onedrive-runtime-unit-not-owned"));
+            }
+            _ => {}
+        }
+    }
+    let previous_service = store
+        .read(&service.name)
+        .map_err(|error| error.to_string())?;
+    // Stop the existing owned trigger before replacing either unit. A new timer
+    // is also stopped/disabled after install; Save never starts a background job.
+    if !matches!(
+        store
+            .state(&timer.name)
+            .map_err(|error| error.to_string())?,
+        UnitFileState::Missing
+    ) {
+        let repair = OfflineRepairPlan {
+            engine: OfflineRepairEngine::RcloneBisync,
+            service: service.name.clone(),
+            timer: Some(timer.name.clone()),
+        };
+        pause_offline_repair_trigger(&manager, &repair, cancellation.child_token()).await?;
+    }
+    let controller = UnitController::new(store, manager.clone());
     controller
-        .install(&service, cancellation.child_token())
+        .install(service, cancellation.child_token())
         .await
         .map_err(|error| error.to_string())?;
-    if let Err(error) = controller.install(&timer, cancellation.child_token()).await {
-        let _ = controller
-            .remove(&service.name, CancellationToken::new())
-            .await;
-        return Err(error.to_string());
+    if let Err(error) = controller.install(timer, cancellation.child_token()).await {
+        let rollback = if let Some(content) = previous_service {
+            controller
+                .install(
+                    &UnitDocument {
+                        name: service.name.clone(),
+                        content,
+                    },
+                    CancellationToken::new(),
+                )
+                .await
+        } else {
+            controller
+                .remove(&service.name, CancellationToken::new())
+                .await
+        };
+        return Err(if rollback.is_err() {
+            fl!("onedrive-runtime-install-rollback-failed")
+        } else {
+            error.to_string()
+        });
     }
-
-    let manager = DbusSystemdManager;
     manager
         .action(
             SystemdAction::Disable,
@@ -8734,10 +9274,12 @@ async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> 
         )
         .await
         .map_err(|error| error.to_string())?;
-    manager
-        .action(SystemdAction::Disable, Some(&timer.name), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
+    let repair = OfflineRepairPlan {
+        engine: OfflineRepairEngine::RcloneBisync,
+        service: service.name.clone(),
+        timer: Some(timer.name.clone()),
+    };
+    pause_offline_repair_trigger(&manager, &repair, cancellation).await?;
     Ok(())
 }
 
@@ -8820,12 +9362,12 @@ async fn install_onedrive_offline_mirror_unit(connection: Connection) -> String 
 }
 
 fn offline_mirror_saved_notice(connection: &Connection, initialized: bool) -> String {
-    match (connection.provider, initialized) {
-        (Provider::OneDrive, true) => fl!(
+    match (is_legacy_onedrive_mirror(connection), initialized) {
+        (true, true) => fl!(
             "onedrive-mirror-saved-initialized",
             name = connection.name.as_str()
         ),
-        (Provider::OneDrive, false) => fl!(
+        (true, false) => fl!(
             "onedrive-mirror-saved-uninitialized",
             name = connection.name.as_str()
         ),
@@ -9001,16 +9543,11 @@ async fn remove_generated_units_for_connection_result(
 }
 
 fn managed_unit_names_for_connection(connection: &Connection) -> Vec<UnitName> {
-    match &connection.mode {
-        ConnectionMode::OnlineMount(_) => vec![UnitName::new(connection.id, UnitKind::Service)],
-        ConnectionMode::OfflineMirror(_) => match connection.provider {
-            Provider::Teams => vec![UnitName::new(connection.id, UnitKind::Service)],
-            Provider::OneDrive => vec![UnitName::new(connection.id, UnitKind::Service)],
-            Provider::GoogleDrive | Provider::Box | Provider::Smb | Provider::Sftp => vec![
-                UnitName::new(connection.id, UnitKind::Timer),
-                UnitName::new(connection.id, UnitKind::Service),
-            ],
-        },
+    let service = UnitName::new(connection.id, UnitKind::Service);
+    if is_rclone_offline_mirror(connection) {
+        vec![UnitName::new(connection.id, UnitKind::Timer), service]
+    } else {
+        vec![service]
     }
 }
 
@@ -9490,7 +10027,7 @@ struct OfflineRepairPlan {
 fn offline_repair_plan(connection: &Connection) -> Result<OfflineRepairPlan, String> {
     let engine = if is_rclone_offline_mirror(connection) {
         OfflineRepairEngine::RcloneBisync
-    } else if is_onedrive_offline_mirror(connection) {
+    } else if is_legacy_onedrive_mirror(connection) {
         OfflineRepairEngine::OneDriveMonitor
     } else {
         return Err(crate::fl!(
@@ -9748,7 +10285,7 @@ async fn run_managed_offline_mirror_operation(
                 control.cancellation(),
             )
             .await
-            .map(|outcome| rclone_bisync_outcome_summary(mode, &outcome)),
+            .map(|outcome| rclone_bisync_outcome_summary(&connection, mode, &outcome)),
             Err(error) => Err(error),
         };
         control.finish();
@@ -9998,7 +10535,7 @@ async fn run_managed_offline_mirror_operation_result_with_cancellation(
                 cancellation,
             )
             .await
-            .map(|outcome| rclone_bisync_outcome_summary(mode, &outcome))
+            .map(|outcome| rclone_bisync_outcome_summary(connection, mode, &outcome))
         }
         Operation::ResumeSync => {
             start_rclone_offline_mirror_background(connection, &plan, cancellation).await
@@ -10030,7 +10567,40 @@ fn rclone_bisync_mode(connection: &Connection, operation: Operation) -> Result<B
     }
 }
 
-fn rclone_bisync_outcome_summary(mode: BisyncMode, outcome: &BisyncOutcome) -> String {
+fn rclone_bisync_outcome_summary(
+    connection: &Connection,
+    mode: BisyncMode,
+    outcome: &BisyncOutcome,
+) -> String {
+    if is_onedrive_rclone_mirror(connection) {
+        let summary = if matches!(mode, BisyncMode::InitialPreview | BisyncMode::Preview) {
+            match outcome.preview_pending.as_ref() {
+                Some(Ok(files)) => fl!("onedrive-preview-differences", count = files.to_string()),
+                _ => fl!("onedrive-preview-count-unavailable"),
+            }
+        } else if mode == BisyncMode::Scheduled {
+            fl!("onedrive-sync-completed")
+        } else {
+            fl!("onedrive-sync-checksum-verified")
+        };
+        let summary = if mode == BisyncMode::InitialPreview {
+            fl!(
+                "ui-app-summary-initial-sync-has-not-run-yet",
+                summary = summary
+            )
+        } else {
+            summary
+        };
+        return if outcome.warnings.is_empty() {
+            summary
+        } else {
+            fl!(
+                "onedrive-runtime-warning",
+                summary = summary,
+                warning = outcome.warnings.join(" ")
+            )
+        };
+    }
     let mut summary = if matches!(mode, BisyncMode::InitialPreview | BisyncMode::Preview) {
         let summary = preview_summary_text(&outcome.output);
         if mode == BisyncMode::InitialPreview {
@@ -10140,6 +10710,9 @@ async fn start_rclone_offline_mirror_background(
     }
     ensure_background_sync_may_start(connection).await?;
     let result = async {
+        if is_onedrive_rclone_mirror(connection) {
+            verify_rclone_access(connection).await?;
+        }
         install_rclone_offline_mirror_units_result(connection).await?;
         let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
         let manager = DbusSystemdManager;
@@ -10151,18 +10724,7 @@ async fn start_rclone_offline_mirror_background(
             )
             .await
             .map_err(|error| error.to_string())?;
-        manager
-            .action(
-                SystemdAction::Enable,
-                Some(&timer.name),
-                cancellation.child_token(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        manager
-            .action(SystemdAction::Start, Some(&timer.name), cancellation)
-            .await
-            .map_err(|error| error.to_string())?;
+        resume_rclone_timer_with(&manager, &timer.name, cancellation).await?;
         Ok(crate::fl!(
             "ui-app-background-sync-timer-started-use-sync-now"
         ))
@@ -10175,34 +10737,104 @@ async fn start_rclone_offline_mirror_background(
     }
 }
 
+async fn resume_rclone_timer_with<M: SystemdManager>(
+    manager: &M,
+    timer: &UnitName,
+    cancellation: CancellationToken,
+) -> Result<(), String> {
+    if cancellation.is_cancelled() {
+        return Err(fl!("microsoft-oauth-cancelled"));
+    }
+    let result = async {
+        manager
+            .action(
+                SystemdAction::Enable,
+                Some(timer),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|_| fl!("mirror-background-start-incomplete"))?;
+        manager
+            .action(
+                SystemdAction::Start,
+                Some(timer),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|_| fl!("mirror-background-start-incomplete"))?;
+        let status = manager
+            .action(SystemdAction::Status, Some(timer), cancellation)
+            .await
+            .map_err(|_| fl!("mirror-background-start-incomplete"))?;
+        if !status.is_some_and(|status| status.enabled && status.active == ActiveState::Active) {
+            return Err(fl!("mirror-background-start-incomplete"));
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(error) = result {
+        let stop = manager
+            .action(SystemdAction::Stop, Some(timer), CancellationToken::new())
+            .await;
+        let disable = manager
+            .action(
+                SystemdAction::Disable,
+                Some(timer),
+                CancellationToken::new(),
+            )
+            .await;
+        return Err(if stop.is_err() || disable.is_err() {
+            fl!("mirror-background-start-rollback-failed")
+        } else {
+            error
+        });
+    }
+    Ok(())
+}
+
 async fn stop_rclone_offline_mirror_background(
     plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
     cancellation: CancellationToken,
 ) -> Result<String, String> {
-    let service = UnitDocument::service(&plan.service).map_err(|error| error.to_string())?;
-    let timer = UnitDocument::timer(&plan.timer).map_err(|error| error.to_string())?;
-    let manager = DbusSystemdManager;
-    let _ = manager
-        .action(
-            SystemdAction::Stop,
-            Some(&timer.name),
-            cancellation.child_token(),
-        )
-        .await;
-    let _ = manager
-        .action(
-            SystemdAction::Stop,
-            Some(&service.name),
-            cancellation.child_token(),
-        )
-        .await;
-    manager
-        .action(SystemdAction::Disable, Some(&timer.name), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(crate::fl!(
-        "ui-app-background-sync-timer-stopped-manual-sync-now"
-    ))
+    pause_rclone_background_with(&DbusSystemdManager, plan, cancellation).await
+}
+
+async fn pause_rclone_background_with<M: SystemdManager>(
+    manager: &M,
+    plan: &cosmic_ext_applet_mounter::sync::RcloneBisyncPlan,
+    cancellation: CancellationToken,
+) -> Result<String, String> {
+    let repair = OfflineRepairPlan {
+        engine: OfflineRepairEngine::RcloneBisync,
+        service: UnitName::new(plan.connection_id, UnitKind::Service),
+        timer: Some(UnitName::new(plan.connection_id, UnitKind::Timer)),
+    };
+    pause_offline_repair_trigger(manager, &repair, cancellation.child_token()).await?;
+    offline_repair_action(
+        manager,
+        SystemdAction::Stop,
+        &repair.service,
+        &fl!("ui-app-could-not-stop-offline-mirror-service"),
+        cancellation.child_token(),
+    )
+    .await?;
+    offline_repair_action(
+        manager,
+        SystemdAction::Disable,
+        &repair.service,
+        &fl!("ui-app-could-not-disable-offline-mirror-service"),
+        cancellation.child_token(),
+    )
+    .await?;
+    let status = offline_repair_status(
+        manager,
+        &repair.service,
+        &fl!("ui-app-could-not-inspect-stopped-offline-mirror-service"),
+        cancellation,
+    )
+    .await?;
+    require_repaired_unit(&status, &fl!("offline-service-role"), true)?;
+    Ok(fl!("ui-app-background-sync-timer-stopped-manual-sync-now"))
 }
 
 async fn start_onedrive_offline_mirror_background(
@@ -11296,6 +11928,9 @@ fn onedrive_mirror_plan_for_app(
 }
 
 async fn onedrive_mirror_pending_count(connection: &Connection) -> Result<u64, String> {
+    if !is_legacy_onedrive_mirror(connection) {
+        return Err(fl!("pending-count-request-failed"));
+    }
     let confdir = default_config_root()
         .join("onedrive-sync")
         .join(connection.id.to_string());
@@ -11660,8 +12295,8 @@ fn onedrive_runtime_command_error(stage: &str, error: CommandError) -> String {
     onedrive_validation_command_error(stage, error)
 }
 
-async fn test_teams_draft_connection(connection: &mut Connection) -> Result<String, String> {
-    let verified = teams::verify_remote(
+async fn test_sharepoint_draft_connection(connection: &mut Connection) -> Result<String, String> {
+    let verified = sharepoint::verify_remote(
         &app_command_runner(),
         &connection.remote_reference,
         connection
@@ -11676,7 +12311,7 @@ async fn test_teams_draft_connection(connection: &mut Connection) -> Result<Stri
 
 async fn test_connection_plan_and_access(
     connection: &Connection,
-    teams_verified: Option<&teams::VerifiedTeamsLibrary>,
+    teams_verified: Option<&sharepoint::VerifiedSharePointLibrary>,
 ) -> Result<String, String> {
     let plan_summary = match managed_plan_summary(connection) {
         Ok(summary) => summary,
@@ -11685,6 +12320,10 @@ async fn test_connection_plan_and_access(
 
     ensure_vpn_ready_for_connection(connection).await?;
 
+    if is_onedrive_rclone_mirror(connection) {
+        let summary = verify_rclone_access(connection).await?;
+        return Ok(format!("{plan_summary} {summary}"));
+    }
     match connection.provider {
         Provider::Teams
         | Provider::GoogleDrive
@@ -11714,6 +12353,10 @@ async fn test_connection_plan_and_access(
 }
 
 async fn validate_onedrive_connection_for_save(connection: &Connection) -> Result<String, String> {
+    if is_onedrive_rclone_mirror(connection) {
+        ensure_vpn_ready_for_connection(connection).await?;
+        return verify_rclone_access(connection).await;
+    }
     match connection.mode {
         ConnectionMode::OnlineMount(_) => verify_onedriver_online_mount_setup(connection).await,
         ConnectionMode::OfflineMirror(_) => verify_onedrive_offline_mirror_setup(connection).await,
@@ -11857,7 +12500,7 @@ async fn verify_onedrive_offline_mirror_setup_with(
     mount_table: &dyn MountTable,
     config_root: &std::path::Path,
 ) -> Result<String, String> {
-    if !is_onedrive_offline_mirror(connection) {
+    if !is_legacy_onedrive_mirror(connection) {
         return Err(crate::fl!(
             "ui-app-onedrive-offline-mirror-validation-only-applies-to"
         ));
@@ -12095,13 +12738,33 @@ async fn verify_rclone_access(connection: &Connection) -> Result<String, String>
 
 async fn verify_rclone_access_with_verified(
     connection: &Connection,
-    teams_verified: Option<&teams::VerifiedTeamsLibrary>,
+    teams_verified: Option<&sharepoint::VerifiedSharePointLibrary>,
 ) -> Result<String, String> {
+    if is_onedrive_rclone_mirror(connection) {
+        // Validation is read-only and also applies to disabled drafts. Run guards
+        // still require the authoritative saved connection to be enabled.
+        let mut candidate = connection.clone();
+        candidate.enabled = true;
+        let binding =
+            cosmic_ext_applet_mounter::onedrive::MirrorGuardBinding::from_connection(&candidate)
+                .map_err(|error| error.to_string())?;
+        cosmic_ext_applet_mounter::onedrive::verify_mirror_binding(
+            &binding,
+            &candidate,
+            &app_command_runner(),
+            &cosmic_ext_applet_mounter::onedrive::MicrosoftGraph::new()
+                .map_err(|error| error.to_string())?,
+            CancellationToken::new(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(fl!("onedrive-runtime-remote-verified"));
+    }
     let teams_summary = if connection.provider == Provider::Teams {
         let verified = match teams_verified {
             Some(verified) => verified.clone(),
             None => {
-                teams::verify_remote(
+                sharepoint::verify_remote(
                     &app_command_runner(),
                     &connection.remote_reference,
                     connection.teams_identity.as_ref().ok_or(crate::fl!(
@@ -12156,7 +12819,7 @@ async fn verify_rclone_access_with_verified(
             if connection.provider == Provider::Sftp {
                 sftp_access_error(error)
             } else if connection.provider == Provider::Teams {
-                teams::rclone_read_error(&error, connection.remote_subpath.is_some())
+                sharepoint::rclone_read_error(&error, connection.remote_subpath.is_some())
             } else {
                 rclone_access_error(&target, error)
             }
@@ -12216,7 +12879,7 @@ fn rclone_remote_validation_error(connection: &Connection, error: ProviderError)
         ProviderError::InvalidRemoteSubpath => {
             crate::fl!("ui-app-remote-subtree-contains-unsupported-characters-2")
         }
-        ProviderError::InvalidTeamsIdentity(message) => message,
+        ProviderError::InvalidSharePointIdentity(message) => message,
         ProviderError::InvalidMountpointGuard(message) => message,
         ProviderError::Unauthenticated => {
             crate::fl!("ui-app-rclone-remote-is-not-authenticated-reauthorize-it")
@@ -12499,6 +13162,69 @@ fn provider_engine_summary(provider: Provider, mode: AccessMode) -> &'static str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic::Application;
+    use cosmic_ext_applet_mounter::process::FakeCommandRunner;
+
+    #[test]
+    fn onedrive_configuration_editor_round_trip_preserves_engine_and_identity() {
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: Some(OfflineEngine::Rclone),
+            recovery_directory: "/home/example/Recovery/test".into(),
+            ..OfflineMirrorConfig::default()
+        });
+        connection.onedrive_identity = Some(OneDriveIdentity {
+            drive_id: "synthetic-personal-drive".into(),
+            drive_type: cosmic_ext_applet_mounter::model::OneDriveDriveType::Personal,
+        });
+        let restored = connection_from_draft(&draft_from_connection(&connection)).unwrap();
+        assert_eq!(restored.mode, connection.mode);
+        assert_eq!(restored.onedrive_identity, connection.onedrive_identity);
+
+        if let ConnectionMode::OfflineMirror(options) = &mut connection.mode {
+            options.engine = None;
+        }
+        connection.onedrive_identity = None;
+        let restored = connection_from_draft(&draft_from_connection(&connection)).unwrap();
+        assert_eq!(restored.mode, connection.mode);
+        assert_eq!(
+            restored.offline_engine(),
+            Some(OfflineEngine::LegacyOnedrive)
+        );
+    }
+
+    #[test]
+    fn onedrive_configuration_new_editor_mirror_explicitly_selects_rclone() {
+        let connection = connection_from_draft(&ConnectionDraft {
+            name: "New mirror".into(),
+            provider: Provider::OneDrive,
+            access_mode: AccessMode::OfflineMirror,
+            remote_reference: "synthetic-remote".into(),
+            local_path: "/home/example/Cloud/new".into(),
+            ..ConnectionDraft::default()
+        })
+        .unwrap();
+        assert_eq!(connection.offline_engine(), Some(OfflineEngine::Rclone));
+        // The later setup step must verify identity before this can be saved.
+        let mut config = Config::default();
+        config.document.connections.push(connection);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn onedrive_configuration_preallocated_draft_id_does_not_select_legacy() {
+        let connection = connection_from_draft(&ConnectionDraft {
+            id: Some(ConnectionId::new()),
+            name: "New mirror".into(),
+            provider: Provider::OneDrive,
+            access_mode: AccessMode::OfflineMirror,
+            remote_reference: "synthetic-remote".into(),
+            local_path: "/home/example/Cloud/new".into(),
+            ..ConnectionDraft::default()
+        })
+        .unwrap();
+        assert_eq!(connection.offline_engine(), Some(OfflineEngine::Rclone));
+    }
 
     fn cached_status_app(connection: Connection) -> AppModel {
         let mut config = Config::default();
@@ -12692,6 +13418,7 @@ mod tests {
             rclone_remotes: vec![RcloneDraftRemote {
                 name: "new".into(),
                 backend: "smb".into(),
+                drive_type: None,
             }],
             last_notice: Some("new notice".into()),
             ..AppModel::default()
@@ -14517,7 +15244,11 @@ mod tests {
         };
 
         assert_eq!(
-            offline_mirror_state_from_status(Provider::Teams, Some(&failed), Some(&waiting_timer)),
+            offline_mirror_state_from_status(
+                OfflineEngine::Rclone,
+                Some(&failed),
+                Some(&waiting_timer)
+            ),
             SyncRuntimeState::Failed
         );
     }
@@ -14538,7 +15269,11 @@ mod tests {
         };
 
         assert_eq!(
-            offline_mirror_state_from_status(Provider::Teams, Some(&failed), Some(&stopped_timer)),
+            offline_mirror_state_from_status(
+                OfflineEngine::Rclone,
+                Some(&failed),
+                Some(&stopped_timer)
+            ),
             SyncRuntimeState::Paused
         );
     }
@@ -14671,18 +15406,27 @@ mod tests {
                 RcloneDraftRemote {
                     name: "ua_box".into(),
                     backend: "box".into(),
+                    drive_type: None,
                 },
                 RcloneDraftRemote {
                     name: "ua_gdrive".into(),
                     backend: "drive".into(),
+                    drive_type: None,
+                },
+                RcloneDraftRemote {
+                    name: "personal_onedrive".into(),
+                    backend: "onedrive".into(),
+                    drive_type: Some(cosmic_ext_applet_mounter::onedrive::DriveType::Personal),
                 },
                 RcloneDraftRemote {
                     name: "work_teams".into(),
                     backend: "onedrive".into(),
+                    drive_type: None,
                 },
                 RcloneDraftRemote {
                     name: "ua_engr".into(),
                     backend: "smb".into(),
+                    drive_type: None,
                 },
             ]
         );
@@ -14728,14 +15472,17 @@ mod tests {
                 RcloneDraftRemote {
                     name: "box".into(),
                     backend: "box".into(),
+                    drive_type: None,
                 },
                 RcloneDraftRemote {
                     name: "drive".into(),
                     backend: "drive".into(),
+                    drive_type: None,
                 },
                 RcloneDraftRemote {
                     name: "share".into(),
                     backend: "smb".into(),
+                    drive_type: None,
                 },
             ],
             ..AppModel::default()
@@ -14746,6 +15493,7 @@ mod tests {
             vec![RcloneDraftRemote {
                 name: "box".into(),
                 backend: "box".into(),
+                drive_type: None,
             }]
         );
         assert_eq!(
@@ -14753,6 +15501,7 @@ mod tests {
             vec![RcloneDraftRemote {
                 name: "drive".into(),
                 backend: "drive".into(),
+                drive_type: None,
             }]
         );
         assert!(app.matching_rclone_remotes(Provider::OneDrive).is_empty());
@@ -14764,7 +15513,7 @@ mod tests {
             name: "Work Teams".into(),
             provider: Provider::Teams,
             remote_reference: "work_teams".into(),
-            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+            sharepoint_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
                 .into(),
             local_path: "/home/example/Cloud/Work Teams".into(),
             ..ConnectionDraft::default()
@@ -14777,7 +15526,7 @@ mod tests {
         );
         assert_eq!(
             connection.teams_identity.as_ref().unwrap().library_url,
-            draft.teams_library_url
+            draft.sharepoint_library_url
         );
         let mut offline = draft;
         offline.access_mode = AccessMode::OfflineMirror;
@@ -14793,17 +15542,20 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let mut connection = test_connection(Provider::Teams);
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: temporary.path().join("recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
         });
         connection.local_path = temporary.path().join("local");
         connection.remote_subpath = Some("Disposable".into());
-        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
-            site_url: "https://example.sharepoint.com/sites/Work".into(),
-            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
-            drive_id: "b!verified".into(),
-        });
+        connection.teams_identity = Some(
+            cosmic_ext_applet_mounter::model::SharePointLibraryIdentity {
+                site_url: "https://example.sharepoint.com/sites/Work".into(),
+                library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+                drive_id: "b!verified".into(),
+            },
+        );
         let plan = rclone_bisync_plan(&connection, &temporary.path().join("work")).unwrap();
         assert!(
             start_rclone_offline_mirror_background(&connection, &plan, CancellationToken::new(),)
@@ -14819,7 +15571,7 @@ mod tests {
             name: "Work Teams".into(),
             provider: Provider::Teams,
             remote_reference: "work_teams".into(),
-            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+            sharepoint_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
                 .into(),
             local_path: "/home/example/Cloud/Work Teams".into(),
             ..ConnectionDraft::default()
@@ -14828,15 +15580,15 @@ mod tests {
         assert!(managed_plan_summary(&verified).is_err());
         verified.teams_identity.as_mut().unwrap().drive_id = "b!verified".into();
         assert!(managed_plan_summary(&verified).is_ok());
-        assert!(teams_verification_matches_draft(&draft, &verified));
+        assert!(sharepoint_verification_matches_draft(&draft, &verified));
 
         let mut changed = draft.clone();
         changed.remote_reference = "other_remote".into();
-        assert!(!teams_verification_matches_draft(&changed, &verified));
+        assert!(!sharepoint_verification_matches_draft(&changed, &verified));
         changed = draft.clone();
-        changed.teams_library_url =
+        changed.sharepoint_library_url =
             "https://example.sharepoint.com/sites/Other/Shared%20Documents".into();
-        assert!(!teams_verification_matches_draft(&changed, &verified));
+        assert!(!sharepoint_verification_matches_draft(&changed, &verified));
     }
 
     #[test]
@@ -14855,29 +15607,31 @@ mod tests {
             access_mode: AccessMode::OfflineMirror,
             remote_reference: "work_teams".into(),
             remote_subpath: "Disposable/test".into(),
-            teams_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
+            sharepoint_library_url: "https://example.sharepoint.com/sites/Work/Shared%20Documents"
                 .into(),
             local_path: "/tmp/sharepoint-offline-ui-test".into(),
             ..ConnectionDraft::default()
         };
         let mut verified = connection_from_draft(&draft).unwrap();
         verified.teams_identity.as_mut().unwrap().drive_id = "b!verified".into();
-        assert!(teams_verification_matches_draft(&draft, &verified));
+        assert!(sharepoint_verification_matches_draft(&draft, &verified));
 
         let mut changed = draft.clone();
         changed.recovery_directory = "/tmp/another-recovery".into();
-        assert!(!teams_verification_matches_draft(&changed, &verified));
+        assert!(!sharepoint_verification_matches_draft(&changed, &verified));
     }
 
     #[test]
     fn teams_online_service_routes_through_guarded_rclone_with_bounded_preload_support() {
         let mut connection = test_connection(Provider::Teams);
         connection.remote_subpath = Some("General".into());
-        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
-            site_url: "https://example.sharepoint.com/sites/Work".into(),
-            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
-            drive_id: "b!verified".into(),
-        });
+        connection.teams_identity = Some(
+            cosmic_ext_applet_mounter::model::SharePointLibraryIdentity {
+                site_url: "https://example.sharepoint.com/sites/Work".into(),
+                library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+                drive_id: "b!verified".into(),
+            },
+        );
         if let ConnectionMode::OnlineMount(options) = &mut connection.mode {
             options.start_at_login = true;
         }
@@ -14945,17 +15699,20 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let mut connection = test_connection(Provider::Teams);
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: temporary.path().join("recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
         });
         connection.local_path = temporary.path().join("local");
         connection.remote_subpath = Some("Disposable".into());
-        connection.teams_identity = Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
-            site_url: "https://example.sharepoint.com/sites/Work".into(),
-            library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
-            drive_id: "b!verified".into(),
-        });
+        connection.teams_identity = Some(
+            cosmic_ext_applet_mounter::model::SharePointLibraryIdentity {
+                site_url: "https://example.sharepoint.com/sites/Work".into(),
+                library_url: "https://example.sharepoint.com/sites/Work/Documents".into(),
+                drive_id: "b!verified".into(),
+            },
+        );
         fs::create_dir_all(&connection.local_path).unwrap();
         let plan = rclone_bisync_plan(&connection, &temporary.path().join("work")).unwrap();
         let marker = connection
@@ -15648,6 +16405,7 @@ mod tests {
         let recovery = temp.path().join("recovery");
         let mut connection = test_connection(Provider::GoogleDrive);
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: recovery,
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -16625,13 +17383,14 @@ mod tests {
                 connection.name = format!("Repair matrix {index}");
                 connection.local_path = PathBuf::from(format!("/tmp/cosmic-repair-{index}"));
                 if provider == Provider::Teams {
-                    connection.teams_identity =
-                        Some(cosmic_ext_applet_mounter::model::TeamsLibraryIdentity {
+                    connection.teams_identity = Some(
+                        cosmic_ext_applet_mounter::model::SharePointLibraryIdentity {
                             site_url: "https://example.sharepoint.com/sites/Work".into(),
                             library_url: "https://example.sharepoint.com/sites/Work/Documents"
                                 .into(),
                             drive_id: "b!repair-matrix".into(),
-                        });
+                        },
+                    );
                 }
                 let ConnectionMode::OnlineMount(options) = &mut connection.mode else {
                     unreachable!("test connection is online")
@@ -16737,6 +17496,7 @@ mod tests {
             tuning_profile: TuningProfile::Balanced,
             smb_preload_override: None,
             sftp_preload_override: None,
+            onedrive_identity: None,
             teams_identity: None,
         }
     }
@@ -16744,6 +17504,7 @@ mod tests {
     fn test_onedrive_offline_connection(root: &std::path::Path) -> Connection {
         let mut connection = test_connection(Provider::OneDrive);
         connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: None,
             recovery_directory: root.join("recovery"),
             sync_interval_minutes: 15,
             sync_on_metered: false,
@@ -16909,13 +17670,634 @@ mod tests {
     #[test]
     fn successful_bisync_summary_keeps_retention_warning_actionable() {
         let outcome = BisyncOutcome {
+            preview_pending: None,
             output: command_output(""),
             warnings: vec!["Remote retention cleanup was incomplete; run Sync Now again.".into()],
         };
 
-        let summary = rclone_bisync_outcome_summary(BisyncMode::Sync, &outcome);
+        let summary = rclone_bisync_outcome_summary(
+            &test_connection(Provider::Smb),
+            BisyncMode::Sync,
+            &outcome,
+        );
         assert!(summary.contains("Sync completed"));
         assert!(summary.contains("Warning:"));
         assert!(summary.contains("run Sync Now again"));
+    }
+    fn onedrive_runtime_connection(
+        root: &Path,
+        kind: cosmic_ext_applet_mounter::model::OneDriveDriveType,
+    ) -> Connection {
+        let mut connection = test_connection(Provider::OneDrive);
+        connection.name = "Runtime mirror".into();
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: Some(OfflineEngine::Rclone),
+            recovery_directory: root.join("recovery"),
+            sync_interval_minutes: 15,
+            sync_on_metered: false,
+        });
+        connection.local_path = root.join("local");
+        connection.remote_reference = "synthetic_remote".into();
+        connection.remote_subpath = Some("Test".into());
+        connection.onedrive_identity = Some(OneDriveIdentity {
+            drive_id: "synthetic-primary".into(),
+            drive_type: kind,
+        });
+        connection
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_dispatch_uses_engine_and_preserves_legacy_and_online() {
+        use cosmic_ext_applet_mounter::model::OneDriveDriveType;
+        let root = tempfile::tempdir().unwrap();
+        for kind in [OneDriveDriveType::Personal, OneDriveDriveType::Business] {
+            let mut connection = onedrive_runtime_connection(root.path(), kind);
+            assert!(is_rclone_offline_mirror(&connection));
+            assert!(!is_legacy_onedrive_mirror(&connection));
+            assert!(managed_plan_summary(&connection).unwrap().contains("timer"));
+            let sync = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+            assert_eq!(sync.timer.interval, Duration::from_secs(15 * 60));
+            assert!(
+                start_rclone_offline_mirror_background(
+                    &connection,
+                    &sync,
+                    CancellationToken::new()
+                )
+                .await
+                .is_err()
+            );
+            assert!(
+                draft_summary_text(&draft_from_connection(&connection)).contains("rclone bisync")
+            );
+            let plan = offline_repair_plan(&connection).unwrap();
+            assert_eq!(plan.engine, OfflineRepairEngine::RcloneBisync);
+            assert!(plan.timer.is_some());
+            assert_eq!(
+                managed_unit_names_for_connection(&connection),
+                vec![
+                    UnitName::new(connection.id, UnitKind::Timer),
+                    UnitName::new(connection.id, UnitKind::Service)
+                ]
+            );
+            connection.enabled = false;
+            assert!(offline_repair_plan(&connection).is_ok());
+            if let ConnectionMode::OfflineMirror(ref mut options) = connection.mode {
+                options.engine = None;
+            }
+            assert!(!is_rclone_offline_mirror(&connection));
+            assert!(is_legacy_onedrive_mirror(&connection));
+            assert_eq!(
+                offline_repair_plan(&connection).unwrap().engine,
+                OfflineRepairEngine::OneDriveMonitor
+            );
+            assert_eq!(managed_unit_names_for_connection(&connection).len(), 1);
+            connection.mode = ConnectionMode::OnlineMount(OnlineMountConfig::default());
+            assert_eq!(
+                online_mount_engine(&connection),
+                Some(OnlineMountEngine::Onedriver)
+            );
+            assert!(!is_rclone_offline_mirror(&connection));
+            assert!(!is_legacy_onedrive_mirror(&connection));
+        }
+    }
+
+    #[test]
+    fn onedrive_runtime_status_distinguishes_monitor_from_oneshot_and_timer() {
+        let active = repair_unit_status(ActiveState::Active, true);
+        let inactive = repair_unit_status(ActiveState::Inactive, false);
+        let failed = repair_unit_status(ActiveState::Failed, false);
+        assert_eq!(
+            offline_mirror_state_from_status(OfflineEngine::LegacyOnedrive, Some(&active), None),
+            SyncRuntimeState::Idle
+        );
+        assert_eq!(
+            offline_mirror_state_from_status(OfflineEngine::Rclone, Some(&active), Some(&active)),
+            SyncRuntimeState::Running
+        );
+        assert_eq!(
+            offline_mirror_state_from_status(OfflineEngine::Rclone, Some(&inactive), Some(&active)),
+            SyncRuntimeState::Idle
+        );
+        assert_eq!(
+            offline_mirror_state_from_status(OfflineEngine::Rclone, Some(&failed), Some(&active)),
+            SyncRuntimeState::Failed
+        );
+        assert_eq!(
+            offline_mirror_state_from_status(
+                OfflineEngine::Rclone,
+                Some(&inactive),
+                Some(&inactive)
+            ),
+            SyncRuntimeState::Paused
+        );
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_save_installs_worker_and_timer_without_starting_or_enabling() {
+        use cosmic_ext_applet_mounter::services::FakeSystemdManager;
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_runtime_connection(
+            root.path(),
+            cosmic_ext_applet_mounter::model::OneDriveDriveType::Personal,
+        );
+        let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+        let service = UnitDocument::service(&mirror_script::service_spec(&plan).unwrap()).unwrap();
+        let timer = UnitDocument::timer(&plan.timer).unwrap();
+        let store =
+            FileUnitStore::new(root.path().join("units"), Arc::new(StructuralUnitValidator));
+        let manager = FakeSystemdManager::default();
+        for _ in 0..7 {
+            manager.push(Ok(None));
+        }
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+        install_paused_rclone_units(
+            store.clone(),
+            manager.clone(),
+            &service,
+            &timer,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            store
+                .read(&service.name)
+                .unwrap()
+                .unwrap()
+                .contains("--run-bisync")
+        );
+        assert!(store.read(&timer.name).unwrap().is_some());
+        assert!(
+            manager
+                .actions()
+                .iter()
+                .all(|(action, _)| !matches!(action, SystemdAction::Start | SystemdAction::Enable))
+        );
+        assert!(!initial_sync_marker(&plan).exists());
+        assert!(!initial_preview_marker(&plan).exists());
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_save_rejects_external_units_and_restores_previous_service_on_partial_failure()
+     {
+        use cosmic_ext_applet_mounter::services::{FakeSystemdManager, ServiceError};
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_runtime_connection(
+            root.path(),
+            cosmic_ext_applet_mounter::model::OneDriveDriveType::Business,
+        );
+        let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+        let service = UnitDocument::service(&mirror_script::service_spec(&plan).unwrap()).unwrap();
+        let timer = UnitDocument::timer(&plan.timer).unwrap();
+        let unit_dir = root.path().join("units");
+        let store = FileUnitStore::new(unit_dir.clone(), Arc::new(StructuralUnitValidator));
+        fs::create_dir_all(&unit_dir).unwrap();
+        fs::write(
+            unit_dir.join(service.name.file_name()),
+            "[Unit]\nDescription=External\n",
+        )
+        .unwrap();
+        let manager = FakeSystemdManager::default();
+        assert!(
+            install_paused_rclone_units(
+                store.clone(),
+                manager.clone(),
+                &service,
+                &timer,
+                CancellationToken::new()
+            )
+            .await
+            .is_err()
+        );
+        assert!(manager.actions().is_empty());
+        fs::remove_file(unit_dir.join(service.name.file_name())).unwrap();
+        let mut original = service.clone();
+        original.content.push_str("# original managed service\n");
+        store.write(&original).unwrap();
+        store.write(&timer).unwrap();
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+        manager.push(Ok(None));
+        manager.push(Err(ServiceError::Runtime(
+            "synthetic reload failure".into(),
+        )));
+        assert!(
+            install_paused_rclone_units(
+                store.clone(),
+                manager.clone(),
+                &service,
+                &timer,
+                CancellationToken::new()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            store.read(&service.name).unwrap().unwrap(),
+            original.content
+        );
+        assert_eq!(store.read(&timer.name).unwrap().unwrap(), timer.content);
+        assert!(
+            manager
+                .actions()
+                .iter()
+                .all(|(action, _)| !matches!(action, SystemdAction::Enable | SystemdAction::Start))
+        );
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_resume_checks_observed_timer_and_rolls_back_failed_start() {
+        use cosmic_ext_applet_mounter::services::{FakeSystemdManager, ServiceError};
+        let timer = UnitName::new(ConnectionId::new(), UnitKind::Timer);
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Ok(None));
+        manager.push(Ok(Some(repair_unit_status(ActiveState::Active, true))));
+        resume_rclone_timer_with(&manager, &timer, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            manager
+                .actions()
+                .iter()
+                .map(|(action, _)| *action)
+                .collect::<Vec<_>>(),
+            [
+                SystemdAction::Enable,
+                SystemdAction::Start,
+                SystemdAction::Status
+            ]
+        );
+        for failure in [0, 1, 2] {
+            let manager = FakeSystemdManager::default();
+            for _ in 0..failure {
+                manager.push(Ok(None));
+            }
+            manager.push(Err(ServiceError::Runtime("synthetic start failure".into())));
+            assert!(
+                resume_rclone_timer_with(&manager, &timer, CancellationToken::new())
+                    .await
+                    .is_err()
+            );
+            let actions = manager.actions();
+            assert_eq!(actions[actions.len() - 2].0, SystemdAction::Stop);
+            assert_eq!(actions.last().unwrap().0, SystemdAction::Disable);
+        }
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let manager = FakeSystemdManager::default();
+        assert!(
+            resume_rclone_timer_with(&manager, &timer, cancelled)
+                .await
+                .is_err()
+        );
+        assert!(manager.actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn onedrive_runtime_pause_requires_stopped_timer_and_service_without_resetting_failure() {
+        use cosmic_ext_applet_mounter::services::{FakeSystemdManager, ServiceError};
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_runtime_connection(
+            root.path(),
+            cosmic_ext_applet_mounter::model::OneDriveDriveType::Business,
+        );
+        let plan = rclone_bisync_plan(&connection, &root.path().join("work")).unwrap();
+        let manager = FakeSystemdManager::default();
+        for _ in 0..2 {
+            manager.push(Ok(None));
+            manager.push(Ok(None));
+            manager.push(Ok(Some(repair_unit_status(ActiveState::Inactive, false))));
+        }
+        pause_rclone_background_with(&manager, &plan, CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            manager
+                .actions()
+                .iter()
+                .all(|(action, _)| *action != SystemdAction::ResetFailed)
+        );
+        let manager = FakeSystemdManager::default();
+        manager.push(Ok(None));
+        manager.push(Err(ServiceError::Runtime(
+            "synthetic disable failure".into(),
+        )));
+        assert!(
+            pause_rclone_background_with(&manager, &plan, CancellationToken::new())
+                .await
+                .is_err()
+        );
+        assert_eq!(manager.actions().len(), 2);
+        assert!(
+            manager
+                .actions()
+                .iter()
+                .all(|(_, unit)| unit.as_ref().unwrap().ends_with(".timer"))
+        );
+    }
+
+    #[test]
+    fn onedrive_runtime_summary_uses_structured_count_and_never_echoes_engine_logs() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_runtime_connection(
+            root.path(),
+            cosmic_ext_applet_mounter::model::OneDriveDriveType::Personal,
+        );
+        let outcome = BisyncOutcome {
+            output: command_output("private-secret Path1: 999 changes: Bisync successful"),
+            warnings: vec![],
+            preview_pending: Some(Ok(3)),
+        };
+        let summary = rclone_bisync_outcome_summary(&connection, BisyncMode::Preview, &outcome);
+        assert!(summary.contains('3'));
+        assert!(!summary.contains("999"));
+        assert!(!summary.contains("private-secret"));
+        assert!(offline_mirror_saved_notice(&connection, true).contains("normal bisync"));
+    }
+
+    fn onedrive_editor_draft(
+        kind: cosmic_ext_applet_mounter::onedrive::DriveType,
+    ) -> ConnectionDraft {
+        ConnectionDraft {
+            id: Some(ConnectionId::new()),
+            name: "Synthetic mirror".into(),
+            provider: Provider::OneDrive,
+            access_mode: AccessMode::OfflineMirror,
+            onedrive_drive_type: kind,
+            onedrive_expected_account: "person@example.invalid".into(),
+            remote_reference: "example_remote".into(),
+            remote_subpath: "Test folder".into(),
+            local_path: "/tmp/synthetic-mirror".into(),
+            ..ConnectionDraft::default()
+        }
+    }
+
+    #[test]
+    fn onedrive_editor_discovery_separates_primary_types_libraries_and_online() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        let remotes = parse_rclone_remotes_for_app(
+            r#"{
+            "personal":{"type":"onedrive","drive_type":"personal"},
+            "business":{"type":"onedrive","drive_type":"business"},
+            "library":{"type":"onedrive","drive_type":"documentLibrary"},
+            "incomplete":{"type":"onedrive"},
+            "other":{"type":"box"}
+        }"#,
+        )
+        .unwrap();
+        for (kind, name) in [
+            (DriveType::Personal, "personal"),
+            (DriveType::Business, "business"),
+        ] {
+            let app = AppModel {
+                draft: onedrive_editor_draft(kind),
+                rclone_remotes: remotes.clone(),
+                ..AppModel::default()
+            };
+            assert!(app.draft_uses_rclone());
+            assert!(!app.draft_primary_actions_ready());
+            assert_eq!(
+                app.matching_rclone_remotes(Provider::OneDrive)[0].name,
+                name
+            );
+            assert_eq!(app.matching_rclone_remotes(Provider::OneDrive).len(), 1);
+            assert_eq!(
+                app.matching_rclone_remotes(Provider::Teams)[0].name,
+                "library"
+            );
+        }
+        let mut app = AppModel {
+            draft: onedrive_editor_draft(DriveType::Personal),
+            rclone_remotes: remotes,
+            ..AppModel::default()
+        };
+        app.draft.access_mode = AccessMode::OnlineMount;
+        assert!(!app.draft_uses_rclone());
+        assert!(app.matching_rclone_remotes(Provider::OneDrive).is_empty());
+        app.draft.access_mode = AccessMode::OfflineMirror;
+        app.draft.legacy_onedrive = true;
+        assert!(!app.draft_uses_rclone());
+        assert!(OneDriveEditorRequest::from_draft(&app.draft, &[], true).is_err());
+        // Even a forged new-setup message cannot convert a legacy profile.
+        let _ = app.setup_onedrive_rclone(true);
+        assert!(app.onedrive_editor_pending.is_none());
+    }
+
+    #[test]
+    fn onedrive_editor_acceptance_binds_identity_and_clears_on_edits() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        for kind in [DriveType::Personal, DriveType::Business] {
+            let mut app = AppModel {
+                draft: onedrive_editor_draft(kind),
+                ..AppModel::default()
+            };
+            let request = OneDriveEditorRequest::from_draft(&app.draft, &[], false).unwrap();
+            let identity = OneDriveIdentity {
+                drive_id: "primary-drive".into(),
+                drive_type: kind,
+            };
+            accept_onedrive_editor_result(&mut app.draft, &request, Ok(identity.clone())).unwrap();
+            assert!(app.draft_primary_actions_ready());
+            let saved = connection_from_draft(&app.draft).unwrap();
+            assert_eq!(saved.offline_engine(), Some(OfflineEngine::Rclone));
+            assert_eq!(saved.onedrive_identity, Some(identity));
+            assert!(
+                !serde_json::to_string(&saved)
+                    .unwrap()
+                    .contains("person@example.invalid")
+            );
+            let loaded = draft_from_connection(&saved);
+            assert!(loaded.onedrive_expected_account.is_empty());
+            assert_eq!(loaded.onedrive_drive_type, kind);
+            assert!(onedrive_validation_matches_draft(&app.draft, &saved));
+            let _ = app.update(Message::DraftSubpath("Another folder".into()));
+            assert!(app.draft.onedrive_identity.is_none());
+            assert!(!app.draft_primary_actions_ready());
+            assert!(!onedrive_validation_matches_draft(&app.draft, &saved));
+            assert!(
+                accept_onedrive_editor_result(
+                    &mut app.draft,
+                    &request,
+                    Ok(saved.onedrive_identity.unwrap())
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn onedrive_editor_reconnect_uses_saved_identity_and_failure_does_not_mutate_saved_profile() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        let mut draft = onedrive_editor_draft(DriveType::Business);
+        draft.onedrive_identity = Some(OneDriveIdentity {
+            drive_id: "saved-drive".into(),
+            drive_type: DriveType::Business,
+        });
+        let saved = connection_from_draft(&draft).unwrap();
+        draft.remote_reference = "replacement_remote".into();
+        // A forged draft identity cannot authorize a different account.
+        draft.onedrive_identity = Some(OneDriveIdentity {
+            drive_id: "edited-drive".into(),
+            drive_type: DriveType::Business,
+        });
+        let request =
+            OneDriveEditorRequest::from_draft(&draft, std::slice::from_ref(&saved), true).unwrap();
+        assert_eq!(request.setup.previous_identity, saved.onedrive_identity);
+        let wrong = draft.onedrive_identity.clone().unwrap();
+        assert!(accept_onedrive_editor_result(&mut draft, &request, Ok(wrong)).is_err());
+        assert!(!draft.enabled);
+        assert!(draft.onedrive_identity.is_none());
+        assert!(saved.enabled);
+        assert_eq!(
+            saved.onedrive_identity.as_ref().unwrap().drive_id,
+            "saved-drive"
+        );
+        accept_onedrive_editor_result(
+            &mut draft,
+            &request,
+            Ok(saved.onedrive_identity.clone().unwrap()),
+        )
+        .unwrap();
+        assert!(!draft.enabled); // Reconnect does not enable a failed/disabled draft.
+        draft.onedrive_drive_type = DriveType::Personal;
+        assert!(OneDriveEditorRequest::from_draft(&draft, &[saved], false).is_err());
+    }
+
+    #[test]
+    fn onedrive_editor_cancel_and_late_completion_cannot_accept_or_save() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        let mut app = AppModel {
+            draft: onedrive_editor_draft(DriveType::Personal),
+            ..AppModel::default()
+        };
+        let request = OneDriveEditorRequest::from_draft(&app.draft, &[], false).unwrap();
+        let token = CancellationToken::new();
+        app.onedrive_editor_pending = Some(OneDriveEditorPending {
+            cancellation: token.clone(),
+        });
+        app.onedrive_editor_generation = 2;
+        let identity = OneDriveIdentity {
+            drive_id: "primary-drive".into(),
+            drive_type: DriveType::Personal,
+        };
+        let _ = app.update(Message::OneDriveRcloneCompleted(
+            1,
+            request.clone(),
+            Ok(identity.clone()),
+        ));
+        assert!(app.onedrive_editor_pending.is_some());
+        assert!(!token.is_cancelled());
+        let _ = app.update(Message::SaveDraft);
+        assert!(app.config.document.connections.is_empty());
+        assert!(!app.draft_primary_actions_ready());
+        let _ = app.update(Message::CancelOneDriveRclone);
+        assert!(token.is_cancelled());
+        let _ = app.update(Message::OneDriveRcloneCompleted(2, request, Ok(identity)));
+        assert!(app.onedrive_editor_pending.is_none());
+        assert!(app.draft.onedrive_identity.is_none());
+        assert!(app.config.document.connections.is_empty());
+    }
+
+    #[test]
+    fn onedrive_editor_rclone_remote_reference_is_protected_from_removal() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        let mut draft = onedrive_editor_draft(DriveType::Personal);
+        draft.onedrive_identity = Some(OneDriveIdentity {
+            drive_id: "primary-drive".into(),
+            drive_type: DriveType::Personal,
+        });
+        let mut app = AppModel::default();
+        app.config
+            .document
+            .connections
+            .push(connection_from_draft(&draft).unwrap());
+        assert!(app.rclone_remote_is_referenced("example_remote"));
+        app.config.document.connections[0].mode =
+            ConnectionMode::OnlineMount(OnlineMountConfig::default());
+        assert!(!app.rclone_remote_is_referenced("example_remote"));
+    }
+
+    struct EditorGraph(cosmic_ext_applet_mounter::onedrive::DriveType);
+    impl cosmic_ext_applet_mounter::onedrive::Graph for EditorGraph {
+        fn get<'a>(
+            &'a self,
+            target: cosmic_ext_applet_mounter::onedrive::GraphTarget<'a>,
+            _token: &'a str,
+            _cancel: CancellationToken,
+        ) -> cosmic_ext_applet_mounter::onedrive::GraphFuture<'a> {
+            Box::pin(async move {
+                use cosmic_ext_applet_mounter::onedrive::GraphTarget;
+                Ok(match target {
+                    GraphTarget::Profile => {
+                        serde_json::json!({"id":"synthetic-user","mail":"person@example.invalid"})
+                    }
+                    GraphTarget::PrimaryDrive | GraphTarget::ExpectedBusinessDrive(_) => {
+                        serde_json::json!({"id":"primary-drive","driveType":self.0.as_str(),"owner":{"user":{"id":"synthetic-owner"}}})
+                    }
+                    GraphTarget::Folder { .. } => {
+                        serde_json::json!({"id":"folder-id","folder":{},"parentReference":{"driveId":"primary-drive"}})
+                    }
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn onedrive_editor_setup_adapter_create_select_and_cancel_use_production_backend() {
+        use cosmic_ext_applet_mounter::onedrive::DriveType;
+        for kind in [DriveType::Personal, DriveType::Business] {
+            for create in [false, true] {
+                let mut draft = onedrive_editor_draft(kind);
+                let request = OneDriveEditorRequest::from_draft(&draft, &[], create).unwrap();
+                let config = serde_json::json!({"example_remote":{"type":"onedrive","drive_type":kind.as_str(),
+                    "drive_id":"primary-drive","token":{"access_token":"synthetic-token"}}}).to_string();
+                let runner = FakeCommandRunner::default();
+                if create {
+                    runner.push(Ok(command_output("{}")));
+                    runner.push(Ok(command_output(r#"{"State":""}"#)));
+                }
+                runner.push(Ok(command_output("{}")));
+                runner.push(Ok(command_output(&config)));
+                runner.push(Ok(command_output(&config)));
+                runner.push(Ok(command_output(r#"{"IsDir":true}"#)));
+                let identity = run_onedrive_editor_setup(
+                    &runner,
+                    &EditorGraph(kind),
+                    &request,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+                accept_onedrive_editor_result(&mut draft, &request, Ok(identity)).unwrap();
+                assert!(draft.onedrive_identity.is_some());
+                let commands = runner
+                    .requests()
+                    .iter()
+                    .map(|r| r.sanitized_command())
+                    .collect::<Vec<_>>();
+                assert_eq!(commands.iter().any(|c| c.contains("config create")), create);
+                assert!(commands.iter().all(|c| !c.contains("bisync")
+                    && !c.contains("purge")
+                    && !c.contains("config delete")));
+                if !create {
+                    assert!(
+                        commands.iter().all(|c| c.starts_with("rclone lsjson ")
+                            || c.starts_with("rclone config dump"))
+                    );
+                }
+                let runner = FakeCommandRunner::default();
+                let cancel = CancellationToken::new();
+                cancel.cancel();
+                assert!(
+                    run_onedrive_editor_setup(&runner, &EditorGraph(kind), &request, cancel)
+                        .await
+                        .is_err()
+                );
+                assert!(runner.requests().is_empty());
+            }
+        }
     }
 }

@@ -923,6 +923,7 @@ version = "0.5.3"
 dependencies = [
  "i18n-embed",
  "i18n-embed-fl",
+ "jiff",
  "libc",
  "libcosmic",
  "percent-encoding",

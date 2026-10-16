@@ -101,6 +101,8 @@ impl Default for OnlineMountConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OfflineMirrorConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<OfflineEngine>,
     pub recovery_directory: PathBuf,
     pub sync_interval_minutes: u32,
     pub sync_on_metered: bool,
@@ -109,10 +111,45 @@ pub struct OfflineMirrorConfig {
 impl Default for OfflineMirrorConfig {
     fn default() -> Self {
         Self {
+            engine: None,
             recovery_directory: PathBuf::new(),
             sync_interval_minutes: 15,
             sync_on_metered: false,
         }
+    }
+}
+
+/// Absent on old documents; resolved using the connection's provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OfflineEngine {
+    Rclone,
+    LegacyOnedrive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OneDriveDriveType {
+    Personal,
+    Business,
+}
+
+/// Stable drive binding, never an OAuth token or an account credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OneDriveIdentity {
+    pub drive_id: String,
+    pub drive_type: OneDriveDriveType,
+}
+
+impl OneDriveIdentity {
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        !self.drive_id.is_empty()
+            && self.drive_id.len() <= 512
+            && self.drive_id.is_ascii()
+            && !self
+                .drive_id
+                .chars()
+                .any(|ch| ch.is_control() || ch.is_whitespace() || matches!(ch, '/' | '\\'))
     }
 }
 
@@ -200,7 +237,8 @@ pub struct ConnectionPreloadOverride {
 pub type SmbPreloadOverride = ConnectionPreloadOverride;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TeamsLibraryIdentity {
+#[serde(rename = "TeamsLibraryIdentity")]
+pub struct SharePointLibraryIdentity {
     pub site_url: String,
     pub library_url: String,
     pub drive_id: String,
@@ -224,7 +262,26 @@ pub struct Connection {
     #[serde(default)]
     pub sftp_preload_override: Option<ConnectionPreloadOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub teams_identity: Option<TeamsLibraryIdentity>,
+    pub teams_identity: Option<SharePointLibraryIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onedrive_identity: Option<OneDriveIdentity>,
+}
+
+impl Connection {
+    /// Resolves legacy documents without migrating or silently changing engines.
+    #[must_use]
+    pub fn offline_engine(&self) -> Option<OfflineEngine> {
+        match &self.mode {
+            ConnectionMode::OnlineMount(_) => None,
+            ConnectionMode::OfflineMirror(options) => Some(options.engine.unwrap_or(
+                if self.provider == Provider::OneDrive {
+                    OfflineEngine::LegacyOnedrive
+                } else {
+                    OfflineEngine::Rclone
+                },
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
