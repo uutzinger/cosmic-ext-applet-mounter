@@ -73,6 +73,52 @@ fn onedrive_configuration_legacy_round_trip_keeps_engine_and_wire_format() {
 }
 
 #[test]
+fn onedrive_configuration_preserves_historic_legacy_recovery_on_unrelated_save() {
+    let work = Path::new("/home/example/State");
+    let mut old = legacy();
+    if let ConnectionMode::OfflineMirror(options) = &mut old.mode {
+        options.recovery_directory = work.join("onedrive-recovery").join(old.id.to_string());
+    }
+    let new = mirror(OneDriveDriveType::Personal);
+    assert!(
+        config(vec![old.clone(), new.clone()])
+            .validate_with_work_root(work)
+            .is_ok()
+    );
+    let mut invalid = new.clone();
+    if let ConnectionMode::OfflineMirror(options) = &mut invalid.mode {
+        options.recovery_directory = work.join("onedrive-recovery").join(invalid.id.to_string());
+    }
+    assert!(
+        config(vec![old.clone(), invalid])
+            .validate_with_work_root(work)
+            .is_err()
+    );
+    for recovery in [
+        work.to_path_buf(),
+        work.join("rclone-bisync"),
+        work.join("onedrive-recovery/other-owner"),
+    ] {
+        let mut invalid = old.clone();
+        if let ConnectionMode::OfflineMirror(options) = &mut invalid.mode {
+            options.recovery_directory = recovery;
+        }
+        assert!(
+            config(vec![invalid, new.clone()])
+                .validate_with_work_root(work)
+                .is_err()
+        );
+    }
+    let mut invalid = old;
+    invalid.local_path = work.join("onedrive-recovery/mirror");
+    assert!(
+        config(vec![invalid, new])
+            .validate_with_work_root(work)
+            .is_err()
+    );
+}
+
+#[test]
 fn onedrive_configuration_legacy_only_shared_recovery_still_loads() {
     let first = legacy();
     let mut second = first.clone();

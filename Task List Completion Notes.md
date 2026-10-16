@@ -2673,3 +2673,97 @@ running applet for replacement installation, then select the existing remote,
 fill the disposable subtree and Verify selected remote before saving/syncing.
 These post-build task/evidence updates are a separate records-only commit and
 do not alter candidate source/packaging identity or require another build.
+
+### October 16, 2026 — Replacement installed for guided inventory retest
+
+Operator requested guided acceptance and confirmed applet removed. Ran maintained
+`bash scripts/install-flatpak.sh --candidate-receipt
+target/task-runs/flatpak-candidate-cf00f2a/artifacts.json --log-dir
+target/task-runs/flatpak-install-cf00f2a` (absolute paths supplied). Exit 0,
+installation verified after full candidate-reuse checks. Prior installed commit
+cfa15ec80e68374319cda2749291939880badb88bcdc86b64190bc4f37a28e57 recorded;
+replacement 48e7cabc6280678b999521499f475efd82395d2487da114ce60d4a887c97f8fd
+and complete metadata match the inspected candidate on the same master/x86_64
+user ref. Retained summary.json/task.log/installation.json in that log directory.
+No launcher change needed: original shadowing entry already parked. No build,
+dependency update, remote creation/deletion, user-service change or app launch
+performed by the installer. Existing authenticated remote retained.
+
+Next operator check: re-add applet, open Add Connection, detect/select the existing
+personal remote, enter expected account and explicit disposable remote subtree,
+select the empty local acceptance directory through Browse and Verify selected
+remote. Do not Save or Sync until verification/inventory result is reviewed.
+Installed identity is verified; corrected inventory, folder access and integrated
+mirror/service acceptance remain pending. Records-only edits do not require gate
+or rebuild; prior code verification receipts remain applicable.
+
+Guided personal verification retest: operator screenshot now shows
+"OneDrive drive and selected folder verified. Save keeps background
+synchronization paused." No preceding invalid-configuration notice is visible.
+This verifies the installed editor's successful selected-remote/folder setup
+result after the replacement; no new consent or remote creation was requested.
+Next is Test Connection (plan/dependency/readiness/guard/access validation),
+followed by reviewed Save in Paused state. No synchronization, generated-unit
+state or local mirror-write acceptance is inferred from this screenshot.
+
+### October 16, 2026 — Draft test passed; Save exposed legacy recovery compatibility
+
+Operator screenshot: Test Connection passed, managed bisync service/timer
+definitions validated structurally, and primary drive/selected-folder access
+verified with the saved identity. This does not prove installed units or sync.
+Subsequent Save failed with InvalidWorkDirectory referring to a different,
+already-saved connection, not the new tested draft.
+
+Read-only configuration inspection printed only engine/provider and overlap
+classification. The rejected existing connection is legacy OneDrive (engine
+absent), with its historical app-owned recovery directory at
+<work-root>/onedrive-recovery/<its-own-connection-id>. Local mirror is outside
+the work root. The tested draft ID is absent from the saved document: Save did
+not persist it. No user configuration, path, legacy state, unit or cloud data
+was edited to bypass validation.
+
+Diagnosis: app Save builds a candidate document containing all saved profiles,
+then Config::validate_with_work_root applies the new blanket work-root overlap
+guard to all recovery paths. This rejects the historical legacy default even
+when adding an unrelated rclone profile. Test Connection validates only its own
+draft, so it passed before that document-wide check.
+
+Changed src/config.rs: exempt only legacy OneDrive's exact, normalized per-ID
+historical recovery directory. Mirror/cache paths remain protected; new rclone
+profiles, other engines/providers, arbitrary state directories, the shared state
+root, rclone-bisync and another owner's recovery directory receive no exemption.
+No migration, engine conversion, state deletion or public UI string change.
+tests/onedrive_configuration.rs adds a synthetic legacy-plus-new-profile Save
+validation regression with positive compatibility and negative overlap cases.
+
+Validation (source 4fdd537, dirty=true):
+
+- New regression failed before fix, exit 101, reproducing Save's configuration
+  rejection with synthetic paths only.
+- `just fmt`: exit 0.
+- `bash scripts/dev.sh check`: exit 0; target/task-runs/dev-check-qzyv08qs/.
+- `cargo test --locked --test onedrive_configuration`: exit 0, eight passed,
+  including unchanged legacy/engine routing, malformed identity and overlap tests.
+- Final gate follows. Installed package is unchanged; Save retest and subsequent
+  paused units/Preview/initial/scheduled/Pause/cleanup acceptance remain pending.
+
+- First final gate target/task-runs/dev-gate-ghv7ttex/: failed exit 1 in
+  repo_hygiene_test.py because the newly committed scripts/install-flatpak.sh
+  had Git mode 100644. Earlier pre-commit gates did not enforce its mode while
+  untracked; invocation through bash worked, but repository entry-point policy
+  requires 100755. Corrected/staged only its executable bit (no content change).
+  `python3 tests/repo_hygiene_test.py`: exit 0, four passed. Final gate rerun
+  follows; original failure is retained, not counted as a pass.
+
+- Additional read-only path classification examined 11 saved connection blocks:
+  one historical per-ID legacy recovery under the state root, no other overlap
+  found by that inspection. This is diagnostic classification, not a substitute
+  for the app's full document validation. No saved configuration was modified.
+- Final rerun `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-xqjx8r62/ (source 4fdd5379f7549a8214e8d608fe3cd3e4310673da,
+  dirty=true). Formatting, all-feature lint, all-target Rust and maintained Python
+  tests passed. `git diff --check` and `git diff --cached --check`: exit 0.
+  Changed files: src/config.rs, tests/onedrive_configuration.rs, installer Git
+  executable mode and task/evidence records. Installer mode is staged; source
+  fix/records remain uncommitted. No installed Save success is claimed. Next:
+  approved commit/source pin/replacement build, then installed Save/Paused retest.

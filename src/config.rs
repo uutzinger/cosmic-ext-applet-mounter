@@ -632,7 +632,26 @@ impl Config {
                 ConnectionMode::OnlineMount(options) => {
                     paths.extend(options.cache_directory.iter())
                 }
-                ConnectionMode::OfflineMirror(options) => paths.push(&options.recovery_directory),
+                ConnectionMode::OfflineMirror(options) => {
+                    // Older abraunegg profiles use this per-connection recovery
+                    // namespace beneath the shared state root. Preserve it when
+                    // validating an unrelated save; it is outside rclone-bisync.
+                    // No other provider, engine or state path gets this exception.
+                    let historic_legacy_recovery = connection.provider == Provider::OneDrive
+                        && connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive)
+                        && normalize_absolute(
+                            &work_root
+                                .join("onedrive-recovery")
+                                .join(connection.id.to_string()),
+                        )
+                        .is_some_and(|expected| {
+                            normalize_absolute(&options.recovery_directory).as_ref()
+                                == Some(&expected)
+                        });
+                    if !historic_legacy_recovery {
+                        paths.push(&options.recovery_directory);
+                    }
+                }
             }
             if normalize_absolute(work_root).is_none_or(|work| {
                 paths.iter().any(|path| {

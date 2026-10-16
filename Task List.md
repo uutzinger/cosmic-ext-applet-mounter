@@ -420,8 +420,14 @@ drive types use the same tested generic profile; only identity/auth differs.
   Fixes/installer/acceptance records committed as f5c3841; replacement manifest
   pins that exact source. Replacement candidate built October 16 from packaging
   cf00f2a: export/bundle identity verified, metadata/runtime provenance unchanged.
-  Updated installation/inventory retest remains open; existing authenticated
-  remote retained for verification after the update.
+  Replacement installed October 16; installed identity/complete metadata match
+  candidate. Installed personal selected-folder verification retest passed;
+  editor shows verified status without the previous parsing notice. Test
+  Connection passed. Save rejected an existing legacy OneDrive recovery path
+  under the historic app-owned state namespace; narrow compatibility fix passes
+  check, eight focused configuration tests and final gate. Installer executable
+  Git mode corrected after gate exposed it. Replacement build/Save retest pending.
+  Paused Save and mirror/service acceptance remain pending.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 
