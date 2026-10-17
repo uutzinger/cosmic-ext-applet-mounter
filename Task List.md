@@ -440,8 +440,9 @@ drive types use the same tested generic profile; only identity/auth differs.
   mirror or retained bisync listings despite initialized state. Portal-backed
   mirror/recovery I/O, scheduled shared state root and initial-sync anchor
   postconditions corrected in source; four access tests, 29 coordinator tests,
-  localization check and final gate passed. Replacement build/installed retest
-  with fresh disposable ownership remains outstanding; no marker/state reset.
+  localization check and final gate passed. Correction committed as 91dc5ce;
+  replacement manifest pinned to that revision. Build/installed retest with
+  fresh disposable ownership is in progress; no marker/state reset.
   Quiet manual run, scheduled/Pause and remaining acceptance stay pending.
 
 #### 5. Legacy abraunegg connections (no conversion tool)

@@ -678,3 +678,10 @@ These are implementation rules, not installed acceptance. Rebuild/installation,
 portal authorization persistence across launches, real recovery writes and
 ordinary/scheduled/Pause acceptance remain outstanding. Portal API reference:
 [Documents](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Documents.html).
+
+
+October 17 replacement preparation: source correction committed as 91dc5ce;
+manifest pins that immutable revision for the authorized x86_64/master candidate.
+Runtime, feature, Cargo-input and permission selections are unchanged. Prior
+candidate and failed initialized profile are preserved. Build, installation and
+fresh disposable portal/anchor acceptance remain separate pending observations.

@@ -2959,3 +2959,22 @@ for both mirror and recovery directories in a fresh disposable profile. Retest
 initial anchor publication, ordinary sync, cross-launch access and scheduled/Pause
 before claiming integrated acceptance. Existing initialized missing-anchor state
 is deliberately not repaired by creating markers or deleting bisync state.
+
+
+### October 17, 2026 — Authorized replacement candidate for portal mirror access
+
+User authorized commit, build and retest. Source correction committed as
+91dc5cef71531a64dca17a94fba7b864a4526420. Manifest and current packaging guide now
+pin that immutable source; previous candidate remains rollback evidence.
+Packaging checkout will be committed separately. Cargo sources, shipping
+features, runtimes and permissions are unchanged. Prior passing development gate
+and localization receipts above remain applicable to the same runtime inputs;
+only affected packaging-contract tests are repeated for this pin.
+
+Replacement x86_64/master build is necessary because installed db66196 predates
+the portal-backed local I/O and anchor postconditions. Preserve failed profile
+and data; fresh disposable mirror and recovery selections are required for retest.
+Build/install success will be recorded separately from operator UI acceptance.
+
+`cargo test --locked --test flatpak_packaging_contract`: exit 0, four passed
+for the replacement source pin. `git diff --check`: exit 0.

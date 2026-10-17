@@ -10,7 +10,7 @@ submission. It requires a selected JSON manifest in a separate clean checkout
 at an expected commit, tracked referenced inputs, full Git source commit pins
 and SHA-256 for remote archives/files. Tags alone and directory-source prototypes
 are rejected. The source manifest now pins accepted implementation commit
-`5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d` for the development candidate.
+`91dc5cef71531a64dca17a94fba7b864a4526420` for the development candidate.
 The wrapper does not change that pin or choose a runtime. The packaging changes
 must also be committed before a clean-checkout candidate build.
 
@@ -170,7 +170,7 @@ Retain candidates/probes as evidence; do not ship unvalidated WebKit modules or
 claim native success completes sandbox acceptance.
 
 The permission review below applies to the 0.5.4 development candidate. Its source
-manifest pins implementation commit `5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d`,
+manifest pins implementation commit `91dc5cef71531a64dca17a94fba7b864a4526420`,
 including the integrated OneDrive rclone editor/runtime and subsequent tests and
 diagnostics. This is a development source pin, not a release tag or installed
 acceptance result. Version/release metadata is finalized in the later release task.
@@ -317,7 +317,7 @@ app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext
 ```
 
 The current manifest pins implementation commit
-`5e9f5b8c8bd3ca9bb426dec584b7cedd1954f37d` and uses generated `cargo-sources.json`.
+`91dc5cef71531a64dca17a94fba7b864a4526420` and uses generated `cargo-sources.json`.
 Offline contract tests compare every registry archive/checksum with Cargo.lock,
 check vendor checksum metadata/config, and verify Git commits and source selectors.
 The checked-in vendor list already matches this revision; regeneration is not
