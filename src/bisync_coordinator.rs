@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::config::{Config, LoadSource};
+use crate::mirror_access::LocalMirrorPaths;
 use crate::mirror_script::{live_progress_log_path, live_progress_state_path};
 use crate::model::{Connection, ConnectionId, ConnectionMode, Provider};
 use crate::offline_coordinator::{
@@ -151,15 +152,26 @@ impl RetentionCleanupIssues {
 }
 
 pub fn default_work_root() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .map(|home| home.join(".local/state"))
-        })
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cosmic-ext-applet-mounter")
+    work_root_for(
+        crate::process::CommandExecutionMode::detect_current(),
+        std::env::var_os("HOME").map(PathBuf::from),
+        std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+    )
+}
+
+fn work_root_for(
+    mode: crate::process::CommandExecutionMode,
+    home: Option<PathBuf>,
+    state: Option<PathBuf>,
+) -> PathBuf {
+    let host_state = home.map(|home| home.join(".local/state"));
+    (if mode == crate::process::CommandExecutionMode::FlatpakSpawnHost {
+        host_state
+    } else {
+        state.or(host_state)
+    })
+    .unwrap_or_else(std::env::temp_dir)
+    .join("cosmic-ext-applet-mounter")
 }
 
 pub async fn run_saved<R: CommandRunner>(
@@ -276,7 +288,12 @@ async fn run_plan<R: CommandRunner>(
         .await
         .map_err(|error| error.to_string())?;
     }
-    prepare_inputs(connection, plan, mode)?;
+    let local_paths = LocalMirrorPaths::resolve(connection, cancellation.child_token()).await?;
+    let mut local_connection = connection.clone();
+    local_connection.local_path = local_paths.mirror.clone();
+    let mut local_plan = plan.clone();
+    local_plan.recovery_directory = local_paths.recovery.clone();
+    prepare_inputs(&local_connection, &local_plan, mode)?;
     if connection.provider == Provider::OneDrive
         && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
     {
@@ -299,7 +316,15 @@ async fn run_plan<R: CommandRunner>(
             OfflineOperationState::Running,
         ),
     )?;
-    let result = run_transaction(connection, plan, mode, runner, cancellation.clone()).await;
+    let result = run_transaction(
+        connection,
+        plan,
+        mode,
+        runner,
+        cancellation.clone(),
+        &local_paths,
+    )
+    .await;
     let final_state = if result.is_ok() {
         OfflineOperationState::Succeeded
     } else if cancellation.is_cancelled() {
@@ -381,6 +406,11 @@ fn prepare_inputs(
     plan: &RcloneBisyncPlan,
     mode: BisyncMode,
 ) -> Result<(), String> {
+    if fs::symlink_metadata(&connection.local_path)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(crate::fl!("mirror-access-unavailable"));
+    }
     if fs::symlink_metadata(&plan.recovery_directory)
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
@@ -452,6 +482,18 @@ fn ensure_local_access_marker(
             )
         })?;
     }
+    validate_local_access_marker(connection, plan)
+}
+
+fn validate_local_access_marker(
+    connection: &Connection,
+    plan: &RcloneBisyncPlan,
+) -> Result<(), String> {
+    let Some(name) = &plan.access_marker_name else {
+        return Ok(());
+    };
+    let path = connection.local_path.join(name);
+    let expected = format!("{}\n", connection.id);
     let metadata = fs::symlink_metadata(&path)
         .map_err(|_| crate::fl!("ui-bisync-coordinator-sharepoint-access-marker-is-missing"))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
@@ -479,7 +521,10 @@ async fn run_transaction<R: CommandRunner>(
     mode: BisyncMode,
     runner: &R,
     cancellation: CancellationToken,
+    local_paths: &LocalMirrorPaths,
 ) -> Result<BisyncOutcome, String> {
+    let mut local_plan = plan.clone();
+    local_plan.recovery_directory = local_paths.recovery.clone();
     let (day, stamp) = utc_day_and_stamp(SystemTime::now())?;
     if mode == BisyncMode::Scheduled {
         prepare_scheduled_progress(plan)?;
@@ -552,7 +597,14 @@ async fn run_transaction<R: CommandRunner>(
             warnings: Vec::new(),
         });
     }
-    prepare_recovery(connection, plan, &day, runner, cancellation.child_token()).await?;
+    prepare_recovery(
+        connection,
+        &local_plan,
+        &day,
+        runner,
+        cancellation.child_token(),
+    )
+    .await?;
     let output = runner
         .run(request, cancellation.child_token())
         .await
@@ -610,6 +662,21 @@ async fn run_transaction<R: CommandRunner>(
         && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
         && matches!(mode, BisyncMode::InitialSync | BisyncMode::Sync)
     {
+        // Engine success must not initialize a mirror whose anchors exist only
+        // in a sandbox shadow directory, or were removed during the transfer.
+        let mut local_connection = connection.clone();
+        local_connection.local_path = local_paths.mirror.clone();
+        validate_local_access_marker(&local_connection, &local_plan)
+            .map_err(|_| crate::onedrive::OneDriveError::Ownership.to_string())?;
+        validate_remote_access_marker(
+            connection,
+            plan,
+            BisyncMode::Sync,
+            runner,
+            cancellation.child_token(),
+        )
+        .await
+        .map_err(|_| crate::onedrive::OneDriveError::Ownership.to_string())?;
         runner
             .run(
                 rclone_request(
@@ -628,7 +695,8 @@ async fn run_transaction<R: CommandRunner>(
             .await
             .map_err(|_| crate::fl!("onedrive-checksum-verification-failed"))?;
     }
-    let warnings = cleanup_retention(connection, plan, runner, cancellation.child_token()).await;
+    let warnings =
+        cleanup_retention(connection, &local_plan, runner, cancellation.child_token()).await;
     if mode == BisyncMode::InitialSync {
         write_atomic(
             &initial_sync_marker(plan),
@@ -1413,6 +1481,101 @@ mod tests {
     use crate::process::{CapturedOutput, FakeCommandRunner};
 
     #[test]
+    fn flatpak_worker_uses_the_same_host_shared_state_root_as_the_applet() {
+        use crate::process::CommandExecutionMode::{FlatpakSpawnHost, Native};
+        let home = Some(PathBuf::from("/home/example"));
+        let sandbox_state = Some(PathBuf::from("/home/example/.var/app/example/state"));
+        assert_eq!(
+            work_root_for(FlatpakSpawnHost, home.clone(), sandbox_state.clone()),
+            PathBuf::from("/home/example/.local/state/cosmic-ext-applet-mounter")
+        );
+        assert_eq!(
+            work_root_for(Native, home, sandbox_state.clone()),
+            PathBuf::from("/home/example/.var/app/example/state/cosmic-ext-applet-mounter")
+        );
+    }
+
+    #[test]
+    fn authorized_local_paths_do_not_change_host_engine_arguments() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = onedrive_connection(root.path());
+        let plan = rclone_bisync_plan(&connection, &root.path().join("state")).unwrap();
+        let paths = LocalMirrorPaths {
+            mirror: root.path().join("portal/mirror"),
+            recovery: root.path().join("portal/recovery"),
+        };
+        let mut local_connection = connection.clone();
+        local_connection.local_path = paths.mirror.clone();
+        let mut local_plan = plan.clone();
+        local_plan.recovery_directory = paths.recovery.clone();
+        prepare_inputs(&local_connection, &local_plan, BisyncMode::InitialSync).unwrap();
+        assert!(
+            paths
+                .mirror
+                .join(plan.access_marker_name.as_ref().unwrap())
+                .is_file()
+        );
+        assert!(!connection.local_path.exists());
+        assert!(!plan.recovery_directory.exists());
+        let request =
+            bisync_request(&plan, BisyncMode::InitialSync, "2026-10-17", "stamp").unwrap();
+        let command = request.sanitized_command();
+        assert!(command.contains(&plan.path2_local.display().to_string()));
+        assert!(command.contains(&plan.recovery_directory.display().to_string()));
+        assert!(!command.contains("portal/mirror"));
+        assert!(!command.contains("portal/recovery"));
+    }
+
+    #[tokio::test]
+    async fn missing_post_sync_anchor_never_initializes_or_runs_checksum() {
+        for missing_local in [true, false] {
+            let root = tempfile::tempdir().unwrap();
+            let connection = onedrive_connection(root.path());
+            let plan = rclone_bisync_plan(&connection, &root.path().join("state")).unwrap();
+            prepare_inputs(&connection, &plan, BisyncMode::InitialSync).unwrap();
+            if missing_local {
+                fs::remove_file(
+                    connection
+                        .local_path
+                        .join(plan.access_marker_name.as_ref().unwrap()),
+                )
+                .unwrap();
+            }
+            let runner = FakeCommandRunner::default();
+            push_successful_sync_prefix(&runner);
+            if !missing_local {
+                runner.push(Ok(output("foreign-owner")));
+            }
+            assert!(
+                run_transaction(
+                    &connection,
+                    &plan,
+                    BisyncMode::InitialSync,
+                    &runner,
+                    CancellationToken::new(),
+                    &LocalMirrorPaths::native(&connection).unwrap()
+                )
+                .await
+                .is_err()
+            );
+            assert!(!initial_sync_marker(&plan).exists());
+            assert!(
+                !runner
+                    .requests()
+                    .iter()
+                    .any(|r| r.sanitized_command().contains(" check "))
+            );
+            assert!(
+                !connection
+                    .local_path
+                    .join(plan.access_marker_name.as_ref().unwrap())
+                    .exists()
+                    || !missing_local
+            );
+        }
+    }
+
+    #[test]
     fn retention_counts_use_fluent_plural_selection() {
         for (count, expected) in [(1, "1 recovery entry;"), (2, "2 recovery entries;")] {
             let warnings = RetentionCleanupIssues {
@@ -1536,6 +1699,7 @@ mod tests {
                     BisyncMode::Sync,
                     &runner,
                     CancellationToken::new(),
+                    &LocalMirrorPaths::native(&connection).unwrap(),
                 )
                 .await
                 .unwrap_err();
@@ -2359,6 +2523,7 @@ mod tests {
             prepare_inputs(&connection, &plan, BisyncMode::InitialSync).unwrap();
             let runner = FakeCommandRunner::default();
             push_successful_sync_prefix(&runner);
+            runner.push(Ok(output(&connection.id.to_string())));
             runner.push(if success {
                 Ok(output(""))
             } else {
@@ -2379,6 +2544,7 @@ mod tests {
                 BisyncMode::InitialSync,
                 &runner,
                 CancellationToken::new(),
+                &LocalMirrorPaths::native(&connection).unwrap(),
             )
             .await;
             assert_eq!(result.is_ok(), success);
@@ -2456,6 +2622,7 @@ mod tests {
             let runner = FakeCommandRunner::default();
             runner.push(Ok(output(&connection.id.to_string())));
             push_successful_sync_prefix(&runner);
+            runner.push(Ok(output(&connection.id.to_string())));
             runner.push(if success {
                 Ok(output(""))
             } else {
@@ -2473,6 +2640,7 @@ mod tests {
                 BisyncMode::Sync,
                 &runner,
                 CancellationToken::new(),
+                &LocalMirrorPaths::native(&connection).unwrap(),
             )
             .await;
             assert_eq!(result.is_ok(), success);

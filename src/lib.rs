@@ -10,6 +10,7 @@ pub mod host_inspection;
 pub mod i18n;
 pub mod import;
 pub mod microsoft_oauth;
+pub mod mirror_access;
 pub mod mirror_script;
 pub mod model;
 pub mod mount_guard;

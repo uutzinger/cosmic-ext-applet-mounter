@@ -6,7 +6,7 @@ Status: Source reconciliation complete; final release-package acceptance pending
 
 Created: October 7, 2026
 
-Last reviewed: October 16, 2026
+Last reviewed: October 17, 2026
 
 ## Scope and method
 
@@ -159,7 +159,15 @@ version below 5), not for a general D-Bus failure, timeout, or invalid path.
 Portal v4 is the supported-host case that requires this exception. Remove it
 when the minimum supported host provides sandbox-enabled v5+ host-path lookup.
 
-Source: `src/app.rs`. This is an explicit exception, not an unresolved D-Bus
+Source: `src/app.rs` and `src/mirror_access.rs`. October 17: mirror/recovery access
+revalidates remembered directory grants through the same version-gated policy;
+the v4 host lookup has a fixed operation, watch-bus lifetime, five-second timeout
+and 64 KiB output bound. There is no fallback on a general v5 failure. This adds
+no host executable, shell text, blanket grant or filesystem permission. Native
+and sandbox local I/O are separated from rclone's host engine paths; installed
+access/recovery/worker acceptance remains pending.
+
+This is an explicit exception, not an unresolved D-Bus
 conversion or a reason to postpone the source inventory scan.
 
 ### Storage engines

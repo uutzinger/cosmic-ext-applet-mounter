@@ -13,7 +13,7 @@ personal and business sample trees on October 15, 2026
 
 Created: October 14, 2026
 
-Last reviewed: October 16, 2026
+Last reviewed: October 17, 2026
 
 Scope: OneDrive Offline mirror connections after `abraunegg/onedrive` is dropped.
 Associated task: Task List "Engine decision and OneDrive Offline migration to
@@ -642,3 +642,39 @@ Its narrow compatibility exception permits only legacy OneDrive's exact normaliz
 mirror/cache and other work-root overlaps remain guarded. Eight focused config
 tests and final gate passed. Candidate rebuild and installed Save/Paused retest
 remain separate; no existing profile or legacy state is migrated.
+
+## Flatpak mirror and recovery access correction (October 17)
+
+Status: source correction and focused fake-adapter validation; installed retest
+pending. The db66196 candidate saved paused, previewed and completed initial
+transfers/checksum, but the next manual sync correctly blocked on a missing
+anchor. Host mirror and retained bisync listings contained no anchor. Direct
+sandbox I/O through the saved host path did not establish access to the engine's
+tree. Initial transfer/checksum success alone was insufficient acceptance.
+
+`src/mirror_access.rs` keeps saved host engine paths separate from authorized
+sandbox paths. Folder selection remembers the existing document grant in a
+private per-host-directory record under the already shared app config namespace.
+Every operation revalidates the same origin via Documents D-Bus GetHostPaths on
+v5+, or the existing reviewed capability-gated portal-v4 document-info exception.
+Native runs retain their original paths; no new host command or filesystem grant
+is added. Records are bounded, malformed/linked records rejected, and missing,
+revoked, changed or read-only access fails before engine execution. A known host
+path or writable sandbox-home shadow is never sufficient authority.
+
+Mirror and recovery directories each need Browse authorization in Flatpak. The
+editor exposes recovery Browse; the native automatic sibling default remains.
+Coordinator marker/recovery/retention I/O uses the verified portal paths while
+rclone arguments, saved binding and target hash retain host paths. Save/Test and
+Start check access as well as runtime workers. Flatpak scheduled worker and applet
+use the same host-shared state root; native XDG_STATE_HOME behavior is retained.
+OneDrive initial/ordinary sync verifies local and remote anchors after engine
+success, before checksum and initialization publication. Missing anchors on an
+already initialized mirror stay blocked; no automatic recreation, state reset,
+resync or permission expansion. Preserve the failed disposable profile as
+evidence and use a newly owned disposable setup for installed retest.
+
+These are implementation rules, not installed acceptance. Rebuild/installation,
+portal authorization persistence across launches, real recovery writes and
+ordinary/scheduled/Pause acceptance remain outstanding. Portal API reference:
+[Documents](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Documents.html).

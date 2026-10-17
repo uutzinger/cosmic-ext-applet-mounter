@@ -741,6 +741,8 @@ pub enum Message {
     DraftLocalPath(String),
     OpenLocalFolderPicker,
     LocalFolderPicked(Result<Option<String>, String>),
+    OpenRecoveryFolderPicker,
+    RecoveryFolderPicked(Result<Option<String>, String>),
     DraftRecoveryDirectory(String),
     DraftCacheLimit(String),
     DraftSyncInterval(String),
@@ -1929,6 +1931,29 @@ impl AppModel {
             Message::OpenLocalFolderPicker => {
                 return self.open_local_folder_picker();
             }
+            Message::OpenRecoveryFolderPicker => {
+                self.last_notice = Some(fl!(
+                    "notice-picker-opening",
+                    target = fl!("ui-app-recovery-directory")
+                ));
+                return Task::perform(
+                    async { pick_folder(fl!("ui-app-recovery-directory")).await },
+                    |result| cosmic::Action::App(Message::RecoveryFolderPicked(result)),
+                );
+            }
+            Message::RecoveryFolderPicked(result) => match result {
+                Ok(Some(path)) => {
+                    self.validated_draft = None;
+                    self.draft.recovery_directory = path.clone();
+                    self.last_notice = Some(fl!(
+                        "notice-folder-selected",
+                        target = fl!("ui-app-recovery-directory"),
+                        path = path
+                    ));
+                }
+                Ok(None) => self.last_notice = Some(fl!("notice-folder-cancelled")),
+                Err(error) => self.last_notice = Some(fl!("notice-folder-failed", error = error)),
+            },
             Message::LocalFolderPicked(result) => match result {
                 Ok(Some(path)) => {
                     self.pending_shared_remote_ack = None;
@@ -3336,11 +3361,21 @@ impl AppModel {
                     fl!("offline-settings"),
                     settings
                         .push(field_with_safety_help(
-                            widget::text_input::text_input(
-                                fl!("recovery-placeholder"),
-                                &self.draft.recovery_directory,
-                            )
-                            .on_input(Message::DraftRecoveryDirectory),
+                            widget::row::with_capacity(2)
+                                .spacing(8)
+                                .push(
+                                    widget::text_input::text_input(
+                                        fl!("recovery-placeholder"),
+                                        &self.draft.recovery_directory,
+                                    )
+                                    .on_input(Message::DraftRecoveryDirectory)
+                                    .width(Length::Fill),
+                                )
+                                .push(field_with_help(
+                                    widget::button::standard(fl!("browse"))
+                                        .on_press(Message::OpenRecoveryFolderPicker),
+                                    fl!("recovery-browse-help"),
+                                )),
                             fl!("recovery-safety"),
                             fl!("recovery-help"),
                         ))
@@ -7340,10 +7375,12 @@ fn local_target_label(mode: AccessMode) -> String {
 }
 
 async fn pick_local_folder(mode: AccessMode) -> Result<Option<String>, String> {
-    let dialog = file_chooser::open::Dialog::new().title(crate::fl!(
-        "ui-app-choose-value1",
-        value1 = (local_target_label(mode)).to_string()
-    ));
+    pick_folder(local_target_label(mode)).await
+}
+
+async fn pick_folder(target: String) -> Result<Option<String>, String> {
+    let dialog = file_chooser::open::Dialog::new()
+        .title(crate::fl!("ui-app-choose-value1", value1 = target));
 
     match dialog.open_folder().await {
         Ok(response) => {
@@ -7363,12 +7400,14 @@ fn selected_folder_path(path: &Path) -> String {
 }
 
 async fn host_visible_selected_folder_path(path: &Path) -> Result<String, String> {
-    document_portal_origin_path(path).await.map(|origin| {
-        origin
-            .as_deref()
-            .map(selected_folder_path)
-            .unwrap_or_else(|| selected_folder_path(path))
-    })
+    let origin = document_portal_origin_path(path).await?;
+    if let Some(host) = &origin {
+        cosmic_ext_applet_mounter::mirror_access::remember_directory(host, path)?;
+    }
+    Ok(origin
+        .as_deref()
+        .map(selected_folder_path)
+        .unwrap_or_else(|| selected_folder_path(path)))
 }
 
 async fn document_portal_origin_path(path: &Path) -> Result<Option<PathBuf>, String> {
@@ -9189,7 +9228,7 @@ async fn install_rclone_offline_mirror_units(connection: Connection) -> String {
 }
 
 async fn install_rclone_offline_mirror_units_result(connection: &Connection) -> Result<(), String> {
-    prepare_offline_mirror_runtime(connection)?;
+    prepare_offline_mirror_runtime(connection).await?;
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
     prepare_rclone_bisync_work_files(connection, &plan)?;
@@ -10521,7 +10560,7 @@ async fn run_managed_offline_mirror_operation_result_with_cancellation(
     operation: Operation,
     cancellation: CancellationToken,
 ) -> Result<String, String> {
-    prepare_offline_mirror_runtime(connection)?;
+    prepare_offline_mirror_runtime(connection).await?;
     let plan =
         rclone_bisync_plan(connection, &default_work_root()).map_err(|error| error.to_string())?;
     match operation {
@@ -11604,8 +11643,17 @@ fn prepare_onedriver_online_mount_runtime_with(
     Ok(())
 }
 
-fn prepare_offline_mirror_runtime(connection: &Connection) -> Result<(), String> {
-    fs::create_dir_all(&connection.local_path).map_err(|error| {
+async fn prepare_offline_mirror_runtime(connection: &Connection) -> Result<(), String> {
+    let paths = if is_legacy_onedrive_mirror(connection) {
+        cosmic_ext_applet_mounter::mirror_access::LocalMirrorPaths::native(connection)?
+    } else {
+        cosmic_ext_applet_mounter::mirror_access::LocalMirrorPaths::resolve(
+            connection,
+            CancellationToken::new(),
+        )
+        .await?
+    };
+    fs::create_dir_all(&paths.mirror).map_err(|error| {
         crate::fl!(
             "ui-app-failed-to-create-mirror-directory-value1-error",
             value1 = (connection.local_path.display()).to_string(),
@@ -11620,7 +11668,7 @@ fn prepare_offline_mirror_runtime(connection: &Connection) -> Result<(), String>
         )
     })?;
     if let ConnectionMode::OfflineMirror(options) = &connection.mode {
-        fs::create_dir_all(&options.recovery_directory).map_err(|error| {
+        fs::create_dir_all(&paths.recovery).map_err(|error| {
             crate::fl!(
                 "ui-app-failed-to-create-recovery-directory-value1-error",
                 value1 = (options.recovery_directory.display()).to_string(),
@@ -12740,6 +12788,13 @@ async fn verify_rclone_access_with_verified(
     connection: &Connection,
     teams_verified: Option<&sharepoint::VerifiedSharePointLibrary>,
 ) -> Result<String, String> {
+    if matches!(connection.mode, ConnectionMode::OfflineMirror(_)) {
+        cosmic_ext_applet_mounter::mirror_access::LocalMirrorPaths::resolve(
+            connection,
+            CancellationToken::new(),
+        )
+        .await?;
+    }
     if is_onedrive_rclone_mirror(connection) {
         // Validation is read-only and also applies to disabled drafts. Run guards
         // still require the authoritative saved connection to be enabled.

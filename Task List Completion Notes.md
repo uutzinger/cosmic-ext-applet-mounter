@@ -2813,3 +2813,149 @@ legacy recovery state, remote and services unchanged during build. No push or
 publication. Next operator step: close unsaved editor and remove panel applet for
 replacement installation, then existing-remote/subtree verification and Save
 retest. Post-build evidence is a separate records-only commit; no rebuild needed.
+
+### October 16, 2026 — Legacy-compatible replacement installed for Save retest
+
+Operator confirmed panel applet removed for replacement. Ran maintained
+`bash scripts/install-flatpak.sh --candidate-receipt
+target/task-runs/flatpak-candidate-db66196/artifacts.json --log-dir
+target/task-runs/flatpak-install-db66196` (absolute paths supplied). Exit 0;
+candidate reuse/integrity checks passed and installed identity/complete metadata
+match the candidate. Same user master/x86_64 ref; new commit
+968e0ac9c1acfa722db89e43d6452d31dd73c9e6dacb26b08043fadf2308252c.
+Previous installed commit
+48e7cabc6280678b999521499f475efd82395d2487da114ce60d4a887c97f8fd
+retained in installation.json for rollback identity. summary.json/task.log and
+installation.json retained under target/task-runs/flatpak-install-db66196/.
+
+No launcher modification needed, since native override remains parked. No
+dependency updates, profile edits, cloud changes, service changes or app launch
+performed by the installer. Next operator sequence: re-add panel applet, recreate
+the unsaved personal draft using its existing remote and explicit disposable
+subtree, Browse to empty local acceptance directory, Verify selected remote,
+Test Connection, then Save only after preceding checks pass. Review resulting
+notice/Paused state before any sync. Installed Save/Paused and subsequent
+mirror/service lifecycle acceptance remain open. Documentation-only updates;
+unchanged code checks reuse the preceding receipts, without another gate/build.
+
+Legacy-compatible installed Save retest: operator screenshot reports the test
+connection saved with managed mirror units and schedule disabled, requiring
+Preview and confirmed initial Sync Now before Start. No legacy recovery-path
+error. Read-only saved-document inspection confirms the disposable test profile
+exists with rclone engine, OfflineMirror mode and the exact approved personal
+test subtree. No raw configuration or credentials printed. This proves installed
+Save/UI result and persistence; timer scheduling, actual transfers and service
+lifecycle remain unverified. Next: disposable distinct local/cloud sample files,
+then Preview before confirmed initial sync. No Start/Sync issued by the agent.
+
+Installed personal Preview/initial acceptance, same db66196 candidate:
+
+- Operator screenshot: Preview completed, estimated differing paths 2, initial
+  sync not yet run; UI requested explicit Sync Now confirmation. This is an
+  estimate, not a checksum or transfer result.
+- Operator then confirmed initial Sync Now. Completion screenshot reports
+  OneDrive synchronization and checksum verification completed successfully.
+  Operator noted it took some time; no duration measurement supplied, so no
+  performance claim or timing regression inferred.
+- Initial sync/checksum success is recorded as observed installed UI/backend
+  result. Explicit operator confirmation of both local/cloud test-file arrivals
+  is still pending; no independent raw engine receipt inspection claimed here.
+  Next: verify arrivals, then one unchanged manual Sync Now to exercise ordinary
+  synchronization/checksum. Keep scheduling paused until that result is reviewed.
+  Scheduled Start/Pause, business account flow and cleanup remain outstanding.
+  No source edits/check repetition, service changes or cloud operations executed
+  by the agent in this record-only update.
+
+### October 17, 2026 — Ordinary sync blocked: sandbox/host mirror access
+
+Operator confirmed both test files arrived after initial sync, then reported the
+unchanged manual run blocked on missing/changed ownership marker. Read-only
+inspection: real host mirror anchor absent, one initialized target, four retained
+bisync listing files and none containing the access anchor. Current applet's
+namespace does not expose the saved host mirror path. No marker, listing, lock,
+initialization state, test file or user configuration changed during diagnosis.
+
+Source establishes a namespace mismatch: folder selection resolves portal URI
+to a host path and discards the portal access path; coordinator direct local I/O
+uses that host path inside the sandbox, while rclone uses the actual host path.
+Sandbox home paths can be temporary shadow directories. The initial engine
+checksum checks the host tree, so it did not prove that coordinator anchor writes
+reached that tree. This explains the false initialization boundary; current
+missing-anchor guards correctly block further work and must not be bypassed.
+
+Selected correction: retain per-directory existing portal grants in private
+app-owned config, revalidate origins with typed Documents D-Bus (v5 GetHostPaths,
+existing capability-gated portal-v4 document-info exception), and use the granted
+portal paths only for sandbox mirror/recovery I/O. Engine arguments, saved
+identities and target hashes keep host paths. Missing/revoked/malformed grants
+fail closed, never fall back to writable sandbox-home shadows. Add recovery
+Browse so its authorization is explicit; do not broaden filesystem grants.
+Require local and remote anchor postconditions after initial/ordinary engine
+success before checksum and initial completion publication. Also align scheduled
+worker's Flatpak state root with the applet's host-shared root, retaining native
+XDG_STATE_HOME policy. Source/fake tests and installed acceptance are separate.
+The already-initialized test profile's missing anchor is not silently recreated.
+
+Implemented files: new src/mirror_access.rs with DirectoryOrigin trait and fake,
+private per-directory grant records, strict portal-path/origin matching, bounded
+16 KiB reads, writable-directory checks and cancellation/8-second origin bound;
+src/lib.rs export; src/app.rs remembers folder selections, adds recovery Browse
+and checks access during validation/runtime preparation; shared coordinator uses
+mapped local marker/recovery/retention paths while engine arguments stay host
+paths, checks OneDrive anchors after engine success and shares host state with
+scheduled workers. New app-owned messages/help use Fluent. Packaging manifest
+permissions and rclone flags unchanged. Contracts/inventory/guide updated.
+
+Validation at source 1bf37a053a8155f715ddf97392fb56717d982cd3, dirty=true:
+
+- `just fmt`: exit 0.
+- Iterative `bash scripts/dev.sh check`: exit 0, logs
+  target/task-runs/dev-check-n29b9g7z/, dev-check-1ewz111q/,
+  dev-check-r_p05wcy/ and final dev-check-gztawdhh/; bounded reader/permission
+  refinements were included in the final check. Early checks are not substituted
+  for final validation of later edits.
+- `cargo test --locked --lib bisync_coordinator::`: exit 0, 29 passed, including
+  host-vs-portal argument separation, missing post-engine local/remote anchors
+  cannot initialize, worker state-root equivalence and existing lock/cancellation/
+  partial-failure/retention protections.
+- `cargo test --locked --lib mirror_access::`: initial two tests passed; final
+  four passed with malformed/oversized/linked record and read-only/absent/linked
+  directory cases. Revoked/changed origin and cancellation never select host
+  shadow paths. Tests use synthetic paths, temp files and fake origin adapters.
+- `bash scripts/dev.sh localization-check`: exit 0, receipt/log
+  target/task-runs/dev-localization-check-3w68t2h_/.
+- Final gate follows. No live sync, marker recreation, permission change, profile
+  conversion, deletion, commit or candidate build performed in this correction.
+
+- First gate target/task-runs/dev-gate-sfapxthr/: exit 101 on Clippy's
+  unnecessary_literal_unwrap in the new state-root test fixture. Replaced the
+  known Some/unwrap expected value with its literal PathBuf; production behavior
+  unchanged. Focused state-root test and final gate rerun follow. No failed gate
+  is counted as acceptance.
+
+- After lint-only test correction, `bash scripts/dev.sh check`: exit 0,
+  target/task-runs/dev-check-msnv2u9t/; `just fmt`: exit 0;
+  `cargo test --locked --lib flatpak_worker_uses_the_same_host_shared_state_root_as_the_applet`:
+  exit 0, one passed. Production/Fluent inputs unchanged since focused/localization
+  checks; those passing receipts are reused.
+- Bounded read-only host portal-directory metadata inspection examined ten
+  document entries and found one alias for the selected test directory in
+  doc-ID/basename form, matching the implementation's path grammar. No directory
+  contents, permissions, grant records or test files modified; this is format
+  evidence, not sandbox write/worker acceptance. Final gate rerun follows.
+
+- Final `bash scripts/dev.sh gate`: exit 0; receipt/log
+  target/task-runs/dev-gate-j7fe93iz/ (source 1bf37a053a8155f715ddf97392fb56717d982cd3,
+  dirty=true). Formatting, all-feature lint, all-target Rust and maintained Python
+  tests passed. The state-root fixture lint issue did not recur.
+- `git diff --check`: exit 0. No desktop/AppStream source change, so no new
+  metadata validation needed. Fluent validation receipt above remains current.
+  All runtime/source edits and new mirror_access module are uncommitted. No
+  rebuild/installation or renewed live sync performed. Original failed profile,
+  test files, marker absence and initialization state retained unchanged.
+
+Next: approve source commit/pinned replacement build, then installed portal Browse
+for both mirror and recovery directories in a fresh disposable profile. Retest
+initial anchor publication, ordinary sync, cross-launch access and scheduled/Pause
+before claiming integrated acceptance. Existing initialized missing-anchor state
+is deliberately not repaired by creating markers or deleting bisync state.

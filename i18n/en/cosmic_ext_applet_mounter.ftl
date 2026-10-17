@@ -1,4 +1,7 @@
 app-title = Cloud Mounter
+mirror-access-unavailable = Mirror or recovery folder access is unavailable or changed. Use Browse to select both folders again before saving or synchronizing.
+mirror-access-select-directories = Select both the mirror and recovery folders with Browse to authorize sandbox access. A typed host path does not grant folder access.
+recovery-browse-help = Choose an existing recovery folder with the folder picker. Flatpak mirrors require this authorization separately from the mirror folder.
 auth-helper-title = OneDrive Authorization
 auth-helper-intro = Sign in with Microsoft. This helper captures only the final native-client redirect URL and writes it to onedrive's transient response file.
 auth-helper-captured = OneDrive authorization captured
@@ -151,7 +154,7 @@ sync-metered-help = Disabled by default so automatic sync pauses on metered netw
 offline-settings = Offline mirror settings
 recovery-placeholder = leave blank for automatic recovery directory
 recovery-safety = Keep recovery data outside the mirror tree.
-recovery-help = Optional. Leave blank to auto-generate a sibling recovery directory based on the mirror directory.
+recovery-help = Leave blank to auto-generate a sibling recovery directory based on the mirror directory. Flatpak mirrors require choosing an explicit recovery folder with Browse.
 recovery-automatic = Automatic recovery directory: { $path }
 vpn-disconnect = Allow applet to disconnect VPN it activated
 vpn-disconnect-help = The applet may disconnect only a VPN it activated, and only after no active connection still needs it.

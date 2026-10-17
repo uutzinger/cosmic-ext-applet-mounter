@@ -443,6 +443,15 @@ record the specific path/operation and a narrowly scoped solution; do not silent
 add `--filesystem=host`. Host engine execution and host-visible FUSE mounts do
 not prove that the sandboxed Rust worker can access every user-selected path.
 
+October 17 source correction: choose both the mirror folder and an explicit
+recovery folder using their Browse buttons. The app remembers and revalidates
+the existing portal grants for local coordinator I/O; rclone keeps host paths.
+Typed paths alone are insufficient. This does not add filesystem permissions.
+The scheduled worker shares the applet's host-visible state root. Initial sync
+now requires both anchors after transfer before it can report initialization.
+These changes require a new candidate and installed acceptance; missing markers
+in an already initialized profile are not silently recreated or reset.
+
 All remaining grants support current source paths; replacing host CLIs does not
 remove the D-Bus grants for their replacement APIs or the shared engine/unit
 paths. No blanket session/system bus socket or proprietary VPN-service grant is
