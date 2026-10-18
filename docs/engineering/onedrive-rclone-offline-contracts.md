@@ -8,7 +8,7 @@ flows accepted for both drive types; new production folder guards await live acc
 production configuration, shared Microsoft OAuth, OneDrive setup/guards and guarded
 coordinator/planner, shared app runtime and Add/Modify editor paths implemented;
 phase-4 implementation and integrated installed smoke closed October 18, 2026;
-broader phase-7/native/Debian/Flatpak lifecycle and release acceptance remains open;
+broader phase-6/native/Debian/Flatpak lifecycle and release acceptance remains open;
 generic profiles confirmed by original/download and measured-sync checks for
 personal and business sample trees on October 15, 2026
 
@@ -713,3 +713,30 @@ carried to phase-7 visual review. Full negative-guard/lifecycle/native/Debian an
 release acceptance, legacy deprecation/removal remain in their own phases.
 Historical intermediate pending statuses above are superseded only within this
 accepted smoke scope; detailed failure/fix chronology is retained unchanged.
+
+
+## Phase-5 legacy deprecation (October 18, 2026)
+
+Source policy: new OneDrive Offline drafts explicitly select rclone; saved legacy
+profiles retain absent/explicit legacy engine and their existing runtime route.
+A persistent Fluent notice in the legacy Modify editor explains continued 0.5.4
+support, later removal and manual replacement with separate directories and
+rclone authentication. There is no in-place conversion, state/token copying or
+new legacy engine selector. Online onedriver routing is unchanged.
+
+Existing configuration guards reject equal or ancestor/descendant overlaps
+between a new rclone mirror/recovery and legacy mirror/recovery, even for disabled
+legacy profiles. Focused synthetic tests cover both drive types and connection
+orders, legacy wire-format round trips and separate engine plan namespaces.
+No new runtime safety mechanism or state migration is introduced for this task.
+The [0.5.4 draft release notes](../releases/v0.5.4.md) document preserving
+unsynchronized work, new setup, Preview/initial sync, verification and old-profile
+removal without deleting cloud/local files. Legacy dependencies remain until
+post-0.5.4 removal. Rendered notice and live legacy continuity are phase-7
+acceptance; source/fake tests must not be counted as those installed passes.
+
+
+October 18 numbering clarification: current 0.5.4 migration acceptance is now
+phase 6 (formerly 7); future engine removal uses item 1 in its own section.
+Earlier phase-7 references in this record are historical references to the same
+acceptance work. No release-policy change or engine-removal execution implied.

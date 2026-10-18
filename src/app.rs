@@ -3191,6 +3191,16 @@ impl AppModel {
         mut content: widget::ListColumn<'a, Message>,
     ) -> widget::ListColumn<'a, Message> {
         let modify_locked = matches!(self.window_mode, WindowMode::ModifyConnection(_));
+        if modify_locked
+            && self.draft.provider == Provider::OneDrive
+            && self.draft.access_mode == AccessMode::OfflineMirror
+            && self.draft.legacy_onedrive
+        {
+            content = content.add(section_row(
+                fl!("onedrive-legacy-deprecation-title"),
+                widget::text::body(fl!("onedrive-legacy-deprecation-help")),
+            ));
+        }
         let provider_choices = choice_row(vec![
             provider_choice(
                 fl!("provider-onedrive"),

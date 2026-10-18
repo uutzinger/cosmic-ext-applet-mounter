@@ -3487,3 +3487,138 @@ no repeat runtime gate/build required for unchanged inputs.
 Reorganization verification: original phase-6 checklist equals moved text
 verbatim; one phase-6 heading exists in future section, outside 0.5.4; release
 labels and local link target checked; git diff --check exit 0.
+
+
+### October 18, 2026 — Phase 5 legacy deprecation implementation
+
+Started at operator request. Audit found new editor drafts already choose rclone,
+legacy edits preserve engine/wire format and runtime routing, and existing
+configuration guards reject path overlap including disabled profiles. No engine
+or dependency removal or automatic conversion needed/authorized in phase 5.
+
+Changes: src/app.rs adds persistent Fluent deprecation section for legacy
+OneDrive Offline Modify only. English Fluent notice explains one-release support,
+separate replacement/authentication, Preview/initial sync, verification before
+old-profile removal and no sync-state/token copying. tests/onedrive_configuration.rs
+adds equal/parent/child overlap regression for mirror/recovery against both
+legacy roots, both drive types and both connection orders (disabled legacy), plus
+separate engine-plan namespace and unchanged legacy-serialization coverage.
+Existing guards reused; no new config format or runtime routing change.
+
+Draft docs/releases/v0.5.4.md and index document two-release policy, preserving
+unsynchronized local work, separate authorized folders and rclone authentication,
+Preview/initial sync, verification and user-controlled old-profile removal.
+Version remains draft; no release/package support claim. Engineering contract/
+index updated; phase-7 retains installed legacy continuity/rendered notice gate.
+Untracked Push Buttons.md untouched. No profiles, databases, caches, tokens,
+services, cloud/local files or installed package modified.
+
+Verification so far (source 0a1f951dec41c96966c32baeb9ad8f5872592bba, dirty=true):
+- just fmt: exit 0.
+- bash scripts/dev.sh check: exit 0, target/task-runs/dev-check-cv13tkte/.
+- cargo test --locked --test onedrive_configuration: exit 0, ten passed.
+- cargo test --locked --bin cosmic-ext-applet-mounter onedrive_configuration_:
+  exit 0, three passed (new routing and legacy round trip).
+- cargo test --locked --bin cosmic-ext-applet-mounter
+  onedrive_runtime_dispatch_uses_engine_and_preserves_legacy_and_online:
+  exit 0, one passed.
+- bash scripts/dev.sh localization-check: exit 0,
+  target/task-runs/dev-localization-check-89uxoe9f/.
+- Final gate follows; no installed notice/legacy lifecycle pass claimed.
+
+
+Final phase-5 source verification: bash scripts/dev.sh gate, exit 0, receipt/log
+at target/task-runs/dev-gate-6_eqf2pd/ (same base SHA above, dirty=true). Formatting,
+all-feature lint and all-target Rust/maintained Python tests passed. No failure
+or skipped-as-pass claim. Release-note local links and git diff --check passed.
+Phase-5 source tasks marked complete; installed notice/legacy continuity retained
+explicitly in phase 7. No new release build/installation or live legacy sync run.
+
+Files changed: src/app.rs, English Fluent file, tests/onedrive_configuration.rs,
+docs/releases/v0.5.4.md (new draft), release-note index, OneDrive engineering
+contract/index, Task List.md and completion notes. Existing cross-engine guards
+were already implemented, so only regression coverage changed there. Remaining
+risk/limitation: rendered layout of longer legacy notice and actual installed
+legacy continuity not revalidated; legacy auth/engine dependencies deliberately
+retained for 0.5.4. Next: commit reviewed source/docs, then include notice in the
+next accepted package for phase-7 rendered/live review. No push, tag, publication,
+profile mutation, dependency removal or data deletion performed.
+
+
+### October 18, 2026 — Refresh phase-6 removal checklist before execution
+
+Operator requested task-list update first, then work on removal. Refreshed
+post-0.5.4 phase 6 against current code/packaging: no separate helper desktop
+file; helper still installed via justfile/Flatpak payloads; retire only legacy
+OneDrive executable/options, retaining onedriver Online, rclone onedrive backend
+and shared OAuth. Added missing GTK3 helper recommendation, consumer-checked
+Python/package handling, status/pending/diagnostic/process branches, inert legacy
+profile controls, owned installed-monitor-unit retirement/upgrade acceptance and
+preservation. Historical inventory/published deprecation evidence stays intact.
+No installed package uninstall is implied by dropping recommendations.
+
+Existing release policy still keeps legacy support through 0.5.4. Asked operator
+whether work means separate future-release preparation or explicitly bringing
+engine removal into 0.5.4. No removal code, service operations or release-policy
+change performed while this answer is pending. Completed phase-5 uncommitted
+source/docs and user Push Buttons.md preserved. Documentation update only;
+phase-6 execution/acceptance checklist remains entirely open.
+
+
+### October 18, 2026 — Numbering clarification; start migration acceptance
+
+Operator clarified "6" meant the 0.5.4 acceptance section renamed from 7 to close
+the gap after future engine removal was moved, not a request to implement engine
+removal now. Earlier interpretation in the checklist-refresh entry is superseded;
+0.5.4 legacy support policy is unchanged. Task List.md current acceptance heading/
+references now say phase 6; future engine-removal section starts at item 1 in its
+own numbering. Historical notes/engineering chronology retain original phase
+numbers, with this mapping authoritative for current work. Removal checklist
+refresh retained as future planning; no retirement code/services modified.
+
+Started actual phase-6 acceptance. Existing installed cf2d13b/packaging 848d48b
+supports recovery help/no-automatic-notice visual check; operator prompt sent.
+New phase-5 legacy notice is still uncommitted/uninstalled, so its rendered review
+requires later committed candidate, not a claim from current screenshot/source.
+Reuse accepted phase-4 personal/corporate/SharePoint smoke and focused guard
+receipts for unchanged behavior. No automatic branch creation, removal,
+repeated engine tests/build, profile mutation or dependency change. Push Buttons.md
+and all earlier phase-5 work preserved.
+
+
+October 18 phase-6 visual acceptance: operator explicitly confirmed correct
+recovery Browse/separate-authorization help and absence of Automatic recovery
+directory notice on installed 848d48b, following earlier placeholder confirmation.
+Operator noted the question had already been asked; do not repeat the accepted
+check. Marked final rendered recovery guidance complete, superseding pending
+visual-detail statements in historical records. No runtime/source change,
+profile Save, test rerun/build or live sync needed. Remaining installed legacy
+notice awaits a candidate containing phase-5 source changes; existing broader
+acceptance items retain their current status. git diff --check exit 0.
+
+
+### October 18, 2026 — Commit phase 5 and clarify source/package state
+
+Operator requested commit and updated records after confusion between completed
+recovery-wording installation and subsequent legacy deprecation work. This commit
+includes phase-5 notice/source, two added compatibility regressions, draft 0.5.4
+release notes/index and reconciled task/engineering records. Current phase 6 is
+migration acceptance; future removal has independent item 1. Legacy engine
+support remains in 0.5.4. Push Buttons.md excluded as user work.
+
+Current package remains 848d48b pinned to cf2d13b, installed/verified at OSTree
+757aae349f1017ea47eb93c88e6f1522b8ed9cef657a480e6f1b18826156e8a0. That candidate
+contains the completed recovery wording fix, not this new legacy notice. Its
+rendered recovery placeholder/help/no-automatic-notice check is complete and
+must not be repeated. Phase 5 is source-complete, with no phase-5 build or install
+yet; phase-6 installed legacy notice/continuity and other open acceptance gates
+remain pending. No package build, install, service/profile mutation or publication
+is performed by this commit.
+
+Reused unchanged source verification: check dev-check-cv13tkte, ten configuration
+integration tests, three editor engine/round-trip tests, one engine-dispatch test,
+localization dev-localization-check-89uxoe9f, final gate dev-gate-6_eqf2pd: all
+exit 0 (base 0a1f951, dirty=true). Only records changed since those receipts;
+no repeated gate needed. Release-note links and final git diff --check exit 0.
+Next: pin a replacement candidate to this committed source, build once and
+inspect installed legacy notice; reuse previously accepted sync/recovery smoke.

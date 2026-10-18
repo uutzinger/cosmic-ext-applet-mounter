@@ -72,8 +72,8 @@ Online. No other mount engine is added or changed.
 
 Release boundary: **0.5.4 introduces rclone for new OneDrive Offline mirrors and
 retains existing abraunegg mirrors for one deprecation release.** Phase 5 and
-phase 7 below, plus Consolidated Flatpak acceptance and release, are 0.5.4 work.
-Actual engine/helper/dependency removal (phase 6) is
+phase 6 below, plus Consolidated Flatpak acceptance and release, are 0.5.4 work.
+Actual engine/helper/dependency removal is
 [post-0.5.4 work](#post-054-legacy-abraunegg-engine-removal), targeted at the next
 release (tentatively 0.5.5), not a 0.5.4 gate. No automatic conversion is planned.
 
@@ -396,7 +396,7 @@ drive types use the same tested generic profile; only identity/auth differs.
   gate passed. Reused accepted live scenarios; installed acceptance remains below.
 - [x] Dependency/docs reconciliation: guidance, diagnostics and host-command/script
   inventories distinguish new rclone mirrors, Online and legacy engines. Retained
-  rclone >= 1.74.3 and legacy dependencies until phase 6; no new startup probes.
+  rclone >= 1.74.3 and legacy dependencies until post-0.5.4 engine removal; no new startup probes.
   October 16: check, focused diagnostic/installer tests, localization and full gate
   passed. Installed native/Flatpak acceptance remains below.
 - [x] Integrated Flatpak implementation smoke (started October 16; transferred
@@ -411,27 +411,48 @@ drive types use the same tested generic profile; only identity/auth differs.
   cf2d13b; recovery Browse placeholder observed in installed editor. Full
   chronology, failures/fixes, verification receipts and limitations are retained
   in completion notes. Remaining visual details and broader lifecycle/release
-  acceptance belong to phase 7 below, not this implementation smoke.
+  acceptance belong to phase 6 below, not this implementation smoke.
 
 Phase 4 closed October 18, 2026 under the operator's accepted smoke scope.
-This is not full phase-7/native/Debian/Flatpak release acceptance. Retained test
+This is not full phase-6/native/Debian/Flatpak release acceptance. Retained test
 resources and original failed profile are preserved; no cloud cleanup claimed.
 
 #### 5. Legacy abraunegg deprecation — 0.5.4 (no conversion tool)
 
-- [ ] Stop offering abraunegg for new OneDrive Offline connections; existing ones
-  keep working unchanged for one release. Show a deprecation notice on legacy
-  connections that explains how to create the rclone mirror and delete the old one.
-- [ ] Guard against two engines on one tree: block creating an rclone OneDrive
-  mirror whose local path overlaps an existing legacy abraunegg mirror, and never
-  reuse the abraunegg database, cache or token.
-- [ ] Document the manual replacement steps in the release notes.
+Source work completed October 18; check, focused compatibility/routing tests,
+localization and final gate passed. Phase-5 source/tests and draft guidance are
+included in this commit; no phase-5 package has been built or installed. Rendered
+notice and installed legacy continuity remain phase-6 acceptance. No engine/
+dependency removal or profile conversion.
 
-#### 7. OneDrive migration acceptance — 0.5.4
+- [x] Stop offering abraunegg for new OneDrive Offline connections; existing ones
+  retain their engine for 0.5.4. Existing rclone-only new-draft routing verified;
+  persistent Fluent deprecation/replacement notice added to legacy Modify editor.
+  No new legacy selector, automatic conversion or changed legacy/Online route.
+- [x] Guard against two engines on one tree: existing overlap guards verified for
+  equal/parent/child mirror and recovery paths, both drive types and connection
+  orders, including disabled legacy profiles. Separate engine plan namespaces
+  and unchanged legacy serialization tested; no database/cache/token copying.
+- [x] Draft manual replacement steps and two-release policy in
+  [0.5.4 release notes](docs/releases/v0.5.4.md), including unsynchronized files,
+  fresh directories/auth, Preview/initial sync and verified old-profile removal.
+  Final release-note reconciliation remains phase 6.
 
-- [ ] Final rendered recovery guidance: installed Browse placeholder already
-  confirmed; explicitly check recovery help text and absence of the automatic
-  directory notice. Carried from phase-4 wording review; no unobserved pass.
+#### 6. OneDrive migration acceptance — 0.5.4
+
+Started October 18. Renumbered from 7 after engine removal moved to the future
+section. Reuse completed phase-4 installed smoke and existing focused guard/
+compatibility receipts; do not repeat unchanged suites. Current installed source
+cf2d13b (packaging 848d48b) predates the phase-5 deprecation notice included in
+this source commit; that notice needs a later candidate for rendered review. Final recovery guidance
+is confirmed on the current installed candidate; do not repeat that visual check.
+
+- [ ] Installed legacy continuity/deprecation: inspect the persistent notice on
+  an existing abraunegg Modify screen; confirm 0.5.4 legacy setup/runtime and
+  onedriver Online remain unaffected. Source tests are not installed acceptance.
+- [x] Final rendered recovery guidance: installed Browse placeholder, separate
+  Browse authorization help and absence of automatic-directory notice confirmed
+  by operator October 18 on candidate 848d48b. Reuse this accepted observation.
 - [ ] Implemented guards, per drive type: wrong account or drive (identity guard
   blocks), empty or missing local and remote folder (access marker blocks), and a
   changed target invalidating Preview and initial-sync state.
@@ -439,7 +460,7 @@ resources and original failed profile are preserved; no cloud cleanup claimed.
   Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
 - [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
   Flatpak acceptance items below).
-- [ ] Release notes: new rclone mirrors, continued support/deprecation of existing
+- [ ] Finalize draft release notes: new rclone mirrors, continued support/deprecation of existing
   abraunegg mirrors in 0.5.4, manual replacement steps, and planned engine removal
   in the following release. Do not describe removal as shipped in 0.5.4.
 
@@ -510,27 +531,56 @@ Items that will be activated at some time in the future.
 ## Post-0.5.4: legacy abraunegg engine removal
 
 Planned October 14, 2026; separated from 0.5.4 release gates October 18, 2026.
-Target: release after the 0.5.4 deprecation release, tentatively 0.5.5. Retain
-phase number 6 for existing planning references. Existing abraunegg connections
-remain supported in 0.5.4; this work is not a condition of publishing 0.5.4.
+Target: release after the 0.5.4 deprecation release, tentatively 0.5.5. This
+future section has its own numbering. Existing abraunegg connections remain
+supported in 0.5.4; this work is not a condition of publishing 0.5.4.
 OneDrive Online using onedriver remains supported throughout.
 
-#### 6. Removal (the release after the deprecation release)
+#### 1. Legacy engine removal (the release after the deprecation release)
 
-- [ ] Remove abraunegg code (`one_drive_*` in `src/sync.rs`, `OneDriveSync`
-  dependency kind, auth-files UI in `src/app.rs`), the
-  `scripts/cosmic-ext-applet-mounter-onedrive-auth-helper` and its install/desktop
-  entries, and the Fluent keys for the helper.
-- [ ] Packaging: drop `onedrive`, `python3-gi` and `gir1.2-webkit2-4.1` from
-  `debian/control`; remove OneDrive options from `scripts/install-dependencies.sh`
-  and its tests; remove the `onedrive` rows from the Flatpak host-command
-  inventory and permission rationale; update AppStream/README text.
-- [ ] Update the script catalog and inventory; run `bash scripts/dev.sh gate`.
+Checklist refreshed October 18 against current source. Release boundary above
+remains authoritative until an explicit policy change; preparation may proceed
+separately without removing legacy support from the 0.5.4 source/package.
 
-- [ ] Preserve local mirror/recovery files and credentials when engine support
-  is retired. Keep legacy profiles identifiable with replacement instructions;
-  do not silently drop them or reinterpret them as rclone connections. Verify
-  upgrade behavior and document explicit user-controlled cleanup separately.
+- [ ] Retain legacy profile deserialization/identity and replacement guidance, but
+  block retired-engine authentication, Test/Preview/Sync/Start and scheduling with
+  typed unsupported-engine results. Never reinterpret absent-engine legacy
+  profiles as rclone. Preserve local mirror/recovery files, databases and
+  credentials; verify existing profiles remain visible and removable.
+- [ ] Define and test upgrade handling for old app-owned monitor units so an
+  already installed/enabled legacy service cannot continue launching the retired
+  engine. Use typed systemd control and ownership checks; stop/disable only
+  proven app-owned units. Preserve unrelated user services and all file data.
+- [ ] Remove only legacy runtime/authentication code: one_drive_* plans/requests
+  and legacy-only status/parser helpers in src/sync.rs; legacy setup/auth-files,
+  pending-count, monitor and dispatch branches in src/app.rs; OneDriveSync
+  diagnostics/controller requirements and Executable::OneDrive process route.
+  Preserve rclone OneDrive backend/identity/guards, shared Microsoft OAuth and
+  onedriver Online. Replace removed behavior with explicit unsupported state.
+- [ ] Retire scripts/cosmic-ext-applet-mounter-onedrive-auth-helper and its install
+  payloads in justfile and active Flatpak manifests; reconcile prototype/helper
+  tests and packaging contracts. No separate helper desktop file exists. Remove
+  only unused helper/auth Fluent keys; retain legacy identification/replacement
+  messages and update them for the actual removal release.
+- [ ] Reconcile dependency recommendations and installers after checking remaining
+  consumers: onedrive and helper-only python3-gi, gir1.2-gtk-3.0 and
+  gir1.2-webkit2-4.1 in debian/control, plus corresponding other-distro helper
+  packages. Retain Python wherever maintained scripts require it; do not uninstall
+  packages from user machines. Remove only --onedrive, --onedrive-auth-helper,
+  --skip-onedrive-auth-helper and their legacy installer paths/tests; preserve
+  --onedriver, --rclone and rclone's onedrive backend.
+- [ ] Retire current legacy-executable entries in host-command inventory and
+  permission rationale; preserve historical removed-command evidence and review
+  consumers before dropping shared permissions. Update script catalog/inventory,
+  AppStream/README/dependency guides and removal-release notes without rewriting
+  published 0.5.4 deprecation history. Keep prototype evidence explicitly labeled.
+- [ ] Focused synthetic/fake tests: legacy profile upgrade and inert controls,
+  no retired executable/dependency/helper dispatch, app-owned unit retirement
+  with rollback/partial failure, data preservation and rclone/onedriver parity.
+  Run check and focused tests after Rust edits, final gate once complete, plus
+  localization-check and metadata-check when their inputs change. Separately
+  accept installed upgrade with an owned disposable legacy profile/unit before
+  claiming native/Debian/Flatpak removal-release support.
 
 ## Post-0.5.4 validation and expansion backlog
 

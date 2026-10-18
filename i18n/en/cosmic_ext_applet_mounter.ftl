@@ -1,4 +1,6 @@
 app-title = Cloud Mounter
+onedrive-legacy-deprecation-title = Legacy OneDrive mirror
+onedrive-legacy-deprecation-help = This connection uses abraunegg/onedrive. Existing connections remain supported in Cloud Mounter 0.5.4; support is planned to end in the following release. To replace it, pause this mirror, preserve any unsynchronized files, and use Add Connection to create a OneDrive Offline mirror with rclone, a separate mirror folder, a separate recovery folder, and new authentication. Run Preview and confirm the initial Sync Now. Verify your files before removing the old connection. Do not copy its database, cache, or authentication files. Removing a connection preserves local files; do not delete your OneDrive files.
 mirror-access-unavailable = Mirror or recovery folder access is unavailable or changed. Use Browse to select both folders again before saving or synchronizing.
 mirror-access-select-directories = Select both the mirror and recovery folders with Browse to authorize sandbox access. A typed host path does not grant folder access.
 recovery-browse-help = Choose an existing recovery folder with the folder picker. Flatpak mirrors require this authorization separately from the mirror folder.
