@@ -749,3 +749,24 @@ source; x86_64/master replacement requested for installed notice review. Earlier
 shipping features, Cargo inputs and engine behavior unchanged; no duplicate sync
 suite or recovery-text review needed. Candidate build/install do not themselves
 complete legacy continuity or release acceptance.
+
+
+## October 18 phase-6 scoped acceptance reconciliation
+
+Installed packaging 82c1d7a pins source 67b3aec (Repair visibility correction),
+superseding a0cf060/2f13749. Metadata/runtimes/grants remained unchanged. Operator
+accepted rendered legacy notice and onedriver Online setup/mount/list/unmount,
+legacy Preview, installed personal guard refusal/restoration, Repair with all
+17 baseline files preserved and normal checksum-verified sync afterward, idle
+sleep/wake and manual VPN cancellation/authentication/sync/optional release.
+Original VPN settings and paused schedule restored; real legacy data untouched.
+Earlier phase-4 personal/corporate/SharePoint and recovery/removal evidence reused.
+
+Phase 6 closed only for this Flatpak migration smoke. At operator direction,
+actual legacy monitor/transfer and native/Debian lifecycle checks remain open
+under final release acceptance. Broader scheduled VPN-unavailable, live shared/
+pre-existing tunnel ownership and active-transfer sleep/VPN-loss behavior also
+remain explicit final gates. Existing passing source/fake tests cover ownership,
+reference counting, bounded readiness, cancellation and engine dispatch; no
+unrun installed scenario is claimed. Draft release notes reconciled with this
+limited scope; version/final packages/publication remain separate tasks.

@@ -4148,3 +4148,185 @@ recovery. Do not Repair, delete locks, resync or reset markers speculatively.
 No suspend/reboot/service mutation performed by agent. VPN remains a separate
 open item. Documentation/checkpoint creation exit 0; diff-check follows; no source
 changes or build/tests needed. Acceptance records committed before proceeding.
+
+
+### October 18, 2026 — Idle wake returned; pre-sync checkpoint intact
+
+Operator reports popup opens with the same notification after sleep/wake.
+Read-only checkpoint comparison exit 0: same boot ID (no reboot since checkpoint),
+all 17 files present and byte-identical, coordinator still succeeded/sync. Typed
+systemd session D-Bus inspection exit 0: test service and timer remain disabled
+and unloaded. No unexpected background resume or file mutation observed. Existing
+notification alone is retained UI result, not evidence of a new sync or failure.
+No Repair, resume, marker/state modification or service change performed.
+Scoped wake acceptance still awaits one explicit post-wake Sync Now and result.
+No claim about active-transfer interruption or scheduled wake behavior.
+
+
+### October 18, 2026 — Focused idle sleep/wake smoke accepted
+
+Operator screenshot confirms post-wake Sync Now completed with OneDrive
+checksum verification on disposable personal test, installed packaging 82c1d7a.
+Read-only coordinator inspection succeeded/sync; typed systemd D-Bus confirms
+service and timer both disabled/unloaded after manual sync. Inspection exit 0.
+Pre-sync same-boot check and all 17 checkpoint hashes matched as recorded above.
+Marked scoped idle/paused mirror sleep/wake smoke complete. No hard reboot or
+Repair needed. This does not establish active-transfer interruption, scheduled
+resume, Online busy-mount wake, other providers or native/Debian acceptance.
+No further suspend requested on the display-driver-unstable laptop for this smoke.
+Task/evidence records updated; git diff --check exit 0; no source/build inputs
+changed and no redundant tests/build. Next open phase-6 mirror item is VPN-bound
+readiness/lifecycle; other existing acceptance boundaries remain in the task list.
+
+
+### October 18, 2026 — VPN-bound mirror acceptance started
+
+Read current VPN activation/readiness code and OpenConnect guide. Manual sync
+activates configured NetworkManager VPN if absent, waits boundedly for tunnel
+and profile readiness before engine work; scheduled readiness checks never
+initiate interactive authentication. VPN ownership cleanup is separate evidence.
+Read-only saved configuration: disposable personal mirror has vpn_profile_id None;
+existing NetworkManager OpenConnect profile available, alongside other profiles.
+Typed NetworkManager D-Bus active-connection inspection exit 0: no active VPN.
+No tokens/settings secrets read or exposed; no VPN activated/disconnected by agent.
+First operator step: assign existing OpenConnect profile to personal test through
+Modify/Save, retain paused timer. Then inspect saved mapping before activation
+and readiness/cancellation/normal-sync checks. Restore original None assignment
+after tests. No unrelated mounts, real legacy data or VPN profiles changed.
+Task started; no VPN acceptance claimed. Documentation-only diff-check exit 0.
+
+
+October 18 VPN test sequencing correction: operator selected VPN and Save opened
+OpenConnect authentication before planned Sync Now. Source inspection confirms
+this is the existing OneDrive save validation path: save_draft invokes
+validate_onedrive_connection_for_save, which requires configured VPN readiness
+before remote verification and persistence. Prior instruction implying Save
+would not activate VPN was incorrect. No source defect established. Use this
+prompt for cancellation negative test first: cancel authentication, inspect
+Save-blocked outcome and unchanged saved VPN assignment/data before positive
+authentication retry. No credentials requested in chat or entered by agent.
+
+
+### October 18, 2026 — VPN authentication cancellation blocked Save
+
+Operator screenshot: Save blocked for disposable personal test because VPN
+authentication was cancelled or activation failed. Read-only saved configuration
+confirms vpn_profile_id remains None; coordinator still succeeded/sync from prior
+manual operation. Typed NetworkManager D-Bus reports no active VPN, and systemd
+D-Bus confirms test service/timer disabled and unloaded. Inspections exit 0.
+This accepts installed Save-time authentication cancellation/no persistence smoke,
+not a scheduled VPN failure or mid-transfer interruption test. No source change.
+Next retry Save, authenticate in local OpenConnect dialog, inspect successful
+saved assignment and tunnel readiness before one manual sync. Keep timer paused.
+
+
+### October 18, 2026 — VPN authentication and bound Save passed
+
+Operator completed local OpenConnect authentication and supplied successful Save
+screenshot: managed mirror schedule disabled, initialization retained, subsequent
+Preview/Sync Now use normal bisync. Read-only config confirms personal test now
+has a VPN assignment. Typed NetworkManager D-Bus reports one activated VPN
+(ActiveConnection State 2, VPN State 5); systemd D-Bus reports test service and
+timer disabled/unloaded. Existing initialization file SHA256 unchanged. Both
+inspections exit 0; no agent activation or service mutation. Next one manual
+Sync Now while tunnel is active; then inspect ownership/lifecycle and restore
+original No VPN assignment. No scheduled or interrupted-transfer claim.
+
+
+### October 18, 2026 — VPN-bound manual sync accepted
+
+Operator screenshot reports OneDrive synchronization and checksum verification
+completed. Read-only coordinator succeeded/sync; typed systemd D-Bus service/
+timer remain disabled/unloaded. NetworkManager D-Bus VPN still activated
+(ActiveConnection 2, VPN 5). Saved disconnect_vpn_when_unused is false, so
+retaining VPN matches policy; no automatic disconnect failure inferred.
+Inspections exit 0. Positive tunnel readiness/manual sync accepted, with no
+scheduled, mid-transfer or ownership-release claim. Next operator-controlled
+check enables explicit applet-owned VPN disconnect permission, saves and runs
+one normal sync; shared-user protection must remain in force. Restore original
+No VPN and disconnect false afterward. No source/build changes.
+
+
+### October 18, 2026 — Applet-activated VPN released after manual sync
+
+Operator enabled disconnect permission, saved and ran Sync Now; screenshot
+reports successful synchronization/checksum. Read-only configuration confirms
+VPN assigned and disconnect_vpn_when_unused true. NetworkManager D-Bus now has
+no active VPN; prior authenticated tunnel was activated by this applet during
+Save. Coordinator succeeded/sync; test service/timer remain disabled/unloaded.
+Both inspections exit 0. Scoped applet-activated, unshared VPN release smoke
+passed. This does not prove pre-existing/shared-tunnel protection live, scheduled
+readiness or mid-transfer VPN loss. No agent disconnect/service mutation.
+Next restore original No VPN assignment and disconnect permission false through
+Modify/Save; inspect persistence, initialization and paused units before closing
+this scoped VPN test. No new build/source tests required.
+
+
+### October 18, 2026 — Scoped VPN test restored and accepted
+
+Operator restored No VPN, disconnect permission off and saved; screenshot reports
+managed mirror schedule disabled and existing initialization preserved. Read-only
+config verifies vpn_profile_id None and disconnect_vpn_when_unused false. Existing
+initialization marker SHA256 unchanged. Typed NetworkManager D-Bus reports zero
+active VPNs; systemd D-Bus test service/timer disabled and unloaded. Inspections
+exit 0. Completed focused installed manual VPN acceptance: authentication cancel
+blocks Save without persistence, positive auth/readiness Save, checksum-verified
+bound sync, VPN retained without release permission, applet-activated VPN released
+with permission, and original connection options restored.
+
+Updated active checklist to distinguish this completed smoke from still-unproven
+scheduled VPN-unavailable behavior, live pre-existing/shared-tunnel protection
+and active-transfer sleep/VPN-loss cases. Parent Flatpak lifecycle/phase 6 remain
+open pending scope/evidence reconciliation and other already listed work. No
+source change, rebuild, service mutation, credentials or unrelated GUI work.
+Documentation diff-check exit 0; passing source gate reused, not rerun.
+
+
+### October 18, 2026 — Phase-6 evidence reconciliation and scoped closure
+
+Operator explicitly chose to transfer native/Debian lifecycle and actual legacy
+monitor/transfer to final release acceptance. Kept those items open there with
+original checklist wording, plus disposable-legacy-only instruction; real legacy
+pending user changes remain untouched. Broader scheduled VPN-unavailable, live
+pre-existing/shared VPN protection and active-transfer sleep/VPN-loss are likewise
+explicit final gates, not implicitly passed by idle/manual smoke. The parent
+Flatpak lifecycle item remains open at the final gates for missing scenarios.
+
+Read retained passing dev-gate-s4od_kr5 output (a0cf060 dirty source subsequently
+committed as 67b3aec). Existing passing tests cover VPN activation/shutdown
+ownership decisions, shared reference counts, bounded/cancellable readiness,
+finite-user release, sleep token invalidation, coordinator cancellation and
+legacy/Online/rclone engine dispatch. Relevant exact tests include
+activation_and_shutdown_decisions_respect_readiness_and_ownership,
+usage_snapshots_reference_count_shared_dependencies,
+finite_offline_vpn_users_are_reference_counted_and_release_is_non_destructive,
+deadline_bounds_a_hung_probe_and_never_permits_storage,
+sleep_invalidates_old_operations_even_after_wake,
+required_phases_stop_on_failure_timeout_and_cancellation and
+onedrive_runtime_dispatch_uses_engine_and_preserves_legacy_and_online. Reused
+these source/fake receipts unchanged; they do not prove unrun live scenarios.
+
+Condensed phase-6 checklist around accepted levels, transferred open work and
+receipt identities. Detailed chronological failures/fixes/acceptance above and
+Git history retained. Corrected installed identity to 82c1d7a/source 67b3aec.
+Reconciled draft release notes: rendered legacy notice now accepted, Repair fix,
+Browse requirements, Save-time VPN authentication and limited installed scope.
+Manual replacement/0.5.4 legacy support and post-0.5.4 removal policy unchanged.
+Updated existing OneDrive engineering record/index; no new engineering artifact.
+
+Phase 6 closed for documented Flatpak migration smoke only. Final migration
+gates, consolidated sandbox/package release acceptance, version metadata and
+publication remain outstanding. No new source change, package rebuild, test
+rerun, installation or service/cloud mutation is necessary for record-only
+closure. Checks and final worktree disposition follow. Push Buttons.md untouched.
+
+
+Closure validation: git diff --check exit 0. Focused Python documentation check
+exit 0: all local file links in changed task/release/engineering records resolve,
+phase-6 section has no outstanding [ ] item, transferred final gates remain
+open and release notes retain Draft status. Existing source check/focused tests/
+gate receipts apply because application, scripts, packaging and Fluent inputs
+are unchanged. No check failures. Changed files: Task List.md, this record,
+docs/engineering/README.md, onedrive-rclone-offline-contracts.md and draft
+docs/releases/v0.5.4.md. Remaining risks are the explicit final migration/package
+gates. Next work is consolidated final acceptance, not another phase-6 build.

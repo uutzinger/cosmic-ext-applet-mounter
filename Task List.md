@@ -440,103 +440,73 @@ dependency removal or profile conversion.
 
 #### 6. OneDrive migration acceptance — 0.5.4
 
-Started October 18. Renumbered from 7 after engine removal moved to the future
-section. Reuse completed phase-4 installed smoke and existing focused guard/
-compatibility receipts; do not repeat unchanged suites. Current installed source
-2f13749 (packaging a0cf060) contains the phase-5 deprecation notice. Candidate
-built and receipt-verified installed October 18; export/bundle/installed identity
-verified with unchanged metadata/runtimes. Operator confirmed installed legacy
-notice and replacement instructions October 18; do not repeat that visual check.
-Final recovery guidance is already confirmed; do not repeat that visual check.
+Started and closed October 18 for the documented Flatpak migration smoke scope.
+Operator transferred native/Debian and actual legacy monitor/transfer acceptance
+into final release acceptance; neither is claimed as passed. Earlier numbering
+was phase 7. Detailed guard/failure/fix chronology and receipts remain in
+[completion notes](Task%20List%20Completion%20Notes.md).
 
-- [x] Installed legacy deprecation notice: operator confirmed persistent Legacy
-  OneDrive mirror notice and replacement instructions in existing legacy Modify
-  screen on a0cf060. Profile retained, no conversion or sync performed.
-- [ ] Installed legacy/Online continuity: retained legacy service still declares
-  onedrive --monitor (read-only inspection). Existing legacy engine Preview passed
-  on a0cf060 (19 notable change lines; not a file count). No transfer performed;
-  onedriver Online setup/mount/list/unmount passed; legacy background monitor/
-  actual transfer remains untested.
-  - [x] Existing legacy engine authenticated/accessed storage sufficiently for
-    installed dry-run Preview; deprecation notice does not block this route.
-  - [x] Existing OneDrive Online Test Connection: operator screenshot confirms
-    managed unit validates structurally and onedriver setup is present (a0cf060).
-    Mount/read/unmount is not inferred from setup validation.
-  - [x] Existing onedriver Online mount/list/unmount: operator activated Online,
-    saw files, closed file manager and stopped mount on installed a0cf060.
-  - [ ] Legacy background monitor/actual transfer acceptance; dry-run is accepted
-    separately, and pending real-user changes have not been applied.
-- [x] Final rendered recovery guidance: installed Browse placeholder, separate
-  Browse authorization help and absence of automatic-directory notice confirmed
-  by operator October 18 on candidate 848d48b. Reuse this accepted observation.
-- [x] Implemented guard smoke and retained source coverage: identity refusal,
-  missing access/ownership markers or remote folders, and target-bound Preview/
-  initialization. Completed October 18 at the explicit levels below: both drive-
-  type refusals installed; personal account/marker/retarget/remote-folder cases
-  installed; remaining shared/corporate cases reuse passing fake-adapter evidence
-  from gate dev-gate-6_eqf2pd. Not every negative case was run on each live account.
-  Disposable resources/unsaved drafts only; real legacy mirror untouched.
-  - [x] Retained automated evidence: remapped/denied/malformed identity metadata,
-    missing/changed/linked anchors, post-sync missing-anchor initialization refusal
-    and target-bound initialization invalidation tests passed in retained gate.
-  - [x] Installed wrong drive/account selection refusal, using existing remotes
-    in unsaved drafts; no remote creation, replacement or profile Save.
-    Both reciprocal personal/business drive-type mismatches rejected October 18
-    (a0cf060); matching personal remote/type with different expected email also
-    rejected. Corporate account-only resource mismatch uses retained fake tests;
-    do not claim that distinct case live-tested.
-  - [x] Installed personal missing-marker refusal/restoration: renamed marker
-    caused Sync Now refusal; both user files and seven initialization/listing
-    hashes unchanged during refusal. Restored original marker hash confirmed,
-    .held absent; ordinary sync/checksum then passed and init marker preserved.
-    Shared marker implementation/other malformed cases reuse retained fake tests;
-    remote deletion and corporate live marker loss not claimed.
-  - [x] Installed personal changed-local-target invalidation: saved retarget
-    refused Sync Now without Preview; new directory empty and original hashes
-    preserved. Restored original target then ordinary sync/checksum passed,
-    original files/anchor/init hash unchanged. No copied/reset state or resync.
-  - [x] Installed personal missing remote-folder refusal/restoration: actual
-    remote rename caused verification HTTP 404 and blocked sync; original name
-    restored and normal sync/checksum passed. Saved target unchanged and local
-    file/anchor/init hashes preserved. Shared/corporate cases retain source
-    evidence; no remote deletion or copied/reset initialization.
-- [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
-  Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
-- [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
-  Flatpak acceptance items below).
-  Reuse phase-4 installed setup/initial/manual/restart/scheduled/Pause/recovery
-  and phase-6 guard/Online smoke; avoid duplicate suites. Remaining installed
-  OneDrive gaps: sleep/wake and VPN policy integration.
-  - [x] Repair after a controlled failure on disposable personal mirror: confirm
-    service/timer paused and original files/recovery/listings/init state retained;
-    explicit subsequent Sync Now succeeds without initial sync or resync.
-    Local-marker preflight refusal does not arm Repair; local marker restored.
-    Remote marker temporarily prefixed .held in OneDrive: Sync Now blocked,
-    coordinator Failed verified and all 17 Repair-baseline hashes unchanged.
-    Operator restored remote marker, but popup has no Repair despite persisted
-    coordinator Failed. Source investigation: cached popup reads only service/
-    timer state and coordinator warnings, losing manual failure state. Fix
-    coordinator observation/status mapping corrected in source; check, three
-    focused regressions and final gate passed. Source committed as 67b3aec;
-    replacement packaging 82c1d7a built and receipt-verified installed.
-    Installed popup Repair visible and completed; coordinator Paused/repair,
-    service/timer disabled and unloaded, all 17 baseline files unchanged.
-    Subsequent explicit normal Sync Now passed with checksum verification;
-    coordinator succeeded/sync, initialization marker unchanged, units still
-    disabled/unloaded. Installed Repair/recovery-to-normal smoke accepted.
-  - [ ] Focused sleep/wake smoke: one idle suspend/resume with disposable personal
-    mirror paused and no transfer running; inspect state before one manual sync.
-    Known laptop display-driver instability may require hard reboot: save checkpoint
-    first; reboot recovery is separate evidence, never a successful wake result.
-    Checkpoint: target/task-runs/phase6-sleep-wake-checkpoint/checkpoint.json.
-    Active-transfer/scheduled-resume behavior is outside this first smoke.
-  - [ ] VPN-bound readiness/lifecycle checks, keeping unrelated connections and
-    real legacy pending changes untouched.
-- [ ] Finalize draft release notes: new rclone mirrors, continued support/deprecation of existing
-  abraunegg mirrors in 0.5.4, manual replacement steps, and planned engine removal
-  in the following release. Do not describe removal as shipped in 0.5.4.
+- [x] Rendered legacy deprecation notice and replacement instructions accepted
+  on installed a0cf060; legacy Preview passed (19 notable change lines), and
+  existing onedriver Online setup/mount/list/unmount passed. Real legacy pending
+  changes untouched; actual monitor/transfer remains a release gate below.
+- [x] Final recovery guidance accepted on installed 848d48b: Browse placeholder,
+  separate folder authorization help, no automatic recovery-directory promise.
+- [x] Installed guard smoke: reciprocal personal/business drive-type mismatch,
+  wrong expected personal account, local/remote ownership-marker loss, saved
+  local retarget without Preview and missing remote folder all blocked as
+  expected; original target restored and normal checksum-verified sync passed.
+  Remaining malformed/resource/corporate variants reuse passing source/fake
+  evidence from dev-gate-6_eqf2pd; not every case was live-tested per account.
+- [x] Reuse phase-4 installed personal setup/initial/manual/restart/scheduled/
+  Pause/recovery, corporate setup/initial transfer, SharePoint restart and safe
+  disposable connection-removal evidence. No duplicate unchanged suites.
+- [x] Repair/recovery-to-normal on installed 82c1d7a/source 67b3aec: hidden Repair
+  integration defect fixed, compilation/three regressions/full gate passed;
+  popup Repair completed, 17-file preservation baseline unchanged, units paused;
+  subsequent normal sync/checksum passed without reinitialization/resync.
+- [x] Focused idle sleep/wake: popup returned in same boot, all 17 checkpoint files
+  unchanged before manual sync, post-wake sync/checksum passed, units disabled.
+  Checkpoint: target/task-runs/phase6-sleep-wake-checkpoint/checkpoint.json.
+  No active-transfer or scheduled-resume wake claim.
+- [x] Focused manual VPN: cancellation blocked Save without persistence; positive
+  OpenConnect authentication/Save and bound sync/checksum passed. VPN retained
+  with disconnect permission off and released with permission on. Original No
+  VPN/false options restored; initialization unchanged, units disabled/unloaded.
+- [x] Reconcile OneDrive migration wording in draft 0.5.4 notes: new rclone mirrors,
+  legacy support/deprecation retained in 0.5.4, manual replacement instructions,
+  later removal and verified scope/limits. Publication metadata remains separate.
+- [o] Native/Debian lifecycle and actual legacy monitor/transfer transferred by
+  operator to [final migration gates](#final-migration-gates-transferred-from-phase-6).
+- [o] Broader scheduled VPN/ownership/active-transfer lifecycle remains at those
+  final gates. Retained dev-gate-s4od_kr5 covers VPN ownership/reference counting,
+  bounded readiness, cancellation and engine dispatch with fake adapters;
+  this is source evidence, not installed acceptance of unrun scenarios.
 
 ### Consolidated Flatpak acceptance and release
+
+#### Final migration gates transferred from phase 6
+
+Transfer authorized October 18. These remain required/open; phase-6 closure
+establishes only its scoped installed Flatpak migration smoke.
+
+- [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
+  Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
+- [ ] Legacy background monitor/actual transfer acceptance; dry-run is accepted
+  separately, and pending real-user changes have not been applied.
+  Use a separate approved disposable legacy mirror; do not start the real mirror
+  with pending user changes for this test.
+- [ ] Remaining broader lifecycle acceptance: scheduled VPN-unavailable behavior,
+  pre-existing/shared tunnel ownership protection and interrupted active-transfer
+  sleep/VPN loss are not established by the focused manual/idle smokes.
+  Reconcile required live scope with existing fake-adapter evidence before
+  closing the parent Flatpak lifecycle item.
+- [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
+  Flatpak acceptance items below).
+  Completed phase-4/6 smoke is reused; only missing matrix/scenario coverage and
+  acceptance affected by later source/package changes need new execution.
+
+#### Package acceptance and release
 
 - [o] Adjust release promotion tooling to publish the exact verified artifact
   set from one successful immutable-source build without rebuilding it. Retain
