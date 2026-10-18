@@ -506,8 +506,8 @@ Final recovery guidance is already confirmed; do not repeat that visual check.
   Flatpak acceptance items below).
   Reuse phase-4 installed setup/initial/manual/restart/scheduled/Pause/recovery
   and phase-6 guard/Online smoke; avoid duplicate suites. Remaining installed
-  OneDrive gaps: Repair/recovery-to-normal, sleep/wake and VPN policy integration.
-  - [ ] Repair after a controlled failure on disposable personal mirror: confirm
+  OneDrive gaps: sleep/wake and VPN policy integration.
+  - [x] Repair after a controlled failure on disposable personal mirror: confirm
     service/timer paused and original files/recovery/listings/init state retained;
     explicit subsequent Sync Now succeeds without initial sync or resync.
     Local-marker preflight refusal does not arm Repair; local marker restored.
@@ -519,10 +519,19 @@ Final recovery guidance is already confirmed; do not repeat that visual check.
     coordinator observation/status mapping corrected in source; check, three
     focused regressions and final gate passed. Source committed as 67b3aec;
     replacement packaging 82c1d7a built and receipt-verified installed.
-    Installed Repair visibility/execution retest remains pending; current Failed
-    state and all 17 baseline files retained through replacement.
-  - [ ] Controlled sleep/wake and VPN-bound readiness/lifecycle checks, keeping
-    unrelated connections and real legacy pending changes untouched.
+    Installed popup Repair visible and completed; coordinator Paused/repair,
+    service/timer disabled and unloaded, all 17 baseline files unchanged.
+    Subsequent explicit normal Sync Now passed with checksum verification;
+    coordinator succeeded/sync, initialization marker unchanged, units still
+    disabled/unloaded. Installed Repair/recovery-to-normal smoke accepted.
+  - [ ] Focused sleep/wake smoke: one idle suspend/resume with disposable personal
+    mirror paused and no transfer running; inspect state before one manual sync.
+    Known laptop display-driver instability may require hard reboot: save checkpoint
+    first; reboot recovery is separate evidence, never a successful wake result.
+    Checkpoint: target/task-runs/phase6-sleep-wake-checkpoint/checkpoint.json.
+    Active-transfer/scheduled-resume behavior is outside this first smoke.
+  - [ ] VPN-bound readiness/lifecycle checks, keeping unrelated connections and
+    real legacy pending changes untouched.
 - [ ] Finalize draft release notes: new rclone mirrors, continued support/deprecation of existing
   abraunegg mirrors in 0.5.4, manual replacement steps, and planned engine removal
   in the following release. Do not describe removal as shipped in 0.5.4.

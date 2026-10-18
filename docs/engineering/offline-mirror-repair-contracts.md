@@ -160,3 +160,13 @@ Compilation, three focused regressions and full development gate passed;
 rebuilt installed Repair visibility/execution/preservation remain pending. Original failed state
 and 17-file baseline are preserved for retest, with no repeated fault injection
 or unsafe reset/resync. Source implementation is not installed acceptance.
+
+
+October 18 installed follow-up: packaging 82c1d7a/source 67b3aec exposes Repair
+for the retained disposable personal rclone failure. Operator completed Repair;
+coordinator Paused/repair and all 17 baseline files unchanged. Typed systemd
+D-Bus verified both units disabled and unloaded. Subsequent explicit normal
+Sync Now completed with checksum verification, coordinator succeeded/sync and
+original initialization marker unchanged; both units remained disabled/unloaded.
+This accepts the installed Flatpak personal rclone Repair/recovery smoke only;
+legacy Repair and remaining lifecycle acceptance are not implied.

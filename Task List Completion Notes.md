@@ -4088,3 +4088,63 @@ Remaining risk: installed rendered Repair visibility/execution not yet accepted.
 Next: re-add panel applet, open popup and Repair retained failed personal test
 with existing two-step confirmation. Inspect Paused units and unchanged 17-file
 baseline before subsequent explicit normal sync. Phase 6 remains open.
+
+
+### October 18, 2026 — Installed Repair completed and preservation verified
+
+Operator screenshot confirms popup Repair now visible on installed 82c1d7a.
+Operator ran Repair for disposable personal access test; rendered completion
+reports timer/service paused and bisync safety lock/recovery preserved. Read-only
+state confirms coordinator paused, operation repair, matching connection UUID.
+All 17 baseline mirror/recovery/bisync files still present with identical SHA256.
+Typed session D-Bus GetUnit initially exited 1 with NoSuchUnit: inactive repaired
+units already unloaded. Follow-up read-only ListUnits/GetUnitFileState exited 0:
+service and timer both absent from loaded units and disabled on disk. This is
+consistent with stopped/disabled runtime; no extra service loading/start/reset
+performed. Filesystem/coordinator inspection exit 0. No source change or repeated
+source tests needed; remaining recovery acceptance is explicit subsequent normal
+Sync Now, without initialization/resync and without enabling background timer.
+Phase 6 stays open for that and sleep/wake/VPN and other recorded scope.
+
+
+### October 18, 2026 — Post-Repair normal sync accepted
+
+Operator screenshot confirms Sync Now completed for the disposable personal
+access test, including OneDrive checksum verification on installed packaging
+82c1d7a/source 67b3aec. Read-only coordinator inspection: succeeded/sync. The
+existing initialization file remains byte-identical to pre-Repair baseline;
+no Preview, initial synchronization or resync requested. Typed systemd session
+D-Bus ListUnits/GetUnitFileState: service and timer disabled and unloaded after
+manual sync, so background scheduling remains paused. Both inspections exit 0.
+All 17 baseline files had already been verified unchanged immediately after
+Repair, before this normal sync; bisync listings may update during normal sync.
+Marked only disposable personal installed Repair/recovery-to-normal smoke done.
+Phase 6 remains open for sleep/wake, VPN policy and other listed acceptance.
+Task/evidence and existing Repair contract/index updated; git diff --check exit
+0. Documentation-only acceptance records reuse previous passing source gate;
+no build, service mutation, cloud mutation or repeated source tests performed.
+
+
+### October 18, 2026 — Focused sleep/wake scope and reboot checkpoint
+
+Operator reports existing laptop sleep/wake display-driver failures, potentially
+requiring hard reboot. Save progress before any suspend attempt. Installed Repair
+and subsequent checksum-verified normal sync accepted as above; no repeat needed.
+Created private checkpoint at
+target/task-runs/phase6-sleep-wake-checkpoint/checkpoint.json: current boot ID,
+source/package identity, succeeded/sync coordinator snapshot and fresh SHA256
+for 17 mirror/recovery/bisync files after the completed normal sync. Original
+Repair baseline remains unchanged as historical preservation evidence.
+
+First smoke is one idle manual suspend/resume with the disposable personal mirror
+paused, no transfer running, no scheduled trigger and no legacy/profile changes.
+Before suspend save other work. After normal wake inspect applet/backend and
+checkpoint before one explicit Sync Now; successful checksum result with background
+still paused is the scoped acceptance. Active-transfer cancellation and scheduled
+wake behavior are not proven by this smoke. If display fails and reboot is needed,
+stop further suspend attempts; reopen this repository/chat, inspect preserved
+checkpoint/state before sync, and record wake as inconclusive plus separate reboot
+recovery. Do not Repair, delete locks, resync or reset markers speculatively.
+No suspend/reboot/service mutation performed by agent. VPN remains a separate
+open item. Documentation/checkpoint creation exit 0; diff-check follows; no source
+changes or build/tests needed. Acceptance records committed before proceeding.
