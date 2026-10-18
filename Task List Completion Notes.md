@@ -4464,3 +4464,23 @@ Final diff-check exit 0. No production Rust/Fluent string changes, new dependenc
 package build/install, service change or publication. Changes remain uncommitted;
 next metadata commit and exact app-source manifest pin before freezing inputs.
 Installed candidate unchanged; completed Flatpak behavior tests are reused.
+
+
+### October 18, 2026 — 0.5.4 metadata committed; candidate source pin prepared
+
+Operator authorized commit. Source/evidence commit
+ef5c4d8f165544c6909bc43c17ed84c4ff5aae77 contains verified 0.5.4 metadata,
+publication fixture isolation and consolidated evidence-reuse plan. User's
+Push Buttons.md excluded. Passing dev-gate-dqkwy923, focused six publication
+tests, dependency/version consistency and known-diagnostic metadata receipt
+apply unchanged. Updated Flatpak manifest and three packaging-guide pins from
+67b3aec to ef5c4d8; generated Cargo dependencies, runtimes, grants/features
+unchanged. Step-1 candidate input preparation complete; installed package remains
+82c1d7a/67b3aec. No new build/install, tag, push or publication performed.
+Separate packaging pin commit follows focused packaging contract check.
+
+Pin validation: cargo test --locked --test flatpak_packaging_contract exit 0,
+four passed. git diff --check exit 0; source gate reused since app inputs did not
+change after ef5c4d8. Documentation link/pin checks exit 0. Separate packaging
+commit contains manifest, packaging guide and step-1/audit/index/evidence status.
+Candidate inputs ready for a clean pinned build; no package acceptance inferred.

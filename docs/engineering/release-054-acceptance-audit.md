@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Evidence reuse plan reconciled; release inputs not frozen and final acceptance open
+Status: Evidence reuse plan reconciled; 0.5.4 candidate source pinned, build and final acceptance open
 
 Created: October 18, 2026
 
@@ -82,10 +82,10 @@ are conditional options for unresolved gaps, not a newly required full matrix.
    abraunegg mirrors and preserves onedriver Online. Legacy removal and GUI button
    cleanup are later work. The draft notes already describe this boundary.
 2. **Metadata:** Cargo manifest/root lockfile, Debian changelog and latest
-   AppStream entry are prepared as 0.5.4 on October 18; dependency package pins
-   are unchanged. Notes remain Draft and final acceptance is open. Review/commit
-   metadata, then pin the updated application source in the Flatpak manifest
-   before freezing. Current installed candidate still contains the older source.
+   AppStream entry committed as 0.5.4 in `ef5c4d8` on October 18. Dependency
+   package pins are unchanged; full gate and focused tests passed. Notes remain
+   Draft. Flatpak manifest now pins that exact source; the installed candidate
+   still contains older `67b3aec`, and no new package was built or installed.
 3. **Targets:** existing Debian workflow declares Ubuntu 22.04/24.04/26.04 for
    amd64/arm64. Current installed Flatpak evidence is x86_64/master only. Confirm
    final advertised artifact/platform coverage before dispatch; a build matrix
@@ -113,3 +113,11 @@ are conditional options for unresolved gaps, not a newly required full matrix.
   builds; no outstanding implementation fix is silently excluded from the freeze.
 - Documentation-only mapping can finish before those preparation decisions;
   step 1 as a whole stays open until its scope and input freeze are complete.
+
+
+October 18 source/pin checkpoint: application metadata/evidence committed as
+`ef5c4d8f165544c6909bc43c17ed84c4ff5aae77`; packaging manifest pins that source.
+This completes step-1 candidate input preparation, not final artifact acceptance.
+Use the separate packaging commit containing this pin as the clean build identity.
+Any later source/package fix requires a new immutable candidate and only affected
+checks; documentation receipts alone do not invalidate accepted packages.

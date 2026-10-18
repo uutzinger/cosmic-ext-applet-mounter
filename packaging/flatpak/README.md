@@ -10,7 +10,7 @@ submission. It requires a selected JSON manifest in a separate clean checkout
 at an expected commit, tracked referenced inputs, full Git source commit pins
 and SHA-256 for remote archives/files. Tags alone and directory-source prototypes
 are rejected. The source manifest now pins accepted implementation commit
-`67b3aec06007bddd987f87b79e45dccc8c62f376` for the development candidate.
+`ef5c4d8f165544c6909bc43c17ed84c4ff5aae77` for the development candidate.
 The wrapper does not change that pin or choose a runtime. The packaging changes
 must also be committed before a clean-checkout candidate build.
 
@@ -170,10 +170,11 @@ Retain candidates/probes as evidence; do not ship unvalidated WebKit modules or
 claim native success completes sandbox acceptance.
 
 The permission review below applies to the 0.5.4 development candidate. Its source
-manifest pins implementation commit `67b3aec06007bddd987f87b79e45dccc8c62f376`,
+manifest pins implementation commit `ef5c4d8f165544c6909bc43c17ed84c4ff5aae77`,
 including the integrated OneDrive rclone editor/runtime and subsequent tests and
 diagnostics. This is a development source pin, not a release tag or installed
-acceptance result. Version/release metadata is finalized in the later release task.
+acceptance result. Version 0.5.4 metadata is prepared; final artifact acceptance
+and release-note finalization remain open.
 The GUI prototype copies local artifacts and is not reproducible release proof.
 Both manifests use the same application ID: installing either replaces that
 user's existing Flatpak installation, not the native/Debian package. Do not run
@@ -317,7 +318,7 @@ app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext
 ```
 
 The current manifest pins implementation commit
-`67b3aec06007bddd987f87b79e45dccc8c62f376` and uses generated `cargo-sources.json`.
+`ef5c4d8f165544c6909bc43c17ed84c4ff5aae77` and uses generated `cargo-sources.json`.
 Offline contract tests compare every registry archive/checksum with Cargo.lock,
 check vendor checksum metadata/config, and verify Git commits and source selectors.
 The checked-in vendor list already matches this revision; regeneration is not

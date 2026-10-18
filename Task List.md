@@ -498,13 +498,13 @@ installed Flatpak evidence remain distinct.
   redundant runs. Preserve existing target scope; no added architecture/provider
   test matrix. Missing evidence is reviewed first, with new live tests only for
   a concrete unresolved release gap or changed behavior.
-- [ ] Finalize 0.5.4 version/package metadata and candidate release-note scope
-  before freezing the source/package revisions for required final builds.
-  October 18: Cargo/lock, Debian and AppStream prepared as 0.5.4; focused
-  publication tests, version/dependency consistency and final gate passed
-  (dev-gate-dqkwy923). Metadata recipe retains known COSMIC diagnostics. Notes
-  remain draft; metadata commit and source/manifest freeze await review. Later acceptance/
-  checksum records must not trigger a rebuild of unchanged inputs.
+- [x] Prepare 0.5.4 version/package metadata and candidate release-note scope;
+  source committed as ef5c4d8 and Flatpak manifest pins that exact revision.
+  Focused publication tests, version/dependency checks and dev-gate-dqkwy923
+  passed; metadata recipe retains known COSMIC diagnostics. Notes remain draft.
+  Packaging pin is committed separately; these are candidate build inputs,
+  not final package acceptance or publication. Later receipt-only changes do
+  not require rebuilding unchanged inputs.
 - [x] Source/dependency baseline retained: all 620 Cargo registry archives/checksums
   and 12 dependency Git pins/selectors checked; generated inline/shell support
   fixed and verified. Latest installed development packaging 82c1d7a pins source
