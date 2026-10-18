@@ -4330,3 +4330,137 @@ are unchanged. No check failures. Changed files: Task List.md, this record,
 docs/engineering/README.md, onedrive-rclone-offline-contracts.md and draft
 docs/releases/v0.5.4.md. Remaining risks are the explicit final migration/package
 gates. Next work is consolidated final acceptance, not another phase-6 build.
+
+
+### October 18, 2026 — Final acceptance reordered into one sequence
+
+Operator requested merging the transferred phase-6 migration gates and package
+acceptance/release checklist. Replaced the two parallel sections with eight
+dependency-ordered steps: evidence/matrix and release-input freeze; build/reuse
+and artifact/grant inspection; auth/portal access; mirror/legacy continuity;
+VPN/sleep; Online/desktop/preservation; engineering/submission records; final
+verification and approval. Native/Debian, disposable legacy actual transfer and
+broader lifecycle obligations remain open, integrated with corresponding package
+checks rather than duplicated umbrella lifecycle items. Existing source/fake
+evidence and phase-4/6 installed smoke retain explicit reuse boundaries.
+
+Updated stale development baseline from de8d779/cf5da32 to installed packaging
+82c1d7a/source 67b3aec, retaining earlier identities as history. Version/metadata
+freeze precedes final builds; notes/checksum/acceptance reconciliation follows
+without needless rebuild. Publication and installation approval boundaries remain.
+Phase-6 transfer link now targets the unified acceptance heading. No acceptance
+item marked passed by this reordering. No source/script/package changes or tests/
+rebuild required; user's untracked Push Buttons.md untouched. Checks follow.
+
+Reordering validation: git diff --check exit 0; focused Python checklist check
+exit 0 verifies steps 1-8 in order, obsolete anchor removed, retained native/
+legacy/network/retention/rollback/grant/UI/host-command/approval obligations and
+exactly one existing completed source-baseline item in the unified section.
+Only Task List.md and this record changed. No failures; existing passing source
+checks reused because inputs unchanged. Next actionable item is step 1: map
+missing acceptance coverage and freeze required release inputs before builds.
+
+
+### October 18, 2026 — Step-1 acceptance map drafted
+
+Operator asked what step 1 involves and to work on the map. Added maintained
+release-054-acceptance-audit.md under engineering, indexed and linked from active
+step 1. It separates accepted development Flatpak observations, retained source/
+fake/prototype evidence, missing live scenarios and final artifact acceptance;
+no new live test/build/installation performed. Lists concrete scheduled VPN,
+pre-existing/shared ownership, active-transfer sleep/VPN-loss, native and legacy
+checks with destinations. Earlier provider evidence still needs a focused audit
+for final advertised support; no blanket untested provider pass or full repeated
+provider/scenario cross-product imposed.
+
+Verified current Cargo.toml/Debian version 0.5.3, retained 82c1d7a/67b3aec
+development receipts, and declared six Ubuntu/architecture Debian build targets.
+A broad file search initially used a nonexistent data/metainfo glob; corrected
+to resources/app.metainfo.xml, no state change. Map identifies metadata/version,
+platform/architecture coverage, immutable source/manifest and freeze boundaries
+without silently bumping version or choosing extra targets. Step 1 remains open
+until scope is reconciled and inputs finalized; source defects found by later
+tests invalidate affected frozen inputs rather than bypass acceptance.
+Existing engineering-guide naming/status rules followed; no credentials or
+organization names added. Only documentation changes; validation follows.
+
+Step-1 map validation: git diff --check exit 0; focused Python local-link/table
+check exit 0, 19 coverage rows and pending freeze status verified. No failed
+validation; prior application checks reused because runtime inputs unchanged.
+Records remain uncommitted for review. Next: reconcile advertised provider/
+platform matrix, then prepare consistent 0.5.4 metadata and immutable source pins.
+
+
+### October 18, 2026 — Redundant live matrix removed; Flatpak evidence reused
+
+Operator explicitly directed eliminating redundant work and reusing completed
+Flatpak tests. Updated step-1 map/status and task list accordingly: accepted
+phase-4/6 setup/auth/sync/scheduling/Pause/recovery/guard/Repair/portal/restart/
+idle-wake/manual-VPN/panel/removal observations are reused for unchanged inputs.
+No default full provider/account/scenario or additional architecture matrix,
+repeated OAuth or further laptop suspend. Initial map's unrun live procedures
+are conditional choices for concrete unresolved release gaps, not blanket
+mandatory execution. Source/fake and installed evidence labels remain distinct.
+
+Retain focused native/Debian changed-OneDrive smoke and disposable legacy actual
+monitor/transfer as missing acceptance, plus final package/permission/dependency/
+identity checks. Review retained worker/retention, provider, Online/UI and network
+evidence before requesting extra live work. Unrun live cases remain explicit
+limitations, never passed by bookkeeping; real defects remain blockers. Marked
+map/reuse-policy reconciliation complete, input metadata/freeze still pending.
+Next concrete step: prepare/review consistent 0.5.4 metadata and final package
+inputs, using existing development package as acceptance baseline. No build,
+installation, service/cloud changes or new test run required for this plan edit.
+
+Reuse-plan validation: git diff --check exit 0; focused Python documentation
+check exit 0 (links resolve, mapping complete and metadata freeze outstanding).
+No runtime inputs changed; prior source checks reused. Plan changes remain
+uncommitted; Push Buttons.md untouched.
+
+
+### October 18, 2026 — Prepare 0.5.4 metadata before release-input freeze
+
+Operator requested next step after evidence reuse plan. Updated application
+Cargo.toml and only the root package version in Cargo.lock to 0.5.4, prepended
+Debian 0.5.4 changelog and AppStream 0.5.4 summary dated October 18. Historic
+entries unchanged. No dependency pins/runtime/grant/engine behavior changes;
+legacy support and dependencies retained, new OneDrive rclone mirrors and
+Repair/portal/recovery guidance improvements summarized. Release notes remain
+Draft; prepared metadata is not publication or final package acceptance.
+
+Found release_publication_test.py fixture copied the live Debian changelog while
+assuming synthetic Cargo/AppStream 0.5.3. Replaced that one fixture input with a
+neutral synthetic changelog to keep tests independent of real version bumps;
+no production script change. Focused unittest discovery: six passed, exit 0.
+Version/dependency Python consistency inspection exit 0: Cargo/lock/Debian/latest
+AppStream all 0.5.4, all dependency package entries exactly unchanged.
+cargo metadata --locked --offline --no-deps --format-version 1 exit 0.
+Metadata recipe exit 0: target/task-runs/dev-metadata-check-rhpyci3r/. Raw validators
+still report known COSMIC category and AppStream provides/binaries diagnostics,
+per nonfatal maintained recipe; no new 0.5.4 release-entry diagnostic. This is
+not a clean strict freedesktop validator pass. Final development gate follows.
+
+Updated map/task status: metadata prepared, not committed or frozen; Flatpak
+manifest still pins accepted older 67b3aec until new source commit is available.
+No package build/install/tag/push/publication/service change. Prior accepted
+Flatpak behavior remains reusable; a versioned final artifact needs correct
+source/pin/identity rather than relabeling the installed 0.5.3 candidate.
+
+
+0.5.4 metadata final verification: first gate dev-gate-jm4w0709 exited 1 after
+fmt/Clippy passed because sandbox blocked just temporary directory creation
+under /run/user/1000/just (read-only filesystem). This was an infrastructure
+block, not a passing test or source failure. Required access rerun
+bash scripts/dev.sh gate exit 0, target/task-runs/dev-gate-dqkwy923/, base
+a00730e6573b25704998cbb451005d81416e1eba dirty=true. Full formatting/lint/Rust/
+maintained Python gate passed; synthetic promotion test output does not imply
+real publication. Focused six publication tests already passed; no source fix
+needed between gates. Metadata recipe known COSMIC diagnostics remain above.
+
+Files for metadata preparation: Cargo.toml, Cargo.lock, debian/changelog,
+resources/app.metainfo.xml, tests/release_publication_test.py and task/evidence/
+acceptance-map records. Earlier uncommitted evidence/reuse-plan edits retained.
+Final diff-check exit 0. No production Rust/Fluent string changes, new dependency,
+package build/install, service change or publication. Changes remain uncommitted;
+next metadata commit and exact app-source manifest pin before freezing inputs.
+Installed candidate unchanged; completed Flatpak behavior tests are reused.

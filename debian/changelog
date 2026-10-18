@@ -1,3 +1,15 @@
+cosmic-ext-applet-mounter (0.5.4) unstable; urgency=medium
+
+  * Use rclone bisync for new personal and work/school OneDrive mirrors.
+  * Retain existing legacy OneDrive mirrors with deprecation and replacement
+    guidance; keep onedriver Online mounts supported.
+  * Resolve portal-authorized mirror and recovery paths consistently across
+    manual and scheduled synchronization.
+  * Correct Flatpak recovery-folder guidance and expose Repair after failed
+    manual synchronization while the schedule is paused.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Sun, 18 Oct 2026 12:00:00 -0700
+
 cosmic-ext-applet-mounter (0.5.3) unstable; urgency=medium
 
   * Migrate desktop host control to typed D-Bus adapters and a restricted

@@ -17,7 +17,10 @@ class PublicationPreflight(unittest.TestCase):
             (root / 'Cargo.toml').write_text('[package]\nversion = "0.5.3"\n')
             (root / 'Cargo.lock').write_text(
                 '[[package]]\nname = "cosmic-ext-applet-mounter"\nversion = "' + lock + '"\n')
-            (root / 'debian/changelog').write_text((ROOT / 'debian/changelog').read_text())
+            (root / 'debian/changelog').write_text(
+                'cosmic-ext-applet-mounter (0.5.3) unstable; urgency=medium\n\n'
+                '  * Synthetic publication fixture.\n\n'
+                ' -- Test Maintainer <test@example.invalid>  Mon, 12 Oct 2026 12:00:00 -0700\n')
             (root / 'resources/app.metainfo.xml').write_text(
                 '<component><releases><release version="0.5.3" type="' + kind +
                 '"/></releases></component>')

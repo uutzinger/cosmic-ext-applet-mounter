@@ -78,6 +78,17 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.4" date="2026-10-18">
+      <description>
+        <p>New OneDrive offline mirrors use rclone bisync for personal and work or school accounts.</p>
+        <ul>
+          <li>Retain existing legacy OneDrive mirrors with deprecation and manual replacement guidance.</li>
+          <li>Keep OneDrive Online mounts supported through onedriver.</li>
+          <li>Improve Flatpak mirror and recovery folder authorization and guidance.</li>
+          <li>Show Repair after a failed manual synchronization with a paused schedule.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-10-13">
       <description>
         <p>Native source and Debian release with D-Bus host integration and safer synchronization.</p>

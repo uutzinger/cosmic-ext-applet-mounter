@@ -477,7 +477,7 @@ was phase 7. Detailed guard/failure/fix chronology and receipts remain in
   legacy support/deprecation retained in 0.5.4, manual replacement instructions,
   later removal and verified scope/limits. Publication metadata remains separate.
 - [o] Native/Debian lifecycle and actual legacy monitor/transfer transferred by
-  operator to [final migration gates](#final-migration-gates-transferred-from-phase-6).
+  operator to [consolidated final acceptance](#consolidated-flatpak-acceptance-and-release).
 - [o] Broader scheduled VPN/ownership/active-transfer lifecycle remains at those
   final gates. Retained dev-gate-s4od_kr5 covers VPN ownership/reference counting,
   bounded readiness, cancellation and engine dispatch with fake adapters;
@@ -485,66 +485,113 @@ was phase 7. Detailed guard/failure/fix chronology and receipts remain in
 
 ### Consolidated Flatpak acceptance and release
 
-#### Final migration gates transferred from phase 6
+Ordered October 18 to combine final migration and package gates. Native/Debian
+and actual legacy transfer checks were transferred here by operator decision;
+they remain open. Reuse accepted phase-4/6 evidence and test only missing scope
+or behavior affected by later source/package changes. Source/fake, native and
+installed Flatpak evidence remain distinct.
 
-Transfer authorized October 18. These remain required/open; phase-6 closure
-establishes only its scoped installed Flatpak migration smoke.
+#### 1. Reconcile evidence and freeze release inputs
+
+- [x] Reconcile the [0.5.4 acceptance map](docs/engineering/release-054-acceptance-audit.md).
+  October 18 operator chose reuse of completed Flatpak tests and elimination of
+  redundant runs. Preserve existing target scope; no added architecture/provider
+  test matrix. Missing evidence is reviewed first, with new live tests only for
+  a concrete unresolved release gap or changed behavior.
+- [ ] Finalize 0.5.4 version/package metadata and candidate release-note scope
+  before freezing the source/package revisions for required final builds.
+  October 18: Cargo/lock, Debian and AppStream prepared as 0.5.4; focused
+  publication tests, version/dependency consistency and final gate passed
+  (dev-gate-dqkwy923). Metadata recipe retains known COSMIC diagnostics. Notes
+  remain draft; metadata commit and source/manifest freeze await review. Later acceptance/
+  checksum records must not trigger a rebuild of unchanged inputs.
+- [x] Source/dependency baseline retained: all 620 Cargo registry archives/checksums
+  and 12 dependency Git pins/selectors checked; generated inline/shell support
+  fixed and verified. Latest installed development packaging 82c1d7a pins source
+  67b3aec; build/install receipts are under target/task-runs/flatpak-candidate-82c1d7a/
+  and flatpak-install-82c1d7a/. Earlier de8d779/cf5da32 evidence is historical.
+  COSMIC BaseApp/Freedesktop 25.08 retained with unchanged metadata/grants.
+
+#### 2. Build or reuse packages and inspect their contents
+
+- [ ] Obtain required native/Debian and source-based Flatpak artifacts at the
+  frozen revisions with shipping features only. Reuse exact-source accepted
+  artifacts; build only changed inputs or missing artifacts, once per matrix.
+- [ ] Verify source/runtime identity, helper/worker payloads, size, checksums and
+  matching Flatpak export/bundle identities. Inspect installed effective grants,
+  including BaseApp/global overrides; no silent blanket host filesystem/bus
+  grants or restoration of obsolete shell wrappers. Latest development candidate
+  export/bundle/install identity already matches; payload/effective-grant review
+  and final-release identities remain open.
+
+#### 3. Verify authentication and sandbox access
+
+- [ ] Prove selected engine authentication and sandbox mirror/recovery/state
+  access through reviewed grants/portal authorization. Reuse phase-4/6 personal,
+  corporate and SharePoint evidence where inputs are unchanged. Host-path
+  resolution is not an access grant; verify Platform capabilities rather than
+  SDK imports or host-installed packages alone.
+
+#### 4. Complete mirror and legacy continuity acceptance
 
 - [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
   Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
+  Run a focused installed personal/business smoke of changed OneDrive behavior
+  and onedriver continuity. Reuse shared source/engine/Flatpak lifecycle evidence;
+  no duplicate full sleep/VPN/Repair suite merely for a different package mode.
 - [ ] Legacy background monitor/actual transfer acceptance; dry-run is accepted
-  separately, and pending real-user changes have not been applied.
-  Use a separate approved disposable legacy mirror; do not start the real mirror
-  with pending user changes for this test.
-- [ ] Remaining broader lifecycle acceptance: scheduled VPN-unavailable behavior,
-  pre-existing/shared tunnel ownership protection and interrupted active-transfer
-  sleep/VPN loss are not established by the focused manual/idle smokes.
-  Reconcile required live scope with existing fake-adapter evidence before
-  closing the parent Flatpak lifecycle item.
-- [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
-  Flatpak acceptance items below).
-  Completed phase-4/6 smoke is reused; only missing matrix/scenario coverage and
-  acceptance affected by later source/package changes need new execution.
+  separately, and pending real-user changes have not been applied. Use a separate
+  approved disposable legacy mirror; do not start the real mirror with pending
+  user changes for this test.
+- [x] Reuse phase-4/6 Flatpak personal/corporate/SharePoint Preview/initial/ordinary/
+  scheduled/Pause/recovery, guards and Repair evidence at its recorded scope.
+  No repeated setup/auth/sync/Repair suite for unchanged behavior.
+- [ ] Review retained Task (5) worker/progress/cancellation/retention evidence and
+  final package differences; perform a narrow live test only for an unresolved
+  release gap. Do not label unrun scenarios as installed passes.
 
-#### Package acceptance and release
+#### 5. Complete VPN and sleep/wake acceptance
 
-- [o] Adjust release promotion tooling to publish the exact verified artifact
-  set from one successful immutable-source build without rebuilding it. Retain
-  explicit approval, source/run/checksum validation and native/Flatpak gates;
-  ordinary tag builds must still never publish automatically.
-  Source implementation and focused checks handled by
-  [Release build workflow follow-up](#release-build-workflow-follow-up--october-13-2026);
-  next hosted promotion acceptance remains explicitly open there.
-- [x] Commit accepted implementation and check Cargo sources; manifest pins
-  cf5da32f622ac7b03efb42facba9e9102da365ca for the development candidate. October 16:
-  all 620 registry archives/checksums and 12 dependency Git pins/selectors checked;
-  generated inline/shell source support fixed, focused tests and full gate passed.
-  COSMIC BaseApp/Freedesktop 25.08 unchanged. Packaging committed as de8d779;
-  builder used validated local Git transport for the exact pinned app commit.
-- [ ] Build source-based candidate/final Flatpak with shipping features only (candidate built October 16);
-  verify source/runtime identity, helper/worker payloads and size. Inspect effective
-  grants including BaseApp/global overrides; no silent blanket host filesystem/
-  bus grants or restoration of obsolete shell wrappers.
-  Candidate export/bundle ref, commit and complete metadata agree; bundle is
-  13,511,896 bytes. Payload review and installed effective-grant acceptance remain
-  open; build receipt: target/task-runs/flatpak-candidate-de8d779/artifacts.json.
-- [ ] Prove selected engine auth and sandbox mirror/recovery/state access through
-  reviewed grants/portal authorization. Host-path resolution is not an access
-  grant. Verify Platform capabilities, not merely SDK imports or host packages.
-- [ ] Complete Task (5) final sandbox Preview/initial/ordinary/scheduled sync,
-  worker/progress, pause/resume, cancellation, failure/Repair, lock/initialization
-  preservation and successful-only retention; expand provider matrix as applicable.
 - [ ] Complete Task (6) final OpenConnect positive VPN/mount/unmount/ownership and
-  one negative authentication lifecycle. Keep prior native/prototype receipts
-  separate. Decide Cisco rollback disposition only after relevant acceptance;
-  no OS client removal is implicit.
+  one negative authentication lifecycle. Reuse phase-6 manual mirror auth cancel,
+  positive auth/sync and optional applet-owned release; keep native/prototype
+  receipts separate from installed Flatpak evidence.
+- [x] Reuse phase-6 idle wake and manual VPN cancellation/auth/sync/optional-release
+  smoke with existing source/fake readiness, ownership and cancellation coverage.
+  No additional laptop suspend or full VPN fault matrix required by default.
+- [ ] Review whether package/runtime changes leave a concrete network/sleep gap.
+  Scheduled VPN-unavailable, live shared/pre-existing ownership and active-transfer
+  sleep/VPN-loss remain unrun live cases, not automatic mandatory reruns or passes.
+  Add a focused live check only when the evidence review identifies a blocker.
+- [ ] Decide Cisco rollback disposition only after relevant acceptance; no OS
+  client removal is implicit.
+
+#### 6. Complete Online, desktop and preservation checks
+
 - [ ] Verify final Online engines, busy unmount/Repair, clean-profile setup,
   upgrade/removal preservation, panel/settings integration and translations.
+  Reuse installed onedriver mount/list/unmount, panel embedding, recovery wording,
+  legacy notice and disposable connection-removal evidence where applicable.
+
+#### 7. Reconcile engineering and submission records
+
 - [ ] Reconcile host-command inventory/permission rationale, close transferred
   Tasks (5)/(6) sandbox gates and prepare concise COSMIC review description.
   Confirm maintainer expectations for retained host execution/dependencies.
-- [ ] Finalize 0.5.4 metadata/notes/checksums, inspect native/final Flatpak artifacts
-  and obtain release publication/COSMIC packaging submission approval.
+- [o] Release promotion tooling implementation/focused checks are handled by
+  [Release build workflow follow-up](#release-build-workflow-follow-up--october-13-2026).
+  It must publish the exact accepted immutable-source artifact set without
+  rebuilding; ordinary tag builds must never publish automatically. Hosted
+  promotion acceptance remains open in that authoritative task.
+
+#### 8. Final release verification and approval
+
+- [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and
+  inspect the accepted native/final Flatpak artifacts against frozen identities.
+  Keep earlier development smoke separate from final artifact acceptance.
+- [ ] Obtain release publication/COSMIC packaging submission approval for the
+  concrete verified artifacts and review description. Publication/submission and
+  any package installation remain separately authorized actions.
 
 ## Agent context reduction — October 15, 2026
 
