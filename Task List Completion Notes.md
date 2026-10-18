@@ -3017,3 +3017,221 @@ portal authorization, initial/ordinary sync, cross-launch and scheduled/Pause
 acceptance remain pending operator observations. Requested panel re-add first.
 Old missing-anchor state is preserved and deliberately blocked; no repair/reset,
 manual marker recreation, cloud deletion or broader filesystem permission.
+
+October 17 operator observation, installed f685237 candidate: re-added applet
+embeds normally in the COSMIC panel and popup opens. Rendered panel launch passed;
+fresh disposable directory authorization and mirror synchronization remain pending.
+No runtime changes or repeated build/check required for this observation.
+
+
+October 17 fresh draft authorization failure: operator screenshot shows personal
+remote/subtree verified, but Test Connection requests both local Browse grants.
+Read-only inspection of private grant metadata found one record, for disposable
+Acceptance-Personal-2, and none for Recovery-Personal-2. No credential/config dump
+or grants modified. This is missing-record evidence, not proof of a portal
+implementation failure after both Browse operations. Asked operator which
+selectors were used; recovery authorization retest pending.
+
+Scope review: verify_rclone_access_with_verified, prepare_offline_mirror_runtime
+(non-legacy), and the shared bisync coordinator use LocalMirrorPaths; therefore
+SharePoint and other rclone mirrors share the Flatpak access requirement. Native
+resolution retains original paths. LegacyOnedrive runtime preparation retains
+its separate path. No recorded installed Flatpak SharePoint mirror portal test
+was found in current active task/evidence records; no such pass claimed. Added
+one disposable shared-access smoke to integrated acceptance without repeating
+unchanged native/provider fault suites. Source/package inputs unchanged.
+
+
+### October 17, 2026 — Recovery authorization confirmed; editor wording correction
+
+Operator confirmed only mirror Browse had been used. After recovery Browse,
+installed draft Test Connection passed: managed service/timer structural checks
+and OneDrive identity/subtree access verified. This resolves the missing-grant
+observation; initial/ordinary sync and worker persistence are still unverified.
+
+Operator found misleading automatic recovery text. src/app.rs now chooses
+Fluent Browse placeholder/help for Flatpak non-legacy rclone mirrors and omits
+the automatic-path notice. Native/legacy automatic recovery remains available;
+explicit recovery selections no longer show an automatic-path notice.
+i18n/en/cosmic_ext_applet_mounter.ftl adds the two applicable messages. No
+runtime, path-resolution, service, credential or permission behavior changed.
+Task List.md records source correction and installed acceptance boundaries.
+
+Validation, base 605d865de73e53ee3b7a5c2becb747b27d183d06, dirty=true:
+- just fmt: exit 0.
+- bash scripts/dev.sh check: exit 0, target/task-runs/dev-check-383zm643/.
+- cargo test --locked offline_mirror_blank_recovery_defaults_next_to_mirror_directory:
+  exit 0, one focused test passed; other filtered targets are not live acceptance.
+- bash scripts/dev.sh localization-check: exit 0,
+  target/task-runs/dev-localization-check-o5oj20bq/.
+- Initial gate target/task-runs/dev-gate-4sedy4f6/: exit 1 after formatting/lint
+  passed; sandbox denied just temporary-directory creation under /run/user.
+  Reran with required access, no source correction for this environment failure.
+- Final bash scripts/dev.sh gate: exit 0, target/task-runs/dev-gate-4ti9gk3s/.
+- git diff --check: exit 0.
+
+Source wording correction is not yet committed/built/installed. Continue current
+installed candidate's Save/paused and sync acceptance without rebuilding for
+text alone; old failed profile remains unchanged. Rendered corrected wording
+requires a later replacement candidate. No new engine behavior is claimed.
+
+
+October 17 installed f685237 fresh personal profile progression: operator saved
+with acknowledgment of existing remote authentication reuse; Preview completed
+with two estimated differing file paths and explicit uninitialized status.
+Confirmed initial Sync Now then reported synchronization and checksum success.
+Read-only host filesystem inspection: Acceptance-Personal-2 exists; one regular,
+non-symlink ownership anchor (37 bytes) for new connection
+8e646732-5734-44c8-8033-d8d9d06b85ae, four retained connection bisync listings,
+two containing the anchor name, and one initial-sync-complete marker. Both
+operator-named test files test.docx and test.txt are present in the host mirror.
+No contents printed or files modified. Unlike the prior failed profile, the
+anchor now exists in the host engine tree. This establishes initial host-path
+and retained-listing evidence only; ordinary no-edit sync, portal cross-launch,
+real recovery writes, schedule/Pause and SharePoint sandbox smoke remain open.
+No source/runtime inputs changed; prior verification receipts reused.
+
+
+October 17 installed f685237 ordinary no-edit sync retest: after successful
+initial sync and read-only host-anchor inspection, operator ran Sync Now again
+without editing files. Screenshot reports OneDrive synchronization and checksum
+verification completed successfully. Previous initialized missing-anchor failure
+did not recur in this fresh disposable profile. This is installed ordinary-sync
+success, not measured zero-transfer evidence or background worker acceptance.
+Next: close editor, remove/re-add panel applet, reopen saved connection and repeat
+manual sync without Browse to verify retained portal authorization across fresh
+launches. Schedule/Pause, recovery writes and SharePoint sandbox smoke remain
+outstanding. No source/package inputs changed or checks repeated.
+
+
+October 17 installed f685237 cross-launch manual sync: following instructions to
+close the Modify window, remove/re-add the panel applet, reopen the saved profile
+and run Sync Now without Browse, operator screenshot reports successful OneDrive
+synchronization and checksum verification. Retained portal authorization across
+applet relaunch passed at the operator-observation level; separate scheduled
+worker access is not inferred. No files, grants or services changed by agent.
+Next scheduled Start and Pause with one disposable local edit; wait for the
+configured timer, do not substitute manual Sync Now. Source/check receipts
+unchanged. Recovery write and SharePoint sandbox checks remain outstanding.
+
+
+October 17 installed f685237 scheduled worker/Pause: after instructions to edit
+local test.txt, Start the saved test connection and wait for the timer without
+manual Sync Now, operator confirmed the edit arrived remotely. Popup screenshot
+reports Pause completed and background sync timer stopped; manual Sync Now
+remains available. This is operator-observed scheduled transfer and Pause success;
+no independent systemd signal/property trace or post-Pause interval observation
+is claimed. Agent did not modify services.
+
+Read-only recovery inspection: suggested Recovery-Personal-2 directory is absent;
+actual Browse grant points to Acceptance-Personal-2-Recovery. That selected host
+directory exists and contains one dated .cosmic-mounter-owner file (37 bytes),
+with no retained user-file backup yet. Directory date is recorded by runtime;
+execution evidence is dated October 17 in operator timezone. A local-to-remote
+edit does not establish local overwritten-file recovery. Next: edit only remote
+test.txt, keep local original, run paused manual sync, inspect local recovery
+copy. No source/check/package inputs changed. SharePoint sandbox smoke and other
+integrated acceptance boundaries remain open.
+
+
+October 17 installed f685237 remote-to-local/recovery smoke: operator confirmed
+remote edit arrived locally after instructions to leave local unchanged and run
+manual Sync Now while paused. Read-only selected host recovery inspection found
+two files: dated owner marker and timestamp-suffixed test.txt backup (10 bytes).
+Backup is a regular non-symlink file; byte-hash comparison confirms it differs
+from current local test.txt. Contents were not printed. Backup bytes were not
+captured before the overwrite, so exact previous-version equality is not claimed;
+observed overwrite plus retained distinct timestamped copy establishes recovery
+creation for this disposable transfer. Runtime directory timestamps use UTC date
+October 18; operator evidence date remains October 17 America/Phoenix.
+
+Personal installed smoke now covers draft Test/Save, Preview, initial sync and
+checksum, host ownership anchor, ordinary sync, retained portal access after
+applet relaunch, scheduled local-to-remote edit, Pause, remote-to-local edit and
+local recovery creation. This does not close integrated acceptance overall:
+business account flow, disposable SharePoint shared-access smoke and corrected
+recovery wording rendered in a later candidate remain outstanding. No source,
+permission, service, credential, or file mutations by agent; prior source checks
+remain applicable. Old failed profile/data preserved; current test stays paused.
+
+
+October 17 installed f685237 corporate setup progression: after instructions to
+Connect new remote using work/school account, operator screenshot shows generated
+remote selected, Work or school OneDrive selected and drive/selected-folder
+verified notice. Actual remote subtree is Acceptance-Business, differing from
+suggested longer disposable name; subsequent checks must stay within this
+verified test subtree. No account address, organization, tokens or drive IDs
+copied into records. This is setup/verification observation, not Test Connection,
+Save, managed-unit or transfer acceptance. Next Test Connection and Save paused,
+then one minimal business transfer smoke; reuse passed shared scheduling/fault/
+recovery tests rather than repeat personal suite. No agent runtime mutation.
+
+
+October 17 installed f685237 corporate initial transfer smoke passed. Operator
+screenshot confirms Test Connection passed (managed service/timer structural
+validation and primary-drive/subtree identity/access); operator separately
+confirmed Save. Preview screenshot estimated two differing file paths and
+explicitly stated initial sync had not run. Subsequent confirmed initial Sync
+Now screenshot reports synchronization/checksum verification completed
+successfully; operator confirmed test files on remote.
+
+Read-only host inspection via selected Acceptance-Business grant found both
+regular test files test.docx/test.txt, one regular non-symlink ownership anchor,
+four retained bisync listings (two with anchor) and one initial-sync-complete
+marker. No content/config/credential dump or agent mutation. Corporate installed
+account setup, portal-selected paths and initial transfer are now observed;
+shared personal ordinary/relaunch/scheduled/Pause/recovery and earlier native
+fault evidence are reused, not repeated. This does not imply corporate-specific
+fault/scheduling testing. Current test stays paused. Shared SharePoint sandbox
+smoke, installed corrected wording and final acceptance reconciliation remain
+open. No source/check/package input change; no redundant gate/build.
+
+
+October 17 installed f685237 SharePoint sandbox smoke started: operator created
+Acceptance-SharePoint in the existing Documents library, reused existing
+SharePoint authenticated remote/library without new authentication, and selected
+Offline mirror. Draft Test Connection screenshot reports structural managed
+SharePoint service validation, background timer disabled, backend match,
+selected subtree accessible with zero visible items, and library/site/drive
+matching saved identity. Optional signed-in account label unavailable from Graph;
+required identity verification succeeds independently. Organization, library URL,
+remote alias, drive ID and account details omitted from records. Draft Test is
+not installed-unit execution or sync acceptance. Next Save, disposable bidirectional
+initial transfer and retained portal authorization check. No agent config/grant/
+service/cloud mutation and no repeated unchanged source checks.
+
+
+October 17 installed f685237 SharePoint initial sync: saved profile Modify screen
+reports Sync Now completed, transfer counts not reported by rclone, and initial
+synchronization recorded complete; future runs use normal bisync. Operator
+confirmed files on remote. Read-only host inspection of portal-selected
+Acceptance-SharePoint found test.docx, test.txt and SharePoint ownership anchor;
+connection df45c039-e4a3-4af9-9f25-e9f3da0e1c10 has one initial-sync-complete marker
+and six retained listing files. No file contents/config/credentials printed or
+mutated. Missing counts are not treated as zero transfers; UI completion and
+host/remote observations support initial transfer success. No new standalone
+checksum result inferred from SharePoint notice. Next close editor, remove/re-add
+panel applet and run ordinary Sync Now without Browse to verify SharePoint
+retained portal access. Reuse passed personal shared scheduling/recovery tests;
+no duplicate suite. No source/package/check inputs changed.
+
+
+October 17 installed f685237 SharePoint cross-launch ordinary sync passed:
+following requested editor close/panel remove-readd/reopen sequence without
+Browse, operator screenshot reports Sync Now completed. No initial-sync message
+on this run. Rclone transfer counts unavailable; no measured zero-transfer claim.
+Marked the specific installed SharePoint portal-access smoke complete in Task
+List.md. Existing SharePoint connection/authentication was reused without engine
+migration or modification of its original profile; test is separate and paused.
+
+Installed affected-path coverage now includes personal full smoke (manual,
+restart, scheduled transfer/Pause and recovery creation), business account setup
+and initial transfer, and SharePoint shared folder-access/initial/ordinary sync
+after restart. Unchanged shared scenarios are not repeated per provider. Overall
+integrated acceptance remains open for final reconciliation and installed
+recovery-placeholder/help correction; that source-only change passed check,
+focused recovery test, localization and gate as previously recorded. Current
+uncommitted scope: src/app.rs, English Fluent file, Task List.md and completion
+notes. No package build/install/commit, data deletion or permission change this
+observation; old failed profile and disposable resources preserved. git diff
+--check: exit 0; no runtime inputs changed since earlier passing checks.

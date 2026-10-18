@@ -444,8 +444,48 @@ drive types use the same tested generic profile; only identity/auth differs.
   replacement manifest pinned to that revision. Packaging f685237 built and
   installed October 17; export/bundle/installed identities match, complete metadata
   and runtime provenance unchanged. Fresh disposable portal/anchor retest is in
-  progress; no marker/state reset. Old failed profile/data retained.
-  Quiet manual run, scheduled/Pause and remaining acceptance stay pending.
+  progress; operator confirmed replacement embeds in panel and popup opens.
+  No marker/state reset. Old failed profile/data retained. Quiet manual run,
+  scheduled/Pause and remaining acceptance stay pending. Fresh draft Test
+  Connection blocked on local authorization; read-only inspection found mirror
+  Browse grant only, recovery grant absent. Operator confirmed recovery was not
+  selected; Test Connection passed after recovery Browse. Correct misleading
+  automatic-recovery placeholder/help for Flatpak rclone mirrors corrected in
+  source; check, focused recovery test, localization and final gate passed.
+  Installed wording retest awaits a later candidate; sync behavior unchanged.
+  Fresh profile Save (shared-auth acknowledgment), Preview (two paths) and
+  confirmed initial Sync Now/checksum passed. Host mirror now contains one
+  ownership marker and both test files; two of four retained listings contain
+  the marker, with one initial-complete marker. Operator's second, no-edit Sync
+  Now passed synchronization/checksum verification; prior ownership-marker
+  failure did not recur. Operator's sync after closing editor and removing/
+  re-adding panel applet also passed without Browse: retained portal access
+  across applet launches verified. Scheduled local edit arrived remotely;
+  operator's Pause notice confirms background timer stopped. Selected recovery
+  directory contains a dated ownership marker. Remote-only edit arrived locally;
+  timestamped test.txt backup exists in selected host recovery and differs from
+  current local file. Personal installed sync/recovery smoke passed; remaining
+  account/provider checks below stay open. Corporate installed setup screenshot
+  confirms new remote selected, work/school drive and disposable Acceptance-Business
+  subtree verified. Test Connection passed; operator confirmed Save. Preview
+  estimated two paths; initial Sync Now/checksum passed and operator confirmed
+  remote files. Host mirror contains both test files, one regular anchor and
+  initial-complete marker; two of four retained listings contain anchor.
+  Corporate installed setup/initial transfer smoke passed; unchanged personal
+  scheduling/recovery/fault coverage reused.
+  - [x] Verify shared portal folder access with one disposable SharePoint rclone
+    mirror in the installed Flatpak after the OneDrive access retest; existing
+    native/prototype evidence does not establish sandbox access. Reuse unchanged
+    provider scenarios; cover mirror/recovery Browse and cross-launch access.
+    Installed draft Test Connection passed with existing authenticated remote:
+    library identity matched and disposable Acceptance-SharePoint accessible
+    (zero visible items). Optional Graph account label unavailable, nonblocking.
+    Saved profile initial sync completed; operator confirmed remote files. Host
+    mirror contains both test files and SharePoint anchor, with retained listings
+    and initial-complete state. Ordinary sync after closing editor/removing and
+    re-adding panel applet passed without Browse: retained portal access verified.
+    Transfer counts unavailable, not claimed zero; shared personal worker/recovery
+    evidence reused. Corrected recovery wording still awaits installed review.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 

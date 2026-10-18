@@ -3357,33 +3357,42 @@ impl AppModel {
                         ),
                         fl!("sync-metered-help"),
                     ));
-                content.add(section_row(
-                    fl!("offline-settings"),
-                    settings
-                        .push(field_with_safety_help(
-                            widget::row::with_capacity(2)
-                                .spacing(8)
-                                .push(
-                                    widget::text_input::text_input(
-                                        fl!("recovery-placeholder"),
-                                        &self.draft.recovery_directory,
-                                    )
-                                    .on_input(Message::DraftRecoveryDirectory)
-                                    .width(Length::Fill),
-                                )
-                                .push(field_with_help(
-                                    widget::button::standard(fl!("browse"))
-                                        .on_press(Message::OpenRecoveryFolderPicker),
-                                    fl!("recovery-browse-help"),
-                                )),
-                            fl!("recovery-safety"),
-                            fl!("recovery-help"),
-                        ))
-                        .push(widget::text::body(fl!(
-                            "recovery-automatic",
-                            path = recovery_directory_placeholder(&self.draft)
-                        ))),
-                ))
+                let requires_recovery_selection = running_in_flatpak()
+                    && !(self.draft.provider == Provider::OneDrive && self.draft.legacy_onedrive);
+                let mut settings = settings.push(field_with_safety_help(
+                    widget::row::with_capacity(2)
+                        .spacing(8)
+                        .push(
+                            widget::text_input::text_input(
+                                if requires_recovery_selection {
+                                    fl!("recovery-placeholder-browse")
+                                } else {
+                                    fl!("recovery-placeholder")
+                                },
+                                &self.draft.recovery_directory,
+                            )
+                            .on_input(Message::DraftRecoveryDirectory)
+                            .width(Length::Fill),
+                        )
+                        .push(field_with_help(
+                            widget::button::standard(fl!("browse"))
+                                .on_press(Message::OpenRecoveryFolderPicker),
+                            fl!("recovery-browse-help"),
+                        )),
+                    fl!("recovery-safety"),
+                    if requires_recovery_selection {
+                        fl!("recovery-help-browse")
+                    } else {
+                        fl!("recovery-help")
+                    },
+                ));
+                if !requires_recovery_selection && self.draft.recovery_directory.trim().is_empty() {
+                    settings = settings.push(widget::text::body(fl!(
+                        "recovery-automatic",
+                        path = recovery_directory_placeholder(&self.draft)
+                    )));
+                }
+                content.add(section_row(fl!("offline-settings"), settings))
             }
         };
 
