@@ -4,7 +4,10 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 on Ubuntu 22.04
+    import tomli as tomllib
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

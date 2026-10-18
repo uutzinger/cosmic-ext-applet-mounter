@@ -76,47 +76,33 @@ fn release_preparation_supports_reuse_and_does_not_publish() {
 }
 
 #[test]
-fn debian_recommends_optional_onedrive_gui_runtime() {
+fn debian_keeps_engines_without_retired_webkit_runtime() {
     let control = include_str!("../debian/control");
     let binary = control
         .split("\n\n")
         .find(|block| block.starts_with("Package:"))
         .unwrap();
-    let recommends = binary
-        .split("Recommends:\n")
-        .nth(1)
-        .unwrap()
-        .split("\nDescription:")
-        .next()
-        .unwrap();
-    for package in [
-        "python3",
-        "python3-gi",
-        "gir1.2-gtk-3.0",
-        "gir1.2-webkit2-4.1",
-    ] {
-        assert!(
-            recommends
-                .lines()
-                .any(|line| line.trim().trim_end_matches(',') == package),
-            "{package}"
-        );
+    for retired in ["python3-gi", "gir1.2-gtk-3.0", "gir1.2-webkit2-4.1"] {
+        assert!(!binary.contains(retired), "{retired}");
     }
-    let depends = binary
-        .split("Depends:\n")
-        .nth(1)
-        .unwrap()
-        .split("\nRecommends:")
-        .next()
-        .unwrap();
-    assert!(!depends.contains("gir1.2-webkit"), "helper stays optional");
+    for retained in [
+        "rclone (>= 1.74.3)",
+        "onedriver (>= 0.15.0)",
+        "onedrive (>= 2.5.10)",
+    ] {
+        assert!(binary.contains(retained), "{retained}");
+    }
+    assert!(
+        control.contains(" python3,"),
+        "build tooling retains Python"
+    );
 }
 
 #[test]
-fn debian_install_respects_cargo_target_and_packages_helper_catalog() {
+fn debian_install_respects_cargo_target_and_packages_catalog_without_helper() {
     let rules = include_str!("../debian/rules");
     assert!(rules.contains("\"$(CARGO_TARGET_DIR)/release/cosmic-ext-applet-mounter\""));
-    assert!(rules.contains("scripts/cosmic-ext-applet-mounter-onedrive-auth-helper"));
+    assert!(!rules.contains("scripts/cosmic-ext-applet-mounter-onedrive-auth-helper"));
     assert!(rules.contains("i18n/en/cosmic_ext_applet_mounter.ftl"));
     assert!(!rules.contains("--all-features"));
     assert!(!rules.contains("development-probes"));

@@ -231,7 +231,7 @@ permissions only after a specific failing feature proves they are required.
 ## GUI Prototype
 
 `io.github.uutzinger.cosmic-ext-applet-mounter.GuiPrototype.json` copies the
-locally built applet binary, helper, desktop file, AppStream metadata, and icon
+locally built applet binary, translation catalog, desktop file, AppStream metadata, and icon
 into a Flatpak so the real GUI can be smoke-tested before the final
 reproducible manifest exists.
 
@@ -461,21 +461,17 @@ defaults), exact source/runtime identity, generated worker/guard units, and live
 Tasks (5)/(6) behavior before release. Do not enable `development-probes` in the
 shipping build, advance the tag prematurely, or substitute a different base/runtime.
 
-> **0.5.4 development:** new OneDrive Offline mirrors use host rclone >= 1.74.3 and the shared applet OAuth/coordinator path. The `onedrive` host command and auth helper remain for legacy profiles for one transition release; removal is a later phase. Integrated Flatpak/browser acceptance is still pending. See the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md).
+> **0.5.4 development:** new OneDrive Offline mirrors use host rclone >= 1.74.3 and the shared applet OAuth/coordinator path. The `onedrive` host command remains for legacy profiles for one transition release; its removal is a later phase. The WebKit auth helper is retired in 0.5.4. Integrated Flatpak/browser acceptance is still pending. See the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md).
 
-The packaged optional legacy OneDrive auth helper uses Python GI, GTK 3, and WebKit2
-4.1 introspection. Final sandbox acceptance must verify those imports and its
-sign-in handoff inside the accepted runtime/base (or document manual URL handoff).
-Host Debian recommendations/installer packages do not supply sandbox libraries.
-
-The accepted 25.08 Platform currently lacks Python GI. Flatpak therefore uses
-manual browser/response-URL handoff for legacy OneDrive Offline setup, not the packaged
-WebKit helper: start setup, open sign-in through the desktop portal, then paste
-and submit the full final Microsoft native-client redirect URL. Browser request
-acceptance is not sign-in completion. Transient auth files live in the private
-app-owned shared state directory so the sandbox and host engine see the same files;
-they are removed after setup. Native installations retain the optional helper.
-Rebuild/installed sign-in acceptance remains required for this source change.
+Version 0.5.4 no longer packages the WebKit OneDrive authentication helper or
+requires its Python GI/GTK/WebKit libraries. Existing legacy mirrors retain
+browser/manual response-URL reauthentication: start setup, open sign-in through
+the desktop portal, then paste and submit the full final Microsoft native-client
+redirect URL. The same manual handoff is available in native installations.
+Browser request acceptance is not sign-in completion. Transient auth files live
+in the private app-owned shared state directory so sandbox and host engine see
+the same files; they are removed after setup. Existing legacy synchronization,
+credentials and engine dependencies are retained. No host libraries are removed.
 
 October 13 candidate testing confirmed browser/redirect submission and dry-run
 validation. Some Microsoft personal-account redirects leave the native-client

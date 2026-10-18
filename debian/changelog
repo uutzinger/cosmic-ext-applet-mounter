@@ -1,6 +1,9 @@
 cosmic-ext-applet-mounter (0.5.4) unstable; urgency=medium
 
   * Use rclone bisync for new personal and work/school OneDrive mirrors.
+  * Support release preflight on Ubuntu 22.04 with the build-time tomli fallback.
+  * Remove the WebKit authentication helper and helper-only GUI dependencies;
+    retain browser/manual reauthentication for existing legacy mirrors.
   * Retain existing legacy OneDrive mirrors with deprecation and replacement
     guidance; keep onedriver Online mounts supported.
   * Resolve portal-authorized mirror and recovery paths consistently across

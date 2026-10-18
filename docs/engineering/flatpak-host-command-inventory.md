@@ -276,9 +276,10 @@ reviewed to avoid overlooking an indirect host executable.
 | App-owned readiness/mount guards | **Unavoidable invocation** | Fixed flags and validated saved identities through that package-specific launcher. |
 | User-installed OpenConnect secret-agent service | **Replaced by D-Bus** | Applet starts/restarts the fixed service through the user manager. Its external nm-applet/plugin process is required authentication infrastructure, not an applet host CLI control path. |
 
-The settings/editor self-launch, WebKit authentication helper, and direct
-`xdg-open <validated-login-URL>` are local child launches, not host-runner
-requests. They use the installed/self-selected helper or fixed browser launcher.
+Settings/editor self-launch remains a local child launch, not a host-runner
+request. October 18: WebKit helper and direct native `xdg-open` auth launch
+retired in 0.5.4; validated legacy sign-in URLs open through the typed desktop
+OpenURI portal for native and Flatpak. Manual redirect submission remains.
 Graph identity verification and VPN route/DNS/TCP checks are in-process APIs.
 
 ## Development and installation exclusions

@@ -2,6 +2,9 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import runpy
+import sys
+from unittest.mock import patch
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +31,20 @@ class PublicationPreflight(unittest.TestCase):
                 (root / 'docs/releases/v0.5.3.md').write_text(notes)
             return subprocess.run(['bash', str(ROOT / 'scripts/check-release-publication.sh'), tag],
                                   cwd=root, capture_output=True, text=True)
+
+    def test_python310_fallback_uses_full_toml_parser(self):
+        try:
+            import tomllib as parser
+        except ModuleNotFoundError:
+            import tomli as parser
+        with patch.dict(sys.modules, {"tomllib": None, "tomli": parser}):
+            namespace = runpy.run_path(str(ROOT / "scripts/lib/publication_check.py"))
+        document = '[package]\nversion = "0.5.4" # fixture\n[[dependency]]\nname = "sample"\n'
+        self.assertEqual(namespace["tomllib"].loads(document), {
+            "package": {"version": "0.5.4"}, "dependency": [{"name": "sample"}],
+        })
+        with self.assertRaises(parser.TOMLDecodeError):
+            namespace["tomllib"].loads('[package]\nversion = [')
 
     def test_finalized_metadata_passes(self):
         result = self.check_fixture()

@@ -37,7 +37,6 @@
       "buildsystem": "simple",
       "build-commands": [
         "install -Dm0755 cosmic-ext-applet-mounter /app/bin/cosmic-ext-applet-mounter",
-        "install -Dm0755 cosmic-ext-applet-mounter-onedrive-auth-helper /app/bin/cosmic-ext-applet-mounter-onedrive-auth-helper",
         "install -Dm0644 cosmic_ext_applet_mounter.ftl /app/share/io.github.uutzinger.cosmic-ext-applet-mounter/i18n/en/cosmic_ext_applet_mounter.ftl",
         "install -Dm0644 app.desktop /app/share/applications/io.github.uutzinger.cosmic-ext-applet-mounter.desktop",
         "install -Dm0644 app.metainfo.xml /app/share/metainfo/io.github.uutzinger.cosmic-ext-applet-mounter.metainfo.xml",
@@ -51,10 +50,6 @@
         {
           "type": "file",
           "path": "../../target/release/cosmic-ext-applet-mounter"
-        },
-        {
-          "type": "file",
-          "path": "../../scripts/cosmic-ext-applet-mounter-onedrive-auth-helper"
         },
         {
           "type": "file",

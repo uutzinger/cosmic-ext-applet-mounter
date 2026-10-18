@@ -498,8 +498,9 @@ installed Flatpak evidence remain distinct.
   redundant runs. Preserve existing target scope; no added architecture/provider
   test matrix. Missing evidence is reviewed first, with new live tests only for
   a concrete unresolved release gap or changed behavior.
-- [x] Prepare 0.5.4 version/package metadata and candidate release-note scope;
-  source committed as ef5c4d8 and Flatpak manifest pins that exact revision.
+- [ ] Refresh candidate source/manifest pins after the WebKit-helper cleanup.
+  Earlier 0.5.4 version/package metadata and candidate scope were prepared;
+  ef5c4d8/28b0abd remain the pre-cleanup baseline, not the next shipping candidate.
   Focused publication tests, version/dependency checks and dev-gate-dqkwy923
   passed; metadata recipe retains known COSMIC diagnostics. Notes remain draft.
   Packaging pin is committed separately; these are candidate build inputs,
@@ -514,8 +515,17 @@ installed Flatpak evidence remain distinct.
 
 #### 2. Build or reuse packages and inspect their contents
 
+October 18 scope update: remove WebKit helper and helper-only dependencies now;
+retain browser/manual legacy reauthentication and all legacy sync support. Current
+28b0abd packages are pre-cleanup evidence; affected package inputs need replacement
+after source checks. Do not repeat unchanged Flatpak behavior tests.
+
 - [ ] Obtain required native/Debian and source-based Flatpak artifacts at the
-  frozen revisions with shipping features only. Reuse exact-source accepted
+  frozen revisions with shipping features only. Started October 18: Flatpak
+  28b0abd/ef5c4d8 x86_64/master build/export passed. Authorized master push
+  verified; hosted run 39166940625 failed on both 22.04 targets (missing tomllib),
+  with four newer-target jobs passed. Python3.10 fallback/build dependency fixed
+  alongside helper retirement; replacement source verification in progress. Reuse exact-source accepted
   artifacts; build only changed inputs or missing artifacts, once per matrix.
 - [ ] Verify source/runtime identity, helper/worker payloads, size, checksums and
   matching Flatpak export/bundle identities. Inspect installed effective grants,
@@ -523,6 +533,12 @@ installed Flatpak evidence remain distinct.
   grants or restoration of obsolete shell wrappers. Latest development candidate
   export/bundle/install identity already matches; payload/effective-grant review
   and final-release identities remain open.
+
+  October 18 Flatpak payload/dependency review passed: six source-matched export
+  files, correct 0.5.4 metadata, Platform ELF libraries available, unchanged
+  runtime/policy and only read-only theme global overrides. Receipt:
+  target/task-runs/flatpak-candidate-28b0abd/payload-review.json. Candidate not
+  installed; this pre-cleanup payload is not the replacement shipping candidate.
 
 #### 3. Verify authentication and sandbox access
 
@@ -646,18 +662,14 @@ separately without removing legacy support from the 0.5.4 source/package.
   diagnostics/controller requirements and Executable::OneDrive process route.
   Preserve rclone OneDrive backend/identity/guards, shared Microsoft OAuth and
   onedriver Online. Replace removed behavior with explicit unsupported state.
-- [ ] Retire scripts/cosmic-ext-applet-mounter-onedrive-auth-helper and its install
-  payloads in justfile and active Flatpak manifests; reconcile prototype/helper
-  tests and packaging contracts. No separate helper desktop file exists. Remove
-  only unused helper/auth Fluent keys; retain legacy identification/replacement
-  messages and update them for the actual removal release.
-- [ ] Reconcile dependency recommendations and installers after checking remaining
-  consumers: onedrive and helper-only python3-gi, gir1.2-gtk-3.0 and
-  gir1.2-webkit2-4.1 in debian/control, plus corresponding other-distro helper
-  packages. Retain Python wherever maintained scripts require it; do not uninstall
-  packages from user machines. Remove only --onedrive, --onedrive-auth-helper,
-  --skip-onedrive-auth-helper and their legacy installer paths/tests; preserve
-  --onedriver, --rclone and rclone's onedrive backend.
+- [o] WebKit helper, helper-only dependency recommendations/install options and
+  unused localization keys moved into 0.5.4 step-2 cleanup by operator October 18.
+  Browser/manual legacy reauthentication retained; this does not retire engine
+  support or delete existing credentials. See consolidated acceptance above.
+- [ ] Remove remaining onedrive engine recommendation and --onedrive installer
+  option after checking consumers. Retain Python for maintained build/developer
+  tools; do not uninstall packages from user machines. Preserve --onedriver,
+  --rclone and rclone's onedrive backend.
 - [ ] Retire current legacy-executable entries in host-command inventory and
   permission rationale; preserve historical removed-command evidence and review
   consumers before dropping shared permissions. Update script catalog/inventory,

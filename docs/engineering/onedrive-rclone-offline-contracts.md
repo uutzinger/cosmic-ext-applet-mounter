@@ -770,3 +770,13 @@ remain explicit final gates. Existing passing source/fake tests cover ownership,
 reference counting, bounded readiness, cancellation and engine dispatch; no
 unrun installed scenario is claimed. Draft release notes reconciled with this
 limited scope; version/final packages/publication remain separate tasks.
+
+
+October 18 package-review scope correction: operator moves WebKit auth-helper
+retirement into 0.5.4, matching the decision to bypass WebKit/Ruby requirements.
+New mirrors remain rclone-only; existing legacy sync and stored credentials
+remain supported. Browser/manual reauthentication remains via portal/response
+URL; helper dispatcher, install payloads and GUI-only dependency recommendations
+removed. Earlier helper-retention statements are historical and superseded only
+for the helper, not engine retirement. Source/pin replacement and affected checks
+required; completed rclone Flatpak behavior tests remain reusable.

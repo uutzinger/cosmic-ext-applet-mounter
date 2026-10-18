@@ -536,39 +536,6 @@ install_onedrive() {
 # Summary
 # ---------------------------------------------------------------------------
 
-# Check imports only: no GTK initialization, browser, OAuth, or user-state writes.
-onedrive_auth_helper_available() {
-    command -v python3 >/dev/null 2>&1 || return 1
-    python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("WebKit2", "4.1"); from gi.repository import GLib, Gtk, WebKit2' >/dev/null 2>&1
-}
-
-install_onedrive_auth_helper() {
-    info "Checking optional OneDrive sign-in GUI dependencies..."
-    if onedrive_auth_helper_available; then
-        info "Python GI, GTK 3, and WebKitGTK 4.1 are already available."
-        return 0
-    fi
-    local packages=()
-    case "$(detect_distro)" in
-        debian) packages=(python3 python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1) ;;
-        fedora) packages=(python3 python3-gobject gtk3 webkit2gtk4.1) ;;
-        arch) packages=(python python-gobject gtk3 webkit2gtk-4.1) ;;
-        opensuse|gentoo)
-            warn "Install your distribution's Python GI, GTK 3 and WebKit2 4.1 introspection runtime manually; package variants/USE flags are not automated here."
-            warn "Until the import check passes, use Cloud Mounter's manual browser/response-URL handoff."
-            return 0
-            ;;
-        *) error "Unsupported OneDrive GUI helper distribution."; return 1 ;;
-    esac
-    pkg_update_index
-    pkg_install "${packages[@]}"
-    if ! onedrive_auth_helper_available; then
-        error "OneDrive GUI imports are unavailable after installation. Check the system python3 GI/GTK 3/WebKit2 4.1 runtime, or rerun with --skip-onedrive-auth-helper and use manual URL handoff."
-        return 1
-    fi
-    info "OneDrive sign-in GUI dependencies are available."
-}
-
 print_summary() {
     info "Dependency status:"
     printf '  %-12s %s\n' "rclone" "$(get_rclone_version) (min ${RCLONE_MIN_VERSION})"
@@ -584,7 +551,6 @@ print_summary() {
     fi
     printf '  %-12s %s\n' "fusermount3" "$(command -v fusermount3 >/dev/null 2>&1 && echo present || echo missing)"
     printf '  %-12s %s\n' "nmcli" "$(command -v nmcli >/dev/null 2>&1 && echo present || echo missing)"
-    printf '  %-12s %s\n' "OneDrive GUI" "$(onedrive_auth_helper_available && echo available || echo 'unavailable (manual URL handoff remains available)')"
 }
 
 # ---------------------------------------------------------------------------
@@ -598,14 +564,12 @@ Usage: $0 [OPTION]...
 Install or update host dependencies for cosmic-ext-applet-mounter.
 
 Options:
-  --all                Install/update all engines, including legacy OneDrive GUI runtime.
+  --all                Install/update all engines, including the legacy OneDrive engine.
   --base               Install base tools only (fuse3, network-manager).
   --rclone             Install/update rclone (new OneDrive mirrors and other providers).
   --rclone-selfupdate  Try rclone's package-aware selfupdate first (opt-in).
   --onedriver          Install/update jstaf/onedriver (OneDrive Online mounts).
-  --onedrive           Install/update legacy OneDrive mirror engine and optional GUI runtime.
-  --onedrive-auth-helper Install/check only the optional legacy OneDrive GUI runtime.
-  --skip-onedrive-auth-helper Omit GUI runtime; use manual browser/URL handoff.
+  --onedrive           Install/update legacy OneDrive mirror engine (browser/manual sign-in).
   --help               Show this help message.
   --log-dir DIR        Mirror visible output to a new private log/report directory.
 
@@ -721,8 +685,6 @@ main() {
     local do_rclone=false
     local do_onedriver=false
     local do_onedrive=false
-    local do_auth_helper=false
-    local skip_auth_helper=false
 
     if [ $# -eq 0 ]; then
         do_all=true
@@ -736,8 +698,6 @@ main() {
             --rclone-selfupdate) PREFER_RCLONE_SELFUPDATE=true ;;
             --onedriver) do_onedriver=true ;;
             --onedrive) do_onedrive=true ;;
-            --onedrive-auth-helper) do_auth_helper=true ;;
-            --skip-onedrive-auth-helper) skip_auth_helper=true ;;
             --help) usage; exit 0 ;;
             *) error "Unknown option: $1"; usage; exit 1 ;;
         esac
@@ -754,8 +714,6 @@ main() {
     require_supported_distro
     require_sudo
 
-    if [ "$do_onedrive" = true ]; then do_auth_helper=true; fi
-    if [ "$skip_auth_helper" = true ]; then do_auth_helper=false; fi
 
     if [ "$do_base" = true ]; then
         install_base
@@ -768,9 +726,6 @@ main() {
     fi
     if [ "$do_onedrive" = true ]; then
         install_onedrive
-    fi
-    if [ "$do_auth_helper" = true ]; then
-        install_onedrive_auth_helper
     fi
     print_summary
     info "Done."

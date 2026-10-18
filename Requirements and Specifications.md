@@ -851,15 +851,15 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 | NetworkManager VPN | NetworkManager D-Bus service |
 | OpenConnect VPN | Host `network-manager-openconnect` plugin and authentication dialog |
 | Interactive OpenConnect authentication | Host `nm-applet` secret agent |
-| Legacy OneDrive sign-in helper (transition release only) | Python 3/PyGObject, GTK 3 and WebKitGTK 4.1 runtime/introspection libraries |
 
 Dependencies shall be checked independently. An unavailable mode shall not
 disable unrelated modes.
 
-The OneDrive sign-in helper and the manual browser/response-URL handoff exist only
-for legacy `abraunegg/onedrive` connections. They are unchanged during the
-transition release and removed, with their Debian recommendations and installer
-options, in the removal release. rclone OneDrive setup needs neither.
+The manual browser/response-URL handoff remains available for existing legacy
+`abraunegg/onedrive` connections during the transition release. Version 0.5.4
+removes the WebKit sign-in helper and its helper-only Debian recommendations and
+installer options. Existing legacy synchronization and credentials are retained;
+rclone OneDrive setup does not consume legacy authentication files.
 
 ### 8.3 Permissions
 

@@ -12,7 +12,7 @@ it is listed here. Inspect its help and obtain the applicable approval first.
 |---|---|---|
 | [install-dependencies.sh](install-dependencies.sh) | Install selected host storage/base/optional legacy OneDrive GUI dependencies; `--rclone` covers new OneDrive mirrors. | Package/repository/network changes, potentially privileged. No options means `--all`, **not** inspection. See [dependencies](../docs/dependency-installation.md). |
 | [setup-openconnect.sh](setup-openconnect.sh) | Install OpenConnect packages and the on-demand authentication-agent service; uninstall that service. | Packages, user service and icon setting change. Does not create a VPN profile; uninstall retains packages/profile. See [OpenConnect guide](../docs/openconnect.md). |
-| [cosmic-ext-applet-mounter-onedrive-auth-helper](cosmic-ext-applet-mounter-onedrive-auth-helper) | Installed native graphical OneDrive redirect capture. | Opens GUI, reads auth URL file and writes private response file. Runtime payload used by packaging/app, not an obsolete developer experiment. Never paste redirect URLs or credentials into logs. |
+| `cosmic-ext-applet-mounter-onedrive-auth-helper` (retired in 0.5.4) | Removed WebKit legacy sign-in payload. | Native and Flatpak manual handoff now opens the browser through the desktop portal; existing legacy sync remains supported. No helper installed or dispatched. |
 
 ## Optional setup logs
 
@@ -33,11 +33,11 @@ so standalone users do not need Python or checkout-relative support files.
 
 | Script | Purpose | Current boundary |
 |---|---|---|
-| [check-ui-localization.sh](check-ui-localization.sh) | Localization gate used by `just localization-check`. | Calls translation checker and helper localization tests; does not build. |
+| [check-ui-localization.sh](check-ui-localization.sh) | Localization gate used by `just localization-check`. | Calls the translation checker; retired helper localization tests removed. Does not build. |
 | [dev.sh](dev.sh) | Run a fixed just check/native-build recipe with private logs and concise phase/result output. | `bash scripts/dev.sh check`; `gate` runs fmt-check, lint and test; supports `--log-dir` and bounded `--timeout-seconds`. No arbitrary arguments, install, cleanup, GUI launch or release tasks. |
 | [build-flatpak.sh](build-flatpak.sh) | Read-only `--preflight` source/runtime/installed-state inspection, or explicit-manifest candidate build/export, or verified reuse with --reuse-receipt. | Preflight only observes current/installed state and records blockers. Builds require clean pinned source and a new output; generated Cargo inline/shell sources are validated and fingerprinted; build-only --local-source-repo uses recorded exact-commit Git transport without global config writes; reuse needs a schema-2 receipt/successful summary and passes hashes, fsck and metadata checks without builder/runtime calls. No installation, launch or submission. |
 | [check-ui-translations.py](check-ui-translations.py) | Catalog/reference and selected hardcoded UI-string checks. | Source checks, not full Fluent compilation or rendered UI review. |
-| [check-release-publication.sh](check-release-publication.sh) | Version/metadata/finalized-note preflight (wrapper for `lib/publication_check.py`). | Read-only; does not prove package acceptance or grant approval. |
+| [check-release-publication.sh](check-release-publication.sh) | Version/metadata/finalized-note preflight (wrapper for `lib/publication_check.py`). | Read-only; requires Python 3.11+ or the tomli fallback on Python 3.10. Does not prove package acceptance or grant approval. |
 | [archive-release.sh](archive-release.sh) | After a release, move completed task-list and completion-note history to `docs/archive/` and carry open items forward. | Edits the two Markdown files and `docs/archive/` only; no commit. Needs `--tasks-from` / `--notes-from` heading prefixes; `--dry-run` reports counts. Version may carry a pre-release label (`0.5.4-pre`). Refuses existing archives and uncommitted edits to the two files. |
 | [onedrive-mirror-prototype.sh](onedrive-mirror-prototype.sh) | Development-only OneDrive OAuth, identity and shared-coordinator lifecycle prototype. | Uses `src/microsoft_oauth.rs` for shared protected config/create/continue handling. Explicit fixed actions; `inspect` reads identity, `auth` creates only a fresh `cm_proto_` remote, `prepare` creates an owned disposable cloud tree and initial Preview. Later actions require its retained session. No applet configuration, installation, services or mount changes. See the operator sequence below. |
 | [onedrive-mirror-guard-check.sh](onedrive-mirror-guard-check.sh) | Live OneDrive compatibility investigation. | **Changes cloud data:** only fresh `CloudMounter-GuardTest-<token>` folders. `--round-trip` adds immutable originals, independent downloads, measured sync transfers and schema-2 partial evidence; cleanup verifies marker content. `--settle-seconds` is bounded 0..60 (default 10); `--web-edit` pauses for an Office edit. `--plan` only checks configured backend presence. Legacy mode retains schema 1. |
@@ -138,12 +138,12 @@ or distribution differ, also update `lib/artifact_inspection.py`,
 | `lib/publication_check.py` | `Cargo.toml` and `Cargo.lock`, `debian/changelog` (via `dpkg-parsechangelog`), `resources/app.metainfo.xml` (latest `<release>`), `docs/releases/v<version>.md` (must not contain "draft"). |
 | `promote_release.py` | `docs/releases/v<version>.md` as the release body; runs `check-release-publication.sh`. |
 | `lib/release_tasks.py` | `cargo metadata` for the version and `debian/changelog`; a clean branch on a GitHub remote. |
-| `check-ui-translations.py`, `check-ui-localization.sh` | `src/**/*.rs`, `i18n/*/cosmic_ext_applet_mounter.ftl`, `tests/auth_helper_localization_test.py`. COSMIC/Fluent-specific: adapt the catalog name or drop the `localization-check` recipe. |
+| `check-ui-translations.py`, `check-ui-localization.sh` | `src/**/*.rs`, `i18n/*/cosmic_ext_applet_mounter.ftl`. COSMIC/Fluent-specific: adapt the catalog name or drop the `localization-check` recipe. |
 | `build-flatpak.sh`, `inspect-artifacts.py` | An explicit Flatpak manifest passed on the command line; drop them if you do not ship Flatpak. |
 
 **Project-specific and not reusable as written**
 
-- `install-dependencies.sh`, `setup-openconnect.sh` and the OneDrive auth helper
+- `install-dependencies.sh` and `setup-openconnect.sh`
   belong to this applet.
 - `archive/` holds retired runtime helpers; leave it behind.
 

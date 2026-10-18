@@ -3850,17 +3850,9 @@ impl AppModel {
                 .push(widget::text::body(fl!("onedrive-auth-title")))
                 .push(widget::text::body(fl!("onedrive-auth-intro")))
                 .push(field_with_help(
-                    widget::button::suggested(if running_in_flatpak() {
-                        fl!("onedrive-auth-open-browser")
-                    } else {
-                        fl!("onedrive-auth-open")
-                    })
-                    .on_press(Message::OpenOneDriveMirrorAuthUrl),
-                    if running_in_flatpak() {
-                        fl!("onedrive-auth-open-browser-help")
-                    } else {
-                        fl!("onedrive-auth-open-help")
-                    },
+                    widget::button::suggested(fl!("onedrive-auth-open-browser"))
+                        .on_press(Message::OpenOneDriveMirrorAuthUrl),
+                    fl!("onedrive-auth-open-browser-help"),
                 ))
                 .push(widget::text::body(fl!("onedrive-auth-shell-fallback")))
                 .push(field_with_help(
@@ -8496,7 +8488,7 @@ async fn run_onedrive_mirror_manual_setup_with(
         .await
         .map_err(|error| {
             crate::fl!(
-                "ui-app-onedrive-manual-webkit-authorization-completed-but-post",
+                "ui-app-onedrive-manual-authorization-completed-but-post",
                 error = (error).to_string()
             )
         })
@@ -11860,79 +11852,23 @@ async fn open_onedrive_auth_url(auth_files: &OneDriveMirrorAuthFiles) -> Result<
         })?;
     let url = url.trim();
     validate_onedrive_auth_url(url)?;
-    if running_in_flatpak() {
-        let request = async {
-            let connection = zbus::Connection::session().await?;
-            let proxy = zbus::Proxy::new(
-                &connection,
-                "org.freedesktop.portal.Desktop",
-                "/org/freedesktop/portal/desktop",
-                "org.freedesktop.portal.OpenURI",
-            )
-            .await?;
-            let options = BTreeMap::<String, zbus::zvariant::OwnedValue>::new();
-            let _: zbus::zvariant::OwnedObjectPath =
-                proxy.call("OpenURI", &("", url, options)).await?;
-            Ok::<(), zbus::Error>(())
-        };
-        return match tokio::time::timeout(Duration::from_secs(10), request).await {
-            Ok(Ok(())) => Ok(fl!("onedrive-auth-browser-requested")),
-            _ => Err(fl!("onedrive-auth-browser-request-failed")),
-        };
-    }
-    if let Some(helper) = onedrive_auth_helper_path() {
-        Command::new(&helper)
-            .env(
-                "COSMIC_MOUNTER_AUTH_UI",
-                serde_json::json!({
-                    "auth-helper-title": fl!("auth-helper-title"),
-                    "auth-helper-intro": fl!("auth-helper-intro"),
-                    "auth-helper-captured": fl!("auth-helper-captured"),
-                    "auth-helper-completed": fl!("auth-helper-completed"),
-                })
-                .to_string(),
-            )
-            .arg(&auth_files.auth_url_file)
-            .arg(&auth_files.response_url_file)
-            .spawn()
-            .map_err(|error| {
-                crate::fl!(
-                    "ui-app-failed-to-start-onedrive-auth-helper-value1",
-                    value1 = (helper.display()).to_string(),
-                    error = (error).to_string()
-                )
-            })?;
-        return Ok(fl!("onedrive-auth-helper-opened"));
-    }
-    Command::new("xdg-open").arg(url).spawn().map_err(|error| {
-        crate::fl!(
-            "ui-app-failed-to-start-xdg-open-error",
-            error = (error).to_string()
+    let request = async {
+        let connection = zbus::Connection::session().await?;
+        let proxy = zbus::Proxy::new(
+            &connection,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.OpenURI",
         )
-    })?;
-    Ok(fl!("onedrive-auth-browser-opened"))
-}
-
-fn onedrive_auth_helper_path() -> Option<PathBuf> {
-    let helper_name = "cosmic-ext-applet-mounter-onedrive-auth-helper";
-    if let Ok(current) = env::current_exe()
-        && let Some(directory) = current.parent()
-    {
-        let sibling = directory.join(helper_name);
-        if sibling.is_file() {
-            return Some(sibling);
-        }
+        .await?;
+        let options = BTreeMap::<String, zbus::zvariant::OwnedValue>::new();
+        let _: zbus::zvariant::OwnedObjectPath = proxy.call("OpenURI", &("", url, options)).await?;
+        Ok::<(), zbus::Error>(())
+    };
+    match tokio::time::timeout(Duration::from_secs(10), request).await {
+        Ok(Ok(())) => Ok(fl!("onedrive-auth-browser-requested")),
+        _ => Err(fl!("onedrive-auth-browser-request-failed")),
     }
-    if let Ok(home) = env::var("HOME") {
-        let user_install = PathBuf::from(home)
-            .join(".local")
-            .join("bin")
-            .join(helper_name);
-        if user_install.is_file() {
-            return Some(user_install);
-        }
-    }
-    None
 }
 
 fn validate_onedrive_auth_response_url(value: &str) -> Result<(), String> {

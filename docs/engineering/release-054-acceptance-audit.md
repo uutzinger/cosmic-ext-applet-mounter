@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Evidence reuse plan reconciled; 0.5.4 candidate source pinned, build and final acceptance open
+Status: Evidence reuse plan reconciled; helper retirement requires replacement candidate source/pins, final acceptance open
 
 Created: October 18, 2026
 
@@ -121,3 +121,20 @@ This completes step-1 candidate input preparation, not final artifact acceptance
 Use the separate packaging commit containing this pin as the clean build identity.
 Any later source/package fix requires a new immutable candidate and only affected
 checks; documentation receipts alone do not invalidate accepted packages.
+
+
+## October 18 package-review correction: remove WebKit helper now
+
+Operator confirmed the rclone migration was chosen to avoid WebKit/Ruby build
+requirements. Legacy compatibility does not require keeping the WebKit helper.
+Retire helper/GUI recommendations/installer options in 0.5.4, while retaining
+existing legacy synchronization and browser/manual reauthentication. Native and
+Flatpak manual sign-in use the desktop OpenURI portal; no old installed helper
+is discovered or launched. Python remains only where build/tooling uses it.
+No host libraries, credentials or user files are automatically removed.
+
+28b0abd/ef5c4d8 build results are pre-cleanup artifacts and remain retained
+evidence, not selected post-cleanup shipping inputs. Source/pin preparation
+reopens only for this change; reviewed runtime/permissions and accepted rclone
+behavior remain reusable. Replacement payload audit must prove helper absence
+and Debian recommendations without helper-only GUI dependencies.

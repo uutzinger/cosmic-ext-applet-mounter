@@ -171,7 +171,7 @@ fn flatpak_build_identity_and_assets_preserve_release_boundaries() {
             .map(|item| item.as_str().unwrap())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(commands.contains("cosmic-ext-applet-mounter-onedrive-auth-helper"));
+        assert!(!commands.contains("cosmic-ext-applet-mounter-onedrive-auth-helper"));
         assert!(commands.contains("cosmic_ext_applet_mounter.ftl"));
         assert!(!commands.contains("development-probes"));
         assert!(!commands.contains("--all-features"));

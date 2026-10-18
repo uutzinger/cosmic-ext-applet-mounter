@@ -32,7 +32,6 @@ test:
     set -euo pipefail
     cargo test --locked --all-targets
     for t in tests/*_test.py; do
-        [ "$t" = tests/auth_helper_localization_test.py ] && continue  # run by localization-check
         python3 "$t"
     done
 
@@ -95,7 +94,6 @@ stage destination='target/stage':
 
 install-user: build-release
     install -Dm0755 {{cargo-target-dir / 'release' / name}} {{user-bin-dir / name}}
-    install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper {{user-bin-dir / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}}
     install -Dm0644 i18n/en/cosmic_ext_applet_mounter.ftl {{user-data-dir / appid / 'i18n' / 'en' / 'cosmic_ext_applet_mounter.ftl'}}
     install -Dm0644 resources/app.desktop {{user-data-dir / 'applications' / appid + '.desktop'}}
     install -Dm0644 resources/app.metainfo.xml {{user-data-dir / 'metainfo' / appid + '.metainfo.xml'}}
@@ -105,7 +103,6 @@ install-user: build-release
 
 install: build-release
     install -Dm0755 {{cargo-target-dir / 'release' / name}} {{bin-dst}}
-    install -Dm0755 scripts/cosmic-ext-applet-mounter-onedrive-auth-helper {{base-dir / 'bin' / 'cosmic-ext-applet-mounter-onedrive-auth-helper'}}
     install -Dm0644 i18n/en/cosmic_ext_applet_mounter.ftl {{catalog-dst}}
     install -Dm0644 resources/app.desktop {{desktop-dst}}
     install -Dm0644 resources/app.metainfo.xml {{appdata-dst}}

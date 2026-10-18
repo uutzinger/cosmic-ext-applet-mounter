@@ -9,8 +9,8 @@ supported minimum versions.
 
 For the 0.5.4 development source, **rclone 1.74.3 or newer** handles new
 OneDrive Offline mirrors. OneDrive Online mounts still need `onedriver`;
-`onedrive` and its optional GUI helper are needed only for retained legacy
-Offline profiles. Installed native/Flatpak acceptance of the new integration is
+`onedrive` is needed only for retained legacy Offline profiles; sign-in uses
+the browser/manual response-URL handoff, without a WebKit helper. Installed native/Flatpak acceptance of the new integration is
 pending; an older installed applet keeps its existing engine behavior.
 
 The automated installer supports Debian, Ubuntu, Pop!_OS, Fedora, Arch Linux,
@@ -32,7 +32,8 @@ To install only the engine for new OneDrive mirrors, select `--rclone`:
 bash scripts/install-dependencies.sh --rclone
 ```
 
-No options and `--all` retain all engines and the legacy helper for compatibility.
+No options and `--all` retain all engines for compatibility; they do not install
+the retired WebKit helper runtime.
 Use `--onedriver` for OneDrive Online or `--onedrive` for existing legacy mirrors.
 These commands install/update packages; the applet never installs them itself.
 
@@ -65,7 +66,6 @@ Manual instructions are retained below for reference and for other distributions
 | [NetworkManager](https://networkmanager.dev/) | network and VPN readiness over D-Bus | installed |
 | systemd user manager and logind | service/timer control and optional sleep cleanup over D-Bus | host services available |
 | OpenConnect NetworkManager plugin | Cisco-compatible VPN authentication | see [OpenConnect setup](openconnect.md) |
-| Python 3 / PyGObject, GTK 3, WebKitGTK 4.1 | Optional legacy OneDrive Offline sign-in window | Debian packages below |
 
 The implemented 0.5.4 development rclone OneDrive Offline mirror uses the same **1.74.3 minimum**;
 it does not require another upgrade beyond this existing requirement. Its generic
@@ -74,34 +74,19 @@ prototype tests used 1.75.0. This is source compatibility evidence for 1.74.3,
 not a live test of that release. See the
 [version and flag assessment](engineering/onedrive-rclone-offline-contracts.md#rclone-version-and-flag-assessment).
 
-### Legacy OneDrive sign-in helper
+### Legacy OneDrive reauthentication
 
-The retained legacy OneDrive Offline GUI helper needs these runtime packages
-on Debian/Ubuntu/Pop!_OS (not compiler/development packages):
+Existing legacy mirrors keep their onedrive engine and stored authentication.
+For reauthentication, use the editor's browser/manual response-URL handoff:
+prepare the handoff, open sign-in through the desktop portal, then paste and
+submit the final Microsoft native-client redirect URL in the editor. Treat the
+URL as a credential; never paste it in logs or support messages.
 
-```sh
-sudo apt install python3 python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
-```
-
-The Debian package recommends them, so normal APT installation includes them.
-Source installations need the command above if using this helper. If installing
-with `--no-install-recommends`, install them explicitly or use the editor's manual
-browser/response-URL handoff instead. They are not required for ordinary mounts,
-already-authorized synchronization, or OpenConnect VPN authentication. Flatpak
-must supply these helper libraries inside its runtime/base; host packages alone
-do not make them available in the sandbox.
-
-The installer includes this runtime with `--all` or `--onedrive`, even when
-onedrive is already current. To install/check only the GUI dependencies:
-
-```sh
-bash scripts/install-dependencies.sh --onedrive-auth-helper
-```
-
-Use `--skip-onedrive-auth-helper` with other selections to keep manual URL
-handoff instead. The helper path checks imports without opening a GUI or
-authenticating. Debian/Ubuntu/Pop!_OS, Fedora, and Arch package mappings are
-automated; openSUSE/Gentoo report explicit manual runtime guidance when missing.
+Version 0.5.4 retires the applet's WebKit helper and its PyGObject/GTK/WebKit-only
+recommendations and installer options. It does not uninstall libraries from the
+host; other applications may need them. Python remains a build/developer-tool
+prerequisite where those tools use it. New rclone mirrors use their own supported
+Microsoft browser flow and do not consume legacy authentication files.
 
 ### Dependency diagnostics
 
@@ -203,7 +188,7 @@ Reference:
 
 ## abraunegg/onedrive (legacy OneDrive Mirror)
 
-> **Transition release:** the 0.5.4 source creates OneDrive Offline mirrors with `rclone bisync`. Retain `onedrive` and its helper for existing legacy profiles for one release; removal is a later phase. There is no automatic conversion. See the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
+> **Transition release:** the 0.5.4 source creates OneDrive Offline mirrors with `rclone bisync`. Retain `onedrive` for existing legacy profiles for one release; engine removal is a later phase. The WebKit helper is retired in 0.5.4. There is no automatic conversion. See the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
 
 Ubuntu 24.04 repositories may provide an obsolete 2.4.x package. Use an
 upstream-supported package source that provides version 2.5.10 or newer.

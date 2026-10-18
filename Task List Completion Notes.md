@@ -4484,3 +4484,171 @@ four passed. git diff --check exit 0; source gate reused since app inputs did no
 change after ef5c4d8. Documentation link/pin checks exit 0. Separate packaging
 commit contains manifest, packaging guide and step-1/audit/index/evidence status.
 Candidate inputs ready for a clean pinned build; no package acceptance inferred.
+
+
+### October 18, 2026 — Step-2 package build and inspection started
+
+Operator authorized step 2. Reviewed maintained build/inspection entry points,
+release procedures and script inventory. Existing installed bundle contains
+0.5.3 metadata and cannot be reused as 0.5.4 artifact; runtime/behavior unchanged
+so completed Flatpak behavior evidence remains reusable. Created clean packaging
+worktree /tmp/cloud-mounter-flatpak-packaging-28b0abd at
+28b0abd8587f0c2167415eff1f2f5a1e88ac6a73, app source
+ef5c4d8f165544c6909bc43c17ed84c4ff5aae77. Started maintained build-flatpak.sh
+once for x86_64/master; output target/artifacts/candidates/flatpak-28b0abd-x86_64-master,
+receipt/log target/task-runs/flatpak-candidate-28b0abd/. No installation.
+
+Debian inventory says hosted matrix artifacts, not redundant local Debian build.
+Read-only git ls-remote matches tracked origin/master 4b5bb28; 44 local commits
+through 28b0abd are not remotely available. Requested separate push authorization
+for exact committed scope before hosted build; no push/tag/publication performed.
+No duplicate standalone native build requested while hosted package path is
+being selected. Read attempt for nonexistent internal inspect_artifacts.py was
+corrected to public scripts/inspect-artifacts.py; no state change from that read.
+
+
+October 18 hosted path authorized: operator explicitly approved pushing master
+and running build-only Debian workflow. Fetched origin/master immediately before
+push, no incoming commits (0 behind/44 ahead). Reviewed committed series and
+diff summary; historical series-wide diff-check noted pre-existing whitespace
+in documentation, left untouched rather than editing accepted/user text. Push
+exit 0, remote master moved 4b5bb28 to 28b0abd. No tag or publication.
+Started run_github_linux_build.sh once from clean pinned /tmp checkout, --ref
+master, source identity verified 28b0abd; selected run 39166940625. Maintained
+script owns CI polling/download/verification, no external CI polling loop.
+Logs target/task-runs/debian-candidate-28b0abd/; downloads
+target/artifacts/candidates/debian-28b0abd. Hosted and local Flatpak builds run
+independently; no separate redundant standalone native build.
+
+Read-only maintained Flatpak preflight exit 0, no blockers, receipt
+target/task-runs/flatpak-preflight-28b0abd/preflight.json. Required Platform25.08,
+SDK25.08, COSMIC BaseApp stable and Rust SDK extension available. User app override
+empty; system app absent and system overrides empty. User global overrides add
+only read-only GTK3/GTK4/KDE theme/color configuration paths; no blanket host
+filesystem or bus grant. This observes effective grants of installed older
+candidate; new export policy comparison and payload inspection still follow.
+
+
+### October 18, 2026 — 0.5.4 Flatpak build/export and offline payload review passed
+
+Single build-flatpak.sh exit 0, target/task-runs/flatpak-candidate-28b0abd/.
+Packaging 28b0abd/app ef5c4d8; export/bundle commit
+1b2d100791bcbb76fb0ff940a811a374c48e2858793a838c165338639e5a3530.
+Bundle 13,451,400 bytes, SHA256
+062834a7dcbfd42a3abc13504941699208dfc395be70b00d2567a6d603451ddd.
+Producer checked repository/bundle ref and complete metadata against built
+policy; direct comparison with accepted 82c1d7a receipt confirms unchanged
+complete metadata, runtime commits, finish args and SDK-extension declarations.
+
+Short read-only payload audit complements maintained metadata inspection, which
+explicitly excludes payload: main ELF executable and optional auth helper
+executable present; Fluent catalog, desktop file, AppStream and icon present.
+Five source payloads byte-identical to clean pinned checkout; all six exported
+OSTree payload bytes SHA256 match built files. Main binary 33,545,672 bytes;
+helper 6,598 bytes. Latest AppStream version 0.5.4. readelf identifies five ELF
+NEEDED libraries, all found in accepted Platform25.08 deployment (not SDK).
+Review retained privately in payload-review.json beside build receipt.
+
+Legacy helper's GI/GTK/WebKit imports are not claimed available in Platform: read
+production launch branch and existing packaging guide, confirming Flatpak uses
+portal/manual redirect handoff while native can use packaged helper. Worker and
+readiness guard are modes of shared Rust binary, not missing separate payloads.
+No engine/auth/browser/UI/service execution in this audit. All payload, library
+and metadata comparison checks exit 0. No install or installed 0.5.4 acceptance.
+Hosted Debian matrix still pending; step 2 not marked complete.
+
+
+October 18 operator flagged WebKit/helper retention during package inspection.
+New rclone setup does not use it; current native existing-legacy setup still
+offers helper-based reauthentication, while Flatpak production launch explicitly
+uses portal/manual browser handoff and bypasses helper. Existing post-0.5.4
+checklist had deferred helper/native dependencies along with legacy removal.
+Asked scope choice: move helper/WebKit retirement forward everywhere with
+browser/manual legacy reauth retained, or remove only unused Flatpak payload.
+No source/package input changed yet. Running Debian receipt remains meaningful
+for original inputs; affected artifacts require replacement if cleanup changes
+the selected package inputs. No helper process, auth dialog or cloud operation
+launched by inspection.
+
+
+### October 18, 2026 — WebKit helper retirement implemented for 0.5.4
+
+Operator selected removal everywhere with browser/manual legacy reauthentication
+retained, and reiterated rclone migration avoids WebKit/Ruby compilation. Removed
+helper source and helper-localization tests, helper installation from native/
+Debian/source/GUI-prototype Flatpak recipes, and GUI-only Debian recommendations.
+Installer no longer probes/installs GI/GTK/WebKit or exposes helper-only options;
+all engines/--onedrive retained. No host package uninstall. Native manual legacy
+sign-in now uses same validated bounded OpenURI portal as Flatpak; helper discovery
+and launch and direct native xdg-open fallback removed. Native interactive engine
+auth and existing manual response-file handoff remain; no new legacy creation.
+
+Updated browser UI/help/error wording and removed only unused helper keys.
+Preserved profile/credential/sync/runtime state, legacy monitor/Preview/Repair,
+new rclone OAuth and Online onedriver. Source/dependency/packaging guides,
+specification external-tools paragraph, catalog/inventory, host-launch inventory
+and release notes reconciled; future engine-removal checklist refers helper-only
+work to this 0.5.4 step. Historical configure/prototype records remain history;
+shipping manifests do not build WebKit/Ruby. Earlier 28b0abd artifacts retained
+as pre-cleanup evidence, not the selected next shipping package.
+
+Verification so far: just fmt exit 0; dev-check-zbigv0pe exit 0; five focused
+onedrive_auth_ tests exit 0 (private handoff, stale result, invalid URL validation
+and engine default routing preserved); four flatpak_packaging_contract tests
+exit 0; five dependency installer fake tests and thirteen reporting tests exit 0.
+Helper-only installer flags reject before privileged operations. Translation
+checker passed; final maintained localization/metadata/gate follow after docs.
+No live auth/browser/helper/service/cloud change. Source/pin commit, replacement
+build/inspection and narrow native/browser handoff acceptance remain pending.
+
+
+### October 18, 2026 — Ubuntu 22.04 CI failure diagnosed and corrected
+
+Hosted run 39166940625 ended failed: both Ubuntu22.04 architectures reached
+Build and test Debian package; other four Ubuntu24.04/26.04 jobs succeeded.
+Private gh --log-failed produced empty output; direct job-log API downloads
+retained ubuntu2204-{amd64,arm64}.log. Both fail publication fixture with
+ModuleNotFoundError tomllib, not runner unavailability. Python standard-library
+tomllib starts at 3.11 (official docs https://docs.python.org/3/library/tomllib.html);
+Ubuntu jammy provides python3-tomli1.2.2-2 in universe (official package download
+https://packages.ubuntu.com/jammy/all/python3-tomli/download).
+
+publication_check.py now falls back to tomli on Python3.10. Declared python3-tomli
+as Build-Depends and in hosted dependency installation; no app runtime GUI
+dependency restored. Added functional simulated-no-tomllib parser test using
+real TOML parsing, including invalid document rejection. Build guide/catalog/
+inventory updated. Actual 22.04 acceptance awaits new-source hosted matrix.
+Do not rerun failed historical source or publish incomplete matrix artifacts.
+
+Helper cleanup first final gate dev-gate-jjswt4q6 failed two Debian contract tests
+that still required retired helper/GUI recommendations. Updated those contracts
+to reject helper payload/dependencies while requiring retained engines/Python
+build tooling; six focused Debian packaging tests then passed. No production
+helper restored to satisfy stale tests. Final gate rerun follows combined fixes.
+
+
+Combined cleanup/CI-fix verification: publication fixture now seven tests passed
+(includes Python3.10 fallback simulation); Debian source packaging six passed.
+Rechecked all-target compilation after Debian Rust contract changes: maintained
+dev-check-zs798q61 exit 0. Localization receipt dev-localization-check-7i9tf6xc
+exit 0; metadata receipt dev-metadata-check-fv8yjwyg exit 0 with known COSMIC
+validator diagnostics only. Direct manifest/dependency/file/link audit exit 0:
+no active manifest helper/WebKit/Ruby module, no helper source or GUI-only
+recommendations; edited catalog/docs local links resolve. Maintained script
+catalog and inventory updated for both helper retirement and TOML fallback.
+Final combined gate running; no replacement dispatch yet.
+
+
+Final combined source gate: bash scripts/dev.sh gate exit 0, retained receipt
+target/task-runs/dev-gate-5jl1l4eq/, base 28b0abd dirty=true. Formatting, all-feature
+Clippy, all-target Rust and maintained Python passed. Previous stale Debian
+contract failure remains recorded; no broad failing run concealed. Compilation,
+auth handoff, packaging, installer/reporting, publication fallback and localization
+focused evidence above applies. Metadata recipe known COSMIC diagnostics remain.
+Final git diff --check exit 0. Source/browser behavior and packaging cleanup are
+implemented/tested but not committed, installed or accepted on 22.04 CI yet.
+Requested explicit commit/push and replacement-build authorization for new fixes;
+original approved push covered 44 commits only through 28b0abd. Old failed matrix
+not redispatched, no tag/publication or source/helper/library deletion on host.
+Remaining artifacts: successful pre-cleanup Flatpak retained, incomplete historical
+Debian matrix retained remotely; next new-input builds after authorization.

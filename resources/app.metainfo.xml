@@ -84,6 +84,7 @@
         <ul>
           <li>Retain existing legacy OneDrive mirrors with deprecation and manual replacement guidance.</li>
           <li>Keep OneDrive Online mounts supported through onedriver.</li>
+          <li>Remove the WebKit sign-in helper while retaining browser/manual legacy reauthentication.</li>
           <li>Improve Flatpak mirror and recovery folder authorization and guidance.</li>
           <li>Show Repair after a failed manual synchronization with a paused schedule.</li>
         </ul>

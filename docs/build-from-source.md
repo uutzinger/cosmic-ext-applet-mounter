@@ -7,6 +7,7 @@ Requirements:
 - Linux with the COSMIC™ desktop
 - Rust 1.95.0 or later through rustup
 - `just`
+- Python 3 for tooling; Python 3.10 also needs `python3-tomli` for release checks
 - native development packages required by libcosmic
 
 The repository pins the Rust toolchain and libcosmic Git revision.

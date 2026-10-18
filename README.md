@@ -100,8 +100,9 @@ wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0
 sudo apt install ./cosmic-ext-applet-mounter_0.5.2_ubuntu24.04_amd64.deb
 ```
 
-The package installs the applet binary, OneDrive authentication helper, desktop
-entry, AppStream metadata, and icon.
+The 0.5.4 package installs the applet binary, desktop entry, AppStream metadata,
+translation catalog and icon. Earlier packages also installed the retired
+WebKit-based OneDrive authentication helper.
 
 ### Installation from Flatpak
 
