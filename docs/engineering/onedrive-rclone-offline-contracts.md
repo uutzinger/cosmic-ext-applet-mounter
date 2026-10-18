@@ -740,3 +740,12 @@ October 18 numbering clarification: current 0.5.4 migration acceptance is now
 phase 6 (formerly 7); future engine removal uses item 1 in its own section.
 Earlier phase-7 references in this record are historical references to the same
 acceptance work. No release-policy change or engine-removal execution implied.
+
+
+October 18 phase-6 candidate preparation: source 2f13749 contains the phase-5
+persistent legacy notice and compatibility regressions. Manifest pins that exact
+source; x86_64/master replacement requested for installed notice review. Earlier
+848d48b/cf2d13b remains installed with recovery wording accepted. Runtimes, grants,
+shipping features, Cargo inputs and engine behavior unchanged; no duplicate sync
+suite or recovery-text review needed. Candidate build/install do not themselves
+complete legacy continuity or release acceptance.

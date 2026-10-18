@@ -443,9 +443,10 @@ dependency removal or profile conversion.
 Started October 18. Renumbered from 7 after engine removal moved to the future
 section. Reuse completed phase-4 installed smoke and existing focused guard/
 compatibility receipts; do not repeat unchanged suites. Current installed source
-cf2d13b (packaging 848d48b) predates the phase-5 deprecation notice included in
-this source commit; that notice needs a later candidate for rendered review. Final recovery guidance
-is confirmed on the current installed candidate; do not repeat that visual check.
+cf2d13b (packaging 848d48b) predates the phase-5 deprecation notice committed as
+2f13749. Replacement manifest now pins 2f13749; packaging/build preparation in
+progress for notice review. Final recovery guidance is confirmed on the current
+installed candidate; do not repeat that visual check.
 
 - [ ] Installed legacy continuity/deprecation: inspect the persistent notice on
   an existing abraunegg Modify screen; confirm 0.5.4 legacy setup/runtime and

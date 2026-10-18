@@ -3622,3 +3622,21 @@ exit 0 (base 0a1f951, dirty=true). Only records changed since those receipts;
 no repeated gate needed. Release-note links and final git diff --check exit 0.
 Next: pin a replacement candidate to this committed source, build once and
 inspect installed legacy notice; reuse previously accepted sync/recovery smoke.
+
+
+### October 18, 2026 — Phase-6 deprecation-notice candidate build preparation
+
+Operator clarified Push Buttons.md is GUI cleanup for after 0.5.4; leave that
+user file untracked/unchanged and outside current staging. Requested phase-6
+build. Source 2f137491e32c459129f0d77befea4f26faedcf19 is committed phase-5
+notice/compatibility/guide work. Updated manifest/current packaging guide to pin
+that immutable source. Replacement x86_64/master build is necessary because
+installed 848d48b/cf2d13b lacks the notice; existing artifact cannot prove rendering
+of new text. Runtimes, finish grants, Cargo inputs/features and engine behavior
+unchanged. Prior check/focused/localization/gate receipts remain applicable to
+unchanged source, with affected packaging-contract test repeated for pin only.
+No engine removal; 0.5.4 legacy support retained. Build creates new artifact/
+receipts, not an installation/publication; operator requested running this build.
+
+Replacement pin checks: cargo test --locked --test flatpak_packaging_contract,
+exit 0, four passed; git diff --check exit 0. No broad source gate repeated.
