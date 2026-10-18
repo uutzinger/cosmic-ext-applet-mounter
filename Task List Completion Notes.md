@@ -4040,3 +4040,21 @@ Earlier pending build/install/guard/lifecycle observations retained chronologica
 Next approved commit and pinned candidate build/install, then Repair against same
 saved failure, compare 17-file baseline and only then normal sync. No state/file/
 cloud reset, new permission, engine removal or Push Buttons.md changes.
+
+
+### October 18, 2026 — Repair replacement source committed and pinned
+
+Operator authorized commit, build and installation. Source commit
+67b3aec06007bddd987f87b79e45dccc8c62f376 includes Repair visibility fix and
+preceding phase-6 acceptance records. Existing gate dev-gate-s4od_kr5 and three
+focused regressions apply unchanged. Manifest and packaging guide now pin this
+source; dependencies, shipping features, runtimes and permissions unchanged.
+Replacement is necessary because installed a0cf060 omits the popup correction.
+Flatpak x86_64/master only; no redundant native/Debian build. Build/install and
+real Repair remain pending. Preserve retained Failed state and 17-file baseline.
+User's untracked Push Buttons.md remains excluded as post-0.5.4 GUI work.
+
+Packaging verification: cargo test --locked --test flatpak_packaging_contract
+exit 0, four passed; git diff --check exit 0. Application source unchanged since
+67b3aec, so the passing source gate is reused. Packaging pin commit follows;
+installation readiness requested while building.

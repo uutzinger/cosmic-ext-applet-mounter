@@ -517,7 +517,8 @@ Final recovery guidance is already confirmed; do not repeat that visual check.
     coordinator Failed. Source investigation: cached popup reads only service/
     timer state and coordinator warnings, losing manual failure state. Fix
     coordinator observation/status mapping corrected in source; check, three
-    focused regressions and final gate passed. Commit/replacement candidate and
+    focused regressions and final gate passed. Source committed as 67b3aec;
+    replacement manifest pinned to that source. Candidate build/install and
     installed Repair retest remain pending; current Failed state retained.
   - [ ] Controlled sleep/wake and VPN-bound readiness/lifecycle checks, keeping
     unrelated connections and real legacy pending changes untouched.
