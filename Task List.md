@@ -518,8 +518,9 @@ Final recovery guidance is already confirmed; do not repeat that visual check.
     timer state and coordinator warnings, losing manual failure state. Fix
     coordinator observation/status mapping corrected in source; check, three
     focused regressions and final gate passed. Source committed as 67b3aec;
-    replacement manifest pinned to that source. Candidate build/install and
-    installed Repair retest remain pending; current Failed state retained.
+    replacement packaging 82c1d7a built and receipt-verified installed.
+    Installed Repair visibility/execution retest remains pending; current Failed
+    state and all 17 baseline files retained through replacement.
   - [ ] Controlled sleep/wake and VPN-bound readiness/lifecycle checks, keeping
     unrelated connections and real legacy pending changes untouched.
 - [ ] Finalize draft release notes: new rclone mirrors, continued support/deprecation of existing

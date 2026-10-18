@@ -4058,3 +4058,33 @@ Packaging verification: cargo test --locked --test flatpak_packaging_contract
 exit 0, four passed; git diff --check exit 0. Application source unchanged since
 67b3aec, so the passing source gate is reused. Packaging pin commit follows;
 installation readiness requested while building.
+
+
+### October 18, 2026 — Repair visibility replacement built and installed
+
+Source 67b3aec06007bddd987f87b79e45dccc8c62f376; packaging
+82c1d7a29906723dda12d5eb30eb2ada8e2e65c5, retained clean packaging checkout
+/tmp/cloud-mounter-flatpak-packaging-82c1d7a. User confirmed editor/settings
+closed, syncs paused and applet removed from panel before replacement.
+Maintained build-flatpak.sh exit 0, receipt/log
+target/task-runs/flatpak-candidate-82c1d7a/. Single build; no retry/rebuild.
+Complete export/bundle metadata, runtime identities, finish args and SDK
+extensions equal preceding a0cf060 candidate. App source pin changed only.
+Bundle SHA256 db8569d85c2532ac7a4d6b992f0f2ebc5e9105a6b813411841c164ee541ca80f;
+metadata file SHA256 f791b92fc3866e73e401ea29f45367f7f7834fa7c6458171d71d1dfa3ae82cc3.
+Maintained install-flatpak.sh exit 0, receipt/log
+target/task-runs/flatpak-install-82c1d7a/. Complete candidate reuse verified
+before install; installed ref app/io.github.uutzinger.cosmic-ext-applet-mounter/
+x86_64/master and OSTree identity match inspected bundle/export:
+942e1805dd8e02156290d2b05bed0d47c5fda61053eb6ddd8099b0d731a6b1b3.
+Rollback identity retained:
+31ca8f2a612f9b26c788e1330830918daf7b02c378f7b3a131a7bff68333dba0.
+Read-only baseline recheck after install: all 17 original files unchanged, zero
+missing. Before install coordinator remained failed/sync; no engine, cloud or
+coordinator reset performed. No permissions/runtime change, push/publication or
+user GUI cleanup file inclusion. Source check/focused tests/gate and four
+packaging contracts reused as above; record-only follow-up needs no rebuild.
+Remaining risk: installed rendered Repair visibility/execution not yet accepted.
+Next: re-add panel applet, open popup and Repair retained failed personal test
+with existing two-step confirmation. Inspect Paused units and unchanged 17-file
+baseline before subsequent explicit normal sync. Phase 6 remains open.
