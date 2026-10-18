@@ -526,6 +526,7 @@ pub struct UnitObservation {
     services: BTreeMap<ConnectionId, UnitStatus>,
     timers: BTreeMap<ConnectionId, UnitStatus>,
     warnings: Option<BTreeMap<ConnectionId, Vec<String>>>,
+    coordinator_states: BTreeMap<ConnectionId, OfflineOperationState>,
     failed: BTreeSet<ConnectionId>,
 }
 
@@ -1055,6 +1056,7 @@ impl AppModel {
                 }
                 self.unit_observation.services.extend(observation.services);
                 self.unit_observation.timers.extend(observation.timers);
+                self.unit_observation.coordinator_states = observation.coordinator_states;
                 if let Some(warnings) = observation.warnings {
                     self.unit_observation.warnings = Some(warnings);
                 }
@@ -5634,6 +5636,16 @@ impl AppModel {
     fn cached_offline_state(&self, connection: &Connection) -> SyncRuntimeState {
         let service = self.unit_observation.services.get(&connection.id);
         let timer = self.unit_observation.timers.get(&connection.id);
+        // Live service activity remains controllable even if a previous manual
+        // operation failed. Otherwise coordinator failures outlive a paused timer.
+        if !service.is_some_and(|status| {
+            matches!(status.active, ActiveState::Active | ActiveState::Activating)
+        }) && matches!(
+            self.unit_observation.coordinator_states.get(&connection.id),
+            Some(OfflineOperationState::Failed | OfflineOperationState::Cancelled)
+        ) {
+            return SyncRuntimeState::Failed;
+        }
         if service.is_none()
             || (is_rclone_offline_mirror(connection)
                 && timer.is_none()
@@ -5745,35 +5757,60 @@ async fn observe_ui_units(
     if cancellation.is_cancelled() {
         return result;
     }
-    let warnings = tokio::task::spawn_blocking(move || {
-        let mut warnings = BTreeMap::new();
-        for connection in connections
-            .iter()
-            .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
-        {
-            let path = cosmic_ext_applet_mounter::offline_coordinator::state_path(
-                &work_root,
-                connection.id,
-            );
-            match cosmic_ext_applet_mounter::offline_coordinator::read_state(&path) {
-                Ok(Some(state))
-                    if state.connection_id == connection.id && !state.warnings.is_empty() =>
-                {
-                    warnings.insert(connection.id, state.warnings);
+    let offline_ids = connections
+        .iter()
+        .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
+        .map(|connection| connection.id)
+        .collect::<BTreeSet<_>>();
+    let states =
+        tokio::task::spawn_blocking(move || observe_offline_state_files(&connections, &work_root));
+    let observation = tokio::select! {
+        () = cancellation.cancelled() => None,
+        result = tokio::time::timeout(Duration::from_secs(1), states) => result.ok().and_then(Result::ok),
+    };
+    if let Some(observation) = observation {
+        result.coordinator_states = observation.states;
+        result.warnings = Some(observation.warnings);
+        result.failed.extend(observation.failed);
+    } else {
+        // A timed-out/failed read must not authorize controls from cached success.
+        result.failed.extend(offline_ids);
+    }
+    result
+}
+
+#[derive(Default)]
+struct OfflineStateObservation {
+    states: BTreeMap<ConnectionId, OfflineOperationState>,
+    warnings: BTreeMap<ConnectionId, Vec<String>>,
+    failed: BTreeSet<ConnectionId>,
+}
+
+fn observe_offline_state_files(
+    connections: &[Connection],
+    work_root: &Path,
+) -> OfflineStateObservation {
+    let mut observation = OfflineStateObservation::default();
+    for connection in connections
+        .iter()
+        .filter(|connection| matches!(connection.mode, ConnectionMode::OfflineMirror(_)))
+    {
+        let path =
+            cosmic_ext_applet_mounter::offline_coordinator::state_path(work_root, connection.id);
+        match cosmic_ext_applet_mounter::offline_coordinator::read_state(&path) {
+            Ok(Some(state)) if state.connection_id == connection.id => {
+                observation.states.insert(connection.id, state.state);
+                if !state.warnings.is_empty() {
+                    observation.warnings.insert(connection.id, state.warnings);
                 }
-                Err(_) => {
-                    return None;
-                }
-                _ => {}
+            }
+            Ok(None) => {}
+            _ => {
+                observation.failed.insert(connection.id);
             }
         }
-        Some(warnings)
-    });
-    result.warnings = tokio::select! {
-        () = cancellation.cancelled() => None,
-        result = tokio::time::timeout(Duration::from_secs(1), warnings) => result.ok().and_then(Result::ok).flatten(),
-    };
-    result
+    }
+    observation
 }
 
 async fn current_vpn_ready_states(config: ConfigDocument) -> BTreeMap<VpnProfileId, bool> {
@@ -13327,6 +13364,139 @@ mod tests {
         assert_eq!(snapshot.sync_state[&id], SyncRuntimeState::Idle);
         assert_eq!(snapshot.offline_warnings[&id], vec!["cached warning"]);
         assert!(app.unit_status_fresh(id));
+    }
+
+    fn paused_rclone_status_app(provider: Provider) -> AppModel {
+        let mut connection = test_connection(provider);
+        connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+            engine: Some(OfflineEngine::Rclone),
+            ..OfflineMirrorConfig::default()
+        });
+        let id = connection.id;
+        let mut app = cached_status_app(connection);
+        app.unit_observation
+            .services
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        app.unit_observation
+            .timers
+            .insert(id, repair_unit_status(ActiveState::Inactive, false));
+        app
+    }
+
+    #[test]
+    fn popup_coordinator_failure_exposes_repair_for_paused_rclone_mirrors() {
+        for provider in [
+            Provider::OneDrive,
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut app = paused_rclone_status_app(provider);
+            let id = app.config.document.connections[0].id;
+            assert!(app.controller_snapshot().paused_syncs.contains(&id));
+            for state in [
+                OfflineOperationState::Failed,
+                OfflineOperationState::Cancelled,
+            ] {
+                app.unit_observation.coordinator_states.insert(id, state);
+                assert_eq!(
+                    app.controller_snapshot().sync_state[&id],
+                    SyncRuntimeState::Failed
+                );
+                assert!(!app.controller_snapshot().paused_syncs.contains(&id));
+                let row = &app.view_state().rows[0];
+                assert!(repair_available(row));
+                assert!(!decide_operation(row, Operation::SyncNow).allowed);
+            }
+            app.unit_observation
+                .services
+                .insert(id, repair_unit_status(ActiveState::Active, false));
+            assert_eq!(
+                app.controller_snapshot().sync_state[&id],
+                SyncRuntimeState::Running
+            );
+            app.unit_observation
+                .services
+                .insert(id, repair_unit_status(ActiveState::Inactive, false));
+            app.mirror_operations_pending.insert(id);
+            assert_eq!(
+                app.controller_snapshot().sync_state[&id],
+                SyncRuntimeState::Running
+            );
+        }
+    }
+
+    #[test]
+    fn popup_coordinator_repair_observation_clears_failure_but_ignores_stale_reply() {
+        let mut app = paused_rclone_status_app(Provider::OneDrive);
+        let connection = app.config.document.connections[0].clone();
+        let id = connection.id;
+        app.unit_observation
+            .coordinator_states
+            .insert(id, OfflineOperationState::Failed);
+        app.unit_observation_revision = 2;
+        let repaired = || UnitObservation {
+            services: [(id, repair_unit_status(ActiveState::Inactive, false))].into(),
+            timers: [(id, repair_unit_status(ActiveState::Inactive, false))].into(),
+            coordinator_states: [(id, OfflineOperationState::Paused)].into(),
+            ..UnitObservation::default()
+        };
+        let _ = app.update_message(Message::UnitObservationCompleted(
+            1,
+            vec![connection.clone()],
+            repaired(),
+        ));
+        assert!(repair_available(&app.view_state().rows[0]));
+        let _ = app.update_message(Message::UnitObservationCompleted(
+            2,
+            vec![connection],
+            repaired(),
+        ));
+        assert!(app.controller_snapshot().paused_syncs.contains(&id));
+        assert!(!repair_available(&app.view_state().rows[0]));
+    }
+
+    #[test]
+    fn popup_coordinator_observation_rejects_foreign_and_malformed_state_per_connection() {
+        use cosmic_ext_applet_mounter::offline_coordinator::{state_path, write_state};
+        let root = tempfile::tempdir().unwrap();
+        let connections = (0..4)
+            .map(|_| {
+                let mut connection = test_connection(Provider::Smb);
+                connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig::default());
+                connection
+            })
+            .collect::<Vec<_>>();
+        let valid = &connections[0];
+        write_state(
+            &state_path(root.path(), valid.id),
+            &OfflineCoordinatorState::new(
+                valid.id,
+                OfflineOperation::Sync,
+                OfflineOperationState::Failed,
+            )
+            .with_warnings(vec!["synthetic warning".into()]),
+        )
+        .unwrap();
+        write_state(
+            &state_path(root.path(), connections[1].id),
+            &OfflineCoordinatorState::new(
+                ConnectionId::new(),
+                OfflineOperation::Sync,
+                OfflineOperationState::Failed,
+            ),
+        )
+        .unwrap();
+        let malformed = state_path(root.path(), connections[2].id);
+        std::fs::create_dir_all(malformed.parent().unwrap()).unwrap();
+        std::fs::write(malformed, b"malformed state").unwrap();
+        let result = observe_offline_state_files(&connections, root.path());
+        assert_eq!(result.states[&valid.id], OfflineOperationState::Failed);
+        assert_eq!(result.warnings[&valid.id], ["synthetic warning"]);
+        assert_eq!(result.failed, [connections[1].id, connections[2].id].into());
+        assert!(!result.states.contains_key(&connections[3].id));
     }
 
     #[test]

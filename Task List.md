@@ -443,24 +443,84 @@ dependency removal or profile conversion.
 Started October 18. Renumbered from 7 after engine removal moved to the future
 section. Reuse completed phase-4 installed smoke and existing focused guard/
 compatibility receipts; do not repeat unchanged suites. Current installed source
-cf2d13b (packaging 848d48b) predates the phase-5 deprecation notice committed as
-2f13749. Replacement manifest now pins 2f13749; packaging/build preparation in
-progress for notice review. Final recovery guidance is confirmed on the current
-installed candidate; do not repeat that visual check.
+2f13749 (packaging a0cf060) contains the phase-5 deprecation notice. Candidate
+built and receipt-verified installed October 18; export/bundle/installed identity
+verified with unchanged metadata/runtimes. Operator confirmed installed legacy
+notice and replacement instructions October 18; do not repeat that visual check.
+Final recovery guidance is already confirmed; do not repeat that visual check.
 
-- [ ] Installed legacy continuity/deprecation: inspect the persistent notice on
-  an existing abraunegg Modify screen; confirm 0.5.4 legacy setup/runtime and
-  onedriver Online remain unaffected. Source tests are not installed acceptance.
+- [x] Installed legacy deprecation notice: operator confirmed persistent Legacy
+  OneDrive mirror notice and replacement instructions in existing legacy Modify
+  screen on a0cf060. Profile retained, no conversion or sync performed.
+- [ ] Installed legacy/Online continuity: retained legacy service still declares
+  onedrive --monitor (read-only inspection). Existing legacy engine Preview passed
+  on a0cf060 (19 notable change lines; not a file count). No transfer performed;
+  onedriver Online setup/mount/list/unmount passed; legacy background monitor/
+  actual transfer remains untested.
+  - [x] Existing legacy engine authenticated/accessed storage sufficiently for
+    installed dry-run Preview; deprecation notice does not block this route.
+  - [x] Existing OneDrive Online Test Connection: operator screenshot confirms
+    managed unit validates structurally and onedriver setup is present (a0cf060).
+    Mount/read/unmount is not inferred from setup validation.
+  - [x] Existing onedriver Online mount/list/unmount: operator activated Online,
+    saw files, closed file manager and stopped mount on installed a0cf060.
+  - [ ] Legacy background monitor/actual transfer acceptance; dry-run is accepted
+    separately, and pending real-user changes have not been applied.
 - [x] Final rendered recovery guidance: installed Browse placeholder, separate
   Browse authorization help and absence of automatic-directory notice confirmed
   by operator October 18 on candidate 848d48b. Reuse this accepted observation.
-- [ ] Implemented guards, per drive type: wrong account or drive (identity guard
-  blocks), empty or missing local and remote folder (access marker blocks), and a
-  changed target invalidating Preview and initial-sync state.
+- [x] Implemented guard smoke and retained source coverage: identity refusal,
+  missing access/ownership markers or remote folders, and target-bound Preview/
+  initialization. Completed October 18 at the explicit levels below: both drive-
+  type refusals installed; personal account/marker/retarget/remote-folder cases
+  installed; remaining shared/corporate cases reuse passing fake-adapter evidence
+  from gate dev-gate-6_eqf2pd. Not every negative case was run on each live account.
+  Disposable resources/unsaved drafts only; real legacy mirror untouched.
+  - [x] Retained automated evidence: remapped/denied/malformed identity metadata,
+    missing/changed/linked anchors, post-sync missing-anchor initialization refusal
+    and target-bound initialization invalidation tests passed in retained gate.
+  - [x] Installed wrong drive/account selection refusal, using existing remotes
+    in unsaved drafts; no remote creation, replacement or profile Save.
+    Both reciprocal personal/business drive-type mismatches rejected October 18
+    (a0cf060); matching personal remote/type with different expected email also
+    rejected. Corporate account-only resource mismatch uses retained fake tests;
+    do not claim that distinct case live-tested.
+  - [x] Installed personal missing-marker refusal/restoration: renamed marker
+    caused Sync Now refusal; both user files and seven initialization/listing
+    hashes unchanged during refusal. Restored original marker hash confirmed,
+    .held absent; ordinary sync/checksum then passed and init marker preserved.
+    Shared marker implementation/other malformed cases reuse retained fake tests;
+    remote deletion and corporate live marker loss not claimed.
+  - [x] Installed personal changed-local-target invalidation: saved retarget
+    refused Sync Now without Preview; new directory empty and original hashes
+    preserved. Restored original target then ordinary sync/checksum passed,
+    original files/anchor/init hash unchanged. No copied/reset state or resync.
+  - [x] Installed personal missing remote-folder refusal/restoration: actual
+    remote rename caused verification HTTP 404 and blocked sync; original name
+    restored and normal sync/checksum passed. Saved target unchanged and local
+    file/anchor/init hashes preserved. Shared/corporate cases retain source
+    evidence; no remote deletion or copied/reset initialization.
 - [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
   Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
 - [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
   Flatpak acceptance items below).
+  Reuse phase-4 installed setup/initial/manual/restart/scheduled/Pause/recovery
+  and phase-6 guard/Online smoke; avoid duplicate suites. Remaining installed
+  OneDrive gaps: Repair/recovery-to-normal, sleep/wake and VPN policy integration.
+  - [ ] Repair after a controlled failure on disposable personal mirror: confirm
+    service/timer paused and original files/recovery/listings/init state retained;
+    explicit subsequent Sync Now succeeds without initial sync or resync.
+    Local-marker preflight refusal does not arm Repair; local marker restored.
+    Remote marker temporarily prefixed .held in OneDrive: Sync Now blocked,
+    coordinator Failed verified and all 17 Repair-baseline hashes unchanged.
+    Operator restored remote marker, but popup has no Repair despite persisted
+    coordinator Failed. Source investigation: cached popup reads only service/
+    timer state and coordinator warnings, losing manual failure state. Fix
+    coordinator observation/status mapping corrected in source; check, three
+    focused regressions and final gate passed. Commit/replacement candidate and
+    installed Repair retest remain pending; current Failed state retained.
+  - [ ] Controlled sleep/wake and VPN-bound readiness/lifecycle checks, keeping
+    unrelated connections and real legacy pending changes untouched.
 - [ ] Finalize draft release notes: new rclone mirrors, continued support/deprecation of existing
   abraunegg mirrors in 0.5.4, manual replacement steps, and planned engine removal
   in the following release. Do not describe removal as shipped in 0.5.4.

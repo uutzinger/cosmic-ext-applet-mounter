@@ -3640,3 +3640,403 @@ receipts, not an installation/publication; operator requested running this build
 
 Replacement pin checks: cargo test --locked --test flatpak_packaging_contract,
 exit 0, four passed; git diff --check exit 0. No broad source gate repeated.
+
+
+October 18 phase-6 build completed: packaging a0cf06024cdcf279f1ec226f70d26672fa310e7e
+from clean /tmp/cloud-mounter-flatpak-packaging-a0cf060, source pin
+2f137491e32c459129f0d77befea4f26faedcf19. Maintained build-flatpak.sh command
+shown in chat, --arch x86_64 --branch master --local-source-repo "$PWD",
+--output-dir "$PWD/target/artifacts/candidates/flatpak-a0cf060-x86_64-master",
+--log-dir "$PWD/target/task-runs/flatpak-candidate-a0cf060": exit 0, succeeded.
+Producer artifacts.json/summary.json/task.log retained in that log directory.
+Export/bundle ref app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master,
+OSTree 31ca8f2a612f9b26c788e1330830918daf7b02c378f7b3a131a7bff68333dba0.
+Bundle 13,508,224 bytes, SHA256
+65c9f8d1639ceae05b2c9229ee33a90addb4aea862d8b6133ec0157ccafe4756.
+Complete metadata and runtime provenance equal prior 848d48b candidate. No build
+failure; no changed grants/runtime or publication. Installed app remains 848d48b;
+new candidate is not installed or rendered yet. Requested operator window close,
+paused syncs and panel removal before receipt-verified replacement install.
+GUI cleanup Push Buttons.md stays for post-0.5.4 and is untouched/untracked.
+Prior sync/recovery/guard source receipts reused; no repeat tests needed for
+this unchanged built input. Records-only change; git diff --check exit 0.
+
+
+October 18 phase-6 installation: operator confirmed windows closed, syncs paused
+and applet removed from panel. bash scripts/install-flatpak.sh
+--candidate-receipt "$PWD/target/task-runs/flatpak-candidate-a0cf060/artifacts.json"
+--log-dir "$PWD/target/task-runs/flatpak-install-a0cf060": exit 0, succeeded.
+Maintained installer revalidated candidate reuse/hash/metadata and installed ref/
+commit. Receipt target/task-runs/flatpak-install-a0cf060/installation.json;
+summary/task.log alongside. Installed OSTree
+31ca8f2a612f9b26c788e1330830918daf7b02c378f7b3a131a7bff68333dba0;
+previous rollback commit
+757aae349f1017ea47eb93c88e6f1522b8ed9cef657a480e6f1b18826156e8a0.
+No installation failure or runtime/grant change. Legacy notice is now packaged,
+but rendering and legacy/Online continuity still unverified. Next panel re-add,
+open an existing legacy OneDrive Offline Modify screen, inspect notice without
+Save/auth/sync; keep original profiles and test data intact. Do not repeat accepted
+recovery wording/sync tests. Push Buttons.md unchanged; no publication.
+
+
+October 18 installed a0cf060 legacy notice acceptance: operator opened identified
+existing legacy OneDrive Offline Modify and confirmed Legacy label and replacement
+instructions. Marked rendered notice separately complete; no new auth, Save,
+conversion or sync performed. Read-only selected-profile unit-file inspection
+also confirms existing legacy service file retained, ExecStart still uses
+onedrive and --monitor. No arguments/paths, organization/account data or tokens
+printed. This verifies preserved installed launch declaration, not successful
+engine execution. Actual legacy/Online runtime acceptance remains open.
+
+Split combined notice/continuity task so visual success is not confused with a
+runtime pass. Recovery visual and current legacy-notice visual observations need
+no repeat. Source/package inputs unchanged; no gate/build needed for records.
+User Push Buttons.md retained for post-0.5.4 cleanup. git diff --check exit 0.
+
+
+October 18 installed legacy continuity started at operator request for named
+existing legacy mirror. Read-only saved-profile metadata: absent engine resolves
+legacy; configured local directory exists (not symlink); legacy config,
+refresh_token, items.sqlite3 and initial-sync-complete files present. Presence is
+not proof credentials remain valid. Managed legacy service file retained.
+Read-only systemd D-Bus Manager.GetUnit returned NoSuchUnit; service currently
+not loaded, so no running-monitor success inferred from enabled config flag.
+No service start, sync or user configuration/file change performed. Only a
+temporary UUID selector under /tmp used for bounded D-Bus inspection; no token
+or account content printed.
+
+Source inspected for next operator action: legacy Test Connection invokes fixed
+onedrive --sync --dry-run --verbose through maintained app runner with timeout,
+not ordinary transfer. Next operator performs that installed UI check and
+reports result; do not Start or Sync Now yet. Engine authentication/preview and
+later live continuity remain pending. Records-only, no source/gate/build change.
+
+
+October 18 installed a0cf060 legacy Preview passed. Operator screenshot explicitly
+shows Preview completed for existing legacy mirror, onedrive reported 19 notable
+file-change lines. This is actual installed legacy dry-run command success and
+remote access, not transfer, exact changed-file count or background-monitor
+acceptance. Operator used Preview (screenshot), not inferred Test Connection.
+No pending changes applied; existing monitor was not started by agent. Marked
+specific legacy Preview subcheck complete, kept monitor/transfer and onedriver
+Online open. Next existing OneDrive Online validation; preserve legacy pending
+changes and do not request a real sync simply to prove engine launch. Source/
+package inputs unchanged, prior tests reused; git diff --check exit 0.
+
+
+October 18 installed a0cf060 OneDrive Online validation passed. Operator screenshot
+shows existing personal Online connection Test Connection succeeded: managed
+online mount unit validates structurally, onedriver setup present, cache created
+if needed. Account/mountpoint/cache values not copied into records. This is
+installed setup/plan validation, not actual engine mount/read/unmount success.
+Added separate completed subcheck and kept remaining operation checks open.
+Next operator closes editor, activates only this Online connection, observes
+existing folder listing without editing and deactivates; no legacy sync/auth
+or saved-configuration change needed. Source/package inputs unchanged; no
+repeat source checks/build, git diff --check exit 0. Push Buttons.md untouched.
+
+
+October 18 installed a0cf060 onedriver Online operation passed at operator
+observation level: following instructions to activate existing Online connection,
+view files without edits, close file manager and deactivate, operator reports
+files appeared, file manager closed and Online mount stopped. Marked actual
+mount/list/unmount subcheck complete in addition to prior setup/structural Test.
+No transfer/edit claim, independent D-Bus/mount trace or restart/sleep/VPN scope
+inferred. Legacy Preview's 19 notable change lines remain unapplied; legacy
+monitor/transfer acceptance stays open. Source/package inputs unchanged; no
+redundant gate/build. Next acceptance gaps are implemented rclone safety guards
+on approved disposable fixtures/profiles, reusing existing automated evidence
+without mutating real legacy mirror. git diff --check exit 0. User GUI cleanup
+file unchanged; records not yet committed.
+
+
+### October 18, 2026 — Phase-6 safety guard acceptance started
+
+Operator requested guard step. Read retained dev-gate-6_eqf2pd/task.log and mapped
+passing tests: onedrive_guard_saved_target_edits_stop_before_remote_access,
+onedrive_guard_rejects_remapped_config_and_denied_or_malformed_graph_metadata,
+onedrive_guard_rejects_shortcut_notebook_foreign_folder_and_incomplete_stat,
+onedrive_plan_binds_initialization_to_target_and_excludes_browser_items;
+coordinator local_anchors_and_owners_reject_missing_changed_and_linked_data,
+onedrive_anchor_guards_reject_missing_changed_and_linked_markers,
+missing_post_sync_anchor_never_initializes_or_runs_checksum. These are
+synthetic/fake-adapter source tests, not installed refusal evidence. Runtime
+inputs under them unchanged since passing gate; no repeat requested/run.
+
+Installed plan: first unsaved personal draft pointing at existing business remote
+should refuse wrong drive type, then reciprocal direction as needed. Read-only
+verify-existing action, not Connect new remote or Save; no auth/token replacement.
+Later missing-marker/retarget checks only against approved disposable rclone
+resources. Legacy mirror, its pending changes, credentials and real data stay
+unchanged. Marker perturbations must restore original bytes/ownership without
+resync or recreating absent production markers. No mutation yet; task subchecks
+track actual installed refusal separately. git diff --check exit 0.
+
+
+October 18 installed a0cf060 first wrong-drive negative check passed: following
+instructions for unsaved personal OneDrive Offline draft selecting existing
+business remote, operator screenshot reports primary drive does not match saved
+drive/account type and synchronization blocked. No Connect new remote or Save
+requested; no sync execution/result inferred beyond UI refusal. This tests
+personal-vs-business type mismatch, not account-only mismatch or every-run saved
+binding checks (those have separate fake-adapter evidence). Next reciprocal
+business draft selecting existing personal remote, still unsaved/read-only.
+Source/package inputs unchanged; no repeated gate/build. git diff --check exit 0.
+
+
+October 18 installed a0cf060 reciprocal wrong-drive negative check passed:
+operator screenshot after business-type draft selecting existing personal remote
+reports same primary drive/account-type mismatch refusal. Both drive-type
+selection directions now observed without Save/new remote/authentication. Next
+separate personal account-only mismatch using matching personal remote/type and
+synthetic expected email; existing credential is used read-only and no sign-in
+as synthetic account requested. Type mismatch and account mismatch are not
+conflated. Business expected-account resolution uses different Graph resource
+mapping and will be recorded separately if exercised. No source/package change
+or repeated automated tests/build; git diff --check exit 0.
+
+
+October 18 installed a0cf060 account-only mismatch passed: unsaved personal draft
+with matching personal remote/type but synthetic expected email yielded explicit
+Microsoft returned different account refusal. No new sign-in, remote creation,
+Save or sync requested. Wrong-drive both types and personal wrong-account checks
+complete under the checklist's wrong-account-or-drive scope. Business-specific
+expected-account resource mapping remains covered by retained fake evidence,
+not a new live account-only claim.
+
+Prepared missing-local-marker check on already approved disposable personal
+Acceptance-Personal-2 profile (paused): one regular non-symlink anchor found,
+contents match its connection UUID. Baseline captured under
+ target/task-runs/phase6-personal-marker-baseline.json (private mode 0600): three
+local-file hashes, seven initialization/listing hashes. No contents or credentials
+printed; no marker/profile/cloud mutation performed. Next operator temporarily
+renames that original marker, tries existing profile Sync Now (expected refusal),
+then restores same filename without editing bytes. Never recreate marker, reset
+initialization, Repair/resync or alter real legacy mirror. Refusal/restoration/
+unchanged-state evidence remains pending. git diff --check exit 0.
+
+
+October 18 installed a0cf060 local-marker refusal observed: operator screenshot
+shows disposable personal Sync Now failed because ownership marker missing or
+changed, synchronization blocked. Read-only baseline comparison: original marker
+still absent, .held original present with unchanged byte hash; both user test
+files unchanged, all seven retained initialization/listing hashes unchanged.
+No agent restoration/mutation or cloud read needed. Refusal did not reset local
+initialization or rewrite retained listings; no remote-mutation proof inferred
+from local hashes alone. Restore original file name before further operations;
+normal-sync recovery and restoration verification remain pending. No Repair,
+resync, new marker or source/build/test run. git diff --check exit 0.
+
+
+October 18 installed a0cf060 personal missing-marker recovery passed: operator
+screenshot after restore reports Sync Now synchronization/checksum completed.
+Read-only baseline comparison confirms original regular marker restored with
+same byte hash, .held absent, both user-file hashes unchanged and original
+initial-sync-complete hash preserved. Listings may legitimately advance after
+successful normal sync; their unchanged hashes were verified specifically during
+the refused operation, not claimed unchanged after this success. No new initial
+confirmation, Repair or resync requested. Marked personal installed marker smoke
+complete; shared malformed/remote-marker cases retain prior fake evidence.
+
+Next changed-target check: temporarily change only local directory on this
+paused disposable profile to a new empty Browse-authorized directory, Save, then
+request Sync Now without Preview. Expect fresh initialization/Preview requirement;
+never confirm or execute a new initial sync for this negative check. Afterwards
+restore original Browse-selected local target and Save. Original files, marker
+and target-bound initialization baseline remain retained; no real legacy
+profile or remote folder mutation intended. No new target change performed yet.
+Source/package inputs unchanged; git diff --check exit 0.
+
+
+October 18 installed a0cf060 changed-local-target refusal passed: operator
+screenshot after saving disposable profile local retarget reports Sync Now
+failed, initial synchronization requires a successful Preview. Old initialized
+target approval did not authorize new target. Read-only baseline check confirms
+original three local file/anchor hashes unchanged, original initialization hash
+retained, only one initial-complete marker for this connection, and newly selected
+Acceptance-Personal-Retarget directory exists and is empty. No successful Preview
+or new initial sync requested or inferred. No cloud-mutation claim from local
+inspection alone; refusal is before initial execution by source guard.
+
+Target restoration/ordinary-sync recovery pending: Browse back to original
+Acceptance-Personal-2, Save and normal Sync Now, no new initial confirmation.
+Remote and recovery targets remain unchanged by test instructions. Do not reset
+or copy initialization state, recreate anchors, Repair or delete test folders.
+No source/package change; git diff --check exit 0.
+
+
+October 18 installed a0cf060 retarget recovery passed: after restoring original
+local mirror with Browse/Save, operator screenshot reports normal Sync Now and
+checksum verification completed successfully. Read-only check confirms original
+three local file/anchor hashes unchanged, original initial-complete marker/hash
+retained, retarget directory still empty. No Preview/initial confirmation,
+Repair, reset or copied state needed to return to original initialized target.
+Marked changed-local-target subcheck complete. Guard parent remains open for
+explicit remote-folder-loss smoke; corporate marker/retarget not claimed live.
+
+Next personal disposable remote-folder-loss check: operator temporarily renames
+only CloudMounter-Flatpak-Acceptance-Personal-2 in OneDrive, keeping contents;
+existing profile Sync Now must reject missing configured subtree, then operator
+restores original folder name. No deletion or saved target/credential change.
+No folder rename/cloud mutation by agent yet. Original legacy unaffected.
+Runtime/package inputs unchanged; git diff --check exit 0.
+
+
+October 18 remote-folder-loss action clarification pending: operator reports sync
+completed because connection was not saved. Source routes Sync Now to the saved
+profile, so an unsaved editor-path edit is not a missing-remote-folder test.
+Read-only saved metadata confirms original personal remote subtree and local
+mirror remain configured. Asked whether actual folder was renamed in OneDrive
+website, only draft field changed, or statement refers to earlier local test.
+No remote-loss pass or guard defect claimed from ambiguous action. Actual remote
+folder rename needs no connection Save; keep saved expected path unchanged.
+Existing accepted earlier refusal/restoration evidence unchanged pending exact
+clarification. No source/config/cloud mutation or repeated tests/build.
+
+
+October 18 clarification received: operator changed only remote-folder field in
+Modify without Save. Successful Sync Now used unchanged saved target, as designed;
+this was not the intended actual remote-folder rename. Remote-folder-loss check
+remains pending, not failed/passed. Close draft without Save, then rename actual
+disposable folder in OneDrive website while keeping saved target fixed. No
+configuration or cloud changes performed by agent; prior guard evidence retained.
+
+
+October 18 installed a0cf060 actual missing-remote-folder refusal observed:
+operator screenshot after instructed OneDrive website rename reports Microsoft
+verification HTTP 404 and synchronization blocked. This is the expected missing
+resource refusal, separate from prior unsaved-editor confusion. Read-only baseline
+check confirms all three local file/anchor hashes unchanged and original
+initial-sync-complete hash retained. No reset, initialization, cloud recreation
+or deletion performed by agent. Restore actual remote folder's original name,
+then normal Sync Now/checksum recovery remains pending. No connection Save or
+re-authentication needed for restoration. Source/package inputs unchanged;
+git diff --check exit 0.
+
+
+October 18 installed a0cf060 remote-folder restoration passed: operator screenshot
+following original-name restoration reports normal Sync Now/checksum completed.
+Read-only saved configuration confirms original expected remote subtree (no -held)
+and original local mirror; baseline confirms original local file/marker hashes
+and initialization hash preserved. Screenshot still shows -held in unsaved editor
+field with verification required; it did not change the saved runtime target.
+Close editor without Save; no synthetic identity/draft-path changes should persist.
+
+Closed scoped guard-smoke item with explicit verification levels: reciprocal
+personal/business drive-type refusals and personal account mismatch; personal
+missing local anchor, changed local target, missing remote folder, each restored
+and followed by successful ordinary sync/checksum. Retained source/fake tests
+cover remaining malformed/shared/corporate cases; no claim of every negative on
+every live account. No remote contents deleted, original legacy untouched, no
+new auth, Repair, resync or recreated/reset state. Full native/Debian/Flatpak
+lifecycle acceptance remains separate/open; legacy real background transfer also
+still untested. No source/package change or repeated gate/build. git diff --check
+exit 0. Records remain uncommitted; Push Buttons.md untouched.
+
+
+### October 18, 2026 — Phase-6 remaining lifecycle acceptance: Repair preparation
+
+Operator requested next phase-6 items. Mapped completed installed setup/manual/
+restart/scheduled/Pause/recovery/guard/Online smoke; no duplicate suite needed.
+Outstanding package-specific lifecycle includes installed Repair, controlled
+sleep/wake and VPN; Native/Debian remains separate from installed Flatpak.
+Retained gate dev-gate-6_eqf2pd includes passing coordinated cancellation,
+unowned-running rejection, scheduled-stop and failed-reset Repair tests; these
+fake-adapter passes reused, not promoted to installed acceptance.
+
+Read existing Offline Repair contract/source: two-step confirmation (second
+activation after >=1s, within 30s), authoritative owned units, stop/disable timer
+and service, preserve bisync state/data, no preview/sync/resync side effect,
+finish Paused. Repair UI requires failed/interrupted/inconsistent operation.
+Selected approved disposable personal mirror only. Baseline at
+ target/task-runs/phase6-personal-repair-baseline.json records mirror, recovery
+and connection-specific rclone-bisync file hashes, including original anchors/
+initial state. No token contents or file contents logged; private baseline.
+No engine/marker/service mutation performed by agent. Next operator briefly
+renames local marker, requests Sync Now to obtain controlled failure, restores
+same marker, then uses popup Repair two-step confirmation without another Sync
+Now. This repeat refusal sets Repair precondition; it is not a repeat guard
+acceptance run. Legacy real mirror and all pending user changes untouched.
+
+
+October 18 Repair setup correction: operator obtained expected local-marker
+refusal; read-only inspection finds original still .held and all other 16 Repair
+baseline files unchanged. Coordinator state remains succeeded/sync from previous
+operation, because local marker validation returns from prepare_inputs before
+Running/Failed state publication. Therefore this preflight guard refusal is not
+a sufficient Repair eligibility setup; previous preparation instruction corrected,
+not counted as Repair failure or successful Repair acceptance.
+
+Source review: remote anchor cat/validation occurs inside run_transaction after
+Running publication, before bisync request execution; refusal is persisted as
+Failed. Corrected operator plan: restore local original marker, rename only
+remote anchor in approved disposable subtree (not whole folder), request Sync
+Now once, restore remote original marker without another sync, then popup Repair
+with two-step confirmation. This creates genuine coordinator failure without
+file-transfer/resync and without synthetic state-file edits. No agent marker/
+cloud mutation, no legacy change, no runtime source fix implied. Repair baseline
+retained. git diff --check exit 0.
+
+
+October 18 corrected Repair precondition observed: operator restored local
+marker, then renamed actual remote marker by prepending .held (website did not
+append suffix). Expected remote name is absent while original bytes remain in
+renamed file. Installed Sync Now reports missing/changed ownership and blocks.
+Read-only coordinator state confirms failed/sync; all 17 baseline mirror,
+recovery and rclone-bisync file hashes remain present/unchanged, including local
+anchor/initialization/listings. Genuine recoverable coordinator failure now
+established; no transfer/resync needed. Remote restoration still pending.
+Next restore remote name exactly, no extra Sync Now, then popup two-step Repair.
+No source/package mutation or repeated gate/build. git diff --check exit 0.
+
+
+### October 18, 2026 — Missing Repair after coordinator failure: source fix
+
+Operator reported no popup Repair after remote-marker refusal/restoration.
+Read-only backend inspection still failed/sync. Source confirms cached_offline_state
+used only service/timer activity; observe_ui_units read coordinator warnings but
+ignored state. Thus stopped timer/inactive unit hid a failed manual sync as
+Paused. Original seventeen mirror/recovery/bisync files remain baseline evidence;
+no live state reset/Repair/service change performed by agent.
+
+src/app.rs now carries matching typed coordinator states in UnitObservation,
+collected through existing bounded background path. Matching Failed/Cancelled
+state exposes failure/Repair despite paused units; active service and pending
+manual work retain priority. Fresh observation replaces prior coordinator map,
+so repaired Paused state clears failure; existing generation/config guards remain.
+Malformed/foreign state marks that connection's observation failed and cannot
+authorize controls. Missing state retains service/timer behavior; timed-out read
+marks offline observations unavailable rather than authorizing cached success.
+Warnings for valid connections remain available even if another state is bad.
+No new UI strings, host commands, permissions, schema or engine behavior.
+
+Three focused regressions cover six rclone providers, failed/cancelled paused
+units, active/pending work priority, repaired-state clearing vs stale generation,
+and temp-file missing/malformed/foreign typed state isolation. Existing Fake
+systemd Repair sequencing evidence remains applicable; no destructive real test.
+Updated existing Repair engineering contract/index, active task and these notes.
+
+Verification (base a0cf06024cdcf279f1ec226f70d26672fa310e7e, dirty=true):
+- just fmt: exit 0.
+- bash scripts/dev.sh check: exit 0, target/task-runs/dev-check-bu_3z1za/.
+- cargo test --locked --bin cosmic-ext-applet-mounter popup_coordinator_:
+  exit 0, three passed. No failed focused run.
+- git diff --check: exit 0; no new Fluent/desktop/AppStream input, so no duplicate
+  localization/metadata check required. Final gate follows.
+Next committed source/replacement candidate and installed Repair retest against
+retained Failed state; no additional fault injection or manual state editing.
+
+
+Final Repair-visibility source gate: bash scripts/dev.sh gate exit 0, receipt/log
+ target/task-runs/dev-gate-s4od_kr5/ (base a0cf060, dirty=true). Formatting,
+all-feature lint, all-target Rust and maintained Python passed. No gate failure.
+Focused compilation/three regressions above remain valid; no UI string/metadata
+inputs changed. git diff --check exit 0. Source correction complete but uncommitted
+and not installed. Installed applet still a0cf060 with hidden Repair defect;
+no claimed Repair execution. Current coordinator Failed state is preserved for
+replacement, so no repeat marker disturbance is necessary. Files changed for
+fix: src/app.rs, existing Repair engineering record/index and task/evidence notes.
+Earlier pending build/install/guard/lifecycle observations retained chronologically.
+Next approved commit and pinned candidate build/install, then Repair against same
+saved failure, compare 17-file baseline and only then normal sync. No state/file/
+cloud reset, new permission, engine removal or Push Buttons.md changes.

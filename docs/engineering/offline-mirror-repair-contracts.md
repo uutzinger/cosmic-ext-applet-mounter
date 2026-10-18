@@ -134,3 +134,29 @@ Focused fake-manager coverage verifies engine dispatch, Pause ordering, failed
 transitions and Start rollback. This is source/fake-adapter evidence; installed
 native and Flatpak acceptance remains pending. The engine distinction in this
 record is rclone versus legacy OneDrive, not the cloud provider name alone.
+
+
+## October 18, 2026 — Installed failure visibility correction
+
+Installed phase-6 OneDrive rclone smoke produced a real coordinator Failed state
+by temporarily renaming only the remote ownership marker in a disposable folder.
+Operator restored the remote filename; popup had no Repair. Investigation found
+cached popup state used service/timer properties and only read coordinator
+warnings. An inactive service and disabled timer therefore hid manual failure
+as Paused. This is an installed UI integration failure, not Repair execution.
+
+Source correction collects typed coordinator state with the existing bounded
+background unit observation, validates connection UUID and refuses controls when
+state reads fail. Failed/cancelled coordinator operations surface as failure
+when no service is active; live service and in-process operation state retain
+priority for cancellation/control. Fresh Paused/successful observations clear
+old failure; generation/config checks discard stale replies. Missing state
+retains existing service/timer behavior. Tests use temp state files and synthetic
+unit snapshots for all rclone providers, repair reconciliation and malformed/
+foreign state isolation. No new D-Bus/host commands, filesystem grants, translated
+messages or engine actions added.
+
+Compilation, three focused regressions and full development gate passed;
+rebuilt installed Repair visibility/execution/preservation remain pending. Original failed state
+and 17-file baseline are preserved for retest, with no repeated fault injection
+or unsafe reset/resync. Source implementation is not installed acceptance.
