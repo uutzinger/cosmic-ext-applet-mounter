@@ -2978,3 +2978,42 @@ Build/install success will be recorded separately from operator UI acceptance.
 
 `cargo test --locked --test flatpak_packaging_contract`: exit 0, four passed
 for the replacement source pin. `git diff --check`: exit 0.
+
+
+### October 17, 2026 — Portal-access replacement built and installed
+
+- Source 91dc5cef71531a64dca17a94fba7b864a4526420; packaging
+  f685237adb9565da8ac926952b70c8cbc30d9e99, clean detached worktree
+  /tmp/cloud-mounter-flatpak-packaging-f685237. No push/tag/publication.
+- `bash scripts/build-flatpak.sh --manifest
+  /tmp/cloud-mounter-flatpak-packaging-f685237/packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json
+  --source-sha f685237adb9565da8ac926952b70c8cbc30d9e99 --arch x86_64
+  --branch master --local-source-repo "$PWD" --output-dir
+  "$PWD/target/artifacts/candidates/flatpak-f685237-x86_64-master"
+  --log-dir "$PWD/target/task-runs/flatpak-candidate-f685237"`: exit 0.
+  Receipt target/task-runs/flatpak-candidate-f685237/artifacts.json;
+  task.log/summary.json alongside. Bundle 13,512,216 bytes, SHA256
+  87f1612006bd0c351f2046194cdf740a9a4fdde49f8cf2a2911162de26d5e380.
+- Export and imported bundle agree on ref
+  app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master and OSTree
+  7b5189aa6322a6ac6ef6ded343173dc70236be959478ca666e0b90eaf3c52f80.
+  Complete metadata and runtime provenance equal the prior db66196 receipt;
+  metadata file SHA256 f791b92fc3866e73e401ea29f45367f7f7834fa7c6458171d71d1dfa3ae82cc3.
+- Operator confirmed windows closed, syncs paused and panel entry removed;
+  failed profile/data retained. `bash scripts/install-flatpak.sh
+  --candidate-receipt "$PWD/target/task-runs/flatpak-candidate-f685237/artifacts.json"
+  --log-dir "$PWD/target/task-runs/flatpak-install-f685237"`: exit 0.
+  Installer repeated complete candidate reuse verification, replaced user app,
+  and verified installed ref/commit/complete metadata. Receipt
+  target/task-runs/flatpak-install-f685237/installation.json, logs alongside.
+  Previous installed rollback commit
+  968e0ac9c1acfa722db89e43d6452d31dd73c9e6dacb26b08043fadf2308252c.
+  No application override; existing global read-only theme/config grants unchanged.
+- No build/install failure. App source/Fluent unchanged since the passing final
+  gate/localization checks; reused those receipts. No extra rebuild for records.
+
+Installed package identity is verified; rendered panel/editor and fresh disposable
+portal authorization, initial/ordinary sync, cross-launch and scheduled/Pause
+acceptance remain pending operator observations. Requested panel re-add first.
+Old missing-anchor state is preserved and deliberately blocked; no repair/reset,
+manual marker recreation, cloud deletion or broader filesystem permission.

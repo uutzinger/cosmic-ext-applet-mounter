@@ -441,8 +441,10 @@ drive types use the same tested generic profile; only identity/auth differs.
   mirror/recovery I/O, scheduled shared state root and initial-sync anchor
   postconditions corrected in source; four access tests, 29 coordinator tests,
   localization check and final gate passed. Correction committed as 91dc5ce;
-  replacement manifest pinned to that revision. Build/installed retest with
-  fresh disposable ownership is in progress; no marker/state reset.
+  replacement manifest pinned to that revision. Packaging f685237 built and
+  installed October 17; export/bundle/installed identities match, complete metadata
+  and runtime provenance unchanged. Fresh disposable portal/anchor retest is in
+  progress; no marker/state reset. Old failed profile/data retained.
   Quiet manual run, scheduled/Pause and remaining acceptance stay pending.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
