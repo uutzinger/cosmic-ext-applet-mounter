@@ -4664,3 +4664,84 @@ permission changes. Build-only python3-tomli added for 22.04, no GUI dependency.
 Separate packaging commit follows focused contract validation; then fetch,
 review divergence, push and dispatch one matrix at new pinned packaging source.
 Old successful Flatpak and incomplete CI records retained without relabel/retry.
+
+
+### October 18, 2026 — Replacement artifacts started at approved post-helper source
+
+Source 7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef, packaging
+196f7b11cecc7c382943af23b4ebc68579b00b17. Four focused Flatpak contracts passed
+after pin update. Fetched immediately before approved push: zero incoming/two
+outgoing, diff-check clean. Push exit 0; git ls-remote confirms master exactly
+196f7b1. Clean packaging checkout /tmp/cloud-mounter-flatpak-packaging-196f7b1.
+
+Started build-flatpak.sh once, x86_64/master, output
+target/artifacts/candidates/flatpak-196f7b1-x86_64-master and receipt/log
+target/task-runs/flatpak-candidate-196f7b1/. Started maintained hosted wrapper once
+from clean checkout, selected run 39176426152 at exact 196f7b1, logs
+target/task-runs/debian-candidate-196f7b1/, download destination
+target/artifacts/candidates/debian-196f7b1. Tool owns polling and verification.
+No standalone native duplicate, no installation/tag/publication. Shipping
+manifest builds only Rust app, no WebKit/Ruby build module.
+
+
+### October 18, 2026 — Post-helper Flatpak replacement passed offline inspection
+
+Maintained single replacement build/export exit 0, source packaging 196f7b1/app
+7ccc9f7. Receipt target/task-runs/flatpak-candidate-196f7b1/artifacts.json.
+Export/bundle commit 80afd14af567164388f30e8b1632f18dd56c294190890da36b983a4d5ffe0bc5;
+bundle 13,555,104 bytes, SHA256
+bf86f6305e151f99d43f7abb2b59aa27f9e38186d6049e8dcbfea4d8d9615bbe.
+Complete metadata, runtime commits, finish args and SDK extension declarations
+match accepted 82c1d7a baseline. Producer ref/commit/bundle comparison passed.
+
+Read-only payload audit exit 0: five expected app files; executable ELF, four
+source assets byte-identical to clean checkout; latest AppStream0.5.4. All five
+exported OSTree payload hashes match build files; retired helper absent in both
+build and export bin listing. Main ELF library requirements present in accepted
+Platform25.08, no host/SDK assumption. Review in payload-review.json beside
+producer receipt. No WebKit/Ruby module added; browser/manual legacy route kept.
+
+Maintained preflight for new pinned manifest exit 0, clean source/no blockers,
+target/task-runs/flatpak-preflight-196f7b1/. Installed older app identity/overrides
+match preceding preflight exactly: no app-specific/system override; user-global
+adds only read-only theme paths. This plus equal new metadata documents candidate
+policy/effective override composition, not installed replacement acceptance.
+No installation or runtime-owner change. Debian replacement still pending.
+
+
+### October 18, 2026 — Step-2 replacement matrix and artifact inspection completed
+
+Maintained hosted-build wrapper exit 0, run 39176426152 succeeded all six Ubuntu
+22.04/24.04/26.04 amd64/arm64 jobs. Both22.04 actual preflight tests now pass with
+tomli fallback; runner availability was not the earlier issue. Download/producer
+verified exact 196f7b1 source, six unexpired expected artifacts, package names/
+0.5.4 versions/architectures and SHA256 sums. Receipt
+target/artifacts/candidates/debian-196f7b1/receipt.json; summary/log
+target/task-runs/debian-candidate-196f7b1/. No duplicate inspector identity/hash
+run needed: those checks already passed in producer.
+
+Additional short offline payload/dependency audit exit 0, all six packages:
+five required app files present, four assets byte-identical to clean pinned
+source, binary executable ELF with correct62/183 machine architecture, AppStream
+latest0.5.4, retired helper absent. Binary Depends/Recommends have no helper-only
+GI/GTK/WebKit packages; rclone>=1.74.3, onedriver>=0.15.0 and legacyonedrive>=2.5.10
+recommendations retained. Build-only python3-tomli does not become app runtime
+recommendation. Native binary is supplied by Debian packages, no redundant native
+source build. Package bytes, hashes, payload hashes and dependency fields retained
+privately in target/task-runs/debian-candidate-196f7b1/payload-review.json.
+
+Step2 build/offline artifact scope complete. Updated active task, acceptance map
+and engineering index; source/packaging immutable identities remain196f7b1/7ccc9f7.
+No install, live engine/auth/service mutation, tag or publication. Existing
+source gate and accepted Flatpak behavior tests reused; only affected source/
+package checks repeated after cleanup/CI fix. Remaining risk: no installed
+replacement/native/legacy live acceptance claimed. Next step3 evidence reuse/
+auth-sandbox review, then focused remaining native/legacy checks. Docs validation
+and record-only commit follow; no rebuild for acceptance receipts.
+
+Step-2 closure validation: git diff --check exit 0; focused documentation/receipt
+check exit 0 (local links resolve, checklist complete, both producer summaries
+succeeded at exact196f7b1). Only task/evidence/map/index records changed after
+artifact production; no repeat source gate or build justified. Record-only
+commit is outside immutable artifact source; future reuse selects196f7b1, not
+new documentation HEAD. Push Buttons.md remains untracked and untouched.

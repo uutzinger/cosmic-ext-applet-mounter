@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Evidence reuse plan reconciled; post-helper candidate source 7ccc9f7 pinned, replacement builds/final acceptance open
+Status: Step-2 candidate builds/offline artifact inspection passed; installed and final release acceptance open
 
 Created: October 18, 2026
 
@@ -144,3 +144,31 @@ Post-cleanup source checkpoint: `7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef`
 commits helper retirement and the Python3.10 tomli fallback/build dependency.
 Combined gate `dev-gate-5jl1l4eq` passed. Manifest now pins this exact source;
 replacement artifact builds/inspection are pending. No installation authorized.
+
+
+## Step-2 artifact results — October 18
+
+Selected replacement packaging `196f7b11cecc7c382943af23b4ebc68579b00b17` pins
+app `7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef`. Flatpak x86_64/master built
+and exported once; five payloads/source assets/dependencies and helper absence
+verified. Export/bundle commit
+`80afd14af567164388f30e8b1632f18dd56c294190890da36b983a4d5ffe0bc5`. Metadata,
+runtime commits and permissions match the accepted baseline; current overrides
+add only read-only theme paths. Producer/preflight/payload evidence under
+`target/task-runs/flatpak-candidate-196f7b1/` and `flatpak-preflight-196f7b1/`.
+
+[Debian run 39176426152](https://github.com/uutzinger/cosmic-ext-applet-mounter/actions/runs/39176426152)
+succeeded across Ubuntu22.04/24.04/26.04 amd64/arm64, including actual Python3.10
+preflight coverage on both22.04 runners. Maintained producer verified exact source,
+six expected artifacts, package identities and hashes; payload audit verified
+five required files/source assets/ELF architecture in every package, no helper
+or helper-only GUI recommendations, retained rclone/onedriver/onedrive engine
+recommendations. Native payload is the Debian binary; no redundant standalone
+native build. Download receipt `target/artifacts/candidates/debian-196f7b1/receipt.json`;
+review `target/task-runs/debian-candidate-196f7b1/payload-review.json`.
+
+Step 2 complete for build/offline artifact review. None of these replacements
+was installed. Existing rclone behavior evidence is reused; native browser/manual
+legacy reauthentication, focused native/legacy continuity and remaining release
+checks retain their stated live acceptance boundaries. Earlier incomplete run
+39166940625 and pre-cleanup Flatpak receipts remain historical evidence.

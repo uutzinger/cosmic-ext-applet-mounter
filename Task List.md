@@ -515,28 +515,22 @@ installed Flatpak evidence remain distinct.
 
 October 18 scope update: remove WebKit helper and helper-only dependencies now;
 retain browser/manual legacy reauthentication and all legacy sync support. Current
-28b0abd packages are pre-cleanup evidence; affected package inputs need replacement
-after source checks. Do not repeat unchanged Flatpak behavior tests.
+28b0abd packages are pre-cleanup evidence. Post-cleanup 196f7b1 replacements
+built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
-- [ ] Obtain required native/Debian and source-based Flatpak artifacts at the
-  frozen revisions with shipping features only. Started October 18: Flatpak
-  28b0abd/ef5c4d8 x86_64/master build/export passed. Authorized master push
-  verified; hosted run 39166940625 failed on both 22.04 targets (missing tomllib),
-  with four newer-target jobs passed. Python3.10 fallback/build dependency fixed
-  alongside helper retirement; replacement source verification in progress. Reuse exact-source accepted
-  artifacts; build only changed inputs or missing artifacts, once per matrix.
-- [ ] Verify source/runtime identity, helper/worker payloads, size, checksums and
-  matching Flatpak export/bundle identities. Inspect installed effective grants,
-  including BaseApp/global overrides; no silent blanket host filesystem/bus
-  grants or restoration of obsolete shell wrappers. Latest development candidate
-  export/bundle/install identity already matches; payload/effective-grant review
-  and final-release identities remain open.
-
-  October 18 Flatpak payload/dependency review passed: six source-matched export
-  files, correct 0.5.4 metadata, Platform ELF libraries available, unchanged
-  runtime/policy and only read-only theme global overrides. Receipt:
-  target/task-runs/flatpak-candidate-28b0abd/payload-review.json. Candidate not
-  installed; this pre-cleanup payload is not the replacement shipping candidate.
+- [x] Build source-based Flatpak replacement with shipping features: packaging
+  196f7b1 pins app 7ccc9f7, x86_64/master. Build/export and payload/runtime/policy
+  inspection passed; helper absent. Receipt: target/task-runs/flatpak-candidate-196f7b1/.
+- [x] Obtain and inspect native/Debian six-target matrix at 196f7b1. Run
+  39176426152 passed all six targets, including both 22.04 architectures. Producer
+  verified exact source, package identity and SHA256; five-file payload/source/
+  ELF/dependency audit passed. Receipts: target/artifacts/candidates/debian-196f7b1/
+  and target/task-runs/debian-candidate-196f7b1/payload-review.json.
+- [x] Complete combined artifact check: exact identities, payload/helper absence,
+  dependencies, checksums and effective grants. Flatpak metadata/runtime/policy
+  unchanged; only readonly theme global overrides, no app override. WebKit/Ruby
+  build pipeline/helper absent. Build-only tomli supports Python3.10; no GUI-only
+  recommendation. No candidate installation or package lifecycle claim.
 
 #### 3. Verify authentication and sandbox access
 
