@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Evidence reuse plan reconciled; helper retirement requires replacement candidate source/pins, final acceptance open
+Status: Evidence reuse plan reconciled; post-helper candidate source 7ccc9f7 pinned, replacement builds/final acceptance open
 
 Created: October 18, 2026
 
@@ -138,3 +138,9 @@ evidence, not selected post-cleanup shipping inputs. Source/pin preparation
 reopens only for this change; reviewed runtime/permissions and accepted rclone
 behavior remain reusable. Replacement payload audit must prove helper absence
 and Debian recommendations without helper-only GUI dependencies.
+
+
+Post-cleanup source checkpoint: `7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef`
+commits helper retirement and the Python3.10 tomli fallback/build dependency.
+Combined gate `dev-gate-5jl1l4eq` passed. Manifest now pins this exact source;
+replacement artifact builds/inspection are pending. No installation authorized.

@@ -4652,3 +4652,15 @@ original approved push covered 44 commits only through 28b0abd. Old failed matri
 not redispatched, no tag/publication or source/helper/library deletion on host.
 Remaining artifacts: successful pre-cleanup Flatpak retained, incomplete historical
 Debian matrix retained remotely; next new-input builds after authorization.
+
+
+### October 18, 2026 — Replacement source committed and pinned
+
+Operator explicitly approved commit, push and replacement Flatpak/Debian builds.
+Source commit 7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef contains helper retirement,
+Python3.10 CI compatibility fix, focused tests and chronology. Push Buttons.md
+excluded. Manifest/guide now pin this exact source; no Cargo dependency/runtime/
+permission changes. Build-only python3-tomli added for 22.04, no GUI dependency.
+Separate packaging commit follows focused contract validation; then fetch,
+review divergence, push and dispatch one matrix at new pinned packaging source.
+Old successful Flatpak and incomplete CI records retained without relabel/retry.

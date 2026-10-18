@@ -498,14 +498,12 @@ installed Flatpak evidence remain distinct.
   redundant runs. Preserve existing target scope; no added architecture/provider
   test matrix. Missing evidence is reviewed first, with new live tests only for
   a concrete unresolved release gap or changed behavior.
-- [ ] Refresh candidate source/manifest pins after the WebKit-helper cleanup.
-  Earlier 0.5.4 version/package metadata and candidate scope were prepared;
-  ef5c4d8/28b0abd remain the pre-cleanup baseline, not the next shipping candidate.
-  Focused publication tests, version/dependency checks and dev-gate-dqkwy923
-  passed; metadata recipe retains known COSMIC diagnostics. Notes remain draft.
-  Packaging pin is committed separately; these are candidate build inputs,
-  not final package acceptance or publication. Later receipt-only changes do
-  not require rebuilding unchanged inputs.
+- [x] Refresh 0.5.4 candidate source/manifest pins after helper cleanup and the
+  Python3.10 CI fix: source 7ccc9f7, exact Flatpak pin updated. Combined gate
+  dev-gate-5jl1l4eq, focused auth/packaging/installer/publication tests and
+  localization passed; metadata retains known COSMIC diagnostics. Notes remain
+  draft; build and final acceptance stay separate. Older ef5c4d8/28b0abd
+  artifacts are retained pre-cleanup evidence, not selected shipping inputs.
 - [x] Source/dependency baseline retained: all 620 Cargo registry archives/checksums
   and 12 dependency Git pins/selectors checked; generated inline/shell support
   fixed and verified. Latest installed development packaging 82c1d7a pins source
