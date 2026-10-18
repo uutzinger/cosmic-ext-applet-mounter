@@ -3255,3 +3255,235 @@ profiles, credentials and failed-profile evidence; no cloud/file cleanup here.
 Replacement pin validation: cargo test --locked --test flatpak_packaging_contract,
 exit 0 (four passed); git diff --check, exit 0. Prior passing full gate and
 localization receipts reused for unchanged application inputs.
+
+
+October 18 operator replacement build succeeded: maintained build-flatpak.sh
+command supplied in chat, packaging source 848d48bcdeefa7b03a914f0d14e5c7930229d8d3,
+app pin cf2d13b53460079b2bb198a605605d3bd1911f3b, x86_64/master. Producer receipt
+and summary inspected at target/task-runs/flatpak-candidate-848d48b/; succeeded,
+exit 0. Export and bundle match ref
+app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master and commit
+757aae349f1017ea47eb93c88e6f1522b8ed9cef657a480e6f1b18826156e8a0.
+Bundle 13,554,792 bytes; SHA256
+3cce782f1ca22bb0c60826f3a6d3e991329ddd8d7b5ae4e16c42402f3ea93d39.
+Complete metadata and runtime provenance equal previous f685237 candidate;
+no runtime/grant change. Receipt inspection is not installed acceptance; maintained
+installer will repeat complete reuse/hash checks before replacing app. Asked
+operator to close windows/pause/remove panel entry before installation. Preserve
+original failed and current paused profiles/data. Untracked Push Buttons.md
+(currently at repository root) remains outside scope. No repeated sync suite or
+build; installed wording check still pending.
+
+
+October 18 operator confirmed windows closed, syncs paused and panel entry
+removed. bash scripts/install-flatpak.sh --candidate-receipt
+"$PWD/target/task-runs/flatpak-candidate-848d48b/artifacts.json" --log-dir
+"$PWD/target/task-runs/flatpak-install-848d48b": exit 0. Installer repeated complete
+candidate reuse validation, installed user app and verified installed identity/
+complete metadata. Receipt target/task-runs/flatpak-install-848d48b/installation.json,
+summary/log alongside. Installed commit
+757aae349f1017ea47eb93c88e6f1522b8ed9cef657a480e6f1b18826156e8a0;
+previous rollback commit
+7b5189aa6322a6ac6ef6ded343173dc70236be959478ca666e0b90eaf3c52f80.
+No failure or extra grant/runtime/service/data change. Next re-add panel applet,
+open blank Add OneDrive Offline draft and inspect empty recovery field/help;
+do not Save, authenticate, or repeat accepted sync tests for text-only change.
+Rendered wording remains unverified until operator observation.
+
+
+October 18 installed 848d48b rendered wording observation: operator reports
+"Choose a recovery..." appeared after instructions to re-add panel/open blank
+OneDrive Offline draft. Correct Browse placeholder confirmed. This response
+does not explicitly confirm help text or absence of automatic-directory notice;
+those two observations remain pending. No draft Save, runtime/source changes,
+checks or rebuild needed for this observation. Untracked Push Buttons.md retained.
+
+
+### October 18, 2026 — Installed connection removal acceptance
+
+Operator removed paused corporate disposable profile and confirmed disappearance
+from main window. Installed candidate 848d48b. Read-only saved document inspection
+finds neither corporate test name nor UUID 93ce64e3-5855-4c1b-a486-51024802cfe2.
+Managed service/timer files absent from user unit directory; zero remaining
+unit/enablement links for that UUID. Host Acceptance-Business directory remains,
+with test.docx/test.txt and anchor (three regular files); selected
+Acceptance-Business-Recovery remains with owner marker (one regular file).
+No file contents or credentials dumped; cloud folder not deleted or inspected.
+
+Read-only typed systemd user D-Bus inspection using dbus-python Manager.GetUnit:
+initial sandbox attempt exit 1, AccessDenied connecting session bus; repeated
+with authorized bus access exit 0. Both named service and timer return
+org.freedesktop.systemd1.NoSuchUnit. Confirms no loaded managed units, rather
+than merely absence of unit files. No CLI substitution or service mutation.
+Connection-removal preservation smoke marked complete. No new source/runtime
+change or repeated gate needed. git diff --check: exit 0. Recovery wording help/
+automatic-notice visual confirmation and final phase-4 reconciliation remain.
+
+
+### October 18, 2026 — Phase 4 reconciled and closed
+
+Operator requested reconciling records and closing phase 4. Closed implementation
+and integrated installed smoke under the accepted scope, with no escalation to
+full release/lifecycle acceptance. Source cf2d13b53460079b2bb198a605605d3bd1911f3b;
+packaging 848d48bcdeefa7b03a914f0d14e5c7930229d8d3; installed OSTree
+757aae349f1017ea47eb93c88e6f1522b8ed9cef657a480e6f1b18826156e8a0.
+Prior producer/installer and source gate/localization receipts remain authoritative.
+
+Accepted evidence: personal and corporate account/setup; personal initial/manual,
+restart, scheduled edit/Pause and recovery creation; corporate initial transfer;
+SharePoint initial/ordinary sync after restart; host ownership/state; candidate
+identity/unchanged metadata/runtimes; rendered recovery Browse placeholder;
+disposable corporate connection removal with absent saved entry/unit files/links
+and D-Bus NoSuchUnit, local files preserved. Reused unchanged native/fake faults
+and shared scheduling rather than duplicate provider suites. Missing transfer
+counts never treated as zero transfers; exact recovery previous-byte equality
+not inferred. No cloud deletion or comprehensive phase-7 lifecycle claim.
+
+Two unobserved wording details (help and absence of automatic notice) explicitly
+carried to phase-7 visual review, not checked off. Existing phase-7 implemented
+negative guards, Native/Debian and broader Flatpak lifecycle/release acceptance
+remain open. Phases 5/6 legacy deprecation/removal unchanged. Proposed Test/Verify
+and Settings Refresh simplifications are separate UI work, not closing criteria.
+
+Records changed: Task List.md condensed phase-4 execution detail into completed
+smoke summary; engineering OneDrive contract status/index reconciled; these notes
+preserve full removed checklist chronology below. User Push Buttons.md untouched.
+Documentation-only reconciliation: git diff --check exit 0; local linked record
+and phase status checks follow. No changed runtime inputs, repeated gate/build,
+installation, service operation, commit, push or cleanup needed for this step.
+
+#### Preserved phase-4 installed execution checklist at closure
+
+The following is the pre-reconciliation checklist verbatim, retained as historical
+progression; later entries above and the authoritative active task summary
+supersede its intermediate pending statuses.
+
+- [ ] Integrated Flatpak acceptance (started October 16; transferred from phase 3 October 15): reuse
+  applet manifests/runtime/probes after integration. Check both account flows,
+  OAuth/browser portal, selected paths, host/sandbox boundaries and integrated
+  units/status; run one disposable initial-sync/verification/cleanup smoke.
+  Reuse unchanged native scenario/fault evidence; no separate prototype sandbox
+  or repeated business faults. Record results toward phase-7/consolidated Flatpak
+  acceptance, not as another duplicate suite; probe-only evidence is insufficient.
+  October 16: read-only installed/runtime preflight added and exercised; all four
+  accepted runtime/SDK/BaseApp/extension refs present. Corrected BaseApp app-ref
+  validation in build/reuse tooling; 25 focused script tests and final gate passed.
+  Accepted implementation is now cf5da32 and its full manifest pin/Cargo inputs
+  are checked. Packaging committed as de8d779; source-based candidate built and
+  export/bundle identity verified. Approved installation and integrated acceptance
+  remain next; see the October 16 completion evidence. Installation/acceptance
+  authorized October 16 and started; maintained receipt-verified installer added.
+  Candidate installed and ref/commit/metadata verified; native launcher backed up
+  and initial launcher copy caused floating applets (failed panel acceptance).
+  Corrected discovery by parking the user override so COSMIC recognizes the
+  real Flatpak export; package unchanged. Panel retest passed (operator observed
+  embedding/popup; running Flatpak identity confirmed), final installer gate
+  passed. Disposable account/mirror acceptance remains outstanding.
+  Personal browser consent/setup succeeded; automatic remote inventory then
+  reported invalid data. JSON-safe credential redaction fixed in source;
+  regression reproduced before fix, then check, focused tests and final gate
+  passed. Updated candidate build/installed retest remains outstanding.
+  Fixes/installer/acceptance records committed as f5c3841; replacement manifest
+  pins that exact source. Replacement candidate built October 16 from packaging
+  cf00f2a: export/bundle identity verified, metadata/runtime provenance unchanged.
+  Replacement installed October 16; installed identity/complete metadata match
+  candidate. Installed personal selected-folder verification retest passed;
+  editor shows verified status without the previous parsing notice. Test
+  Connection passed. Save rejected an existing legacy OneDrive recovery path
+  under the historic app-owned state namespace; narrow compatibility fix passes
+  check, eight focused configuration tests and final gate. Installer executable
+  Git mode corrected after gate exposed it. Replacement build/Save retest pending.
+  Compatibility fix committed as 5e9f5b8; candidate source pin updated to that
+  exact revision. Replacement built from packaging db66196, with export/bundle
+  identity verified and unchanged complete metadata/runtime provenance.
+  Updated installation verified October 16 (candidate identity/metadata match);
+  installed Save retest passed: managed mirror units saved, schedule reported
+  disabled. Persisted rclone engine and explicit disposable subtree confirmed.
+  Installed Preview passed (two estimated differing paths); confirmed initial
+  Sync Now reports synchronization and checksum verification successful.
+  Operator confirmed both test files arrived. Quiet manual run was blocked by
+  missing ownership anchor; October 17 investigation found no anchor in host
+  mirror or retained bisync listings despite initialized state. Portal-backed
+  mirror/recovery I/O, scheduled shared state root and initial-sync anchor
+  postconditions corrected in source; four access tests, 29 coordinator tests,
+  localization check and final gate passed. Correction committed as 91dc5ce;
+  replacement manifest pinned to that revision. Packaging f685237 built and
+  installed October 17; export/bundle/installed identities match, complete metadata
+  and runtime provenance unchanged. Fresh disposable portal/anchor retest is in
+  progress; operator confirmed replacement embeds in panel and popup opens.
+  No marker/state reset. Old failed profile/data retained. Quiet manual run,
+  scheduled/Pause and remaining acceptance stay pending. Fresh draft Test
+  Connection blocked on local authorization; read-only inspection found mirror
+  Browse grant only, recovery grant absent. Operator confirmed recovery was not
+  selected; Test Connection passed after recovery Browse. Correct misleading
+  automatic-recovery placeholder/help for Flatpak rclone mirrors corrected in
+  source; check, focused recovery test, localization and final gate passed.
+  Installed wording retest awaits a later candidate; sync behavior unchanged.
+  Fresh profile Save (shared-auth acknowledgment), Preview (two paths) and
+  confirmed initial Sync Now/checksum passed. Host mirror now contains one
+  ownership marker and both test files; two of four retained listings contain
+  the marker, with one initial-complete marker. Operator's second, no-edit Sync
+  Now passed synchronization/checksum verification; prior ownership-marker
+  failure did not recur. Operator's sync after closing editor and removing/
+  re-adding panel applet also passed without Browse: retained portal access
+  across applet launches verified. Scheduled local edit arrived remotely;
+  operator's Pause notice confirms background timer stopped. Selected recovery
+  directory contains a dated ownership marker. Remote-only edit arrived locally;
+  timestamped test.txt backup exists in selected host recovery and differs from
+  current local file. Personal installed sync/recovery smoke passed; remaining
+  account/provider checks below stay open. Corporate installed setup screenshot
+  confirms new remote selected, work/school drive and disposable Acceptance-Business
+  subtree verified. Test Connection passed; operator confirmed Save. Preview
+  estimated two paths; initial Sync Now/checksum passed and operator confirmed
+  remote files. Host mirror contains both test files, one regular anchor and
+  initial-complete marker; two of four retained listings contain anchor.
+  Corporate installed setup/initial transfer smoke passed; unchanged personal
+  scheduling/recovery/fault coverage reused.
+  - [x] Verify shared portal folder access with one disposable SharePoint rclone
+    mirror in the installed Flatpak after the OneDrive access retest; existing
+    native/prototype evidence does not establish sandbox access. Reuse unchanged
+    provider scenarios; cover mirror/recovery Browse and cross-launch access.
+    Installed draft Test Connection passed with existing authenticated remote:
+    library identity matched and disposable Acceptance-SharePoint accessible
+    (zero visible items). Optional Graph account label unavailable, nonblocking.
+    Saved profile initial sync completed; operator confirmed remote files. Host
+    mirror contains both test files and SharePoint anchor, with retained listings
+    and initial-complete state. Ordinary sync after closing editor/removing and
+    re-adding panel applet passed without Browse: retained portal access verified.
+    Transfer counts unavailable, not claimed zero; shared personal worker/recovery
+    evidence reused. Corrected recovery wording committed as cf2d13b; October 18
+    replacement manifest pinned to that revision. Packaging 848d48b built by
+    operator October 18; source/export/bundle identity verified, complete metadata
+    and runtime provenance unchanged. Receipt-verified replacement installed
+    October 18; operator confirmed rendered Browse recovery placeholder.
+    Help text and absence of automatic-directory notice await confirmation.
+  - [x] Installed disposable connection removal: operator removed corporate test
+    profile; saved entry, service/timer files and enablement links absent. Typed
+    systemd D-Bus returns NoSuchUnit for both units. Local mirror/test files and
+    recovery directory preserved. No cloud deletion performed.
+
+
+### October 18, 2026 — Separate 0.5.4 deprecation from later engine removal
+
+Operator accepted two-release transition and requested moving phase 6 out of
+0.5.4 tasks. Task List.md now states 0.5.4 scope explicitly: new OneDrive Offline
+uses rclone; existing abraunegg mirrors remain supported for that deprecation
+release. Phase 5 is labeled 0.5.4 deprecation; phase 7 is labeled 0.5.4 migration
+acceptance, with release notes describing deprecation rather than completed
+removal. Consolidated Flatpak/package release gates remain in 0.5.4.
+
+Moved phase-6 removal checklist verbatim to dedicated future section
+Post-0.5.4: legacy abraunegg engine removal, retaining number 6 for historical
+references. Next release tentatively 0.5.5; no fixed publication commitment.
+Added explicit preservation/recognizable-profile upgrade task: retiring support
+must not delete local files/recovery/credentials, silently drop profiles or
+reinterpret them as rclone. onedriver Online unchanged; no conversion tool.
+Historical implementation/acceptance records and all existing checklist statuses
+preserved. Untracked Push Buttons.md untouched. Documentation-only change;
+no source, profile, engine, dependency, service or package mutations. Validate
+moved checklist equality, release placement, local anchor and diff whitespace;
+no repeat runtime gate/build required for unchanged inputs.
+
+Reorganization verification: original phase-6 checklist equals moved text
+verbatim; one phase-6 heading exists in future section, outside 0.5.4; release
+labels and local link target checked; git diff --check exit 0.

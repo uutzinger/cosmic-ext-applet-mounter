@@ -7,7 +7,8 @@ fake-adapter and local-engine checks passed; native cloud prototype account/scen
 flows accepted for both drive types; new production folder guards await live acceptance;
 production configuration, shared Microsoft OAuth, OneDrive setup/guards and guarded
 coordinator/planner, shared app runtime and Add/Modify editor paths implemented;
-production sync activation and installed acceptance pending;
+phase-4 implementation and integrated installed smoke closed October 18, 2026;
+broader phase-7/native/Debian/Flatpak lifecycle and release acceptance remains open;
 generic profiles confirmed by original/download and measured-sync checks for
 personal and business sample trees on October 15, 2026
 
@@ -696,3 +697,19 @@ promise; native/legacy automatic behavior retained. Replacement manifest now
 pins that immutable source. Runtimes, grants, Cargo inputs and engine behavior
 are unchanged. Installed corrected-text review is still pending; unchanged sync
 acceptance is reused rather than repeated.
+
+
+## Phase-4 closure (October 18, 2026)
+
+Implementation and scoped installed smoke accepted. Source cf2d13b, packaging
+848d48b and exact installed identity are recorded in completion notes. Personal
+manual/restart/scheduled/Pause/recovery, corporate account setup/initial transfer,
+SharePoint initial/ordinary sync after restart and disposable connection removal
+passed at their documented observation levels. Host markers and preserved local
+files were inspected; systemd D-Bus reports removed service/timer absent. No cloud
+cleanup or full release lifecycle pass is claimed. Installed recovery Browse
+placeholder confirmed; help and absence of automatic-directory notice explicitly
+carried to phase-7 visual review. Full negative-guard/lifecycle/native/Debian and
+release acceptance, legacy deprecation/removal remain in their own phases.
+Historical intermediate pending statuses above are superseded only within this
+accepted smoke scope; detailed failure/fix chronology is retained unchanged.

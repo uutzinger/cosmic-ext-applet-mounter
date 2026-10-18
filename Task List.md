@@ -70,6 +70,13 @@ Microsoft Graph access requirements. OneDrive Offline mirrors move to `rclone`,
 reusing the SharePoint (Teams) bisync path. `jstaf/onedriver` stays for OneDrive
 Online. No other mount engine is added or changed.
 
+Release boundary: **0.5.4 introduces rclone for new OneDrive Offline mirrors and
+retains existing abraunegg mirrors for one deprecation release.** Phase 5 and
+phase 7 below, plus Consolidated Flatpak acceptance and release, are 0.5.4 work.
+Actual engine/helper/dependency removal (phase 6) is
+[post-0.5.4 work](#post-054-legacy-abraunegg-engine-removal), targeted at the next
+release (tentatively 0.5.5), not a 0.5.4 gate. No automatic conversion is planned.
+
 | Provider | Online mount | Offline mirror |
 |---|---|---|
 | OneDrive | `jstaf/onedriver` | `rclone bisync` (new; replaces `abraunegg/onedrive`) |
@@ -88,8 +95,8 @@ Online. No other mount engine is added or changed.
 #### Open decisions
 
 - [x] Legacy timeline (decided October 14, 2026): existing abraunegg connections
-  keep running but cannot be created for one release; the engine is removed in
-  the following release. No conversion tool: the applet has no established user
+  keep running in 0.5.4 but cannot be newly created; the engine is removed in
+  the following release (tentatively 0.5.5), under the post-0.5.4 section. No conversion tool: the applet has no established user
   base, so users recreate the connection as an rclone mirror manually.
 - [x] Mirror guard rule (decided October 14, 2026). The SharePoint guards came from
   SharePoint tests and do not transfer to OneDrive, so:
@@ -392,104 +399,25 @@ drive types use the same tested generic profile; only identity/auth differs.
   rclone >= 1.74.3 and legacy dependencies until phase 6; no new startup probes.
   October 16: check, focused diagnostic/installer tests, localization and full gate
   passed. Installed native/Flatpak acceptance remains below.
-- [ ] Integrated Flatpak acceptance (started October 16; transferred from phase 3 October 15): reuse
-  applet manifests/runtime/probes after integration. Check both account flows,
-  OAuth/browser portal, selected paths, host/sandbox boundaries and integrated
-  units/status; run one disposable initial-sync/verification/cleanup smoke.
-  Reuse unchanged native scenario/fault evidence; no separate prototype sandbox
-  or repeated business faults. Record results toward phase-7/consolidated Flatpak
-  acceptance, not as another duplicate suite; probe-only evidence is insufficient.
-  October 16: read-only installed/runtime preflight added and exercised; all four
-  accepted runtime/SDK/BaseApp/extension refs present. Corrected BaseApp app-ref
-  validation in build/reuse tooling; 25 focused script tests and final gate passed.
-  Accepted implementation is now cf5da32 and its full manifest pin/Cargo inputs
-  are checked. Packaging committed as de8d779; source-based candidate built and
-  export/bundle identity verified. Approved installation and integrated acceptance
-  remain next; see the October 16 completion evidence. Installation/acceptance
-  authorized October 16 and started; maintained receipt-verified installer added.
-  Candidate installed and ref/commit/metadata verified; native launcher backed up
-  and initial launcher copy caused floating applets (failed panel acceptance).
-  Corrected discovery by parking the user override so COSMIC recognizes the
-  real Flatpak export; package unchanged. Panel retest passed (operator observed
-  embedding/popup; running Flatpak identity confirmed), final installer gate
-  passed. Disposable account/mirror acceptance remains outstanding.
-  Personal browser consent/setup succeeded; automatic remote inventory then
-  reported invalid data. JSON-safe credential redaction fixed in source;
-  regression reproduced before fix, then check, focused tests and final gate
-  passed. Updated candidate build/installed retest remains outstanding.
-  Fixes/installer/acceptance records committed as f5c3841; replacement manifest
-  pins that exact source. Replacement candidate built October 16 from packaging
-  cf00f2a: export/bundle identity verified, metadata/runtime provenance unchanged.
-  Replacement installed October 16; installed identity/complete metadata match
-  candidate. Installed personal selected-folder verification retest passed;
-  editor shows verified status without the previous parsing notice. Test
-  Connection passed. Save rejected an existing legacy OneDrive recovery path
-  under the historic app-owned state namespace; narrow compatibility fix passes
-  check, eight focused configuration tests and final gate. Installer executable
-  Git mode corrected after gate exposed it. Replacement build/Save retest pending.
-  Compatibility fix committed as 5e9f5b8; candidate source pin updated to that
-  exact revision. Replacement built from packaging db66196, with export/bundle
-  identity verified and unchanged complete metadata/runtime provenance.
-  Updated installation verified October 16 (candidate identity/metadata match);
-  installed Save retest passed: managed mirror units saved, schedule reported
-  disabled. Persisted rclone engine and explicit disposable subtree confirmed.
-  Installed Preview passed (two estimated differing paths); confirmed initial
-  Sync Now reports synchronization and checksum verification successful.
-  Operator confirmed both test files arrived. Quiet manual run was blocked by
-  missing ownership anchor; October 17 investigation found no anchor in host
-  mirror or retained bisync listings despite initialized state. Portal-backed
-  mirror/recovery I/O, scheduled shared state root and initial-sync anchor
-  postconditions corrected in source; four access tests, 29 coordinator tests,
-  localization check and final gate passed. Correction committed as 91dc5ce;
-  replacement manifest pinned to that revision. Packaging f685237 built and
-  installed October 17; export/bundle/installed identities match, complete metadata
-  and runtime provenance unchanged. Fresh disposable portal/anchor retest is in
-  progress; operator confirmed replacement embeds in panel and popup opens.
-  No marker/state reset. Old failed profile/data retained. Quiet manual run,
-  scheduled/Pause and remaining acceptance stay pending. Fresh draft Test
-  Connection blocked on local authorization; read-only inspection found mirror
-  Browse grant only, recovery grant absent. Operator confirmed recovery was not
-  selected; Test Connection passed after recovery Browse. Correct misleading
-  automatic-recovery placeholder/help for Flatpak rclone mirrors corrected in
-  source; check, focused recovery test, localization and final gate passed.
-  Installed wording retest awaits a later candidate; sync behavior unchanged.
-  Fresh profile Save (shared-auth acknowledgment), Preview (two paths) and
-  confirmed initial Sync Now/checksum passed. Host mirror now contains one
-  ownership marker and both test files; two of four retained listings contain
-  the marker, with one initial-complete marker. Operator's second, no-edit Sync
-  Now passed synchronization/checksum verification; prior ownership-marker
-  failure did not recur. Operator's sync after closing editor and removing/
-  re-adding panel applet also passed without Browse: retained portal access
-  across applet launches verified. Scheduled local edit arrived remotely;
-  operator's Pause notice confirms background timer stopped. Selected recovery
-  directory contains a dated ownership marker. Remote-only edit arrived locally;
-  timestamped test.txt backup exists in selected host recovery and differs from
-  current local file. Personal installed sync/recovery smoke passed; remaining
-  account/provider checks below stay open. Corporate installed setup screenshot
-  confirms new remote selected, work/school drive and disposable Acceptance-Business
-  subtree verified. Test Connection passed; operator confirmed Save. Preview
-  estimated two paths; initial Sync Now/checksum passed and operator confirmed
-  remote files. Host mirror contains both test files, one regular anchor and
-  initial-complete marker; two of four retained listings contain anchor.
-  Corporate installed setup/initial transfer smoke passed; unchanged personal
-  scheduling/recovery/fault coverage reused.
-  - [x] Verify shared portal folder access with one disposable SharePoint rclone
-    mirror in the installed Flatpak after the OneDrive access retest; existing
-    native/prototype evidence does not establish sandbox access. Reuse unchanged
-    provider scenarios; cover mirror/recovery Browse and cross-launch access.
-    Installed draft Test Connection passed with existing authenticated remote:
-    library identity matched and disposable Acceptance-SharePoint accessible
-    (zero visible items). Optional Graph account label unavailable, nonblocking.
-    Saved profile initial sync completed; operator confirmed remote files. Host
-    mirror contains both test files and SharePoint anchor, with retained listings
-    and initial-complete state. Ordinary sync after closing editor/removing and
-    re-adding panel applet passed without Browse: retained portal access verified.
-    Transfer counts unavailable, not claimed zero; shared personal worker/recovery
-    evidence reused. Corrected recovery wording committed as cf2d13b; October 18
-    replacement manifest pinned to that revision. Packaging preparation in
-    progress; installed recovery placeholder/help review remains outstanding.
+- [x] Integrated Flatpak implementation smoke (started October 16; transferred
+  from phase 3 October 15; closed October 18): shipping-feature candidate built,
+  installed and identity/metadata verified. Both OneDrive account flows passed;
+  personal initial/ordinary/restart/scheduled/Pause/recovery checks passed,
+  corporate initial transfer passed, and SharePoint initial/ordinary sync after
+  restart passed. Shared native scenario/fault evidence reused without repeating
+  unchanged suites. Portal host/local I/O correction and ownership anchors
+  verified; paused Save and disposable connection removal verified, including
+  absent systemd units and preserved local data. Candidate 848d48b pins source
+  cf2d13b; recovery Browse placeholder observed in installed editor. Full
+  chronology, failures/fixes, verification receipts and limitations are retained
+  in completion notes. Remaining visual details and broader lifecycle/release
+  acceptance belong to phase 7 below, not this implementation smoke.
 
-#### 5. Legacy abraunegg connections (no conversion tool)
+Phase 4 closed October 18, 2026 under the operator's accepted smoke scope.
+This is not full phase-7/native/Debian/Flatpak release acceptance. Retained test
+resources and original failed profile are preserved; no cloud cleanup claimed.
+
+#### 5. Legacy abraunegg deprecation — 0.5.4 (no conversion tool)
 
 - [ ] Stop offering abraunegg for new OneDrive Offline connections; existing ones
   keep working unchanged for one release. Show a deprecation notice on legacy
@@ -499,20 +427,11 @@ drive types use the same tested generic profile; only identity/auth differs.
   reuse the abraunegg database, cache or token.
 - [ ] Document the manual replacement steps in the release notes.
 
-#### 6. Removal (the release after the deprecation release)
+#### 7. OneDrive migration acceptance — 0.5.4
 
-- [ ] Remove abraunegg code (`one_drive_*` in `src/sync.rs`, `OneDriveSync`
-  dependency kind, auth-files UI in `src/app.rs`), the
-  `scripts/cosmic-ext-applet-mounter-onedrive-auth-helper` and its install/desktop
-  entries, and the Fluent keys for the helper.
-- [ ] Packaging: drop `onedrive`, `python3-gi` and `gir1.2-webkit2-4.1` from
-  `debian/control`; remove OneDrive options from `scripts/install-dependencies.sh`
-  and its tests; remove the `onedrive` rows from the Flatpak host-command
-  inventory and permission rationale; update AppStream/README text.
-- [ ] Update the script catalog and inventory; run `bash scripts/dev.sh gate`.
-
-#### 7. Acceptance
-
+- [ ] Final rendered recovery guidance: installed Browse placeholder already
+  confirmed; explicitly check recovery help text and absence of the automatic
+  directory notice. Carried from phase-4 wording review; no unobserved pass.
 - [ ] Implemented guards, per drive type: wrong account or drive (identity guard
   blocks), empty or missing local and remote folder (access marker blocks), and a
   changed target invalidating Preview and initial-sync state.
@@ -520,8 +439,9 @@ drive types use the same tested generic profile; only identity/auth differs.
   Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
 - [ ] Flatpak: the same lifecycle in the rebuilt Flatpak (feeds the Consolidated
   Flatpak acceptance items below).
-- [ ] Release notes: engine removal and the manual steps to recreate a OneDrive
-  Offline mirror as an rclone connection.
+- [ ] Release notes: new rclone mirrors, continued support/deprecation of existing
+  abraunegg mirrors in 0.5.4, manual replacement steps, and planned engine removal
+  in the following release. Do not describe removal as shipped in 0.5.4.
 
 ### Consolidated Flatpak acceptance and release
 
@@ -586,6 +506,31 @@ Plan, decisions and section order:
 # Cloud Mounter Applet Future Task List
 
 Items that will be activated at some time in the future.
+
+## Post-0.5.4: legacy abraunegg engine removal
+
+Planned October 14, 2026; separated from 0.5.4 release gates October 18, 2026.
+Target: release after the 0.5.4 deprecation release, tentatively 0.5.5. Retain
+phase number 6 for existing planning references. Existing abraunegg connections
+remain supported in 0.5.4; this work is not a condition of publishing 0.5.4.
+OneDrive Online using onedriver remains supported throughout.
+
+#### 6. Removal (the release after the deprecation release)
+
+- [ ] Remove abraunegg code (`one_drive_*` in `src/sync.rs`, `OneDriveSync`
+  dependency kind, auth-files UI in `src/app.rs`), the
+  `scripts/cosmic-ext-applet-mounter-onedrive-auth-helper` and its install/desktop
+  entries, and the Fluent keys for the helper.
+- [ ] Packaging: drop `onedrive`, `python3-gi` and `gir1.2-webkit2-4.1` from
+  `debian/control`; remove OneDrive options from `scripts/install-dependencies.sh`
+  and its tests; remove the `onedrive` rows from the Flatpak host-command
+  inventory and permission rationale; update AppStream/README text.
+- [ ] Update the script catalog and inventory; run `bash scripts/dev.sh gate`.
+
+- [ ] Preserve local mirror/recovery files and credentials when engine support
+  is retired. Keep legacy profiles identifiable with replacement instructions;
+  do not silently drop them or reinterpret them as rclone connections. Verify
+  upgrade behavior and document explicit user-controlled cleanup separately.
 
 ## Post-0.5.4 validation and expansion backlog
 
