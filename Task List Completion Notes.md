@@ -3235,3 +3235,23 @@ uncommitted scope: src/app.rs, English Fluent file, Task List.md and completion
 notes. No package build/install/commit, data deletion or permission change this
 observation; old failed profile and disposable resources preserved. git diff
 --check: exit 0; no runtime inputs changed since earlier passing checks.
+
+
+### October 18, 2026 — Finish installed recovery wording correction
+
+User requested finishing wording fix. Source/UI and acceptance records committed
+as cf2d13b53460079b2bb198a605605d3bd1911f3b; manifest and current packaging guide
+now pin this immutable source. Replacement x86_64/master package is necessary:
+installed f685237 source 91dc5ce predates recovery placeholder/help correction.
+Only recovery presentation changes; accepted engine, scheduling, recovery and
+account tests remain applicable. Prior check, focused recovery test, Fluent and
+final gate receipts remain valid for unchanged source; rerun only packaging
+contract for new manifest pin. No permission/runtime/feature/Cargo input change.
+Untracked docs/engineering/Push Buttons.md is unrelated user work and preserved
+outside staging. Build, receipt-verified installation and rendered blank recovery
+placeholder/help/no-automatic-notice review remain next. Preserve all paused
+profiles, credentials and failed-profile evidence; no cloud/file cleanup here.
+
+Replacement pin validation: cargo test --locked --test flatpak_packaging_contract,
+exit 0 (four passed); git diff --check, exit 0. Prior passing full gate and
+localization receipts reused for unchanged application inputs.

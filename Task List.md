@@ -485,7 +485,9 @@ drive types use the same tested generic profile; only identity/auth differs.
     and initial-complete state. Ordinary sync after closing editor/removing and
     re-adding panel applet passed without Browse: retained portal access verified.
     Transfer counts unavailable, not claimed zero; shared personal worker/recovery
-    evidence reused. Corrected recovery wording still awaits installed review.
+    evidence reused. Corrected recovery wording committed as cf2d13b; October 18
+    replacement manifest pinned to that revision. Packaging preparation in
+    progress; installed recovery placeholder/help review remains outstanding.
 
 #### 5. Legacy abraunegg connections (no conversion tool)
 

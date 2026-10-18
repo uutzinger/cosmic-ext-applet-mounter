@@ -13,7 +13,7 @@ personal and business sample trees on October 15, 2026
 
 Created: October 14, 2026
 
-Last reviewed: October 17, 2026
+Last reviewed: October 18, 2026
 
 Scope: OneDrive Offline mirror connections after `abraunegg/onedrive` is dropped.
 Associated task: Task List "Engine decision and OneDrive Offline migration to
@@ -685,3 +685,14 @@ manifest pins that immutable revision for the authorized x86_64/master candidate
 Runtime, feature, Cargo-input and permission selections are unchanged. Prior
 candidate and failed initialized profile are preserved. Build, installation and
 fresh disposable portal/anchor acceptance remain separate pending observations.
+
+
+October 18 wording follow-up: installed f685237 candidate passed personal
+manual/scheduled/restart/Pause/recovery smoke, corporate account setup/initial
+transfer and SharePoint initial/ordinary sync after restart. Detailed failure/fix
+chronology remains in completion notes. Recovery instructions corrected in source
+cf2d13b: Flatpak rclone drafts show Browse requirement, without automatic recovery
+promise; native/legacy automatic behavior retained. Replacement manifest now
+pins that immutable source. Runtimes, grants, Cargo inputs and engine behavior
+are unchanged. Installed corrected-text review is still pending; unchanged sync
+acceptance is reused rather than repeated.
