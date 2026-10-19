@@ -4966,3 +4966,56 @@ Pin-only packaging validation follows; existing final gate reused.
 Pin-only cargo test --locked --test flatpak_packaging_contract exit0 (4 tests);
 git diff --check exit0. Historical optional-module contract test is not evidence
 that WebKit is shipped; selected source manifest continues to exclude it.
+
+Replacement packaging commit7069ae5b2182379ebd4f32ba968e4692dbe6c155 pins app
+72661ce9d705038cdb1878165917f298e0ced8c2. Operator explicitly approved push and
+Debian candidates. Fetch immediately before push found0incoming/2outgoing;
+normal origin/master push and ls-remote exact7069ae5 verification exit0.
+
+Local Flatpak wrapper started using clean detached worktree
+/tmp/cloud-mounter-flatpak-packaging-7069ae5, exact packaging SHA, x86_64/master
+and --local-source-repo. Logs target/task-runs/flatpak-candidate-7069ae5/;
+output target/artifacts/candidates/flatpak-7069ae5-x86_64-master/.
+
+Initial hosted invocation with --ref full SHA received definite GitHub HTTP422
+No ref found before any workflow run (summary run_id null); no build occurred.
+Preserved failure target/task-runs/debian-candidate-7069ae5/. Retried maintained
+wrapper with verified master (branch dispatch required), new log directory
+ target/task-runs/debian-candidate-7069ae5-master/. Correlated run39282971942
+selected at exact7069ae5; downloads target/artifacts/candidates/debian-7069ae5/.
+This is one actual Debian matrix, not a duplicate source build. Wrapper owns
+polling/download/identity verification. Both package outcomes pending.
+
+Flatpak7069ae5 build/export/inspection exit0. Export commit
+b2a8a6e68f9f64687304a482849271ed5aab53d8039b97abb4099e62f58e6408;
+bundle13,523,784bytes SHA256
+a11c6d2a0451b00e27f56fdc78591223779c93acec9d280d5867107204a0c5ac.
+Short offline payload review exit0: all5 required files match exported bytes;
+4 source assets byte-identical to clean7069ae5 checkout, new disabled Save notice
+present, helper absent. Complete exported metadata, declared finish-args/SDK
+extensions, runtime commits and ELF NEEDED list match prior196f7b1 candidate;
+reuse prior actual Platform library-capability evidence. No current installed
+override/profile mutation or replacement-installation claim. Review saved in
+ target/task-runs/flatpak-candidate-7069ae5/payload-review.json. Debian pending.
+
+
+October 19 hosted delay diagnosis: one gh run view (exit0) shows all six jobs
+queued with no steps executed. No CI build failure or runner-version-specific
+failure observed. Official GitHub status summary checked: active incident
+8tzbpcnl75jp, Actions degraded availability/workflow-processing delays, opened
+15:49 UTC before this16:07 UTC dispatch. Source:
+https://www.githubstatus.com/incidents/8tzbpcnl75jp . This plausibly explains the
+queue; no claim of a repository-specific root cause. Wrapper continues bounded
+waiting (7200-second default), with no remote cancellation or duplicate build.
+
+Checkpoint: requested source commits pushed; Flatpak replacement produced and
+verified, Debian matrix pending external service recovery. New Debian artifacts
+not claimed. Existing local wrapper session94504 may finish/download later;
+inspect its summary/receipt before resuming. If it has ended, use the maintained
+wrapper --resume-report target/task-runs/debian-candidate-7069ae5-master/summary.json
+with the same download destination and a fresh log directory; this selects the
+recorded run/source and never redispatches. Do not run a competing downloader
+while the original wrapper is active. Refreshed package task split to distinguish
+completed Flatpak/source work, queued Debian work and installed-notice acceptance.
+User future-heading edit and Push Buttons.md excluded from commits; preserved.
+No installation, tag or publication. Record-only changes do not require rebuild.

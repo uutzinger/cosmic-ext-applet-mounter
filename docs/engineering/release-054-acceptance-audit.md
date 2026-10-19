@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Scoped steps 2–4 complete; updated notice source-tested, refreshed packages and remaining release acceptance open
+Status: Scoped steps 2–4 complete; refreshed Flatpak 7069ae5 verified, Debian run queued during GitHub Actions incident; final acceptance open
 
 Created: October 18, 2026
 
@@ -247,3 +247,29 @@ localization dev-localization-check-uor7nshy and full gate dev-gate-nh0kz3wx all
 exit 0 at d066a00 dirty source. Documentation links and git diff --check passed.
 Step 4 closed at the stated source/reused-installed scope; the new notice has
 not been built into or exercised in an installed replacement.
+
+
+## Replacement package checkpoint — October 19
+
+Source fix/records committed as 72661ce; exact Flatpak pin/packaging 7069ae5.
+Both pushed after fetch confirmed no incoming changes. Existing full gate and
+pin-specific four packaging tests passed; no source changes since verification.
+
+Flatpak x86_64/master built once from clean 7069ae5 checkout and local exact-source
+Git transport. Producer export/bundle inspection passed. Additional offline check
+found all five payload files match export and all four assets match source; new
+disabled Save notice present, helper absent. Full metadata, declared permissions,
+runtime commits and ELF dependencies equal prior 196f7b1. Bundle SHA256
+`a11c6d2a0451b00e27f56fdc78591223779c93acec9d280d5867107204a0c5ac`,
+13,523,784 bytes; export commit
+`b2a8a6e68f9f64687304a482849271ed5aab53d8039b97abb4099e62f58e6408`.
+Receipts/review: target/task-runs/flatpak-candidate-7069ae5/ at repository root.
+
+Debian run 39282971942 selects exact packaging 7069ae5. All six jobs remain
+queued with no executed steps at this checkpoint. GitHub reports an active
+[Actions availability incident](https://www.githubstatus.com/incidents/8tzbpcnl75jp)
+with workflow-processing delays; this plausibly explains the queue, rather than
+a demonstrated source/package failure. Hosted wrapper remains waiting with its
+bounded timeout, logs/receipt in target/task-runs/debian-candidate-7069ae5-master/.
+Recover that existing run; do not dispatch another build. New Debian packages
+are not yet available or accepted. No new package was installed or published.

@@ -610,10 +610,14 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
 #### 8. Final release verification and approval
 
-- [ ] Refresh immutable app source/Flatpak pin and affected packages to include
-  the October 19 disabled-mirror Save notice. Current 196f7b1/7ccc9f7 artifacts
-  predate it. Review the changed notice in the replacement; reuse unchanged
-  lifecycle evidence. Commit/build/install approvals retain their boundaries.
+- [x] Commit refreshed source 72661ce and Flatpak pin 7069ae5 for the October 19
+  disabled-mirror Save notice. Flatpak x86_64/master build/export/payload checks
+  passed; prior 196f7b1 artifacts retained. No replacement installation performed.
+- [ ] Finish existing Debian run 39282971942 at exact 7069ae5 and retrieve its
+  verified matrix. October 19 GitHub Actions disruption leaves all six jobs queued;
+  no failed build or duplicate dispatch. Existing wrapper/receipt owns recovery.
+- [ ] Review the changed disabled-mirror Save notice in an installed replacement;
+  reuse unchanged lifecycle evidence. Installation retains its approval boundary.
 - [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and
   inspect the accepted native/final Flatpak artifacts against frozen identities.
   Keep earlier development smoke separate from final artifact acceptance.
