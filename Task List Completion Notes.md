@@ -4958,3 +4958,11 @@ and clean checkout. Local Flatpak build permitted without pushing. Hosted Debian
 requires pushing these new commits; separate push approval is not inferred from
 commit/package request. Installation, tags and publication remain unauthorized.
 Preserve untracked Push Buttons.md and user-owned future-section heading edit.
+
+Step-4 source committed as72661ce9d705038cdb1878165917f298e0ced8c2.
+Prepared Flatpak manifest exact pin to that source and updated packaging guide.
+No runtime, finish-args, SDK/Platform, Cargo lock or vendor source changes.
+Pin-only packaging validation follows; existing final gate reused.
+Pin-only cargo test --locked --test flatpak_packaging_contract exit0 (4 tests);
+git diff --check exit0. Historical optional-module contract test is not evidence
+that WebKit is shipped; selected source manifest continues to exclude it.

@@ -58,7 +58,7 @@
         {
           "type": "git",
           "url": "https://github.com/uutzinger/cosmic-ext-applet-mounter.git",
-          "commit": "7ccc9f7e5a635d59dd0db9a3bb6ed3b1c85f4aef"
+          "commit": "72661ce9d705038cdb1878165917f298e0ced8c2"
         },
         "./cargo-sources.json"
       ]
