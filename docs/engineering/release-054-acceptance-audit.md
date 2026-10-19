@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: Scoped steps 2–4 complete; refreshed Flatpak 7069ae5 verified, Debian run queued during GitHub Actions incident; final acceptance open
+Status: Scoped steps 2–4 complete; refreshed Flatpak and all six Debian candidates at 7069ae5 verified; installed/final acceptance open
 
 Created: October 18, 2026
 
@@ -273,3 +273,18 @@ a demonstrated source/package failure. Hosted wrapper remains waiting with its
 bounded timeout, logs/receipt in target/task-runs/debian-candidate-7069ae5-master/.
 Recover that existing run; do not dispatch another build. New Debian packages
 are not yet available or accepted. No new package was installed or published.
+
+
+## Debian completion after queue delay — October 19
+
+The original hosted wrapper completed exit 0, phase artifacts-ready: existing run
+39282971942 succeeded at exact 7069ae5. All six Ubuntu 22.04/24.04/26.04 amd64/arm64
+packages downloaded to target/artifacts/candidates/debian-7069ae5/; producer
+verified run/source, complete artifact set, package identity and SHA256 checksums.
+No redispatch or rebuild. Receipt: receipt.json in that candidate directory.
+
+Additional offline notice audit exit 0: each package's Fluent catalog equals
+clean source and contains the disabled-mirror notice; retired helper absent.
+Review: target/task-runs/debian-candidate-7069ae5-master/payload-review.json.
+Earlier queue checkpoint remains historical. The new Debian/Flatpak candidates
+are ready for affected installed-notice checks; no installation or release claimed.

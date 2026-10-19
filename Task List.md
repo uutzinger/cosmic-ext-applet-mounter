@@ -613,9 +613,9 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 - [x] Commit refreshed source 72661ce and Flatpak pin 7069ae5 for the October 19
   disabled-mirror Save notice. Flatpak x86_64/master build/export/payload checks
   passed; prior 196f7b1 artifacts retained. No replacement installation performed.
-- [ ] Finish existing Debian run 39282971942 at exact 7069ae5 and retrieve its
-  verified matrix. October 19 GitHub Actions disruption leaves all six jobs queued;
-  no failed build or duplicate dispatch. Existing wrapper/receipt owns recovery.
+- [x] Finish Debian run 39282971942 at exact 7069ae5: all six Ubuntu/architecture
+  candidates downloaded and producer-verified; corrected catalog present in all
+  packages. Original wrapper completed after queue delay, without redispatch.
 - [ ] Review the changed disabled-mirror Save notice in an installed replacement;
   reuse unchanged lifecycle evidence. Installation retains its approval boundary.
 - [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and

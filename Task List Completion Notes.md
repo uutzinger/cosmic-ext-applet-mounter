@@ -5019,3 +5019,30 @@ while the original wrapper is active. Refreshed package task split to distinguis
 completed Flatpak/source work, queued Debian work and installed-notice acceptance.
 User future-heading edit and Push Buttons.md excluded from commits; preserved.
 No installation, tag or publication. Record-only changes do not require rebuild.
+
+
+### October 19, 2026 — Replacement Debian candidates completed
+
+Operator reports workflow complete. Existing wrapper session94504 finished
+exit0 without restart/redispatch, phase artifacts-ready, run39282971942,
+source7069ae5b2182379ebd4f32ba968e4692dbe6c155. Maintained producer downloaded and
+verified six expected Ubuntu22.04/24.04/26.04 amd64/arm64 artifacts, package
+identities and SHA256 checksums. Summary/log:
+ target/task-runs/debian-candidate-7069ae5-master/; artifact receipt:
+ target/artifacts/candidates/debian-7069ae5/receipt.json. No new network/run poll
+or duplicate identity/hash inspector needed; retained producer result reused.
+
+Short offline payload audit exit0: all six Fluent catalogs byte-identical to
+clean7069ae5 source, new disabled Save notice present, retired helper absent.
+No package execution, extraction into system paths, installation or publication.
+Review saved to target/task-runs/debian-candidate-7069ae5-master/payload-review.json.
+Original definite raw-SHA dispatch422 and later queue observations remain
+historical; they are not CI compiler/package failures. Actual matrix succeeded.
+
+Updated active task, acceptance map and index; all replacement candidate build/
+offline inspection work complete. Appsource72661ce/packaging7069ae5 immutable;
+record-only updates require no rebuild or repeat source gate. Installed changed
+notice and final release checks remain open. Prior user heading edit and untracked
+Push Buttons.md preserved. Documentation/diff validation follows.
+Documentation relative-link validation and git diff --check exit0. Commit only
+package-completion records; retain immutable artifact source and user edits.
