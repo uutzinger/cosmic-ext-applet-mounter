@@ -474,6 +474,7 @@ sharepoint-anchor-changed = SharePoint mirror access marker changed; repair the 
 sharepoint-confirmation-invalidate-error = Could not invalidate the prior SharePoint mirror confirmation: { $error }
 sharepoint-schedule-help = Safety: Preview is dry-run; initial synchronization requires Preview plus confirmed Sync Now before Start can enable the schedule. Scheduled runs recheck the saved SharePoint target and access marker.
 sharepoint-mirror-plan-ready = Managed SharePoint mirror service { $name } validates structurally. Preview and Sync Now are available; the background timer is disabled.
+offline-mirror-saved-disabled = { $name } saved with this connection disabled and background synchronization stopped. Choose Enable, run Test Connection, then Save Connection before using Preview or Sync Now. Enabling and saving does not start background synchronization.
 rclone-mirror-saved-uninitialized = { $name } saved with managed mirror units and its schedule disabled. Run Preview and the confirmed initial Sync Now before using Start.
 rclone-mirror-saved-initialized = { $name } saved with managed mirror units and its schedule disabled. Existing initialization state was preserved; Preview and Sync Now now run normal bisync. Use Start to resume scheduled synchronization.
 onedrive-mirror-saved-uninitialized = { $name } saved with its managed OneDrive mirror unit disabled. Run Preview and the confirmed initial Sync Now before using Start.

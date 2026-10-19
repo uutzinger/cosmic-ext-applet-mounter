@@ -9449,6 +9449,12 @@ async fn install_onedrive_offline_mirror_unit(connection: Connection) -> String 
 }
 
 fn offline_mirror_saved_notice(connection: &Connection, initialized: bool) -> String {
+    if !connection.enabled {
+        return fl!(
+            "offline-mirror-saved-disabled",
+            name = connection.name.as_str()
+        );
+    }
     match (is_legacy_onedrive_mirror(connection), initialized) {
         (true, true) => fl!(
             "onedrive-mirror-saved-initialized",
@@ -16550,6 +16556,32 @@ mod tests {
             sync_rejection_message(SyncDecisionRejection::PreviewRequired)
                 .contains("Preview first")
         );
+    }
+
+    #[test]
+    fn disabled_offline_mirror_save_notice_requires_explicit_enable_and_save() {
+        for (provider, engine) in [
+            (Provider::OneDrive, OfflineEngine::Rclone),
+            (Provider::OneDrive, OfflineEngine::LegacyOnedrive),
+            (Provider::Teams, OfflineEngine::Rclone),
+            (Provider::GoogleDrive, OfflineEngine::Rclone),
+        ] {
+            let mut connection = test_connection(provider);
+            connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: Some(engine),
+                ..OfflineMirrorConfig::default()
+            });
+            connection.enabled = false;
+            for initialized in [false, true] {
+                let notice = offline_mirror_saved_notice(&connection, initialized);
+                assert!(notice.contains("Choose Enable"));
+                assert!(notice.contains("Test Connection, then Save Connection"));
+                assert!(notice.contains("does not start background synchronization"));
+                assert!(!notice.contains("Run Preview"));
+                assert!(!notice.contains("now run normal"));
+                assert!(!connection.enabled);
+            }
+        }
     }
 
     #[test]

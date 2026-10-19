@@ -40,6 +40,31 @@ class DependencyInstallerTests(unittest.TestCase):
         self.assertEqual(self.flow(), expected)
         self.assertEqual(self.flow("--all"), expected)
 
+    def test_obs_repository_matches_distribution_not_package_manager_family(self):
+        for distro, version, expected in [
+            ("pop", "24.04", "xUbuntu_24.04"),
+            ("ubuntu", "24.04", "xUbuntu_24.04"),
+            ("ubuntu", "22.04", "xUbuntu_22.04"),
+            ("debian", "12", "Debian_12"),
+            ("opensuse-tumbleweed", "20261018", "openSUSE_Tumbleweed"),
+            ("pop", "99.04", ""),
+            ("unknown", "12", ""),
+        ]:
+            with self.subTest(distro=distro, version=version):
+                result = self.run_shell('''
+                    read_os_release() {
+                        case "$1" in
+                            ID) printf '%s' "$test_distro" ;;
+                            VERSION_ID) printf '%s' "$test_version" ;;
+                        esac
+                    }
+                    test_distro="$1"
+                    test_version="$2"
+                    obs_repo_suffix
+                ''', distro, version)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
     def test_engine_selections_remain_independent(self):
         for option, expected in [("--rclone", "step-rclone"),
                                  ("--onedrive", "step-onedrive-current"),

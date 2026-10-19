@@ -534,29 +534,45 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
 #### 3. Verify authentication and sandbox access
 
-- [ ] Prove selected engine authentication and sandbox mirror/recovery/state
-  access through reviewed grants/portal authorization. Reuse phase-4/6 personal,
-  corporate and SharePoint evidence where inputs are unchanged. Host-path
-  resolution is not an access grant; verify Platform capabilities rather than
-  SDK imports or host-installed packages alone.
+- [x] Reconcile selected rclone OneDrive personal/work-school and SharePoint
+  authentication and portal mirror/recovery/state access using phase-4/6 installed
+  evidence. Relevant code and candidate permissions/runtime are unchanged;
+  Platform library availability passed step 2. Host-path resolution grants no
+  access: separate Browse authorization and retained cross-launch/worker access
+  were exercised. See acceptance map and October 18 completion notes. This reuses
+  earlier installed evidence; replacement installation remains open. Changed
+  native browser/manual legacy handoff belongs to step 4 continuity acceptance.
 
 #### 4. Complete mirror and legacy continuity acceptance
 
-- [ ] Native/Debian: personal and business OneDrive mirror lifecycle (setup, sync,
-  Pause/Resume, Repair, sleep/wake, VPN), plus onedriver Online unaffected.
-  Run a focused installed personal/business smoke of changed OneDrive behavior
-  and onedriver continuity. Reuse shared source/engine/Flatpak lifecycle evidence;
-  no duplicate full sleep/VPN/Repair suite merely for a different package mode.
-- [ ] Legacy background monitor/actual transfer acceptance; dry-run is accepted
-  separately, and pending real-user changes have not been applied. Use a separate
-  approved disposable legacy mirror; do not start the real mirror with pending
-  user changes for this test.
+- [x] Fix native VM dependency installer OBS mapping: use Pop!_OS/Ubuntu distro
+  identity rather than Debian package-manager family. Six installer tests and
+  dev-gate-zl7m77q1 passed; operator retry screenshot shows Done.
+
+- [x] Focused installed native/Debian smoke on Pop!_OS 24.04 amd64 VM:
+  personal/business Test/Save/Preview, initial transfer and remote-edit download;
+  personal Start/Pause; onedriver Online Test/Save/mount/list/unmount passed by
+  operator observation October 19. Business required explicit Enable then Save
+  before Preview. Reuse shared source/engine/Flatpak lifecycle evidence; no
+  duplicate full sleep/VPN/Repair suite. Exact VM package hash not independently
+  captured; this is scoped lifecycle acceptance, not final artifact sign-off.
+- [x] Correct disabled-mirror Save notice: require Enable, Test Connection and
+  Save Connection before Preview/Sync Now; enabling/saving leaves scheduling
+  stopped. Two focused tests, check, localization and gate dev-gate-nh0kz3wx
+  passed October 19. Source correction; replacement-package UI check in step 8.
+- [o] Legacy abraunegg browser/manual reauthentication and monitor/actual-transfer
+  live acceptance skipped by operator October 19; no longer a 0.5.4 release gate.
+  Retain earlier deprecation/Preview and source-test evidence at its scope;
+  these unrun live cases are not passes. Legacy compatibility/dependency policy
+  unchanged; no disposable legacy profile or real pending transfer started.
 - [x] Reuse phase-4/6 Flatpak personal/corporate/SharePoint Preview/initial/ordinary/
   scheduled/Pause/recovery, guards and Repair evidence at its recorded scope.
   No repeated setup/auth/sync/Repair suite for unchanged behavior.
-- [ ] Review retained Task (5) worker/progress/cancellation/retention evidence and
-  final package differences; perform a narrow live test only for an unresolved
-  release gap. Do not label unrun scenarios as installed passes.
+- [x] Review retained Task (5) worker/progress/cancellation/retention evidence and
+  final package differences. Unchanged worker/coordinator paths and retained
+  source/installed evidence justify reuse; no additional step-4 live blocker
+  identified. Limits recorded in acceptance map/completion notes; unrun cases
+  remain unverified. Final package identity and later network/UI gates stay open.
 
 #### 5. Complete VPN and sleep/wake acceptance
 
@@ -594,6 +610,10 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
 #### 8. Final release verification and approval
 
+- [ ] Refresh immutable app source/Flatpak pin and affected packages to include
+  the October 19 disabled-mirror Save notice. Current 196f7b1/7ccc9f7 artifacts
+  predate it. Review the changed notice in the replacement; reuse unchanged
+  lifecycle evidence. Commit/build/install approvals retain their boundaries.
 - [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and
   inspect the accepted native/final Flatpak artifacts against frozen identities.
   Keep earlier development smoke separate from final artifact acceptance.

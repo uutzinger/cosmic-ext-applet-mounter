@@ -10,7 +10,7 @@ it is listed here. Inspect its help and obtain the applicable approval first.
 
 | Script | Purpose | State changes / guidance |
 |---|---|---|
-| [install-dependencies.sh](install-dependencies.sh) | Install selected host storage/base/optional legacy OneDrive GUI dependencies; `--rclone` covers new OneDrive mirrors. | Package/repository/network changes, potentially privileged. No options means `--all`, **not** inspection. See [dependencies](../docs/dependency-installation.md). |
+| [install-dependencies.sh](install-dependencies.sh) | Install selected host storage/base/legacy engine dependencies; OBS repositories use actual distro identity; `--rclone` covers new OneDrive mirrors. | Package/repository/network changes, potentially privileged. No options means `--all`, **not** inspection. See [dependencies](../docs/dependency-installation.md). |
 | [setup-openconnect.sh](setup-openconnect.sh) | Install OpenConnect packages and the on-demand authentication-agent service; uninstall that service. | Packages, user service and icon setting change. Does not create a VPN profile; uninstall retains packages/profile. See [OpenConnect guide](../docs/openconnect.md). |
 | `cosmic-ext-applet-mounter-onedrive-auth-helper` (retired in 0.5.4) | Removed WebKit legacy sign-in payload. | Native and Flatpak manual handoff now opens the browser through the desktop portal; existing legacy sync remains supported. No helper installed or dispatched. |
 

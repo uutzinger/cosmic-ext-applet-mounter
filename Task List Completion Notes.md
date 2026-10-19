@@ -4745,3 +4745,216 @@ succeeded at exact196f7b1). Only task/evidence/map/index records changed after
 artifact production; no repeat source gate or build justified. Record-only
 commit is outside immutable artifact source; future reuse selects196f7b1, not
 new documentation HEAD. Push Buttons.md remains untracked and untouched.
+
+
+### October 18, 2026 — Step-3 authentication and sandbox access reconciled
+
+Reviewed retained phase-4/6 observations and source comparison against installed
+67b3aec, with selected candidate source7ccc9f7/packaging196f7b1. Personal and
+work/school rclone OneDrive authentication/drive/folder checks passed previously;
+SharePoint reused existing authentication and verified library/subtree access.
+Personal missing recovery grant blocked Test until separate recovery Browse.
+Personal and SharePoint relaunch sync without Browse, personal scheduled edit
+transfer, persisted initialization/listings and recovery-copy creation establish
+retained mirror/recovery/state access at their recorded installed scope. Exact
+prior backup-byte equality remains unverified; no new SharePoint consent claimed.
+
+Read-only git diff --stat and detailed src/app.rs comparison exit 0: app.rs is the
+only changed src file between67b3aec and7ccc9f7. Its changes retire legacy helper
+launch and unify browser/manual labels/OpenURI; Flatpak portal request retained.
+Mirror access, Microsoft OAuth, OneDrive identity and coordinator sources have no
+diff. Read step-2 payload-review.json: required Platform libraries present and
+exported payload matches. Reuse prior metadata/runtime/policy/override comparison
+and preflight receipts; no repeat build, gate, OAuth, portal grant or service
+operation. Native browser/manual legacy handoff is changed live behavior and
+remains under step4 continuity, alongside focused native/legacy checks.
+
+Updated task, acceptance map and engineering index. Step3 evidence-review scope
+complete; packaging196f7b1 has not been installed. No final replacement, other
+provider, native handoff or unrun lifecycle pass inferred. Retained source gate
+is dev-gate-5jl1l4eq (exit0); documentation-only edits do not invalidate it.
+Existing user edits removing a future-section subheading and untracked
+Push Buttons.md preserved. No commit/push/install/publication performed.
+
+Step-3 documentation validation: git diff --check exit0; focused relative-link
+and completed-checklist assertions exit0. Four record files changed; source,
+artifact inputs and user-owned Push Buttons.md untouched. Next: step4 focused
+native/Debian and disposable legacy continuity acceptance.
+
+### October 18, 2026 — Native Pop!_OS VM dependency installer mapping failure
+
+Operator reports 24.04 LTS/amd64 Proxmox VM; screenshot shows Debian candidate
+0.5.4 configured successfully. APT local-file _apt permission notice is not an
+installation failure; screenshot alone does not establish checksum/binary parity.
+Dependency installer installed rclone1.75.2, then stopped before onedriver with
+no OBS repository mapping for pop24.04; legacy installation was not reached.
+
+Root cause: obs_repo_suffix used detect_distro (package-manager family), which
+normalizes Ubuntu/Pop to debian, making its Ubuntu/Pop repository branches
+unreachable. Changed OBS selection to read actual os-release ID; retained
+openSUSE wildcard matching. Package-manager routing unchanged. Added synthetic
+Pop/Ubuntu/Debian/openSUSE and unsupported distro/version regression cases;
+python3 tests/dependency_installer_test.py exit0 (6 tests). No privileged package
+installation or network repository availability verified by these fake tests.
+Catalog/inventory and active step4 updated; existing source/package artifacts
+remain immutable. Fix is standalone installer tooling, no app binary rebuild.
+
+First gate dev-gate-mdze5o5_ exit1: fmt/lint passed, just could not create test
+temporary directory under sandbox read-only /run/user path. Rerun requested with
+normal authorized host access; outcome below. No commit/push or VM changes by agent.
+
+Host-access gate dev-gate-zl7m77q1 exit0, source d066a00 dirty=true; full
+fmt/lint/test passed. git diff --check exit0. Installer source fix complete;
+VM retry/network package installation still pending. Operator should copy the
+corrected local script to the VM (the immutable published source still has the
+old bug), rerun --all with a fresh log directory, and report final status.
+
+
+### October 19, 2026 — Pop!_OS VM native personal mirror round trip
+
+After corrected installer transfer/retry, operator screenshot shows INFO Done
+and native settings/Add Connection windows rendered in VM. No final structured
+installer summary or full engine-version inventory captured; this is an operator
+completion observation, not independent verification of every installed engine.
+
+For matching 24.04/amd64 Debian candidate0.5.4 selected from run39176426152,
+operator reports personal Test Connection passed, then Preview completed after
+Save/local test-file instructions. Initial Sync Now completed and operator
+confirmed test file arrived remotely. Following explicit remote-edit instructions,
+operator confirmed subsequent sync completed and updated text arrived locally.
+This establishes operator-observed personal native upload/download smoke on the
+disposable test path. No independent VM hash/installed binary parity, checksum
+notice, recovery-copy equality or scheduling claim inferred. Start/Pause,
+work/school, onedriver and disposable legacy continuity remain open.
+
+Task/evidence records updated without source changes; prior source gate retained.
+Next native Start/Pause UI check. No laptop services, files or credentials touched.
+
+October 19 native VM personal Start/Pause: operator observed slider on after
+Start, then explicitly switched it off and reports Pause completed/sync stopped.
+Accepted as rendered UI start/pause smoke. No timer-property trace, scheduled
+transfer or post-Pause interval observation inferred. Personal test left paused.
+Next focused work/school OneDrive smoke using a separate disposable subtree;
+existing Flatpak lifecycle evidence reused. Documentation diff check exit0.
+
+October 19 native VM business setup: Test passed. Operator Save screenshot for
+Acceptance-Business reports managed mirror units saved/schedule disabled and
+directs Preview/initial Sync. Preview twice refused: connection disabled or
+unavailable. Source inspection: controller offline_status treats enabled=false
+without observed active work as Unavailable; Test validates draft separately.
+DraftEnabled changes only the draft flag, and Save installs paused units.
+Operator explicitly clicked Enable and reports Preview passed afterward. Thus
+disabled profile blocked Preview; reason it became disabled was not observed.
+Do not infer account/auth failure or auto-enable on successful verification.
+
+Record misleading Save notice as outstanding wording fix: disabled profiles
+need explicit Enable/Test/Save before Preview; schedule remains paused. Business
+transfer not yet accepted. Personal Start/Pause result unchanged. No runtime
+source changes, commands against VM or repeat source checks. git diff --check
+exit0 for record edits.
+
+October 19 native VM business transfer: operator clarified Enable needed a
+subsequent Save to take effect, matching draft-only DraftEnabled handling.
+Initial Sync Now reported completed. After instructions to confirm upload and
+edit the disposable remote file, operator reports completed and arrived; accepted
+as operator-observed business transfer/remote-edit download smoke. No independent
+VM hash, transfer counts or explicit checksum notice captured. New business
+profile has not been started for scheduled operation by these instructions.
+Next native onedriver Online setup/mount/list/unmount; legacy compatibility and
+wording fix remain open. Documentation-only diff check exit0, prior gate reused.
+
+October 19 native VM onedriver Online: operator reports Test and Save passed,
+then enabled the Online connection, saw files in mount directory, closed the
+file manager and reports unmount completed. Accepted as rendered/operator
+observed native onedriver setup/mount/list/unmount continuity. No file mutation
+or independent mount-table/property trace inferred. Focused native/Debian smoke
+now complete at operator-observation scope with personal/business round trips
+and personal Start/Pause. Shared accepted Flatpak lifecycle evidence reused;
+no duplicate sleep/VPN/Repair suite. Final VM package checksum/binary parity
+not captured; final artifact acceptance remains separate. Legacy monitor/actual
+transfer and disabled-profile Save wording remain open in step4. Updated task
+and acceptance map; prior passing source gate reused for documentation edits.
+
+
+### October 19, 2026 — Operator waived legacy live acceptance
+
+Operator questioned further abraunegg/onedrive testing and declined its need.
+Removed browser/manual legacy reauthentication and monitor/actual-transfer checks
+from 0.5.4 mandatory acceptance, marking [o] deliberately skipped, never [x].
+This supersedes the earlier transferred step4 gates. Native rclone/onedriver
+smoke retained as completed; legacy rendered deprecation/Preview and source/fake
+evidence retain original scope. Changed native browser handoff remains unrun
+live and an explicit limitation. No test profile, auth flow, service start or
+cloud transfer was performed for this proposed legacy test.
+
+Clarified installer facts: --all includes legacy onedrive and operator screenshot
+reports v2.5.11-1+np1+1.1 installed. Waiving this test changes no supported engine,
+installer selection, dependencies or existing profile/credential state. Updated
+active task, acceptance map and index. Remaining step4 work: disabled-profile
+Save wording and retained worker/progress/cancellation/retention evidence review.
+Documentation-only validation git diff --check exit0; prior source gate reused.
+
+
+### October 19, 2026 — Step-4 notice correction and evidence review
+
+Implemented state-sensitive offline_mirror_saved_notice early return for disabled
+profiles in src/app.rs, shared by rclone providers and retained legacy engine.
+New Fluent notice explicitly instructs Enable, Test Connection, Save Connection
+before Preview/Sync Now and says enabling/saving does not start background sync.
+Enabled initial/initialized notices and all runtime/engine policy are unchanged;
+no auto-enabling after verification. Two focused notice tests passed, including
+four provider/engine cases with both initialization states and unchanged enabled
+flag. bash scripts/dev.sh check exit0 dev-check-pmjdf7i3; cargo test --locked
+--bin cosmic-ext-applet-mounter offline_mirror_save_notice exit0 (2 tests).
+Localization-check exit0 dev-localization-check-uor7nshy. Final gate running.
+
+Reviewed retained Task(5) carry-forward chronology and coordinator inventory,
+current worker/coordinator/progress implementation, retained gate
+ dev-gate-zl7m77q1 and phase4/6 installed results. Diff7ccc9f7 against worker,
+coordinator, mirror script/access and pending-count modules is empty. Existing
+fixed-mode/UUID worker and shared state-root evidence, installed scheduled
+personal transfer/Pause, invocation-correlated progress tests, failure/timeout/
+cancellation/overlap and owned success-only retention protections remain valid.
+No changed path or unresolved step4 blocker requires another live transfer.
+
+Limits preserved: no final-package rendered streaming-count pass or manual
+streaming feature completion; no new live age-expiry purge or exact prior-byte
+backup equality; VM switch does not prove native scheduled transfer; active
+sleep/VPN-loss is step5 evidence review; legacy live waived. Updated acceptance
+map and draft release notes, plus explicit final release task for refreshed
+source/pin/packages: currently built196f7b1/7ccc9f7 predates notice correction.
+No repeat setup/auth/full lifecycle suite required for notice-only app change.
+No commit, build dispatch, install or publication performed in this task.
+
+
+Step-4 closure: full bash scripts/dev.sh gate exit0,
+ target/task-runs/dev-gate-nh0kz3wx/summary.json and task.log; source d066a00,
+dirty=true. No validation failures for this notice change. Check/focused notice/
+localization receipts above all exit0. Changed implementation files src/app.rs
+and i18n/en/cosmic_ext_applet_mounter.ftl; task/completion records, acceptance map,
+engineering index and draft v0.5.4 notes reconciled. Existing installer fix and
+all prior uncommitted/user edits preserved; Push Buttons.md untouched.
+Documentation relative-link assertions and final git diff --check exit0.
+
+All step4 items now completed at recorded scope or deliberately skipped by
+operator. New notice is not installed: immutable source/pin refresh, affected
+package build and changed-notice UI acceptance remain explicit step8 work.
+No code/runtime gap justifies repeating unchanged auth/sync/fault suites. Other
+unrun cases retain source-only or limitation status in acceptance map. Next
+logical task is step5 VPN/sleep evidence review, reusing accepted manual VPN and
+idle wake results; this closure does not authorize another suspend, commit,
+push, build dispatch, installation, publication or tag.
+
+
+### October 19, 2026 — Approved step-4 commit and replacement-package preparation
+
+Operator requested commit and package creation. Rebuild justified by new disabled
+Save notice absent from196f7b1/7ccc9f7; standalone installer distro fix and scoped
+acceptance records included. Existing runtime/permissions and accepted lifecycle
+evidence unchanged. Reuse gate dev-gate-nh0kz3wx and localization
+dev-localization-check-uor7nshy; no repeated source gate for unchanged inputs.
+Prepare one immutable app-source commit, then exact Flatpak pin/packaging commit
+and clean checkout. Local Flatpak build permitted without pushing. Hosted Debian
+requires pushing these new commits; separate push approval is not inferred from
+commit/package request. Installation, tags and publication remain unauthorized.
+Preserve untracked Push Buttons.md and user-owned future-section heading edit.

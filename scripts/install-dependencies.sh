@@ -108,7 +108,9 @@ require_supported_distro() {
 }
 
 obs_repo_suffix() {
-    case "$(detect_distro)" in
+    # Package-manager families merge Ubuntu/Pop into Debian; OBS repository
+    # names require the actual distribution identity instead.
+    case "$(read_os_release ID)" in
         debian)
             case "$(read_os_release VERSION_ID)" in
                 11) printf '%s' "Debian_11" ;;
@@ -123,7 +125,7 @@ obs_repo_suffix() {
                 25.04) printf '%s' "xUbuntu_25.04" ;;
             esac
             ;;
-        opensuse)
+        opensuse*)
             printf '%s' "openSUSE_Tumbleweed" ;;
     esac
 }

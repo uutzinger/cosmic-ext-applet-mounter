@@ -2,11 +2,11 @@
 
 Type: Audit
 
-Status: Step-2 candidate builds/offline artifact inspection passed; installed and final release acceptance open
+Status: Scoped steps 2–4 complete; updated notice source-tested, refreshed packages and remaining release acceptance open
 
 Created: October 18, 2026
 
-Last reviewed: October 18, 2026
+Last reviewed: October 19, 2026
 
 Scope: Step 1 of [Consolidated Flatpak acceptance and release](../../Task%20List.md#consolidated-flatpak-acceptance-and-release).
 This map links retained evidence to missing work. It does not authorize builds,
@@ -40,8 +40,9 @@ portal/restart, idle wake, manual VPN, panel and connection-removal evidence whe
 relevant inputs are unchanged. Shared policy coverage remains source/fake evidence.
 
 Required remaining work is final package/version/permission/dependency review,
-a focused installed native/Debian smoke of changed OneDrive behavior, disposable
-legacy monitor/transfer continuity, and release identity/checks. Review earlier
+a focused installed native/Debian smoke of changed OneDrive behavior and release
+identity/checks. Legacy live continuity was waived by operator October 19;
+retained compatibility is not claimed newly live-tested. Review earlier
 provider, worker/retention, Online/UI and VPN/sleep evidence first; request a new
 live test only for an identified release blocker or changed behavior. No full
 provider/account/scenario cross-product, new architecture matrix, repeated OAuth
@@ -56,9 +57,9 @@ are conditional options for unresolved gaps, not a newly required full matrix.
 
 | Area / mode | Retained evidence | Missing work and destination |
 |---|---|---|
-| OneDrive personal / installed Flatpak | Setup, Preview/initial/manual sync with checksum, restart, scheduled edit, Pause, recovery creation; phase 4 | Reuse unchanged behavior; close remaining worker/progress/cancellation/retention observations and final artifact differences in step 4. Exact previous recovery bytes were not captured. |
+| OneDrive personal / installed Flatpak | Setup, Preview/initial/manual sync with checksum, restart, scheduled edit, Pause, recovery creation; phase 4 | Step-4 worker/progress/cancellation/retention review reused unchanged source and accepted installed behavior; remaining limitations below. Exact previous recovery bytes were not captured. |
 | OneDrive work/school / installed Flatpak | Setup, selected folder, Test/Save, Preview/initial transfer/checksum; phase 4 | Reuse shared personal scheduling/fault policy evidence at its level; map any remaining account-specific lifecycle gap in step 4. Removed disposable profile must be recreated if new live work needs it. |
-| SharePoint mirror / installed Flatpak | Existing auth/library/subtree verification, portal folders, initial and ordinary sync after applet restart; phase 4 | Reuse shared coordinator tests; identify missing final Task (5) scenarios in step 4. Missing transfer counts are not zero transfers. |
+| SharePoint mirror / installed Flatpak | Existing auth/library/subtree verification, portal folders, initial and ordinary sync after applet restart; phase 4 | Step-4 review reused shared coordinator tests and installed access/transfer evidence; no additional SharePoint-specific worker change identified. Missing transfer counts are not zero transfers. |
 | OneDrive guards / installed Flatpak plus fake adapters | Drive-type/account refusals, local/remote marker loss, saved retarget and remote-folder loss/refusal/restoration; phase 6 | Reuse accepted cases. Malformed/resource/corporate variants retain source/fake status; no blanket per-account live claim. |
 | Repair / personal installed Flatpak | Failed state visible; Repair preserved all 17 baseline files; units disabled; subsequent normal checksum sync passed | Reuse phase-6 result for unchanged code. Legacy Repair or other missing engine/mode coverage remains step 4. |
 | Idle sleep/wake / personal installed Flatpak | Same-boot return, 17 unchanged files before sync, post-wake checksum sync, schedule paused | Active-transfer sleep case remains step 5; do not repeat idle smoke solely for a newer receipt. |
@@ -68,8 +69,8 @@ are conditional options for unresolved gaps, not a newly required full matrix.
 | Shared VPN / installed ownership | Reference-count/shutdown fake tests passed | Use two approved disposable applet consumers; after first stops, shared tunnel remains; release only after last consumer and only if applet-owned; step 5. |
 | Active-transfer sleep / installed lifecycle | Coordinator cancellation and sleep token tests passed; idle live wake accepted | One bounded disposable transfer with checkpoint/cancellation/recovery observations. Laptop display-driver failure or hard reboot is inconclusive for wake; use a suitable test host if needed; step 5. |
 | Active-transfer VPN loss / installed lifecycle | Cancellation/readiness/failure policy tests passed | Disposable transfer; observe failure/cancellation and preserved state, restore VPN and explicit recovery without unsafe resync; step 5. |
-| Native/Debian OneDrive migration | Earlier engine/prototype/fake evidence retained; current integrated native lifecycle not accepted | Focused installed personal/business OneDrive smoke and onedriver continuity; reuse shared policy/Flatpak lifecycle evidence, without competing runtime owners or a duplicate full suite. |
-| Legacy abraunegg mirror / installed continuity | Rendered notice, authenticated dry-run Preview, retained legacy route/unit declaration | Actual monitor/transfer on separate approved disposable legacy mirror, including stop/preservation; step 4. Real pending user changes remain untouched. |
+| Native/Debian OneDrive migration | October 19 Pop!_OS 24.04 amd64 VM: personal/business Test/Save/Preview and upload/remote-edit download; personal Start/Pause; onedriver Online Test/Save/mount/list/unmount accepted by operator observation | Focused native smoke complete; reuse shared policy/Flatpak lifecycle evidence. VM checksum/binary parity not independently captured; final artifact sign-off separate. Disabled-profile Save wording corrected in source, replacement UI acceptance pending; legacy live testing waived October 19. |
+| Legacy abraunegg mirror / installed continuity | Rendered notice, authenticated dry-run Preview, retained legacy route/unit declaration | Operator skipped browser/manual reauthentication and monitor/transfer live checks October 19; no longer a 0.5.4 gate. Retained compatibility/source evidence unchanged; unrun live cases are not passes. Real pending user changes remain untouched. |
 | Online onedriver / installed Flatpak | Test/setup, mount/list/unmount; phase 6 | Missing final busy unmount/Repair, clean-profile and sleep/desktop scenarios; step 6. |
 | Other rclone providers / final Flatpak | Shared coordinator/policy tests and earlier engine evidence exist; per-provider release audit not complete | Review retained Google Drive/Box/SMB/SFTP evidence, select missing engine/auth-specific smoke for claimed support; steps 3-6. No full repeated provider/scenario cross-product is assumed. |
 | Portal/local access / installed Flatpak | Separate mirror/recovery Browse, retained cross-launch access, host anchor/state fix accepted | Final payload/Platform capability and effective-grant audit, including overrides; steps 2-3. Host path alone is not a grant. |
@@ -172,3 +173,77 @@ was installed. Existing rclone behavior evidence is reused; native browser/manua
 legacy reauthentication, focused native/legacy continuity and remaining release
 checks retain their stated live acceptance boundaries. Earlier incomplete run
 39166940625 and pre-cleanup Flatpak receipts remain historical evidence.
+
+
+## Step-3 authentication and sandbox access review — October 18
+
+Closed by scoped reuse of phase-4/6 installed evidence, with candidate inspection
+from step 2. Personal and work/school OneDrive authentication, saved drive/folder
+verification and transfer passed. SharePoint reused an authenticated remote;
+its library/subtree verification and transfer passed, without a new consent claim.
+Separate mirror/recovery Browse authorization was necessary: missing recovery
+selection blocked Test, then selecting it allowed Test. Personal and SharePoint
+ordinary sync after applet relaunch without Browse proved retained access.
+Personal scheduled transfer and recovery-copy creation exercised worker/state
+and selected recovery access. Exact prior recovery bytes were not captured.
+
+Source comparison `67b3aec..7ccc9f7 -- src` changes only `src/app.rs`: legacy
+manual sign-in labels and browser launch. Microsoft OAuth, OneDrive verification,
+mirror-access and coordinator modules are unchanged. The existing Flatpak
+OpenURI request is retained; native now uses it too, replacing helper/direct
+launch. Native browser/manual legacy reauthentication remains step 4 live work.
+No repeat OAuth or grant manipulation is required for the unchanged rclone path.
+
+Step-2 receipts establish unchanged complete Flatpak metadata/runtime/policy,
+reviewed overrides and all main ELF requirements present in Platform 25.08.
+Host path resolution alone confers no grant; SDK/host packages are not used as
+proof of Platform availability. This review does not install packaging 196f7b1
+or turn earlier installed tests into an installed-replacement claim. Other
+providers and unrun lifecycle cases retain their existing acceptance boundaries.
+
+
+## Legacy live acceptance disposition — October 19
+
+Operator declined further abraunegg/onedrive testing after native rclone mirrors
+and onedriver Online smoke passed. This supersedes earlier step-4 live legacy
+handoff/monitor/transfer gates in this record; mark deliberately skipped, not
+passed or deferred as a new mandatory release gate. No legacy test profile was
+created and no real pending legacy changes were synchronized.
+
+The VM version screenshot shows onedrive v2.5.11-1+np1+1.1. Current dependency
+installer --all includes --onedrive legacy engine installation; new Cloud Mounter
+Offline connections still use rclone. This decision waives live testing only: it
+does not remove compatibility code, dependencies or credentials. New native
+browser/manual reauthentication remains unrun live, explicitly retained as an
+acceptance limitation. Earlier dated notes retain their original scope.
+
+
+## Step-4 worker and recovery evidence review — October 19
+
+Reviewed the retained Task (5) record in Task List Carry Forward, the historical
+bisync coordinator inventory, current worker/coordinator/progress code, phase-4/6
+observations and passing gate dev-gate-zl7m77q1. Source diff from 7ccc9f7 shows no
+change to bisync_worker, bisync_coordinator, mirror_script, mirror_access or
+pending_count. Current app edit only selects a disabled-mirror Save notice.
+
+| Area | Evidence reused | Acceptance boundary |
+|---|---|---|
+| Restricted worker | Retained native installed manual/initial/scheduled/Pause/Repair; Flatpak scheduled personal edit arrived remotely and Pause reported stopped; parser/launch and shared-state tests | No new native scheduled-transfer claim from VM slider alone; no full repeated suite justified by notice-only code. |
+| Progress | Invocation-bound atomic progress state and stale/partial/foreign rejection tests; structured current-invocation count test passed | Fake/source coverage, not final-package rendered streaming-count acceptance. Manual streaming progress remains a separate carried-forward feature limitation. |
+| Cancellation/overlap | Required-phase timeout/cancellation, lock exclusion, failed result and Repair preservation tests; installed Repair and normal sync recovery | Active-transfer sleep/VPN loss stays under step 5 review; not claimed live-passed. |
+| Recovery/retention | Installed recovery-copy creation; owned dated cleanup, symlink/unowned/incomplete-listing rejection, success-only cleanup and bounded nonfatal cleanup-failure tests | Age-expiry deletion not newly live-tested; no destructive live purge required for unchanged code. Exact prior backup bytes were not captured. |
+
+No changed engine path or unresolved defect requiring a new step-4 live test was
+identified. Close the scoped evidence review, preserving these limitations and
+later final-package/network/desktop gates. Legacy live tests remain deliberately
+skipped per operator. The disabled-mirror notice is a source correction; candidate
+196f7b1/7ccc9f7 predates it. Freeze refreshed source/manifest inputs for the next
+approved affected package build and accept the changed notice there. Do not rerun
+unchanged OAuth or mirror suites just to replace the artifact identity.
+
+
+Step-4 closure validation: check dev-check-pmjdf7i3, two focused Save-notice tests,
+localization dev-localization-check-uor7nshy and full gate dev-gate-nh0kz3wx all
+exit 0 at d066a00 dirty source. Documentation links and git diff --check passed.
+Step 4 closed at the stated source/reused-installed scope; the new notice has
+not been built into or exercised in an installed replacement.
