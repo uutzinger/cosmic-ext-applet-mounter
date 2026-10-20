@@ -695,17 +695,19 @@ deferred until the 0.5.5 legacy-engine removal and GUI cleanup; it is not a
     eu-strip/eu-elfcompress; verify the setup before retrying a new-source run.
   - [x] Preserve successful ARM run39382160325; fix x86_64 AppStream SVG-loader
     dependency and add an early compose check plus architecture-only retry.
-- [ ] Verify documented bundle installation on a clean user profile with the
-  required runtime and host dependencies; confirm panel discovery and one focused
-  smoke. Reuse completed provider/VPN/mirror evidence; no repeated full matrix.
+- [x] Accept focused documented bundle installation, panel discovery and UI
+  smoke on the existing VM, reusing completed provider/VPN/mirror evidence.
+  October20 operator decision: reuse fresh-VM Debian setup and existing-VM
+  Flatpak checks; record the separate clean-profile Flatpak case as untested.
   October20: existing Pop!_OS VM selected; prior native profiles are not a clean
   profile. Operator screenshot confirms local x86 bundle checksum OK and
   user app/x86_64/master installation exit0. Installed commit readback matches
   verified bundle 2ab220a0 exactly.
   - [x] Focused existing-VM install/panel smoke: flatpak ps identifies running
     application; operator confirms popup, Settings and Modify Connection open.
-  - [ ] Clean-profile installation coverage remains unverified; existing native
-    profiles retained. No installed ARM or public-download acceptance inferred.
+  - [o] Separate clean-profile Flatpak test deliberately omitted by operator
+    decision October20; existing native profiles retained. No installed ARM or
+    public-download acceptance inferred.
 - [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and
   inspect the accepted native/final Flatpak artifacts against frozen identities.
   Keep earlier development smoke separate from final artifact acceptance.
@@ -714,11 +716,15 @@ deferred until the 0.5.5 legacy-engine removal and GUI cleanup; it is not a
   their acceptance evidence; they cannot be promoted together under one exact
   tag. Keep the app pin72661ce; new installers/publisher require a new packaging
   source. No tag chosen or build authorized by this decision.
-- [ ] Finalize release notes and freeze one release source containing the new
-  installers/publisher, then obtain approval for one Debian matrix and one
-  Flatpak CPU matrix from that same SHA. Tag that SHA after acceptance; later
-  receipt-only commits do not move the tag. Reuse unchanged behavior tests and
-  inspect new artifact identities/affected package inputs; do not repeat the
+- [x] Finalize release notes and freeze one release source containing the new
+  installers/publisher. October20: notes finalized with explicit test limits;
+  dev-verify-gjyhru76 and publication preflight pass. Common source is the
+  commit titled "Finalize 0.5.4 release notes and build source"; full SHA
+  reported after commit. No push/tag/build/publication performed.
+- [ ] Obtain approval to push the frozen source and run one Debian matrix and
+  one Flatpak CPU matrix from that same SHA. Tag that SHA after acceptance;
+  later receipt-only commits do not move the tag. Reuse unchanged behavior tests
+  and inspect new artifact identities/affected package inputs; do not repeat the
   full provider/VPN/sleep suite.
 - [ ] Obtain GitHub release publication approval for the concrete verified
   Debian/Flatpak assets and finalized notes. Tag/push, publication and any package

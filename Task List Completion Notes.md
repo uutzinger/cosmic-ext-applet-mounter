@@ -5730,3 +5730,44 @@ notes are still explicitly draft and acceptance limits remain recorded.
 Prepared commit title: Prepare verified GitHub package installation and promotion.
 Only the release task-list patch staged; operator future GUI/AI prose and
 Push Buttons.md excluded. No new build, service or publication action authorized.
+
+
+### October 20, 2026 — Final release-note preparation and scoped acceptance
+
+Release preparation committed as a2fb318b7d624470430dead01f2878f7e03590b6.
+Operator requested continuation and explicitly chose to reuse completed
+fresh-VM Debian and existing-VM Flatpak checks, recording a separate clean-profile
+Flatpak check as untested. Marked the focused install/panel gate complete and
+the additional clean-profile case deliberately skipped, not passed.
+
+Finalized docs/releases/v0.5.4.md as user-facing release content and updated the
+release index: new rclone mirrors, legacy transition/manual replacement, helper
+removal, safety/Repair/portal/VPN wording, installer/runtime/host prerequisites,
+six Debian targets and both Flatpak CPUs. Installed ARM, public downloads and
+unrun legacy/network/sleep cases remain explicit limitations. Migration steps
+preserved. Source/package identity checks and publication are still separate;
+no final artifact has been relabeled or release advertised as available.
+
+Starting the maintained release verify and publication-metadata preflight before
+freezing one source. Existing application inputs/pin remain unchanged. No
+provider/VPN/sync or laptop suspend retest; no push, tag, build dispatch or
+publication authorized by this preparation. Verification receipts follow.
+
+Verification complete: bash scripts/dev.sh verify exit0, source
+a2fb318b7d624470430dead01f2878f7e03590b6, source_dirty=true. Receipt/log:
+target/task-runs/dev-verify-gjyhru76/{summary.json,task.log}. Includes formatting,
+localization, all-target check, Clippy, Rust/Python tests and metadata check.
+bash scripts/check-release-publication.sh v0.5.4 exit0. Read-only remote tag
+query exit0 with no v0.5.4 tag; no tag created. Targeted documentation whitespace
+checks pass. No application, manifest, runtime, dependency or permission input
+changed; only release notes/index and acceptance/status records finalized.
+
+Freeze decision: the commit titled "Finalize 0.5.4 release notes and build source"
+is the common packaging source for the next six Debian targets and two Flatpak
+CPU targets. Keep app pin72661ce. Build only after separate push/CI authorization,
+then verify exact packaging SHA, checksums/provenance and unchanged payload inputs.
+Retain completed installed acceptance at its recorded scope. Any changed package
+input needs affected acceptance; do not repeat unchanged cloud/VPN/sleep tests.
+Tag this same source only after accepted artifacts and separate tag approval.
+Subsequent receipt-only records must not move the frozen tag/source. Prepared
+commit excludes unrelated operator future GUI/AI edits and Push Buttons.md.

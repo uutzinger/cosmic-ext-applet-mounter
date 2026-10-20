@@ -489,3 +489,24 @@ required target once at that common SHA; inspect resulting identities and
 affected inputs while reusing unchanged behavior tests. No current candidate
 is relabeled, tag chosen/created, or replacement build dispatched by this
 decision. Final source freeze remains a separate outstanding checklist item.
+
+
+## Acceptance reuse and release-note freeze preparation — October 20
+
+Operator explicitly chose to reuse completed fresh-VM Debian setup and the
+existing-VM Flatpak installation/panel/settings/editor checks. A separate
+clean-profile Flatpak check is deliberately skipped and remains untested; it is
+no longer a release blocker. No profile reset, repeat sync/VPN/sleep suite or
+additional installation occurred. ARM installed behavior and public-download
+checks remain explicit limitations. Release notes now cover all six Debian
+targets and x86_64/aarch64 Flatpak bundles, with publication still pending.
+Publication metadata/notes preflight passed. Full pre-release verify runs before
+committing/fixing the common source identity; package artifact acceptance still
+requires exact-source replacement build verification.
+
+Pre-release verification completed successfully (dev-verify-gjyhru76, exit0),
+alongside publication metadata/notes preflight. The "Finalize 0.5.4 release notes
+and build source" commit fixes the intended common build source; later receipt
+updates do not change that identity. New exact-source package builds, artifact
+inspection and explicit tag/publication approval remain outstanding. No push,
+tag, hosted dispatch or publication occurred during this preparation.
