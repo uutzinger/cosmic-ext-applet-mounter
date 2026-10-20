@@ -1,0 +1,59 @@
+name: Build Flatpak bundles
+run-name: Flatpak bundles · ${{ inputs.request_id || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: "Optional dispatch correlation ID"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Flatpak ${{ matrix.arch }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out pinned packaging source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare runner and build verified candidate
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          bash scripts/build-flatpak-ci.sh \
+            --arch "$BUILD_ARCH" --source-sha "$GITHUB_SHA" \
+            --work-dir "$RUNNER_TEMP/cloud-mounter-flatpak-$BUILD_ARCH" \
+            --log-dir "$RUNNER_TEMP/cloud-mounter-flatpak-logs-$BUILD_ARCH"
+
+      - name: Upload verified bundle and provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node.js 24
+        with:
+          name: flatpak-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ runner.temp }}/cloud-mounter-flatpak-${{ matrix.arch }}/upload/*
+
+      - name: Retain build summaries even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Node.js 24
+        with:
+          name: flatpak-receipts-${{ matrix.arch }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/cloud-mounter-flatpak-logs-${{ matrix.arch }}/summary.json
+            ${{ runner.temp }}/cloud-mounter-flatpak-${{ matrix.arch }}/producer/summary.json
