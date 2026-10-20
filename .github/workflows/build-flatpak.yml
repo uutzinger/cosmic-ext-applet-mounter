@@ -4,6 +4,15 @@ run-name: Flatpak bundles · ${{ inputs.request_id || github.ref_name }}
 on:
   workflow_dispatch:
     inputs:
+      architecture:
+        description: "Architectures to build (select one when retrying a failed target)"
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - x86_64
+          - aarch64
       request_id:
         description: "Optional dispatch correlation ID"
         required: false
@@ -19,10 +28,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { runner: ubuntu-24.04, arch: x86_64 }
-          - { runner: ubuntu-24.04-arm, arch: aarch64 }
-    runs-on: ${{ matrix.runner }}
+        arch: ${{ fromJSON(inputs.architecture == 'both' && '["x86_64","aarch64"]' || format('["{0}"]', inputs.architecture)) }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
       - name: Check out pinned packaging source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node.js 24
@@ -57,3 +64,4 @@ jobs:
           path: |
             ${{ runner.temp }}/cloud-mounter-flatpak-logs-${{ matrix.arch }}/summary.json
             ${{ runner.temp }}/cloud-mounter-flatpak-${{ matrix.arch }}/producer/summary.json
+            ${{ runner.temp }}/cloud-mounter-flatpak-${{ matrix.arch }}/appstream/hints/*

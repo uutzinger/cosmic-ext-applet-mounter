@@ -17,6 +17,35 @@ MANIFEST = Path('packaging/flatpak') / f'{APP_ID}.json'
 WORKFLOW = '.github/workflows/build-flatpak.yml'
 
 
+def check_appstream(checkout, data, work, report):
+    sources = [source for module in data.get('modules', [])
+               if module.get('name') == 'cosmic-ext-applet-mounter'
+               for source in module.get('sources', []) if isinstance(source, dict)
+               and source.get('type') == 'git'
+               and source.get('url') == 'https://github.com/uutzinger/cosmic-ext-applet-mounter.git']
+    if len(sources) != 1 or not re.fullmatch(r'[0-9a-f]{40}', sources[0].get('commit', '')):
+        raise ValueError('AppStream preflight requires the pinned application Git source')
+    commit = sources[0]['commit']
+    base = work / 'appstream'
+    root = base / 'root'
+    for source, destination in (
+            ('resources/app.metainfo.xml', f'app/share/metainfo/{APP_ID}.metainfo.xml'),
+            ('resources/app.desktop', f'app/share/applications/{APP_ID}.desktop'),
+            ('resources/icon.svg', f'app/share/icons/hicolor/scalable/apps/{APP_ID}.svg')):
+        text = report.capture('git', '-C', str(checkout), 'show', f'{commit}:{source}')
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text + '\n')
+    report.phase('checking-appstream')
+    report.update(appstream_version=report.capture('appstreamcli', '--version'),
+                  appstream_packages=report.capture('dpkg-query', '--show',
+                    '--showformat=${Package} ${Version}\n', 'appstream', 'appstream-compose', 'librsvg2-common'))
+    report.run(['appstreamcli', 'compose', '--no-net', '--prefix=/app',
+                '--origin=cloud-mounter-ci', '--result-root=' + str(base / 'result'),
+                '--hints-dir=' + str(base / 'hints'), '--print-report=full',
+                '--components=' + APP_ID, str(root)], timeout=120)
+
+
 def runner_context(sha, arch, environment, machine):
     repository = environment.get('GITHUB_REPOSITORY', '')
     run_id, attempt = (environment.get(k, '') for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))
@@ -97,7 +126,8 @@ def operation(args, report):
     report.phase('preparing-runner')
     report.run(['sudo', 'apt-get', 'update'], timeout=600)
     report.run(['sudo', 'apt-get', 'install', '--no-install-recommends', '--yes',
-                'flatpak', 'flatpak-builder', 'elfutils', 'ostree', 'dbus-daemon', 'git', 'ca-certificates'], timeout=600)
+                'flatpak', 'flatpak-builder', 'elfutils', 'appstream', 'appstream-compose',
+                'librsvg2-common', 'ostree', 'dbus-daemon', 'git', 'ca-certificates'], timeout=600)
     # flatpak-builder invokes these host tools when finishing release/debug files.
     # --no-install-recommends does not pull elfutils in implicitly.
     report.capture('eu-strip', '--version')
@@ -109,6 +139,7 @@ def operation(args, report):
     data = json.loads((checkout / MANIFEST).read_text())
     if data.get('id') != APP_ID:
         raise ValueError('Unexpected manifest application')
+    check_appstream(checkout, data, work, report)
     report.run(['flatpak', 'remote-add', '--user', '--if-not-exists', 'flathub',
                 'https://flathub.org/repo/flathub.flatpakrepo'])
     report.run(['dbus-run-session', '--', 'flatpak', 'install', '--user', '--noninteractive',

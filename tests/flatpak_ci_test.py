@@ -23,6 +23,12 @@ class FlatpakCITests(unittest.TestCase):
                             'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1',
                             'GITHUB_WORKFLOW_REF': 'example/project/.github/workflows/build-flatpak.yml@refs/heads/master'}
 
+    def capture_responses(self):
+        return [str(ROOT), self.sha, '', 'eu-strip fixture', 'eu-elfcompress fixture',
+                *[(ROOT / path).read_text() for path in
+                  ('resources/app.metainfo.xml', 'resources/app.desktop', 'resources/icon.svg')],
+                'AppStream fixture', 'appstream 1.0.2\nlibrsvg2-common fixture']
+
     def fixture(self, work, arch):
         candidate, producer = work / 'candidate', work / 'producer'
         candidate.mkdir(parents=True)
@@ -109,7 +115,7 @@ class FlatpakCITests(unittest.TestCase):
     def test_build_failure_stops_before_collection(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Mock(directory=Path(directory) / 'logs')
-            report.capture.side_effect = [str(ROOT), self.sha, '', 'eu-strip fixture', 'eu-elfcompress fixture']
+            report.capture.side_effect = self.capture_responses()
             def fail_build(argv, **kwargs):
                 if 'scripts/build-flatpak.sh' in argv:
                     raise RuntimeError('fake builder failure')
@@ -123,6 +129,8 @@ class FlatpakCITests(unittest.TestCase):
             self.assertTrue(any('--arch=x86_64' in cmd and 'flatpak' in cmd for cmd in commands))
             packages = next(cmd for cmd in commands if cmd[:3] == ['sudo', 'apt-get', 'install'])
             self.assertIn('elfutils', packages)
+            self.assertIn('appstream-compose', packages)
+            self.assertIn('librsvg2-common', packages)
             self.assertIn(('eu-strip', '--version'), [call.args for call in report.capture.call_args_list])
             self.assertIn(('eu-elfcompress', '--version'), [call.args for call in report.capture.call_args_list])
             self.assertFalse(any('release' in cmd or 'publish' in cmd for cmd in commands))
@@ -141,6 +149,37 @@ class FlatpakCITests(unittest.TestCase):
                         ci.operation(args, report)
                 commands = [call.args[0] for call in report.run.call_args_list]
                 self.assertFalse(any('flatpak' == cmd[0] or 'scripts/build-flatpak.sh' in cmd for cmd in commands))
+
+    def test_appstream_failure_stops_before_runtime_install_and_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Mock(directory=Path(directory) / 'logs')
+            report.capture.side_effect = self.capture_responses()
+            def fail_compose(argv, **kwargs):
+                if argv[:2] == ['appstreamcli', 'compose']:
+                    raise subprocess.CalledProcessError(1, argv)
+            report.run.side_effect = fail_compose
+            args = Mock(source_sha=self.sha, arch='x86_64', work_dir=Path(directory) / 'work')
+            with patch.dict(ci.os.environ, self.environment, clear=True), patch.object(ci.platform, 'machine', return_value='x86_64'):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    ci.operation(args, report)
+            commands = [call.args[0] for call in report.run.call_args_list]
+            compose = next(cmd for cmd in commands if cmd[:2] == ['appstreamcli', 'compose'])
+            self.assertIn('--no-net', compose)
+            self.assertIn('--print-report=full', compose)
+            self.assertFalse(any('flatpak' == cmd[0] or 'scripts/build-flatpak.sh' in cmd for cmd in commands))
+            data = json.loads((ROOT / ci.MANIFEST).read_text())
+            commit = data['modules'][0]['sources'][0]['commit']
+            git_shows = [call.args[-1] for call in report.capture.call_args_list if 'show' in call.args]
+            self.assertTrue(all(value.startswith(commit + ':resources/') for value in git_shows))
+            self.assertEqual(len(git_shows), 3)
+
+    def test_appstream_rejects_unpinned_source_before_reading_resources(self):
+        data = {'modules': [{'name': 'cosmic-ext-applet-mounter', 'sources': [{
+            'type': 'git', 'url': 'https://github.com/uutzinger/cosmic-ext-applet-mounter.git', 'commit': 'master'}]}]}
+        report = Mock()
+        with self.assertRaises(ValueError):
+            ci.check_appstream(ROOT, data, Path('/unused'), report)
+        report.capture.assert_not_called()
 
 
 if __name__ == '__main__':
