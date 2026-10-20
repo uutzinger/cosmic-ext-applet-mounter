@@ -75,9 +75,9 @@ To reduce data integrity risks, **do not**:
 The [documentation index](docs/index.md) links to setup guides, release notes,
 and engineering records.
 
-**0.5.4 is not published yet.** The download instructions below apply once its
-GitHub release is available. COSMIC Flatpak repository submission is planned for
-0.5.5.
+[Release 0.5.4](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.4)
+provides Debian packages and Flatpak bundles. COSMIC Flatpak repository
+submission is planned for 0.5.5.
 
 When replacing an existing installation, stop its connections, close its windows
 and remove it from the panel first. Run only one native or Flatpak edition at a

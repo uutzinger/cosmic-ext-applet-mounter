@@ -165,7 +165,7 @@ bytes—not payload integrity, signatures, installed overrides or final acceptan
 
 October 13 release decision: 0.5.3 ships through native source/Debian channels.
 Final Flatpak packaging is deferred to 0.5.4, starting with the engine decision in
-[Task List](../../Task%20List.md#release-054--engine-decision-and-flatpak-completion).
+[Task List](../../docs/archive/task-list-through-v0.5.4.md#release-054--engine-decision-and-flatpak-completion).
 Retain candidates/probes as evidence; do not ship unvalidated WebKit modules or
 claim native success completes sandbox acceptance.
 

@@ -2,13 +2,13 @@
 
 Type: Audit
 
-Status: Scoped steps 2–6 accepted and step-7 internal reconciliation prepared; GitHub bundle promotion/final release acceptance open, COSMIC submission deferred to 0.5.5
+Status: v0.5.4 published at aa25846; all ten public asset digests and installer URLs verified; scoped live limits retained, COSMIC submission deferred to 0.5.5
 
 Created: October 18, 2026
 
 Last reviewed: October 20, 2026
 
-Scope: Step 1 of [Consolidated Flatpak acceptance and release](../../Task%20List.md#consolidated-flatpak-acceptance-and-release).
+Scope: Step 1 of [Consolidated Flatpak acceptance and release](../archive/task-list-through-v0.5.4.md#consolidated-flatpak-acceptance-and-release).
 This map links retained evidence to missing work. It does not authorize builds,
 installation, service changes, tags or publication. The task list owns status;
 [completion notes](../../Task%20List%20Completion%20Notes.md) retain chronology.
@@ -510,3 +510,66 @@ and build source" commit fixes the intended common build source; later receipt
 updates do not change that identity. New exact-source package builds, artifact
 inspection and explicit tag/publication approval remain outstanding. No push,
 tag, hosted dispatch or publication occurred during this preparation.
+
+
+## Common-source package verification — October 20
+
+Debian39450879826 (all six targets) and Flatpak39450919904 (x86_64/aarch64)
+succeeded at frozen aa25846c6558a72a6fb1602aab83fc3997495e91. Maintained
+Debian driver verified/downloaded the matrix, exit0; maintained Flatpak
+inspection-only publisher verified both downloads, provenance, pinned inputs,
+runtime commits, offline OSTree identities and full metadata, exit0. Reports:
+target/task-runs/release-054-debian-aa25846/ and release-054-flatpak-aa25846/.
+
+All Debian package bytes equal the previously verified7069ae5 candidates.
+Both Flatpaks retain the previously checked source pins, runtimes, options and
+complete metadata; comparison report is previous-candidate-comparison.json in
+the Flatpak report directory. Reuse unchanged installed behavior evidence at
+its recorded scope. No new installation/ARM live pass claimed; separate clean
+profile omission remains operator-approved.
+
+Clean frozen-source checkout /tmp/cloud-mounter-release-aa25846 prepared.
+Maintained build_release.sh --dry-run --run-id39450879826 succeeded, exit0,
+validating same repository, pushed branch/source, absence of v0.5.4 tag and
+existing successful complete Debian matrix. Receipt:
+target/task-runs/release-054-tag-preflight-aa25846/summary.json. No tag/build/
+release created. Tag creation/push, exact-tag mixed promotion inspection,
+publication approval and public asset/installer checks remain separate.
+
+
+## Pushed tag and exact-tag promotion verification — October 20
+
+Operator approved tag creation/push. Maintained build_release.sh reused existing
+Debian39450879826, created/pushed annotated v0.5.4, and verified cached artifacts,
+exit0. Remote tag object dfa31a927a8b3d5fa2e1d2ff10a43547ee037a88 peels to
+frozen aa25846c6558a72a6fb1602aab83fc3997495e91. Report:
+target/task-runs/release-054-tag-aa25846/. No build dispatched.
+
+Maintained exact-tag mixed promote_release.py inspection passed, exit0, using
+Debian39450879826 and both CPUs from Flatpak39450919904. All ten assets verified
+(six Debian, two bundles, portable provenance and SHA256SUMS); durable names/
+digests/provenance in target/task-runs/release-054-exact-tag-inspection/artifacts.json.
+Remote release query found no v0.5.4 GitHub release. Publication remains
+separately approved; no new runtime/live/installed acceptance claimed.
+
+
+## Published release and record closure — October 20
+
+Operator approved publication. Maintained exact-tag promoter succeeded, exit0,
+using the existing Debian39450879826/Flatpak39450919904 artifacts and source
+aa25846. [GitHub v0.5.4](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.4)
+is public, stable and not prerelease. Ten assets uploaded: six Debian packages,
+two Flatpaks, portable provenance and combined SHA256SUMS.
+
+All ten assets downloaded into target/artifacts/v0.5.4/; every digest equals
+the approved publication receipt and combined checksums verify. Public README
+installer URLs return byte-identical scripts and pass bash -n; neither script
+executed for this check. Publication/public-verification receipts live in
+target/task-runs/release-054-publication/. Existing live acceptance limits
+(including untested ARM installation) remain unchanged.
+
+Completed task/note records archived through v0.5.4 using the maintained
+script, dry-run first. Zero additional open release items carried forward;
+existing carried-forward work and operator future sections preserved. Frozen
+tag/source never moved. Local post-publication documentation/record changes
+are separate from published artifacts and remain uncommitted pending review.
