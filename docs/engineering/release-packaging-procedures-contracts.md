@@ -6,7 +6,7 @@ Status: Accepted procedures, relocated unchanged from the agent guide; verified 
 
 Created: October 13, 2026
 
-Last reviewed: October 13, 2026
+Last reviewed: October 20, 2026
 
 Scope: Build and artifact policy, Git release gates, native/Debian/Flatpak/GitHub
 procedures, documentation layout and release notes, and this repository's package
@@ -211,17 +211,43 @@ execution. Do not bypass them with a parallel ad hoc publication procedure.
 | Task | Entry point | Execution boundary |
 |---|---|---|
 | Build or retrieve hosted Debian packages | `scripts/run_github_linux_build.sh` | Starts a manual matrix unless an existing run is selected; downloads artifacts, does not install/publish. |
+| Build hosted Flatpak bundles | `.github/workflows/build-flatpak.yml`, `scripts/build-flatpak-ci.sh` | Manual dispatch on approved source; native x86_64/aarch64 runners prepare tools/runtime and call the existing candidate builder once each. No app installation/publication. Dispatch requires separate approval. |
 | Prepare release tag and build/reuse artifacts | `scripts/build_release.sh` | Creates/pushes a new tag, then starts one matrix or reuses `--run-id`; requires tag/push approval, never publishes. |
 | Validate release metadata/notes | `scripts/check-release-publication.sh` | Read-only preflight, not proof of package acceptance or publication approval. |
 | Validate/download existing release artifacts | `python3 scripts/promote_release.py <tag> <run-id>` | Default is inspection only from a clean tagged checkout; no compilation/build dispatch. |
+| Inspect hosted Flatpak candidates before tagging | `python3 scripts/promote_release.py <proposed-tag> --inspect-flatpaks --flatpak-run x86_64=<run-id> [--flatpak-run aarch64=<run-id>]` | Retains verified candidate bytes/provenance under the private report directory. No tag required; cannot publish, install or confer acceptance. |
 | Publish accepted existing artifacts | `.github/workflows/publish-release.yml` | Manual tag dispatch with selected `build_run_id` and `accepted=true`; requires publication approval. |
 | Local approved promotion alternative | `python3 scripts/promote_release.py <tag> <run-id> --publish --accepted` | Same verification policy; publishes existing artifacts without rebuilding. |
 
 - `.github/workflows/build-deb.yml` defines the hosted Debian matrix and is
   manual-only, with no publication job. Tag pushes do not automatically build.
-- `scripts/promote_release.py` implements the general promotion checks for this
-  repository's Debian matrix. Changes to supported targets must update its
-  expected artifact coverage, the workflow and their tests together.
+- `.github/workflows/build-flatpak.yml` is likewise manual-only. Ubuntu24.04
+  x86_64/ARM runners build distribution-independent Flatpak targets. Runner-only
+  setup installs manifest refs from Flathub and permits bubblewrap user namespaces
+  if the ephemeral VM's AppArmor restriction is enabled. This is not a host setup
+  recipe. Source manifest/app pins and runtime commit observations are retained;
+  no runtime substitution or pin update is performed by the workflow.
+- Flatpak workflow artifacts `flatpak-x86_64` and `flatpak-aarch64` contain the
+  bundle, built metadata, producer summary/schema-2 receipt, portable hosted index
+  and SHA256SUMS. Separate `flatpak-receipts-<arch>` diagnostics retain summaries
+  even on failure; no raw private logs uploaded. Retention is 14 days. These
+  remain unaccepted candidates. Original receipts contain runner-local absolute
+  paths; the portable index names uploaded files and records source/run/ref/commit.
+  Downloaded files do not automatically become local reuse receipts.
+- `scripts/promote_release.py` verifies the six Debian targets and optional
+  Flatpaks selected by repeated `--flatpak-run ARCH=RUN_ID`; the publication
+  workflow exposes optional per-CPU run inputs. Each selected CPU job must have
+  succeeded with exactly one unexpired artifact; another CPU failing the same
+  matrix does not invalidate the successful job. Full checksums, pinned inputs,
+  producer/runtime provenance and offline ref/commit/metadata must agree.
+  Publication retains the exact release-tag packaging SHA requirement for every
+  selected run, even when application pins agree. Current mixed packaging SHAs
+  are candidates, not an approved release set. Changes to supported targets must
+  update expected coverage, workflow and tests together.
+- Mixed promotion attaches selected bundles, portable FLATPAK-PROVENANCE.json
+  and combined SHA256SUMS alongside Debian packages. Acceptance/publication
+  approval remains explicit; --inspect-flatpaks cannot satisfy or bypass the
+  final tag/clean-checkout gate. Promotion never compiles or dispatches builds.
 - Build/release tools use the shared `scripts/lib/task_output.py` receipt/logger;
   the stable Bash entry points delegate fixed tasks to `scripts/lib/release_tasks.py`.
   Use `--log-dir` for a new private log/summary directory and selected-run/receipt

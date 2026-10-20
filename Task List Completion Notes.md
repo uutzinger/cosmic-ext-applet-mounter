@@ -5046,3 +5046,687 @@ notice and final release checks remain open. Prior user heading edit and untrack
 Push Buttons.md preserved. Documentation/diff validation follows.
 Documentation relative-link validation and git diff --check exit0. Commit only
 package-completion records; retain immutable artifact source and user edits.
+
+
+### October 19, 2026 — Replacement Debian disabled-mirror notice accepted
+
+Following instructions to copy7069ae5 Ubuntu24.04/amd64 candidate, reinstall the
+same0.5.4 version and reload panel, operator confirmed applet added back to VM.
+Operator followed Disable, Test Connection, Save Connection on disposable business
+profile and supplied rendered Modify screenshot. New notice explicitly says
+connection disabled/background sync stopped; choose Enable, Test Connection,
+Save Connection before Preview/Sync Now; enabling/saving does not start background
+sync. Full notice visible; Enable button present and Preview/Sync unavailable.
+Accepted as installed native rendered notice observation. No independent VM
+package/binary hash, systemd property trace, Flatpak replacement install or release
+claim. Previous native personal/business/Online lifecycle results reused.
+
+Updated task, acceptance map/index and draft release-note acceptance boundary.
+No runtime source changes; prior gate/localization retained without repeat. Next
+operator restoration: Enable, Test Connection, Save Connection, leave panel switch
+off. This restoration is not yet claimed performed. git diff --check exit0.
+
+October 19 restoration confirmed: operator reports enabled, tested and saved
+after installed disabled-notice check. Accepted as completion of explicit draft
+Enable/Test/Save restoration. No additional sync, schedule activation or backend
+property observation claimed. Instructions leave panel switch off; Save's normal
+paused-schedule policy unchanged. Installed notice acceptance complete, prior
+lifecycle evidence retained. Documentation-only git diff --check exit0.
+
+
+### October 19, 2026 — Step-5 numbering clarification and evidence review
+
+Operator starts consolidated step5 and questions Task(6). Traced it to the older
+October7 D-Bus host-integration migration child6/NetworkManager OpenConnect
+migration, retained in Task List Carry Forward and archived v0.5.3 task lines
+3995–4088. It is historical numbering, not current consolidated step6. Clarified
+current step5 with a named carry-forward link; similarly named bisync and
+OpenConnect work in current step4/7. Archived numbering/chronology unchanged.
+
+Reviewed prior native/prototype Online positive mount/unmount/ownership and
+canceled/rejected authentication; do not quote private profile/share/route data.
+Reused phase6 installed source-built Flatpak mirror cancellation/auth/checksum
+sync/conditional release/restoration and idle wake/checkpoint evidence. Existing
+candidate metadata/runtime/permission audit valid. Source diff67b3aec..7069ae5 is
+empty for vpn, sleep, services, mirror_access and bisync_coordinator. App diff
+contains only browser helper retirement and disabled Save notice/tests. Retained
+gate dev-gate-nh0kz3wx includes passing sleep invalidation, activation/shutdown,
+shared/finite consumers and deadline guards; no unchanged check rerun.
+
+Review complete: no additional laptop suspend or full VPN fault matrix needed.
+Scheduled unavailable, final Flatpak shared/pre-existing tunnel protection and
+active-transfer sleep/VPN loss remain unrun live limitations. One source-built
+Flatpak Online positive mount/list/unmount/conditional release and canceled-auth
+case remains explicit from original final-package gate. Candidate7069ae5 already
+built/verified; recommend existing laptop VPN/share over duplicating VM setup.
+Read installer --help only; no installation, mount, authentication, profile/
+service mutation or client removal. Keep existing Cisco fallback pending final
+acceptance; optional OS removal not authorized. Updated task/map; next operator
+approval/quiescence for candidate installation before focused test.
+Step-5 documentation validation: git diff --check exit0; changed-document local
+links and historical/current-step boundary assertions exit0. No runtime edits,
+so prior passing gate reused. Installation request pending operator readiness;
+no package or service change performed. Existing user edits preserved.
+
+
+### October 19, 2026 — Approved laptop Flatpak replacement for step-5 VPN test
+
+Operator explicitly confirmed Ready/install on laptop, with editor/settings
+closed, mirrors paused and panel applet removed. Maintained install wrapper first
+failed before installation: recorded /tmp/cloud-mounter-flatpak-packaging-7069ae5
+checkout absent (missing file); log target/task-runs/flatpak-install-7069ae5/.
+Worktree metadata showed path prunable/nonexistent. Recreated only that exact
+missing checkout at7069ae5 using git worktree add --force --detach; no other old
+worktree cleanup or user file removal. No candidate rebuild.
+
+Retry maintained install wrapper exit0 after reuse verification and user bundle
+installation. Logs/receipt target/task-runs/flatpak-install-7069ae5-retry/.
+Installed commit b2a8a6e68f9f64687304a482849271ed5aab53d8039b97abb4099e62f58e6408
+matches expected7069ae5 candidate; metadata/identity checks passed, previous
+commit and overrides retained in installation.json. Receipt acceptance not-run:
+no applet launch, sync, VPN activation, Online mount or sleep performed by agent.
+Next operator re-add applet and locate existing VPN-bound Online share; keep
+connections off until scoped canceled-authentication instructions. This installed
+package result does not close VPN functional acceptance or release approval.
+Documentation-only diff check exit0; source gate not repeated.
+
+
+### October 19, 2026 — Step-5 focused installed Flatpak VPN accepted
+
+Installed packaging7069ae5/app72661ce, OSTree b2a8a6e... (full installation identity
+above). Operator reports initially no VPN connected. Following instructions to
+start VPN-bound SMB and cancel authentication, reports VPN connection failed and
+row off. Retry instructions complete auth and list mounted share; operator
+reports files visible. Following close-file-manager/turn-off instructions,
+operator reports unmount completed. Private profile/share names omitted.
+
+Operator unsure of final VPN state; agent used typed Gio NetworkManager D-Bus
+proxies (system bus) to inspect ActiveConnections and each Vpn property. Command
+exit0: active_vpn_connections0, vpn_states empty, read_only true. No agent VPN
+activation/deactivation, service or profile change. Observed result transcribed
+privately in target/task-runs/phase5-flatpak-vpn-7069ae5/final-networkmanager.json.
+
+Accepted operator-guided installed negative/positive Online cycle and final
+VPN-off outcome. No independent negative-case mount/unit trace, release-option
+configuration dump, shared/pre-existing-tunnel live proof or mid-transfer fault
+inferred. Earlier source ownership/fake and phase6 mirror release evidence reused;
+no repeat gate/source check or suspend. Cisco disposition keeps any installed
+client as optional manual fallback; no removal release gate, uninstall, profile
+or service deletion. Updated docs/openconnect.md, release notes, task/map/index.
+
+Step5 scoped acceptance complete. Remaining final package/desktop/submission
+work stays open. Changes are documentation only; prior gate nh0kz3wx retained.
+Next consolidated step6 Online/desktop/preservation evidence review. Validation
+follows; no commit/push/build/publication performed in this acceptance update.
+Step-5 closure validation: changed-document relative links and checklist assertions
+exit0; git diff --check exit0. No runtime source inputs changed; no repeated
+passing gate or candidate build. Prior user edits remain preserved/uncommitted.
+
+
+### October 19, 2026 — Step-6 focused evidence reuse and closure
+
+Operator requested focused tests without repeating completed work. Reviewed
+active step6, acceptance map, October12 translation audit, current package/UI
+observations and exact archived evidence. Archive v0.5.3 completion notes contain
+Google Drive/Box prototype host-visible mounts and native SFTP lifecycle, plus
+installed deliberate-busy unmount refusal and separately confirmed Repair with
+inactive/disabled unit and detached FUSE mount. Private resource names omitted.
+Latest source Flatpak SMB/VPN and VM native onedriver normal lifecycles accepted
+in steps4/5. Shared routing remains unchanged; no fresh provider auth matrix.
+
+Clean-profile evidence: fresh Pop!_OS VM Add/Test/Save and personal/business round
+trips. Upgrade continuity: existing VM profiles/notice after same-version Debian
+replacement and existing SMB profile after Flatpak7069ae5 replacement. Removal:
+October18 paused disposable profile removed, owned units gone, mirror/recovery
+files retained. No whole-state hash equality or repeat removal/reset claimed.
+Desktop: native settings/editor screenshots and notice, current Flatpak panel/
+popup operation and earlier recovery/legacy wording. English-only current guard
+uor7nshy passed1catalog/1363messages/1576references; package catalogs equal source.
+Older translation helper/count claims preserved as historical, with current
+retirement/acceptance follow-up appended.
+
+Diff67b3aec..7069ae5 empty for controller, config, runtime_ipc, providers, services,
+mount_guard, mounts, preload, model and theme; app diff concerns browser helper
+and disabled Save notice. Existing gate nh0kz3wx confirms failed-unmount latch,
+expected-provider FUSE ownership, timed Repair confirmation and managed-engine
+routing. live_sftp_online_unmount_repair_and_sleep_cleanup remains explicitly
+ignored and is not accepted as a fresh run. No new source or validation inputs.
+
+Step6 closes at scoped review/reuse level. Latest Flatpak busy Repair not newly
+run; no exhaustive accessibility/locales/provider auth or bytewise upgrade-state
+claim. Historical carry-forward sleep/mountpoint/pending-count/OAuth/startup items
+remain open at their own tasks. No additional sleep, forced busy mount, transfer,
+account setup, cleanup, build, service or config change performed. Future GUI
+Push Buttons.md untouched. Updated concise task checkboxes, acceptance map/index
+and translation follow-up. Next step7 engineering/submission reconciliation;
+final release verification remains open. Validation follows, no repeat gate.
+Step-6 closure validation: git diff --check exit0; changed-document relative-link
+and four-completed-checklist assertions exit0. Prior gate nh0kz3wx/localization
+uor7nshy reused unchanged. No runtime source diff or repeat test/build needed.
+
+
+### October 19, 2026 — Step-7 engineering reconciliation and COSMIC readiness
+
+Operator requested step7. Read existing inventory, packaging rationale, engineering
+index and candidate/installation receipts; reviewed default process enum and
+cfg-gated CLI hits. Shipping nine identities unchanged. Nmcli/Systemctl in app
+and sleep snippets are tests/development only; no source route added or removed.
+Static source/receipt reconciliation exit0:23declared grants, no filesystem=host,
+installed commit/metadata exactly match candidate, app overrides empty, only four
+read-only theme global paths. Saved summary under
+ target/task-runs/step7-reconciliation/summary.json. Not a new formal reachability
+proof, live test, current remote policy approval or override mutation.
+
+Updated inventory scope from historical0.5.3 wording to candidate0.5.4; retained
+dated observations, added explicit current owners/removal/permission boundaries
+and scoped sandbox-gate closure. Packaging guide current follow-up explains reused
+portal/worker/VPN evidence, actual host authority, external dependencies and
+candidate acceptance limits. No new grant or runtime/dependency change. Closed
+only transferred worker/VPN sandbox observations at steps3–6 levels; final release
+checks and unrun variants remain separate.
+
+Checked public upstream README, justfile and PR template (official pop-os/
+cosmic-flatpak repository). README supports applet repository route; build recipe
+uses app/<id>/<id>.json. PR template requires personal contribution acknowledgment
+and excludes AI-generated PR descriptions/other content outside own app source/
+manifest exception. No user attestation, maintainer permission exception or
+submission can be inferred. Prepared local cosmic-submission-audit.md as internal
+facts/questions only, not text to paste into that external PR. Operator must
+author the submission and assess actual included files; maintainer decisions on
+host gateway/dependencies/runtime/portal exception remain open. No third-party
+contact, PR, checkbox acknowledgment or publication performed. Web raw justfile
+and guessed example path fetches unavailable; readable official justfile page and
+template/README supplied sufficient direct evidence, no guessed example relied on.
+
+Task7 split into internal completed items and explicit external pending item.
+Engineering index and acceptance map updated. No code/source input changed, so
+prior gate nh0kz3wx/localization and pin-packaging checks reused without rerun.
+Existing uncommitted acceptance records, user future-heading change and
+Push Buttons.md preserved. Documentation validation follows; no commit/push or
+build/install/service state change performed. Next internal step8 release checks
+are separate from the pending COSMIC author/maintainer review.
+
+Step-7 validation: static inventory/receipt reconciliation exit0; changed-document
+relative-link and internal/external checklist assertions exit0; git diff --check
+exit0. No repeated gate/build or external submission. New readiness audit indexed.
+
+
+### October 19, 2026 — 0.5.4 GitHub Flatpak distribution scope
+
+Operator clarified that 0.5.4 completes Flatpak release preparation and independent
+GitHub bundle distribution, with no COSMIC repository PR. COSMIC submission moves
+to 0.5.5 after legacy-engine removal and GUI cleanup. Preserved prior preparation,
+open maintainer questions and existing user-authored future sections; those
+external decisions are no longer 0.5.4 release blockers. No legacy runtime removed.
+
+Read release procedures, current promotion script/workflow and current acceptance
+records. scripts/promote_release.py and hosted publication currently validate and
+attach only the six Debian artifacts and SHA256SUMS. Mixed Debian/Flatpak
+promotion remains an explicit implementation task; no ad hoc asset upload or
+publication performed. Preserve current candidates and acceptance, resolve final
+source/tag identity under maintained guards, and rebuild only if actually needed.
+
+README now drafts prospective 0.5.4 GitHub bundle download, checksum verification,
+user runtime setup, local installation/replacement, host-engine requirements,
+separate directory Browse grants and manual updates. Corrected dependency-script
+branch main to master to match this repository. Official Flatpak single-file
+bundle documentation confirms direct bundle installation and separate runtime
+dependencies; local flatpak install --help confirms bundle/arch/or-update flags.
+No clean-profile install or network download of unpublished assets attempted.
+
+Updated task list, acceptance map, submission audit/index, packaging guide and
+draft release notes. Remaining: mixed-package promotion with focused tests and
+script records, focused clean-profile instructions/panel smoke, final release
+checks/notes/checksums/identity review and explicit tag/push/publication approval.
+Completed unchanged provider/VPN/mirror tests are not scheduled for repetition.
+Documentation-only validation recorded below; no source tests/builds repeated,
+no commit, push, install, service change or external submission performed.
+
+Scope-update validation: Python local-link/runtime/candidate-filename and scope
+assertions exit0; documentation diff whitespace check excluding Task List.md
+exit0. Full git diff --check exits2 for three pre-existing trailing spaces in
+the operator's 0.5.5 AI-consideration section; preserved those user edits.
+No executable inputs changed and no full gate rerun.
+
+### October 19, 2026 — Operator README wording review
+
+Read the operator's revised README and retained its separate Debian/Flatpak
+numbered instructions. Explained user-level Flathub/runtime setup, download
+directory, checksum OK condition, architecture, external engines and manual
+updates. Added the pending-publication boundary and replacement preparation;
+retained separate Browse grants. Corrected shell fence and obvious prose typos,
+condensed the stale OneDrive development notice into release-note guidance.
+No source, scripts, manifest or release publication changed.
+
+Changed README.md and this task/completion record only for this follow-up.
+git diff --check -- README.md exit0; Python local-link, bash -n code-block syntax
+and installation wording assertions exit0. Commands in the README were parsed,
+not executed; clean-profile installation remains open. No build/test gate repeated
+for documentation-only wording. No commit or publication. Next release task:
+maintained Flatpak promotion support, as listed in consolidated step8.
+
+### October 19, 2026 — Automatic Debian release installer
+
+Operator requested a standalone installer and one-command README instructions.
+Added scripts/install-debian.sh: defaults to 0.5.4, accepts --version X.Y.Z,
+selects Ubuntu/Pop!_OS VERSION_ID 22.04/24.04/26.04 and native dpkg architecture
+amd64/arm64. Unsupported targets fail before downloading. Fixed-repository HTTPS
+downloads use bounded connection/transfer timeouts. Verifies a unique selected
+SHA256SUMS entry, actual digest and dpkg-deb Package/Version/Architecture before
+APT install --yes --reinstall (sudo when needed). Temporary downloads are removed
+on exit, actual installation status propagated and summarized. No OS repositories,
+cloud credentials, services or app configuration changed by the installer itself;
+APT package installation has normal package-maintainer-script effects. Optional
+storage engines remain separate. No real installation was performed in this task.
+
+README Debian section now contains only its curl-to-bash command. Updated script
+catalog and engineering script inventory. Added tests/debian_installer_test.py:
+12 supported distro/version/architecture cases, unsupported targets, download,
+checksum/duplicate and all three package-identity failures, APT exit propagation,
+temporary cleanup and stdin help/invalid arguments. All commands use synthetic
+OS metadata and fake network/package adapters; no actual downloads or APT calls.
+
+Validation: bash -n scripts/install-debian.sh exit0; focused Python suite exit0
+(five tests, multiple subcases); read-only script --help exit0; targeted document
+diff whitespace check exit0. First gate dev-gate-huz32vmh failed because sandbox
+could not write /run/user/1000/just. Retrying with authorized access under
+dev-gate-h6f8jd93; final outcome recorded below. Worktree is dirty at source
+1aa9122a2140eab299cb5ba6429e08d046dd7c49. No commit/push or publication;
+the public curl URL needs the new script pushed, and package use needs published
+0.5.4 assets/checksums. Installed acceptance remains separate.
+
+Final gate dev-gate-h6f8jd93 succeeded, exit0, source_dirty=true; receipt/log:
+target/task-runs/dev-gate-h6f8jd93/{summary.json,task.log}. This covers formatting,
+Clippy and Rust/Python test suites, including the new fake installer tests.
+No further executable inputs changed. Installer implementation complete;
+publication and a future approved actual installation remain separate.
+
+### October 19, 2026 — Standalone GitHub Flatpak installer
+
+Operator requested architecture detection and a README curl command, assuming
+release assets will be present; hosted workflow explicitly follows this task.
+Added scripts/install-flatpak-release.sh, distinct from receipt-driven candidate
+install-flatpak.sh. Default version 0.5.4, optional --version X.Y.Z. Maps native
+x86_64/amd64 and aarch64/arm64 to release asset names; refuses unsupported CPUs.
+Requires existing Flatpak and a desktop user, never root. Downloads selected
+bundle/SHA256SUMS over bounded HTTPS and verifies the unique selected digest
+before any Flatpak mutation. Adds user Flathub, installs/updates architecture-
+matched Platform 25.08, then the user bundle with noninteractive/update flags.
+No workflow/build, host-engine installation, service stop or automatic rollback.
+Partial setup failure can retain the remote/runtime; actual exit status is
+preserved and temporary downloads cleaned. No actual installation performed.
+
+README Flatpak section now contains only curl-to-bash. Prerequisite Flatpak is
+noted in Dependencies; detailed setup/update boundaries moved to packaging guide.
+Updated script catalog/inventory; corrected two README installation anchors after
+the operator's heading rename. Architecture-selection implementation does not
+establish ARM assets, runtime availability, hosted builds or installed acceptance.
+
+Validation: bash -n exit0; five focused Python fake-adapter tests exit0 (CPU
+aliases, unsupported CPU, missing/download/checksum/duplicate failures, ordered
+remote/runtime/bundle failures, cleanup, explicit version and stdin arguments).
+Read-only --help exit0; selected-document diff check and single-command/local-
+link assertions exit0. First final gate dev-gate-9ht218t8 blocked on sandbox
+/run/user/1000/just writes; authorized retry running, outcome recorded below.
+No source/manifest change, commit/push, package install or publication. Public
+command needs the script pushed and matching release assets/checksums published.
+Next task is the separately requested GitHub Flatpak build workflow.
+
+Final gate dev-gate-vj99vh5b succeeded, exit0, source_dirty=true at source
+1aa9122a2140eab299cb5ba6429e08d046dd7c49. Receipt/log under
+target/task-runs/dev-gate-vj99vh5b/{summary.json,task.log}; formatting, Clippy and
+Rust/Python suites passed. No executable changes after that gate. Installer and
+README task complete at source/fake-test level; actual installation/hosted build
+and published assets remain separate. No commit/push or publication performed.
+
+### October 19, 2026 — Manual native-architecture GitHub Flatpak workflow
+
+Operator requested the hosted Flatpak workflow after both standalone installers.
+Added manual-only build-flatpak.yml, native Ubuntu24.04 x86_64/aarch64 jobs,
+read-only repository permissions, full-SHA pinned checkout/upload actions and
+14-day artifacts. No push/tag/PR trigger or release-publication job. Runner
+labels confirmed in GitHub's official runner reference. Flathub read-only ARM
+BaseApp query initially needed explicit user installation (two remotes), then
+sandbox DNS blocked it. Authorized retry succeeded: app/com.system76.Cosmic.
+BaseApp/aarch64/stable, Platform/SDK25.08, commit
+5a5f5541eb0fe2bc11cdf2f56044deff76414780274a8b7875d44ad78b50de74.
+Official web BaseApp page fetch was unavailable; actual remote metadata supplies
+the prerequisite evidence. No ARM package build or installed behavior inferred.
+
+Added build-flatpak-ci.sh/lib/flatpak_ci.py. Requires matching manual workflow,
+native CPU, exact SHA and clean checkout before runner mutations; work/log/output
+locations stay outside source and separate. Ephemeral runner only: install build
+tools, relax Ubuntu AppArmor user-namespace restriction when present, install
+manifest runtime/SDK/BaseApp refs, then call maintained build-flatpak.sh once.
+No runtime swap, source-pin rewrite, app installation or hosted dispatch by script.
+No operator-host APT, kernel setting or runtime mutation performed locally.
+
+Collection rejects failed/wrong-source/architecture producers, corrupt artifacts,
+bundle/export ref/commit or metadata differences. Successful uploads include
+bundle, built metadata, original summary/schema2 receipt, portable hosted index
+with SHA/run/repository/ref/commit/runtime/app-source pins, and SHA256SUMS.
+Original receipt paths remain runner-local; portable index names downloaded
+files, not a claim of local candidate-reuse compatibility. Separate diagnostic
+artifacts retain summaries on failure, not raw private logs. Installed acceptance
+remains not-run and current Debian-only publisher is unchanged. Flatpak promotion
+support remains an open step8 task; publication will reuse accepted artifacts.
+
+Updated script catalog/inventory, packaging guide and release procedures. New
+tests/flatpak_ci_test.py covers both architectures, nonmanual/wrong-native/source
+contexts, dirty checkout refusal before runner changes, partial builder failure,
+producer/hash/ref/metadata mismatch, portable file checksums/provenance. All use
+fake reports and synthetic files; no actual APT, sysctl, SDK install, builder or
+GitHub dispatch. Five focused tests exit0. Workflow PyYAML parse, native matrix,
+manual/read-only/pinned-action assertions and bash -n run-block checks exit0;
+driver bash -n/--help and documentation link/diff checks exit0.
+
+Final gate running with authorized runtime-directory access (earlier tasks
+established sandbox /run/user/1000/just limitation); outcome follows. Existing
+local x86_64 candidates not rebuilt or invalidated by these tooling changes;
+new hosted/ARM provenance and installed acceptance need separately approved
+execution after commit/push. User Push Buttons.md and unrelated edits preserved.
+No commit/push/tag, hosted dispatch, package install or publication in this task.
+
+Final gate dev-gate-2qaal4fe succeeded, exit0, source_dirty=true at source
+1aa9122a2140eab299cb5ba6429e08d046dd7c49. Receipt/log:
+target/task-runs/dev-gate-2qaal4fe/{summary.json,task.log}. Formatting, Clippy
+and Rust/Python suites passed, including new hosted-policy fixtures. No subsequent
+executable changes. Workflow implementation complete locally; first approved
+hosted run/download verification retained as a separate outstanding task.
+
+
+### October 19, 2026 — Push only hosted Flatpak build prerequisites
+
+Operator approved commit/push, then narrowed scope to what is necessary to run
+the Flatpak packages. Committed only build-flatpak.yml, build-flatpak-ci.sh,
+lib/flatpak_ci.py and tests/flatpak_ci_test.py as
+d7e94029f3aab1a2c4e4175b2d365b0d7c03edff. Installers, README, release/acceptance
+records and operator future-GUI notes remain local. Existing shared build helpers
+and pinned manifest are already tracked/published; no runtime source input changed.
+Staged diff check exit0; unchanged-input gate dev-gate-2qaal4fe reused.
+Fetched origin before commit and again immediately before push; no upstream
+changes (one local commit, zero remote). git commit, fetch and push exited0;
+remote master verified by git ls-remote at exact d7e94029f3aab1a2c4e4175b2d365b0d7c03edff.
+No hosted dispatch, package installation, tag or publication authorized/performed.
+This execution note remains local under the operator's narrow push scope.
+
+### October 19, 2026 — First hosted Flatpak failure: missing elfutils
+
+Operator supplied x86_64 failure output at source d7e9402: Rust build/install
+reached flatpak-builder finishing, then eu-elfcompress was unavailable and the
+mandatory eu-strip invocation failed with missing executable. No exported bundle
+or hosted success inferred. Runner APT setup uses --no-install-recommends and
+did not explicitly request elfutils. Local dpkg-query confirmed /usr/bin/eu-strip
+and /usr/bin/eu-elfcompress both belong to elfutils. Ubuntu package website
+queries were unavailable; no web evidence or package installation claimed.
+
+Added elfutils to fixed runner build dependencies, then explicit bounded
+eu-strip/eu-elfcompress --version checks before runtime downloads/build. These
+are CI tool prerequisites, not application startup engine probes. Updated fake
+orchestration test to verify package/tool setup; added missing-tool failure cases
+that stop before runtime downloads or builder. Six focused tests pass, exit0;
+selected source/test/catalog/inventory diff check exit0. Final gate pending below.
+Catalog/inventory/task records updated locally; only the two runtime-tooling/test
+files are intended for commit/push under the operator's existing narrow approval.
+No app source/pin/runtime choice or permissions changed; prior installed behavior
+does not need repeating for this runner dependency correction. No local install,
+hosted dispatch or publication performed. A retry must be a new workflow dispatch
+on the corrected commit; rerunning the old run retains its old dependency setup.
+
+Gate dev-gate-0b5sn6tp failed at repository hygiene after the source/fake tests:
+newly tracked build-flatpak-ci.sh had mode100644. Earlier pre-commit gate ignored
+untracked script modes, so that pass did not establish clean-checkout hygiene.
+Corrected executable mode100755 and staged it. Focused repo_hygiene_test.py
+(four tests) and flatpak_ci_test.py (six tests) pass, exit0. Added only the CI
+wrapper/module catalog entries and the CI inventory entry/review date to the
+staged correction so a clean checkout has required documentation; unrelated
+installer entries/docs remain local. Staged diff check and narrow-catalog
+assertions exit0. Final gate retry pending below; no further code changes.
+
+Final gate dev-gate-f6ynq1tg succeeded, exit0, source_dirty=true at d7e9402;
+receipt/log target/task-runs/dev-gate-f6ynq1tg/{summary.json,task.log}. Committed
+only five correction/prerequisite files as ba8a34158f86a168b260af2e6b7829c89393ed14.
+Fresh fetch before push: one local commit, zero remote-only commits. Commit,
+fetch, push and remote ls-remote verification exit0; origin/master equals that
+SHA. No amended history, tag, dispatch, app install or publication. Installer,
+README, broader release records and user future-GUI changes remain local; these
+execution notes/task status remain local under the narrow push scope. New hosted
+run on corrected master still needed; source/fake gate is not hosted acceptance.
+
+### October 20, 2026 — ARM hosted success and x86_64 AppStream failure
+
+Operator reported run39382160325 at ba8a341: ARM passed, x86_64 failed after
+release compilation/stripping during AppStream compose (file-read-error,
+filters-but-no-output). Read-only GitHub job/artifact inspection confirmed ARM
+success/upload and x86_64 failure; no retry dispatched. Sandbox GitHub networking
+failed; authorized read-only retry worked. Archived existing flatpak-aarch64
+artifact under target/artifacts/candidates/flatpak-hosted-ba8a341/flatpak-aarch64.
+All uploaded SHA256SUMS entries and source/run/arch identity verified. OSTree
+commit2e35268ef8769c645c30334a10ebb9fc34aa36cd809b32dd9d711533646917bc.
+No app installation or ARM runtime exercise claimed.
+
+Locally reproduced exact AppStream failure using the unchanged app files and an
+empty GDK_PIXBUF_MODULE_FILE: file-read-error identifies the SVG icon with
+Unrecognized image file format; filters-but-no-output is consequential. Normal
+loader cache composes successfully with only existing nonfatal COSMIC hints.
+Real tool AppStream1.0.2 matches Noble package family; reproduction output under
+target/task-runs/appstream-ci-repro-b2zw12p1/. This isolates SVG-loader support;
+failed runner package inventory/hints were not available, so do not claim those
+were directly observed. Upstream issue619 describes similar errors but different
+icon installation misuse; not used as the diagnosis of our correctly installed
+SVG. No AppStream/metadata validation disabled and no resources changed.
+
+CI explicitly requests appstream/appstream-compose/librsvg2-common rather than
+depending on runner recommendations/preinstalls. New preflight extracts actual
+metainfo/desktop/SVG from the app manifest's immutable Git pin, composes with
+--no-net/--print-report=full before runtime download/build, records AppStream and
+package versions, retains issue hints with summary diagnostics. Workflow choice
+both/x86_64/aarch64 allows retrying only the failed target. Existing app source,
+runtime, permission grants and pinned source remain unchanged. Source identity
+policy at final promotion remains explicit even when preserved ARM is reused.
+
+Eight fake CI-policy tests pass, exit0, including compose failure before any SDK
+or builder call and refusal of unpinned preflight inputs. Workflow YAML/choice/
+run-block syntax assertions pass, exit0. Actual check_appstream function using
+pinned app source passed (not just fake adapter) under
+target/task-runs/appstream-pinned-preflight-vlr5pvem/report/{summary.json,task.log}.
+No native package install, app build or cloud/provider retest performed locally.
+Catalog/inventory/packaging/task records updated; final gate outcome follows.
+
+Final gate dev-gate-ooqx5x1_ succeeded, exit0, source_dirty=true at ba8a341;
+receipt/log target/task-runs/dev-gate-ooqx5x1_/{summary.json,task.log}.
+Committed only five CI workflow/driver/test/catalog/inventory files as
+095c18043a36745d99f536b8e43fc3fa4866c1f6. Fresh fetch showed one local and zero
+remote-only commits; commit/fetch/push/ls-remote all exit0. Remote master equals
+095c18043a36745d99f536b8e43fc3fa4866c1f6. No hosted dispatch, app install or
+publication. Operator can dispatch new workflow on master, architecture=x86_64;
+successful ARM remains preserved, with overall source/provenance release gate
+still separate. Other installers/README/release records and these execution
+notes remain local under the existing narrow push scope.
+
+
+### October 20, 2026 — Hosted Flatpak build artifacts verified for both CPUs
+
+Operator reported retry complete. Read-only GitHub verification confirms
+run39433010848 at095c18043a36745d99f536b8e43fc3fa4866c1f6 completed successfully
+with only Flatpak x86_64 job; bundle/provenance and diagnostic artifacts uploaded,
+unexpired. Existing ARM job run39382160325 atba8a341 remains the preserved
+successful ARM build (its whole matrix run failed x86 before correction). No
+new build dispatched and ARM not rebuilt. Initial sandbox network request failed;
+authorized read-only run/job/artifact queries and download succeeded, exit0.
+
+Downloaded x86 assets under target/artifacts/candidates/flatpak-hosted-095c180/
+flatpak-x86_64; ARM retained under flatpak-hosted-ba8a341/flatpak-aarch64. All
+SHA256SUMS/index file hashes, producer success and source/run/architecture identities
+passed. Complete source pins and manifest/cargo-source fingerprints match across
+architectures. App source72661ce9d705038cdb1878165917f298e0ced8c2 unchanged.
+x86 bundle:13,442,696 bytes, SHA256
+64dd3652bb265f2275d5c1252b8f4e6858234f61cf1df376c428c9ec45a16150, OSTree
+2ab220a037806b795523f9b6d345f95a1b5b998578ccf15386a050883df3d7c8.
+ARM bundle:12,644,456 bytes, SHA256
+da95586ee661c6cf8389023c0b744f42adf6efe73e0cbb0a6b33ed2c3d6532c6, OSTree
+2e35268ef8769c645c30334a10ebb9fc34aa36cd809b32dd9d711533646917bc.
+Machine-readable comparison retained under
+target/task-runs/hosted-flatpak-acceptance-2026-10-20/verified-artifacts.json.
+
+Ran maintained scripts/inspect-artifacts.py flatpak-bundle for each CPU with
+explicit app/ref/arch, expected producer metadata and recorded OSTree commit.
+Both first attempts blocked on sandbox read-only O_TMPFILE, not corrupt bundles.
+Authorized retries both passed, exit0: target/task-runs/hosted-flatpak-inspect-
+x86-2026-10-20-retry/ and hosted-flatpak-inspect-arm-2026-10-20-retry/ contain
+summary/artifact/log receipts. Temporary import only, no installation/execution.
+
+Full hosted x86 metadata differs from prior accepted local7069ae5 only in Context:
+shared list order and sockets explicit x11+wayland+fallback-x11 (host Flatpak1.14.6)
+versus wayland+fallback-x11 (local1.18.1). Reviewed official Flatpak command
+reference: fallback-x11 takes precedence over x11 when supported. Specific
+list-order/fallback equivalence assertion passed; all other full metadata agrees.
+No inspector implementation or strict per-bundle baseline was changed. No blanket
+claim of installed effective permissions; actual installed upgrade remains separate.
+
+Updated task list/acceptance map/tooling inventory; no source inputs changed.
+Reused gate dev-gate-ooqx5x1_ and source/fake checks without repetition. New source
+packaging identities differ across CPUs and remain explicit; final immutable tag,
+Flatpak-aware promotion/checksum assets and focused clean-profile install still
+open. Local documentation checks follow; no commit/push, tag, publication, package
+installation, provider/cloud operation or additional CI dispatch in this turn.
+
+
+### October 20, 2026 — Flatpak-aware promotion and focused VM check preparation
+
+Operator authorized the publisher follow-up and selected the existing Pop!_OS VM
+for the focused installation check. No publication/tag/push/build dispatch is
+part of this implementation. scripts/promote_release.py and
+scripts/lib/flatpak_promotion.py now verify explicit per-CPU hosted runs, selected
+successful jobs (including a successful CPU in a failed matrix), complete
+checksums, producer/source/input/runtime provenance and offline ref/commit/full
+metadata. Normal promotion retains exact release-tag packaging source checks.
+Optional publication workflow inputs select each CPU; combined SHA256SUMS and
+portable FLATPAK-PROVENANCE.json accompany Debian/bundle assets. Receipt origins
+identify each bundle's actual run; no deleted runner paths are published.
+
+The new --inspect-flatpaks mode cannot publish/install and retains verified
+candidate bytes/provenance without a final tag or Debian run. Real command:
+python3 scripts/promote_release.py v0.5.4 --inspect-flatpaks
+--flatpak-run x86_64=39433010848 --flatpak-run aarch64=39382160325
+--repo uutzinger/cosmic-ext-applet-mounter
+--log-dir target/task-runs/flatpak-promotion-candidates-2026-10-20
+passed exit0. summary.json/artifacts.json/FLATPAK-PROVENANCE.json retained in
+that directory, with bundles under flatpak-artifacts/flatpak-<arch>. acceptance
+is not-run, publication not-performed. Reuses the same successful hosted bytes;
+no rebuild, cloud operation or installation. This real verifier result remains
+valid after receipt-origin-only changes. Existing Debian7069ae5, x86_64095c180
+and ARMba8a341 packaging SHAs remain distinct; matching application pins do not
+waive the final exact-tag gate.
+
+Added --bundle FILE to the standalone Flatpak release installer to test its
+checksum/runtime/install steps before release assets are public. Local mode
+requires the exact CPU/app filename and regular sibling SHA256SUMS, copies
+verified inputs to a private temporary directory, and uses the same user
+Flathub/Platform25.08/bundle installation path. No provider/dependency setup,
+service stop, app launch or automatic rollback added. README curl command stays
+unchanged. Catalog, inventory, procedures/output contracts and packaging guide
+updated. Focused tests: flatpak_promotion_test.py 7 passed;
+release_promotion_test.py 15 passed; flatpak_release_installer_test.py 6 passed.
+All exit0. Workflow manual inputs and every Bash run block validated with
+PyYAML BaseLoader/bash -n; installer bash -n and targeted git diff --check pass.
+Fake publication test messages refer only to fake adapters, not a real release.
+
+Read-only SSH to the VM's previously supplied address timed out (exit255); no
+remote changes occurred. Existing VM already has native test profiles, so merely
+installing there will establish a focused replacement/first-Flatpak smoke, not
+a clean-profile result unless a clean profile is actually used. Operator
+readiness/address requested before replacement. VM installation/panel discovery
+and final source/tag/publication decisions remain open. Final gate result follows.
+
+Operator supplied the VM Tailscale hostname after the private-LAN timeout.
+Read-only SSH reached it but BatchMode authentication was denied (exit255);
+no credentials requested or remote state changed. Operator copy/local-bundle
+installation commands supplied using the verified retained x86 artifact and
+sibling SHA256SUMS. Installation result and panel smoke remain pending.
+
+Final verification: bash scripts/dev.sh gate succeeded, exit0, at source
+095c18043a36745d99f536b8e43fc3fa4866c1f6 with source_dirty=true. Receipt/log:
+target/task-runs/dev-gate-85flvcye/{summary.json,task.log}. Includes formatting,
+Clippy, Rust and Python suites. No Rust/UI/AppStream source changed; no separate
+localization/metadata or installed cloud test repetition required. Publisher
+implementation checkbox closed; hosted real publication, VM install/panel smoke,
+clean-profile coverage and final immutable source/tag remain open. No commit,
+push, tag, build dispatch, publication or app installation performed.
+
+
+### October 20, 2026 — Operator VM Flatpak installation succeeded
+
+Operator screenshot shows the maintained install-flatpak-release.sh --bundle
+command on the existing Pop!_OS VM, version0.5.4/x86_64. Selected bundle
+SHA256SUMS verification reports OK; output identifies installation of
+app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master and the
+flatpak-release-install summary reports exit_code0. This establishes successful
+operator-run checksum/install execution; independent installed commit readback,
+panel discovery and rendered settings/editor smoke remain pending. Existing
+native profiles are retained; no clean-profile or ARM installed acceptance
+inferred. Documentation-only progress update reuses passing gate
+dev-gate-85flvcye; no source changes or additional tests/builds/installation by
+the agent. Next: read back installed commit, add panel applet and check settings
+and an unsaved Add Connection window without starting sync.
+
+October 20 follow-up: operator screenshot of flatpak info --user --show-commit
+io.github.uutzinger.cosmic-ext-applet-mounter returns
+2ab220a037806b795523f9b6d345f95a1b5b998578ccf15386a050883df3d7c8, exactly
+matching the verified hosted x86 bundle. Installed commit identity accepted by
+operator readback. Panel launch/discovery and rendered windows remain unverified;
+installation identity alone does not identify which native/Flatpak launcher the
+panel selects. No source edits or repeated tests.
+
+
+### October 20, 2026 — Hosted x86 Flatpak panel/UI smoke accepted on VM
+
+Operator screenshot of flatpak ps --columns=application lists
+io.github.uutzinger.cosmic-ext-applet-mounter, confirming the sandboxed applet
+is running after panel selection. Operator confirms it opens, Settings display
+and Modify Connection is accessible. Together with the earlier successful
+installer checksum/exit0 and exact installed commit readback, this accepts the
+focused existing-VM install/panel/settings/editor smoke for hosted x86 bundle
+2ab220a037806b795523f9b6d345f95a1b5b998578ccf15386a050883df3d7c8.
+Native and Flatpak both appear as Cloud Mounter in the panel picker; ordering
+was not used as identity evidence. No claim of saving a modified connection,
+new cloud synchronization, public GitHub download, clean-profile setup or ARM
+installed behavior. Earlier unchanged provider/VPN/mirror results reused.
+
+Updated Task List.md, this chronology and the acceptance map/index. No source
+edits; prior gate dev-gate-85flvcye reused without repetition. Final source/tag
+identity, uncommitted tooling/docs, clean-profile coverage and publication remain
+open; no additional build, install, commit, push or publication performed.
+
+
+### October 20, 2026 — Release identity decision and commit preparation
+
+Operator authorized resolving source/tag identity and committing the prepared
+tooling/records. Reviewed master/status and intended changes. Existing Debian
+7069ae5, x86 Flatpak095c180 and ARMba8a341 remain preserved accepted candidates
+at their recorded scopes, not one exact-tag release set. New public installers
+and Flatpak-aware publisher are not present in those old packaging revisions.
+Decision: commit this preparation, finalize remaining notes/acceptance, freeze
+one packaging SHA and request a single Debian/Flatpak build set at that SHA.
+The app pin72661ce stays unchanged. Release tag must reference that same source;
+acceptance receipt-only follow-ups do not move it or trigger rebuilds. No tag
+selected, new build dispatched or policy mismatch waived. Tests for unchanged
+provider/VPN/sleep behavior remain reusable.
+
+Commit scope: standalone Debian/Flatpak installers and fake tests; Flatpak
+promotion library/driver/workflow and tests; concise README, package/setup
+guidance, acceptance/submission audits and chronological release records.
+Unrelated operator-authored future GUI/AI prose and Push Buttons.md remain
+local. Gate dev-gate-85flvcye passed for these code inputs and is reused; only
+documentation and installer executable metadata changed afterward. Focused
+staged repository hygiene/whitespace verification and commit result follow.
+
+Staged review: 23 intended files; git diff --cached --check exit0.
+python3 tests/repo_hygiene_test.py: four tests passed, exit0, including newly
+tracked installers'100755 modes and relative links. git diff against72661ce
+for src/i18n/Cargo.toml/Cargo.lock/resources is empty, confirming unchanged
+application payload inputs. Source freeze remains outstanding because release
+notes are still explicitly draft and acceptance limits remain recorded.
+Prepared commit title: Prepare verified GitHub package installation and promotion.
+Only the release task-list patch staged; operator future GUI/AI prose and
+Push Buttons.md excluded. No new build, service or publication action authorized.

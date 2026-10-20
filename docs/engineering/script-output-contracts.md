@@ -6,7 +6,7 @@ Status: Accepted interface, implemented and fixture-verified; new hosted accepta
 
 Created: October 13, 2026
 
-Last reviewed: October 16, 2026
+Last reviewed: October 20, 2026
 
 Scope: Hosted/local tooling, setup reporting, Debian/native/Flatpak inspection
 and OneDrive guard-investigation receipts.
@@ -86,6 +86,21 @@ Promotion remains inspection-only by default. Publication requires explicit
 deleted temporary paths. No compilation/build dispatch occurs in promotion.
 Existing release assets must not be replaced automatically; ambiguous publication
 failure requires checking remote state before another attempt.
+
+October 20 Flatpak extension: repeat `--flatpak-run ARCH=RUN_ID` for selected
+hosted CPU artifacts. Normal promotion still requires each packaging source to
+match the exact release tag and verifies the selected successful job even if
+another matrix job failed. Combined SHA256SUMS covers Debian packages, bundles
+and FLATPAK-PROVENANCE.json; durable receipts identify each bundle's actual run,
+source, digest, ref/commit, pinned inputs, runtime commits and tool observations.
+Temporary runner paths are excluded from the published provenance.
+
+`--inspect-flatpaks` is a separate candidate-only mode without a tag or Debian
+run. It downloads into the new report directory's flatpak-artifacts/flatpak-<arch>,
+retains provenance beside summary/artifacts.json, and records publication_ready=false,
+acceptance=not-run and publication=not-performed. Different packaging SHAs may
+be inspected here but cannot pass normal exact-tag publication. This mode never
+installs, tags, dispatches or publishes.
 
 The common implementation is Python standard-library code in
 `scripts/lib/task_output.py`. Stable Bash entry points delegate fixed task names

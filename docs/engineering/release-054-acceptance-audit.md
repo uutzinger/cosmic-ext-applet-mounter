@@ -2,16 +2,24 @@
 
 Type: Audit
 
-Status: Scoped steps 2–4 complete; refreshed Flatpak and all six Debian candidates at 7069ae5 verified; installed/final acceptance open
+Status: Scoped steps 2–6 accepted and step-7 internal reconciliation prepared; GitHub bundle promotion/final release acceptance open, COSMIC submission deferred to 0.5.5
 
 Created: October 18, 2026
 
-Last reviewed: October 19, 2026
+Last reviewed: October 20, 2026
 
 Scope: Step 1 of [Consolidated Flatpak acceptance and release](../../Task%20List.md#consolidated-flatpak-acceptance-and-release).
 This map links retained evidence to missing work. It does not authorize builds,
 installation, service changes, tags or publication. The task list owns status;
 [completion notes](../../Task%20List%20Completion%20Notes.md) retain chronology.
+
+October 19 distribution decision: 0.5.4 ships through GitHub Releases, including
+the x86_64 Flatpak bundle. COSMIC repository submission follows the planned
+0.5.5 legacy-engine removal and GUI cleanup; earlier references to pending
+COSMIC approval below are historical, not 0.5.4 blockers. Remaining work is
+maintained mixed-package promotion/provenance/checksums, clean-profile bundle
+installation/documentation smoke, final verification and approved publication.
+Existing scoped provider/VPN/mirror acceptance is reused where unchanged.
 
 ## Evidence baseline
 
@@ -61,20 +69,20 @@ are conditional options for unresolved gaps, not a newly required full matrix.
 | OneDrive work/school / installed Flatpak | Setup, selected folder, Test/Save, Preview/initial transfer/checksum; phase 4 | Reuse shared personal scheduling/fault policy evidence at its level; map any remaining account-specific lifecycle gap in step 4. Removed disposable profile must be recreated if new live work needs it. |
 | SharePoint mirror / installed Flatpak | Existing auth/library/subtree verification, portal folders, initial and ordinary sync after applet restart; phase 4 | Step-4 review reused shared coordinator tests and installed access/transfer evidence; no additional SharePoint-specific worker change identified. Missing transfer counts are not zero transfers. |
 | OneDrive guards / installed Flatpak plus fake adapters | Drive-type/account refusals, local/remote marker loss, saved retarget and remote-folder loss/refusal/restoration; phase 6 | Reuse accepted cases. Malformed/resource/corporate variants retain source/fake status; no blanket per-account live claim. |
-| Repair / personal installed Flatpak | Failed state visible; Repair preserved all 17 baseline files; units disabled; subsequent normal checksum sync passed | Reuse phase-6 result for unchanged code. Legacy Repair or other missing engine/mode coverage remains step 4. |
-| Idle sleep/wake / personal installed Flatpak | Same-boot return, 17 unchanged files before sync, post-wake checksum sync, schedule paused | Active-transfer sleep case remains step 5; do not repeat idle smoke solely for a newer receipt. |
-| Manual OpenConnect / personal installed Flatpak | Save-time cancellation/no persistence, positive auth/Save, bound checksum sync, retain/release option, original settings restored | Mount/unmount VPN integration and other Task (6) gaps remain step 5. |
-| Scheduled VPN unavailable / installed service | Guard source/fake policy evidence only; manual auth cancellation is separate | With disposable initialized mirror and unavailable assigned VPN, prove scheduled invocation performs no sync and no interactive auth; preserve files/init, restore and show normal operation; step 5. |
-| Pre-existing VPN / installed ownership | Source ownership policy tests passed; applet-owned release tested live | Activate tunnel independently, run disposable operation with release option, prove tunnel remains connected; operator restores state; step 5. |
-| Shared VPN / installed ownership | Reference-count/shutdown fake tests passed | Use two approved disposable applet consumers; after first stops, shared tunnel remains; release only after last consumer and only if applet-owned; step 5. |
-| Active-transfer sleep / installed lifecycle | Coordinator cancellation and sleep token tests passed; idle live wake accepted | One bounded disposable transfer with checkpoint/cancellation/recovery observations. Laptop display-driver failure or hard reboot is inconclusive for wake; use a suitable test host if needed; step 5. |
-| Active-transfer VPN loss / installed lifecycle | Cancellation/readiness/failure policy tests passed | Disposable transfer; observe failure/cancellation and preserved state, restore VPN and explicit recovery without unsafe resync; step 5. |
-| Native/Debian OneDrive migration | October 19 Pop!_OS 24.04 amd64 VM: personal/business Test/Save/Preview and upload/remote-edit download; personal Start/Pause; onedriver Online Test/Save/mount/list/unmount accepted by operator observation | Focused native smoke complete; reuse shared policy/Flatpak lifecycle evidence. VM checksum/binary parity not independently captured; final artifact sign-off separate. Disabled-profile Save wording corrected in source, replacement UI acceptance pending; legacy live testing waived October 19. |
+| Repair / personal installed Flatpak | Failed state visible; Repair preserved all 17 baseline files; units disabled; subsequent normal checksum sync passed | Reuse phase-6 result for unchanged code. Legacy live testing waived in step 4; no unrun engine/mode case is claimed passed. |
+| Idle sleep/wake / personal installed Flatpak | Same-boot return, 17 unchanged files before sync, post-wake checksum sync, schedule paused | Reused in step 5; active-transfer sleep remains an unrun live limitation. Do not repeat idle smoke solely for a newer receipt. |
+| Manual OpenConnect / personal installed Flatpak | Save-time cancellation/no persistence, positive auth/Save, bound checksum sync, retain/release option, original settings restored | October 19 source-built Flatpak Online negative/positive UI and post-unmount VPN-off check accepted separately below; reuse all mirror results. Shared/pre-existing scenarios retain their stated limitations. |
+| Scheduled VPN unavailable / installed service | Guard source/fake policy evidence only; manual auth cancellation is separate | October 19 review confirms unchanged fail-closed scheduled guard and no interactive activation path. Unrun live limitation; not an automatic additional test or installed pass. |
+| Pre-existing VPN / installed ownership | Source ownership policy tests passed; applet-owned release tested live | Earlier native ownership acceptance and unchanged policy tests retained. Final Flatpak pre-existing-tunnel scenario unrun live; no mandatory duplicate matrix identified. |
+| Shared VPN / installed ownership | Reference-count/shutdown fake tests passed | Earlier native/shared-policy coverage retained. Final Flatpak two-consumer scenario unrun live; no mandatory duplicate matrix identified. |
+| Active-transfer sleep / installed lifecycle | Coordinator cancellation and sleep token tests passed; idle live wake accepted | October 19 review found no changed sleep policy. Unrun live limitation; no additional laptop suspend required. Any future focused check needs a checkpoint and suitable host. |
+| Active-transfer VPN loss / installed lifecycle | Cancellation/readiness/failure policy tests passed | Unchanged readiness/cancellation policy coverage retained. Unrun live limitation; no new fault test required absent a concrete changed behavior or blocker. |
+| Native/Debian OneDrive migration | October 19 Pop!_OS 24.04 amd64 VM: personal/business Test/Save/Preview and upload/remote-edit download; personal Start/Pause; onedriver Online Test/Save/mount/list/unmount accepted by operator observation | Focused native smoke complete; reuse shared policy/Flatpak lifecycle evidence. VM checksum/binary parity not independently captured; final artifact sign-off separate. Disabled-profile Save wording accepted in replacement Debian VM October 19; legacy live testing waived October 19. |
 | Legacy abraunegg mirror / installed continuity | Rendered notice, authenticated dry-run Preview, retained legacy route/unit declaration | Operator skipped browser/manual reauthentication and monitor/transfer live checks October 19; no longer a 0.5.4 gate. Retained compatibility/source evidence unchanged; unrun live cases are not passes. Real pending user changes remain untouched. |
-| Online onedriver / installed Flatpak | Test/setup, mount/list/unmount; phase 6 | Missing final busy unmount/Repair, clean-profile and sleep/desktop scenarios; step 6. |
-| Other rclone providers / final Flatpak | Shared coordinator/policy tests and earlier engine evidence exist; per-provider release audit not complete | Review retained Google Drive/Box/SMB/SFTP evidence, select missing engine/auth-specific smoke for claimed support; steps 3-6. No full repeated provider/scenario cross-product is assumed. |
+| Online onedriver / installed Flatpak | Test/setup, mount/list/unmount; phase 6 | Step-6 review reuses native clean-profile/Online and earlier installed busy-Repair evidence plus unchanged policy tests. Latest Flatpak busy-Repair is unrun; no repeat suspend or full suite required. |
+| Other rclone providers / final Flatpak | Earlier Google Drive/Box prototype mounts and native SFTP lifecycle; latest source-Flatpak SMB cycle; unchanged shared engine routing tests | Step-6 review reuses evidence at those levels, without claiming fresh final-package authentication for every provider. Existing carried-forward OAuth issues remain open; no expanded provider/scenario matrix. |
 | Portal/local access / installed Flatpak | Separate mirror/recovery Browse, retained cross-launch access, host anchor/state fix accepted | Final payload/Platform capability and effective-grant audit, including overrides; steps 2-3. Host path alone is not a grant. |
-| Desktop/preservation / installed Flatpak | Panel embedding, popup, recovery text, legacy notice, disposable connection removal with local files retained | Final settings/localization, clean-profile, package upgrade/removal and other Online coverage; step 6. |
+| Desktop/preservation / installed Flatpak | Panel embedding, popup, recovery text, legacy notice, disposable connection removal with local files retained | Step-6 review reuses fresh VM setup, native settings/editor and notice observations, profile continuity after Debian/Flatpak upgrade, prior removal and catalog guards. No full state-hash, new locale or exhaustive accessibility pass claimed. |
 | Artifact/release identity | Development export/bundle/install ref/commit/metadata match | Final frozen-version artifact matrix, payloads, effective grants, checksums and release verification; steps 1-2 and 8. |
 
 ## Release inputs to freeze
@@ -288,3 +296,196 @@ clean source and contains the disabled-mirror notice; retired helper absent.
 Review: target/task-runs/debian-candidate-7069ae5-master/payload-review.json.
 Earlier queue checkpoint remains historical. The new Debian/Flatpak candidates
 are ready for affected installed-notice checks; no installation or release claimed.
+
+
+## Installed Debian notice acceptance — October 19
+
+Operator reloaded the VM panel after the replacement-package instructions, then
+provided the business Modify screenshot after Disable/Test/Save. The corrected
+notice is fully rendered, including explicit Enable/Test/Save and stopped
+background synchronization guidance. Enable is available; Preview/Sync Now are
+unavailable for the disabled saved profile. This accepts the changed native
+notice at operator-observed installed UI level; VM binary/hash parity was not
+independently captured. No new Flatpak replacement installation is inferred.
+Existing unchanged personal/business/Online lifecycle evidence reused. Operator
+subsequently confirmed Enable, Test Connection and Save Connection restoration;
+no additional sync, Start or independent timer-property check claimed.
+
+
+## Step-5 scope and evidence review — October 19
+
+Active numeric Task (6) referred to the earlier NetworkManager/OpenConnect
+migration, not consolidated release step 6. Task (5) similarly meant the older
+bisync coordinator migration. Replace ambiguous numbers in the current checklist
+with named historical references; preserve archived/carry-forward numbering and
+chronology. Source: the carried-forward October 7 migration section and the
+v0.5.3 task archive's OpenConnect acceptance section.
+
+Earlier installed native and GUI-prototype Flatpak evidence includes successful
+OpenConnect authentication, Online share access, unmount/conditional release,
+cancelled authentication and rejected second factor. Phase-6 source-built Flatpak
+adds manual mirror VPN cancellation/no-persistence, positive auth/checksum sync,
+retention without release permission and release with permission, then restored
+options. Idle wake and preserved-checkpoint sync also passed. These are distinct
+package/evidence levels; prototype Online success does not alone close the final
+source-built Flatpak Online acceptance gate.
+
+Diff 67b3aec..7069ae5 has no changes to vpn.rs, sleep.rs, services.rs,
+mirror_access.rs or bisync_coordinator.rs. App edits concern legacy browser
+handoff and disabled Save notice, not VPN/sleep control. Retain passing gate
+nh0kz3wx tests for activation/shutdown ownership, shared/finite consumers,
+readiness deadlines and sleep invalidation. Scheduled guard source checks
+NetworkManager/profile readiness and returns an error without invoking activation.
+No extra suspend or full shared/pre-existing/VPN-loss matrix is warranted by
+these changes. Those unrun live cases remain explicit limitations.
+
+The remaining focused check is one Online VPN mount/list/unmount/conditional
+release and one canceled-authentication attempt on the built source Flatpak.
+Prefer the laptop's existing host VPN/share setup; a fresh VM would add redundant
+VPN configuration. Candidate 7069ae5 and payload/permission review are ready;
+installation still requires operator approval and applet quiescence. Keep any
+installed proprietary client as the manual fallback pending acceptance; no
+client uninstall, VPN profile edit or service change has been performed.
+
+
+## Laptop Flatpak replacement for VPN acceptance — October 19
+
+Operator approved quiescence and installation. Restored missing temporary
+packaging checkout at the recorded exact7069ae5 commit, then maintained installer
+reused verified candidate and installed expected commit
+`b2a8a6e68f9f64687304a482849271ed5aab53d8039b97abb4099e62f58e6408` successfully.
+Receipt: target/task-runs/flatpak-install-7069ae5-retry/installation.json. Original
+missing-checkout failure retained separately; no rebuild, data/service cleanup
+or runtime launch. Installer acceptance remains not-run; pending panel reload
+and scoped positive/negative VPN Online observations are separate evidence.
+
+
+## Step-5 focused VPN completion — October 19
+
+On installed source Flatpak 7069ae5, operator began with no VPN connected. Following
+canceled-authentication instructions, operator reported VPN connection failed and
+connection row off. After retry instructions to complete authentication, operator
+confirmed mounted share files visible, then closed the file manager/turned row
+off and reported unmount completed. Operator was unsure whether VPN disconnected;
+a read-only typed NetworkManager D-Bus check returned zero active VPN connections.
+The agent did not activate or deactivate any VPN. Final observation saved at
+ target/task-runs/phase5-flatpak-vpn-7069ae5/final-networkmanager.json.
+
+Accept the focused installed UI negative/positive cycle and final VPN-off outcome.
+No independent negative-case FUSE/service trace, release-option dump or live
+shared/pre-existing-tunnel protection claim. Earlier ownership/source evidence
+and mirror release tests remain scoped separately. Idle wake is reused; no new
+suspend or active-transfer fault test was performed. Step 5 is complete at this
+scope. Keep any installed proprietary client as an optional manual fallback;
+no OS removal is a release gate or implied. User guide clarified accordingly.
+Final package/release, desktop and submission acceptance remain open.
+
+
+## Step-6 focused Online/desktop/preservation review — October 19
+
+Reviewed scope before requesting any live operation. Existing evidence covers
+these unchanged paths; no additional live test was selected:
+
+| Area | Evidence reused | Limit retained |
+|---|---|---|
+| Online engines | VM native onedriver setup/mount/list/unmount; latest source Flatpak SMB VPN cycle; earlier prototype Google Drive/Box mounts; native disposable SFTP lifecycle; shared routing tests | Earlier provider results keep their native/prototype identities. No fresh per-provider final-Flatpak auth claim or closure of carried-forward OAuth/quota issues. |
+| Busy/Repair | v0.5.3 completion archive: deliberate busy native clean-unmount refusal, separate two-step confirmed Repair, inactive/disabled service and detached mount; current gate eligibility, ownership, failed-unmount latch and confirmation tests | Latest source Flatpak busy-Repair not repeated. Ignored live SFTP test remains ignored, not passed. |
+| Clean profile/preservation | Fresh VM Add/Test/Save and mirror round trips; saved profiles retained through Debian reinstall; existing SMB profile used successfully after verified Flatpak replacement; phase-4 removal preserved local/recovery files and removed owned units | No bitwise complete config/state/cache comparison across upgrade; no user reset, repeated removal or real-data transfer needed. |
+| Desktop/localization | VM settings/editor, native corrected Save notice, latest Flatpak panel/popup operation, prior recovery and legacy text; localization receipt uor7nshy (1 catalog, 1,363 messages, 1,576 references); candidate catalogs match source | English-only shipping catalog. No untranslated-language acceptance, exhaustive screenshot/keyboard/screen-reader matrix or next-release GUI cleanup implied. |
+
+Source comparison 67b3aec..7069ae5 has no changes to controller, config,
+runtime_ipc, providers, services, mount_guard, mounts, preload, model or theme.
+App changes only retire legacy browser helper and choose the disabled Save
+notice. Current gate nh0kz3wx covers shared Online provider ownership, failed
+unmount recovery, timed Repair confirmation and managed-engine routing. Prior
+installed/prototype evidence is reused; its age/package level remains explicit.
+
+Step 6 closes as this scoped evidence review, not as fresh execution of every
+historical live scenario on every package. Existing carried-forward mount/sleep,
+pending-count, provider OAuth and startup observations retain their own open
+status. No additional sleep, busy mount, destructive cleanup, new account setup,
+code edit or package rebuild was performed. Engineering/submission and final
+release verification remain open.
+
+
+## Step-7 internal reconciliation and external boundary — October 19
+
+Reconciled the host-command inventory and packaging permission rationale with
+source plus existing candidate/installation receipts. Nine default executable
+identities and23 finish-args confirmed; installed metadata/commit equal candidate
+export, no app-specific override and only four read-only global theme paths.
+Static summary: target/task-runs/step7-reconciliation/summary.json. Text search
+CLI hits were reviewed as cfg-gated tests/development probes, not shipping routes.
+Each retained family now has permission/path, owner and removal criteria.
+
+Transferred bisync-worker and NetworkManager/OpenConnect sandbox gates close at
+steps3–6's scoped/reused evidence levels. No fresh blanket provider/fault pass or
+release-publication approval follows. No runtime code, permission or dependency
+change; prior gate/localization and packaging checks reused.
+
+Public COSMIC repository README/build recipe and PR template were inspected.
+The template excludes AI-generated PR descriptions outside its own-app-source/
+manifest exception and requires personal acknowledgment of contribution terms.
+Therefore preparation is an [internal factual review brief](cosmic-submission-audit.md),
+not a generated submission description. Operator authorship/acknowledgment and
+maintainer acceptance of retained host execution, dependencies and runtime/portal
+compatibility remain open. No third-party message, PR, consent or approval was
+created. This is an external submission boundary; internal release verification
+can be reviewed independently in step8, with publication separately authorized.
+
+
+## Hosted Flatpak build closure — October 20
+
+Both CPU bundles are preserved and offline-inspected: x86_64 run39433010848 at
+095c180, ARM job run39382160325 atba8a341 (overall earlier run failed only x86).
+App Git source remains72661ce; manifest/dependency fingerprints and complete
+source pins match between targets. Their packaging/workflow commits differ and
+remain individually recorded; final tag/promotion identity is not waived.
+Checksums and producer/source/run identities passed. Maintained offline bundle
+inspections matched each ref/OSTree commit and full uploaded producer metadata;
+no app execution/installation. Reports under target/task-runs/hosted-flatpak-
+inspect-{x86,arm}-2026-10-20-retry/. Source/fingerprint report under
+target/task-runs/hosted-flatpak-acceptance-2026-10-20/verified-artifacts.json.
+
+Compared hosted x86 metadata with accepted local7069ae5: all sections equal
+except Context list ordering and Flatpak1.14.6's explicit x11 alongside fallback-
+x11 (local1.18.1 omits redundant x11). Official Flatpak command documentation
+states fallback-x11 takes precedence when both are supported. With that specific
+semantic equivalence and unordered Context lists, permissions match; exact
+per-bundle checks were not weakened or normalized in the maintained inspector.
+No new host filesystem/bus grants. Installed clean-profile/ARM acceptance,
+Flatpak release promotion support and final tag/publication checks remain open.
+
+
+## Promotion implementation and VM smoke follow-up — October 20
+
+Flatpak-aware publisher implementation/focused tests and gate dev-gate-85flvcye
+passed; real candidate-only inspection passed for both retained hosted bundles
+under target/task-runs/flatpak-promotion-candidates-2026-10-20/. Exact-tag
+publication policy remains intact; these mixed packaging SHAs are not an
+approved final release set. No actual publication performed.
+
+Operator installed the retained x86 bundle on the existing Pop!_OS24.04 VM
+using install-flatpak-release.sh --bundle: checksum OK, exit0. Installed commit
+readback equals 2ab220a037806b795523f9b6d345f95a1b5b998578ccf15386a050883df3d7c8.
+Screenshot of flatpak ps identifies the running application; operator confirms
+popup, Settings and Modify Connection open. Focused VM installation/panel/UI
+smoke accepted. Native profiles already exist, so clean-profile installation is
+not established. Public-download installation and ARM installed acceptance
+remain unverified; unchanged provider/VPN/sync evidence is reused. See completion
+notes for chronological observations; task list retains remaining release gates.
+
+
+## Final source identity decision — October 20
+
+The reviewed Debian run39282971942 used7069ae5, x86 Flatpak run39433010848
+used095c180 and ARM job run39382160325 usedba8a341. They retain their real
+acceptance/provenance but cannot be combined as one exact-tag source set.
+The pending standalone installers and Flatpak-aware publisher are absent from
+those historical sources. Commit the preparation, finalize notes/remaining
+acceptance, then freeze one packaging source for both package modes. Keep the
+accepted app pin72661ce unchanged. Once separately authorized, build each
+required target once at that common SHA; inspect resulting identities and
+affected inputs while reusing unchanged behavior tests. No current candidate
+is relabeled, tag chosen/created, or replacement build dispatched by this
+decision. Final source freeze remains a separate outstanding checklist item.

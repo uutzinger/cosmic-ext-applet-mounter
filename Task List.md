@@ -548,7 +548,6 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 - [x] Fix native VM dependency installer OBS mapping: use Pop!_OS/Ubuntu distro
   identity rather than Debian package-manager family. Six installer tests and
   dev-gate-zl7m77q1 passed; operator retry screenshot shows Done.
-
 - [x] Focused installed native/Debian smoke on Pop!_OS 24.04 amd64 VM:
   personal/business Test/Save/Preview, initial transfer and remote-edit download;
   personal Start/Pause; onedriver Online Test/Save/mount/list/unmount passed by
@@ -568,7 +567,7 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 - [x] Reuse phase-4/6 Flatpak personal/corporate/SharePoint Preview/initial/ordinary/
   scheduled/Pause/recovery, guards and Repair evidence at its recorded scope.
   No repeated setup/auth/sync/Repair suite for unchanged behavior.
-- [x] Review retained Task (5) worker/progress/cancellation/retention evidence and
+- [x] Review carried-forward bisync worker/progress/cancellation/retention evidence and
   final package differences. Unchanged worker/coordinator paths and retained
   source/installed evidence justify reuse; no additional step-4 live blocker
   identified. Limits recorded in acceptance map/completion notes; unrun cases
@@ -576,32 +575,73 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
 #### 5. Complete VPN and sleep/wake acceptance
 
-- [ ] Complete Task (6) final OpenConnect positive VPN/mount/unmount/ownership and
-  one negative authentication lifecycle. Reuse phase-6 manual mirror auth cancel,
-  positive auth/sync and optional applet-owned release; keep native/prototype
-  receipts separate from installed Flatpak evidence.
+Historical scope: the [carried-forward NetworkManager/OpenConnect migration](Task%20List%20Carry%20Forward.md)
+was numbered Task (6) before consolidation; it is not current release step 6.
+
+- [x] Installed Flatpak 7069ae5 focused VPN/Online check October 19: following
+  canceled-auth instructions, operator reports failure/row off; retry mounted
+  share with files visible; unmount completed. Read-only NetworkManager D-Bus
+  check confirms zero active VPNs afterward. Scoped UI/outcome acceptance; no
+  independent negative-case mount trace or shared-tunnel policy pass inferred.
+  Reuse native/prototype and phase-6 mirror VPN evidence; no duplicate matrix.
 - [x] Reuse phase-6 idle wake and manual VPN cancellation/auth/sync/optional-release
   smoke with existing source/fake readiness, ownership and cancellation coverage.
   No additional laptop suspend or full VPN fault matrix required by default.
-- [ ] Review whether package/runtime changes leave a concrete network/sleep gap.
-  Scheduled VPN-unavailable, live shared/pre-existing ownership and active-transfer
-  sleep/VPN-loss remain unrun live cases, not automatic mandatory reruns or passes.
-  Add a focused live check only when the evidence review identifies a blocker.
-- [ ] Decide Cisco rollback disposition only after relevant acceptance; no OS
-  client removal is implicit.
+- [x] October 19 review: VPN/sleep/services/coordinator code unchanged since
+  accepted phase-6 source; gate nh0kz3wx readiness/ownership/sleep tests passed.
+  No additional suspend or full fault matrix justified. Scheduled VPN-unavailable,
+  Flatpak shared/pre-existing ownership and active-transfer sleep/VPN-loss remain
+  explicitly unrun live limitations. Focused Online package check accepted
+  separately above; no source-only case is labeled an installed pass.
+- [x] Rollback disposition: keep any installed proprietary Cisco client as an
+  optional manual fallback; Cloud Mounter uses NetworkManager/OpenConnect only.
+  Client removal is not a 0.5.4 gate and requires a separate user decision; no OS
+  package, profile or service removal performed. Guidance in docs/openconnect.md.
 
 #### 6. Complete Online, desktop and preservation checks
 
-- [ ] Verify final Online engines, busy unmount/Repair, clean-profile setup,
-  upgrade/removal preservation, panel/settings integration and translations.
-  Reuse installed onedriver mount/list/unmount, panel embedding, recovery wording,
-  legacy notice and disposable connection-removal evidence where applicable.
+October 19 focused evidence review: no additional live test justified for
+unchanged code. Reuse at recorded package/observation levels, not as a claim that
+every scenario ran on the latest Flatpak. Historical open items remain open in
+the carried-forward list; GUI button cleanup stays post-0.5.4.
+
+- [x] Online engines: reuse VM native onedriver setup/mount/list/unmount and latest
+  Flatpak SMB/VPN cycle; earlier Google Drive/Box prototype and native SFTP
+  evidence plus unchanged shared engine routing. No repeated provider matrix or
+  claim of fresh per-provider authentication; carried-forward OAuth issues remain.
+- [x] Busy unmount/Repair: reuse earlier installed native deliberate-busy refusal
+  and confirmed Repair, plus unchanged ownership/confirmation/failure tests in
+  gate nh0kz3wx. Latest Flatpak busy Repair and ignored SFTP live test are not
+  newly passed; no forced busy mount or real-data write needed for this review.
+- [x] Clean profile and preservation: reuse fresh VM setup, saved profiles across
+  Debian replacement, existing SMB profile after Flatpak upgrade, and accepted
+  disposable removal with local mirror/recovery files retained. No profile reset,
+  repeat removal or independent byte-for-byte upgrade-state claim.
+- [x] Desktop/localization: reuse panel/popup/editor/settings observations, native
+  corrected notice and prior recovery/legacy wording. English-only catalog guard
+  uor7nshy passed (1,363 messages/1,576 references), packaged catalogs verified;
+  no new locale or exhaustive rendered/keyboard/accessibility claim.
 
 #### 7. Reconcile engineering and submission records
 
-- [ ] Reconcile host-command inventory/permission rationale, close transferred
-  Tasks (5)/(6) sandbox gates and prepare concise COSMIC review description.
-  Confirm maintainer expectations for retained host execution/dependencies.
+October 19 scope decision: 0.5.4 distributes Debian packages and a standalone
+x86_64 Flatpak bundle through GitHub Releases. COSMIC repository submission is
+deferred until the 0.5.5 legacy-engine removal and GUI cleanup; it is not a
+0.5.4 release gate. Preserve completed technical preparation and acceptance.
+
+- [x] Reconcile host-command inventory/permission rationale against source and
+  installed7069ae5 receipts: nine shipping executable identities, 23 explicit
+  grants, no app override, only read-only global theme overrides. Typed host
+  restrictions are not an OS allowlist; owners/removal criteria documented.
+- [x] Close transferred bisync worker and NetworkManager/OpenConnect sandbox
+  gates using scoped steps3–6 evidence/reuse. Unrun cases remain explicit; final
+  release checks and COSMIC approval are separate.
+- [x] Prepare [internal COSMIC review facts/questions](docs/engineering/cosmic-submission-audit.md)
+  and check public repository instructions/template. No tests/builds or external
+  communications repeated. No app-specific permission acceptance inferred.
+- [o] COSMIC submission authorship/acknowledgment and maintainer decisions moved
+  to [0.5.5 Flatpak submission](#055-flatpak-pull-request-ai-consideration).
+  Nothing posted or acknowledged; no COSMIC approval claimed for GitHub bundles.
 - [o] Release promotion tooling implementation/focused checks are handled by
   [Release build workflow follow-up](#release-build-workflow-follow-up--october-13-2026).
   It must publish the exact accepted immutable-source artifact set without
@@ -612,18 +652,77 @@ built/inspected successfully; reuse unchanged Flatpak behavior tests.
 
 - [x] Commit refreshed source 72661ce and Flatpak pin 7069ae5 for the October 19
   disabled-mirror Save notice. Flatpak x86_64/master build/export/payload checks
-  passed; prior 196f7b1 artifacts retained. No replacement installation performed.
+  passed; prior 196f7b1 artifacts retained. Flatpak replacement installed October 19;
+  installer verified identity/metadata; focused VPN accepted in step 5 and
+  desktop/UI evidence reviewed in step 6. Final release checks remain open.
 - [x] Finish Debian run 39282971942 at exact 7069ae5: all six Ubuntu/architecture
   candidates downloaded and producer-verified; corrected catalog present in all
   packages. Original wrapper completed after queue delay, without redispatch.
-- [ ] Review the changed disabled-mirror Save notice in an installed replacement;
-  reuse unchanged lifecycle evidence. Installation retains its approval boundary.
+- [x] Review corrected disabled-mirror Save notice in installed Debian replacement:
+  October 19 VM screenshot confirms Enable/Test/Save instructions and background
+  sync stopped. Reuse unchanged lifecycle evidence; no Flatpak replacement UI or
+  independent VM binary-hash verification inferred.
+- [x] Extend maintained release promotion to include the accepted x86_64 Flatpak
+  bundle and its producer provenance alongside Debian assets and SHA256SUMS.
+  Validate exact app/packaging source identities, bundle digest/ref/commit and
+  acceptance; refuse mismatches and never rebuild during promotion. Include
+  focused fake/offline tests and update script catalog/inventory and procedures.
+  October20: explicit per-CPU selection, candidate-only inspection and strict
+  exact-tag publication implemented; focused tests, real offline inspection and
+  gate dev-gate-85flvcye pass. Actual publication/installed acceptance separate.
+- [x] Draft README download/checksum/runtime/local-install/update instructions;
+  explicitly state GitHub distribution, external host dependencies and deferred
+  COSMIC submission. Download links remain prospective until publication.
+- [x] Review the operator's revised README for concise wording and clear
+  installation steps; preserve release scope and distinguish written instructions
+  from the pending clean-profile installation check.
+- [x] Add a standalone Debian release installer with automatic Ubuntu/Pop!_OS
+  version and native CPU selection, verified downloads and APT installation;
+  replace README Debian instructions with one curl command. Test with fake
+  downloads/package-manager adapters; actual installation is separate.
+- [x] Add a standalone GitHub Flatpak installer with CPU detection, verified
+  bundle download and user runtime/install setup; reduce README Flatpak steps
+  to one curl command. Test with fake adapters; hosted workflow comes next.
+- [x] Implement manual GitHub Flatpak builds on native x86_64/aarch64 runners
+  using maintained build/export checks; retain bundles, checksums and provenance
+  without publishing. Local fake/policy validation first; commit/push/dispatch
+  and real hosted/installed acceptance remain separate approvals.
+- [x] Verify hosted Flatpak bundles/provenance for both CPUs: x86_64 run39433010848
+  at095c180 and preserved ARM job run39382160325 atba8a341. Downloaded checksums,
+  app/source-input equality and offline ref/commit/metadata checks passed October20.
+  Retain existing local acceptance; no installed ARM or final publication claim.
+  - [x] Fix first hosted x86_64 build failure: install runner elfutils for
+    eu-strip/eu-elfcompress; verify the setup before retrying a new-source run.
+  - [x] Preserve successful ARM run39382160325; fix x86_64 AppStream SVG-loader
+    dependency and add an early compose check plus architecture-only retry.
+- [ ] Verify documented bundle installation on a clean user profile with the
+  required runtime and host dependencies; confirm panel discovery and one focused
+  smoke. Reuse completed provider/VPN/mirror evidence; no repeated full matrix.
+  October20: existing Pop!_OS VM selected; prior native profiles are not a clean
+  profile. Operator screenshot confirms local x86 bundle checksum OK and
+  user app/x86_64/master installation exit0. Installed commit readback matches
+  verified bundle 2ab220a0 exactly.
+  - [x] Focused existing-VM install/panel smoke: flatpak ps identifies running
+    application; operator confirms popup, Settings and Modify Connection open.
+  - [ ] Clean-profile installation coverage remains unverified; existing native
+    profiles retained. No installed ARM or public-download acceptance inferred.
 - [ ] Complete required release checks, reconcile final 0.5.4 notes/checksums and
   inspect the accepted native/final Flatpak artifacts against frozen identities.
   Keep earlier development smoke separate from final artifact acceptance.
-- [ ] Obtain release publication/COSMIC packaging submission approval for the
-  concrete verified artifacts and review description. Publication/submission and
-  any package installation remain separately authorized actions.
+- [x] Review final tag/source identity and choose the release path: Debian7069ae5,
+  Flatpak x86_64095c180 and ARMba8a341 are distinct packaging revisions. Retain
+  their acceptance evidence; they cannot be promoted together under one exact
+  tag. Keep the app pin72661ce; new installers/publisher require a new packaging
+  source. No tag chosen or build authorized by this decision.
+- [ ] Finalize release notes and freeze one release source containing the new
+  installers/publisher, then obtain approval for one Debian matrix and one
+  Flatpak CPU matrix from that same SHA. Tag that SHA after acceptance; later
+  receipt-only commits do not move the tag. Reuse unchanged behavior tests and
+  inspect new artifact identities/affected package inputs; do not repeat the
+  full provider/VPN/sleep suite.
+- [ ] Obtain GitHub release publication approval for the concrete verified
+  Debian/Flatpak assets and finalized notes. Tag/push, publication and any package
+  installation remain separately authorized; no COSMIC PR in 0.5.4.
 
 ## Agent context reduction — October 15, 2026
 
@@ -740,6 +839,16 @@ supported behavior changes or testing exposes a related defect.
   fault cases, then investigate the separately reported onedriver (OneDrive
   Online) sleep hang with journal evidence. The native SFTP release gate above includes one
   normal sleep/wake cycle only.
+
+## 0.5.5 Flatpak Pull Request, AI consideration
+
+Deferred from 0.5.4 on October 19, 2026. Refresh the submission against the
+accepted 0.5.5 source after legacy removal and GUI cleanup; reuse unchanged
+evidence. GitHub bundle distribution in 0.5.4 does not imply COSMIC approval.
+
+- [ ] Prepare the actual COSMIC repository submission after the planned 0.5.5
+  changes; operator authors and acknowledges the contribution. Obtain maintainer
+  decisions on host execution/dependencies and runtime/portal compatibility.
 
 ## Future Tasks depending on Pop!_OS or COSMIC desktop upgrades
 

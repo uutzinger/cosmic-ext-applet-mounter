@@ -71,3 +71,20 @@ integrity and excludes test-module notices from its production scan.
 Installed/native and final Flatpak UI smoke checks remain part of release
 acceptance. Future translations should review message length and wrapping in
 both the popup and connection editor.
+
+
+## October 19 release acceptance follow-up
+
+The October 12 helper and message-count sections above are historical. The
+WebKit helper and its helper-only labels were retired for 0.5.4; no helper is
+shipped in current7069ae5 candidates. Current source localization receipt
+ dev-localization-check-uor7nshy passed with one English catalog, 1,363 fallback
+messages and 1,576 Rust references. The added disabled-mirror Save notice passed
+source checks and rendered in the installed replacement Debian VM. Final
+Debian/Flatpak catalogs were compared byte-for-byte with source.
+
+Consolidated step6 reuses native settings/editor and current Flatpak panel/popup
+observations plus earlier installed recovery/legacy wording. This is scoped
+English UI evidence, not a full visual/accessibility or additional-language
+acceptance claim. No new catalog/code edit or repeat passing guard required.
+Final release checks remain in the current acceptance map.

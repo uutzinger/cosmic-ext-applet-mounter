@@ -46,11 +46,11 @@ The following connection engines are used to connect to the providers:
 
 `jstaf/onedriver` is ideal for on-demand access to OneDrive.
 
-> **0.5.4 development:** new OneDrive Offline mirrors use `rclone bisync` with a 15-minute default schedule and Sync Now. Save keeps the schedule paused until Preview and confirmed initial sync; Start enables it explicitly. Existing `abraunegg/onedrive` profiles retain their engine for one transition release. There is no automatic conversion. Source and automated tests are complete for this integration; installed native/Flatpak acceptance remains pending. See the [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
+> **0.5.4:** New OneDrive mirrors use rclone. Run Preview and the confirmed initial Sync Now before Start enables scheduled sync (15 minutes by default). Existing abraunegg mirrors remain supported for this release; there is no automatic conversion. See the [release notes](docs/releases/v0.5.4.md) for migration guidance and acceptance status.
 
 New OneDrive mirrors need **rclone 1.74.3 or newer** and use the primary personal or work/school drive. In Add/Modify, choose the drive type, enter the expected account, and connect a new remote or verify an existing one. Custom Microsoft clients and alternate roots are not supported for these mirrors. SharePoint and legacy custom-client guidance is in [Microsoft cloud authentication setup](docs/microsoft-cloud-auth-setup.md).
 
-`rclone` is best suited to mount documnet libraries from Microsoft Teams or SharePoint but its bisync mirror needs sync scheduling.
+`rclone` also supports Microsoft Teams and SharePoint document libraries.
 
 ## Data Integrity Warning
 
@@ -75,48 +75,50 @@ To reduce data integrity risks, **do not**:
 The [documentation index](docs/index.md) links to setup guides, release notes,
 and engineering records.
 
+**0.5.4 is not published yet.** The download instructions below apply once its
+GitHub release is available. COSMIC Flatpak repository submission is planned for
+0.5.5.
+
+When replacing an existing installation, stop its connections, close its windows
+and remove it from the panel first. Run only one native or Flatpak edition at a
+time; they share saved connections and host services.
+
 ### Dependencies
 
-For simple installation of dependencies run the automated installer:
+Both Debian and Flatpak installations require storage engines on the host.
+The dependency installer installs all supported engines, including legacy onedrive:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/install-dependencies.sh | bash
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/install-dependencies.sh | bash
 ```
 
-You can also verify dependencies in [Dependency installation](docs/dependency-installation.md).  The applet itself does not install the dependencies for you.
+For individual engines and VPN setup, see [Dependency installation](docs/dependency-installation.md).
+The applet does not install these dependencies itself.
+For a Flatpak installation, install Flatpak through your distribution first.
 
 ### Installation from Source
 
 See [Build from Source](docs/build-from-source.md).
 
-### Installation from Debian Package
-
-The [latest GitHub release](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/latest)
-provides native `amd64` and `arm64` Debian packages for Ubuntu 22.04, 24.04,
-and 26.04. For example, on Ubuntu or Pop!_OS 24.04 amd64:
+### Installation from GitHub Release: Debian Package
 
 ```sh
-wget https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.2/cosmic-ext-applet-mounter_0.5.2_ubuntu24.04_amd64.deb
-sudo apt install ./cosmic-ext-applet-mounter_0.5.2_ubuntu24.04_amd64.deb
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/install-debian.sh | bash
 ```
 
-The 0.5.4 package installs the applet binary, desktop entry, AppStream metadata,
-translation catalog and icon. Earlier packages also installed the retired
-WebKit-based OneDrive authentication helper.
+### Installation from GitHub Release: Flatpak
 
-### Installation from Flatpak
-
-Flatpak publication is pending; use Debian or source installations unless testing
-the [local manifests](packaging/flatpak/README.md). Desktop control uses D-Bus;
-storage engines still run on the host. Documents portal v4 retains a gated
-`flatpak document-info` fallback. The [command inventory](docs/engineering/flatpak-host-command-inventory.md)
-documents the remaining host calls. Release 0.5.3 targets source/Debian installs;
-final Flatpak packaging and engine decisions are planned for 0.5.4.
+```sh
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/install-flatpak-release.sh | bash
+```
 
 ### Post Installation
 
 After installation, open **COSMIC Settings > Desktop > Panel > Applets** and add
 **Cloud Mounter** to the desired panel or dock.
+
+In Flatpak, select mirror and recovery directories separately using their
+**Browse** buttons.
 
 ## Applet Workflow
 
@@ -182,7 +184,7 @@ __Google Drive__ setup accepts the client ID and matching client secret from a
 Google Cloud Desktop OAuth application managed through the
 [Google Auth Platform](https://console.cloud.google.com/auth/overview). Leaving
 both blank uses rclone's shared client for compatibility, but that shared client
-is scheduled foris scheduled for retirement during 2026; configure a private client before
+is scheduled for retirement during 2026; configure a private client before
 then.
 
 To configure a private __Google Drive OAuth__ client, follow
@@ -221,7 +223,7 @@ configuration, not only applet configuration.
 
 ## Conflict Recovery and Limitations
 
-The applets does not provide a mechanims for multiuser editing of documents.
+The applet does not coordinate simultaneous document editing by multiple users.
 
 Offline mirrors preserve both versions of same-file conflicts. Deletions
 propagate bidirectionally after preview and confirmation policy has been

@@ -478,3 +478,131 @@ validation. Some Microsoft personal-account redirects leave the native-client
 URL quickly; retrieving that preceding URL from browser history worked. Treat
 the redirect URL as a credential: paste it only into the applet response field,
 not logs or support messages. This is a manual workaround, not automatic capture.
+
+
+## October 19 permission and acceptance reconciliation
+
+Candidate packaging7069ae5/app72661ce was built and installed without changing
+its 23 declared grants, runtime/BaseApp or host dependencies. Installation receipt
+records matching metadata/commit, no app-specific override and only read-only
+user-global theme paths. Earlier final-worker/portal pending statements above
+are historical checkpoints: actual selected mirror/recovery access and shared
+scheduled worker evidence are accepted by unchanged-code reuse; the replacement
+passed the focused VPN Online cycle. Full source/fake/installed boundaries and
+unrun limits are in the [acceptance map](../../docs/engineering/release-054-acceptance-audit.md).
+
+The broad org.freedesktop.Flatpak gateway and external host engines remain
+explicit submission-review topics. The app's typed restrictions do not make
+that permission an OS allowlist. App-owned state paths are scoped; selected
+mirror/recovery local I/O uses revalidated portal grants rather than treating a
+resolved host path as permission. Host credentials stay with host engines.
+
+Current [COSMIC repository instructions](https://github.com/pop-os/cosmic-flatpak/blob/master/README.md)
+cover the applet repository and build entry point. Its
+[PR template](https://github.com/pop-os/cosmic-flatpak/blob/master/.github/PULL_REQUEST_TEMPLATE.md)
+requires a personal contribution acknowledgment and excludes AI-generated PR
+content except the contributor's own app source and manifest. The operator must
+author the submission description and assess the actual proposed diff; do not
+paste these AI-prepared internal notes into that PR. No acknowledgment or
+maintainer approval has been supplied by this work. Internal facts and open
+questions: [submission readiness notes](../../docs/engineering/cosmic-submission-audit.md).
+
+
+### GitHub bundle distribution decision — October 19
+
+0.5.4 will distribute the accepted x86_64 bundle through GitHub Release assets,
+with checksums and [local installation instructions](../../README.md#installation-from-github-release-flatpak).
+COSMIC repository submission/maintainer exception review is deferred until the
+0.5.5 legacy-engine removal and GUI cleanup. Earlier pending submission gates
+above do not block independent GitHub distribution. Release approval is separate.
+At the October 19 planning point the promotion script handled Debian only.
+The October 20 extension below adds selected Flatpak verification/promotion;
+final exact-tag artifact identity and publication approval remain required before
+advertising the mixed release as available. Clean-profile documented installation
+needs focused acceptance; completed unchanged cloud/VPN tests are reused.
+
+### Standalone GitHub release installer
+
+The README uses `scripts/install-flatpak-release.sh` via curl/stdin. It requires
+Flatpak already installed and runs as the desktop user, without sudo. It defaults
+to 0.5.4; `--version X.Y.Z` selects another published version. CPU detection maps
+x86_64/amd64 to x86_64 and aarch64/arm64 to aarch64. It downloads the corresponding
+`io.github.uutzinger.cosmic-ext-applet-mounter-<arch>-master.flatpak` and
+SHA256SUMS from that GitHub release, verifies the unique selected checksum, then
+adds user Flathub, installs/updates Platform 25.08 for that architecture and
+installs/updates the user bundle. Future runtime changes require updating this
+installer's runtime selection. Host engines/VPN setup remain separate.
+
+Unsupported CPUs or unavailable/mismatched assets fail before Flatpak changes.
+Failure after runtime setup can leave the remote/runtime installed; no rollback
+or app/service stop is attempted. The script cleans private temporary downloads,
+retains the actual exit status and prints a result line. GitHub bundles do not
+provide automatic app updates. Close windows, stop connections and remove the
+panel applet before replacement. The existing `install-flatpak.sh` remains the
+receipt-based internal candidate installer; neither script builds or dispatches
+CI. Both hosted CPU bundles have now passed offline checks; installed ARM
+acceptance remains separate. Before release assets are public, `--bundle FILE`
+uses an exact CPU/app-named local bundle and its sibling SHA256SUMS with the same
+checksum/runtime/install steps. It does not download a release in that mode.
+
+### Manual GitHub build workflow
+
+`.github/workflows/build-flatpak.yml` builds x86_64 and aarch64 on native
+Ubuntu24.04 GitHub runners. Dispatch is manual and separately authorized; no
+push/tag event builds or publishes automatically. It invokes
+`scripts/build-flatpak-ci.sh`, which requires the matching clean packaging SHA
+and native architecture, prepares runner tools and exact manifest runtime refs,
+then calls the existing `build-flatpak.sh` once. Ubuntu's user-namespace restriction
+is relaxed only on the disposable CI runner so bubblewrap can build.
+
+Artifacts `flatpak-x86_64` / `flatpak-aarch64` retain the bundle, metadata,
+producer receipts, a portable source/run/ref/commit index and SHA256SUMS for
+14 days. Separate summary-only diagnostic artifacts are retained on failure.
+Original candidate receipt paths refer to the runner; the portable index lists
+the downloaded files. No app is installed and no GitHub/COSMIC release is
+published. Both real hosted CPU builds passed by October 20; installed ARM
+acceptance remains pending.
+Flathub's ARM COSMIC BaseApp was confirmed against Platform25.08 on October19;
+that read-only observation is not a successful ARM build.
+
+The October 20 publisher extension accepts repeated `--flatpak-run ARCH=RUN_ID`
+and verifies the selected successful job, all file hashes, producer/input/runtime
+provenance and offline bundle ref/commit/full metadata. Normal publication still
+requires each selected build's packaging SHA to match the exact release tag.
+It attaches the selected bundles, portable FLATPAK-PROVENANCE.json and combined
+SHA256SUMS alongside Debian packages without rebuilding. The workflow exposes
+optional run IDs for each CPU; publication requires explicit approval.
+
+For candidate review before a final tag (inspection only):
+
+```sh
+python3 scripts/promote_release.py v0.5.4 --inspect-flatpaks \
+  --flatpak-run x86_64=39433010848 --flatpak-run aarch64=39382160325 \
+  --repo uutzinger/cosmic-ext-applet-mounter
+```
+
+This retains verified files in the new private report directory and explicitly
+records that acceptance/publication are not performed. These two candidates
+have different packaging SHAs; inspection does not waive the final identity gate.
+
+
+### October 20 hosted AppStream follow-up
+
+Run39382160325 at ba8a341 exported/uploaded aarch64 successfully; the preserved
+bundle/provenance is under target/artifacts/candidates/flatpak-hosted-ba8a341/.
+Its checksums/source/run identity passed local verification; installed ARM
+acceptance is not claimed. x86_64 reached AppStream composition and failed with
+file-read-error/filters-but-no-output. The same errors were reproduced locally
+with the SVG loader disabled; normal pinned-source metadata/icon composition
+passes. The failed runner's detailed hints were not retained, so missing SVG
+support is an evidence-backed diagnosis, not a direct package inventory of that
+runner. No icon/metadata edits or validation bypass were needed.
+
+CI now explicitly installs appstream, appstream-compose and librsvg2-common and
+composes the pinned app commit's metainfo/desktop/SVG before SDK download/build.
+The preflight records versions/package inventory and retains issue hints in the
+diagnostic artifact. Select architecture=x86_64 in a new manual run to avoid
+rebuilding the successful ARM target; both remains the default for full builds.
+A mixed-source artifact set must still satisfy explicit release provenance and
+acceptance policy before promotion; preserving ARM does not silently waive that
+final identity gate. These are runner-only changes, not an app/runtime update.

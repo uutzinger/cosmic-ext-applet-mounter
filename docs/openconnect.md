@@ -90,3 +90,11 @@ When the applet activates it, the OpenConnect dialog should request the fields
 defined by the gateway—for example, username, password, and `NetID +Method`—and
 then start the second-factor authentication. The exact fields and gateway URL
 are organization-specific.
+
+
+## Existing proprietary client
+
+Cloud Mounter uses NetworkManager/OpenConnect and does not launch or manage
+Cisco Secure Client. An existing proprietary client can remain installed as a
+manual fallback. This setup does not uninstall it. Removing that client is a
+separate operating-system change; decide independently whether you still need it.

@@ -2,16 +2,18 @@
 
 Type: Inventory
 
-Status: Source reconciliation complete; final release-package acceptance pending
+Status: October 19 command/permission reconciliation and scoped worker/VPN gates complete; COSMIC maintainer exception review and final release acceptance open
 
 Created: October 7, 2026
 
-Last reviewed: October 17, 2026
+Last reviewed: October 19, 2026
 
 ## Scope and method
 
-This records the current working tree for the pending 0.5.3 migration, not the
-older v0.5.2 tag or a final accepted Flatpak artifact. The review follows the
+This records the default shipping surface for the 0.5.4 candidate: app source
+72661ce, packaging7069ae5, with later documentation-only acceptance updates.
+The October 7/12 migration observations below retain their historical scope;
+this inventory does not assert final publication or COSMIC maintainer approval. The review follows the
 shipping applet, settings/IPC paths, guards, restricted bisync worker, generated
 service payloads, and their command factories.
 
@@ -29,8 +31,9 @@ Each command has one source disposition:
 - **Unavoidable invocation**: a retained engine/host-helper operation or supported
   host compatibility exception has no usable D-Bus replacement for its role.
 
-Final native/Flatpak artifact acceptance remains in
-[Tasks (5), (6), and the 0.5.3 gate](../../Task%20List.md).
+Current acceptance is in [consolidated release steps 7 and 8](../../Task%20List.md)
+and the [0.5.4 evidence map](release-054-acceptance-audit.md). Historical Task (5)
+and Task (6) meant the bisync and NetworkManager/OpenConnect migrations.
 The inventory is maintained; the
 [bisync baseline](2026-10-10-bisync-coordinator-inventory.md) is historical.
 
@@ -323,6 +326,8 @@ behavior and installed effective permissions remain separate acceptance gates.
 
 ## Remaining acceptance and follow-ups
 
+### October 12 source checkpoint (historical)
+
 Source permission/documentation reconciliation completed October 12. The source
 and GUI manifests have the same 23 explicit, justified grants; the GUI prototype
 now includes pinned libcosmic's settings-daemon grant. No obsolete command-specific
@@ -351,3 +356,46 @@ until the separate removal phase. Installer --all selections and package
 recommendations are unchanged. Configured engine/mode selects missing-tool
 warnings; no startup version/help probe, new host executable, filesystem grant
 or bus permission was added. Integrated Flatpak acceptance remains pending.
+
+
+### October 19 reconciliation and transferred-gate closure
+
+Default source review still finds nine shipping executable identities listed
+above. Nmcli/Systemctl references found by text search are cfg-gated tests or
+development probes; sleep's systemctl helper is test-only. No shipping shell,
+proprietary Cisco or removed GUI-helper launch route was found. This is reviewed
+source reachability, not a new formal whole-program proof.
+
+| Retained family | Permission and host path boundary | Source owner | Removal criterion |
+|---|---|---|---|
+| rclone, onedriver, legacy onedrive | org.freedesktop.Flatpak host gateway; fixed executable identities and separately validated arguments; host owns engine config and selected storage paths | process.rs, app.rs, providers.rs, sync.rs, microsoft_oauth.rs, bisync_coordinator.rs | Equivalent reviewed engine API; legacy onedrive only after the separate post-0.5.4 retirement/preservation work. |
+| fusermount3 | Same host gateway; owned/validated mountpoint, clean detach or separately confirmed eligible recovery | app.rs, providers.rs, sleep.rs | Equivalent host FUSE API preserving namespace and ownership safety. |
+| cat/mountpoint/find | Same host gateway; fixed mountinfo read or validated directory/readiness/preload operations, bounded output and cancellation | host_inspection.rs, mount_guard.rs, directory_preload.rs, sleep.rs | Equivalent host namespace/metadata APIs on the supported minimum host. |
+| flatpak document-info | Same host gateway; validated portal-selected path, portal-v4 capability exception only | app.rs, mirror_access.rs | Minimum supported host provides sandbox-accessible Documents v5+ resolution; no fallback on general v5 errors. |
+| Restricted app worker/guards | App-owned user service; native binary or fixed /usr/bin/flatpak run entry with mode and UUID | bisync_worker.rs, mirror_script.rs, services.rs, app.rs | Retire the corresponding feature/guard; never replace with a generic command endpoint. |
+
+The host gateway is broad OS authority; typed requests are application policy,
+not an OS-enforced executable allowlist. No --filesystem=host or blanket bus
+socket grant is present. All 23 explicit finish-args remain justified in the
+packaging guide. Installed7069ae5 metadata/commit match the verified export;
+installation receipt has no app-specific override and only read-only global
+theme paths. SDK availability is not used as proof of Platform capabilities.
+
+Close the transferred bisync-worker and OpenConnect sandbox gates at the scoped
+levels in the evidence map: actual portal-selected mirror/recovery access,
+restart/scheduled worker and recovery observations from unchanged code; latest
+source Flatpak negative/positive VPN Online cycle and final zero-active-VPN
+D-Bus check. Native/prototype and final-package results remain distinct. Unrun
+fault/ownership/legacy cases and full final release checks are not promoted to
+passes. No source/permission change or repeat live suite needed for this review.
+
+The WebKit helper and helper-only recommendations were retired October18;
+legacy engine compatibility remains, its additional live test waived. Host
+engines may have their own dependencies; no WebKit/Ruby build pipeline is bundled
+in the app manifest. October16 pending/helper statements above are historical.
+
+External COSMIC acceptance of the host gateway, supported host dependencies,
+portal-v4 exception and runtime baseline remains unconfirmed. Current public
+submission instructions were checked; they do not grant app-specific exception
+approval. See [internal submission readiness notes](cosmic-submission-audit.md).
+No maintainer contact, external PR or publication performed.
