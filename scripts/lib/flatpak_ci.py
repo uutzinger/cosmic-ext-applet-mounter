@@ -97,7 +97,11 @@ def operation(args, report):
     report.phase('preparing-runner')
     report.run(['sudo', 'apt-get', 'update'], timeout=600)
     report.run(['sudo', 'apt-get', 'install', '--no-install-recommends', '--yes',
-                'flatpak', 'flatpak-builder', 'ostree', 'dbus-daemon', 'git', 'ca-certificates'], timeout=600)
+                'flatpak', 'flatpak-builder', 'elfutils', 'ostree', 'dbus-daemon', 'git', 'ca-certificates'], timeout=600)
+    # flatpak-builder invokes these host tools when finishing release/debug files.
+    # --no-install-recommends does not pull elfutils in implicitly.
+    report.capture('eu-strip', '--version')
+    report.capture('eu-elfcompress', '--version')
     # Ubuntu 24.04 AppArmor otherwise blocks bubblewrap's user namespace.
     # This changes only the ephemeral CI VM, never the operator's host.
     if Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns').exists():

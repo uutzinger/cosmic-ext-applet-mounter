@@ -6,7 +6,7 @@ Status: P0–P3 source/fixture gates complete; separate live/hosted package acce
 
 Created: October 13, 2026
 
-Last reviewed: October 18, 2026
+Last reviewed: October 19, 2026
 
 ## Scope and method
 
@@ -46,6 +46,7 @@ rollback, app launch or service changes.
 
 | Script in scripts/ | Category | Current evidence/callers | Disposition |
 |---|---|---|---|
+| `build-flatpak-ci.sh`, `lib/flatpak_ci.py` | Manual hosted Flatpak build | `.github/workflows/build-flatpak.yml`, `tests/flatpak_ci_test.py` | Added October 19: native x86_64/aarch64 runner matrix, ephemeral runner-only APT/Flatpak/user-namespace setup, existing build/export driver and portable verified upload set. Manual dispatch/clean-source guards; no dispatch by the script, app install or publication. First x86_64 hosted build failed during stripping (missing eu-strip); runner elfutils/tool preflight fix prepared. Fake verification remains separate from a successful hosted build/installed acceptance. |
 | `install-dependencies.sh` | Project host setup | Dependency guide, installer/reporting fixtures, component selections | P2 optional --log-dir implemented; visible prompts, private logs/atomic result. October 18: legacy engine retained, helper-only GUI install/probe/options retired; --all installs engines only and --rclone-only isolation retained. OBS mapping now uses actual distro ID so Pop/Ubuntu are not mistaken for Debian; VM retry pending. No-options installation is not read-only. |
 | `setup-openconnect.sh` | Project host setup | OpenConnect guide and fake package/service/setting/report fixtures | P2 optional --log-dir implemented; installs/changes service and icon as before. Uninstall retains packages/profiles. No live setup execution counted. |
 | `cosmic-ext-applet-mounter-onedrive-auth-helper` | Retired runtime payload | October 18 operator moved helper-only retirement into 0.5.4 | Source, install payloads, dispatcher, GUI dependency options and helper-localization tests removed. Existing legacy browser/manual handoff retained. No longer a runtime consumer. |

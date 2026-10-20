@@ -2,6 +2,7 @@
 """Offline hosted-build collection/runner policy tests; no CI or package changes."""
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -108,7 +109,7 @@ class FlatpakCITests(unittest.TestCase):
     def test_build_failure_stops_before_collection(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Mock(directory=Path(directory) / 'logs')
-            report.capture.side_effect = [str(ROOT), self.sha, '']
+            report.capture.side_effect = [str(ROOT), self.sha, '', 'eu-strip fixture', 'eu-elfcompress fixture']
             def fail_build(argv, **kwargs):
                 if 'scripts/build-flatpak.sh' in argv:
                     raise RuntimeError('fake builder failure')
@@ -120,7 +121,26 @@ class FlatpakCITests(unittest.TestCase):
             self.assertFalse((args.work_dir / 'upload').exists())
             commands = [call.args[0] for call in report.run.call_args_list]
             self.assertTrue(any('--arch=x86_64' in cmd and 'flatpak' in cmd for cmd in commands))
+            packages = next(cmd for cmd in commands if cmd[:3] == ['sudo', 'apt-get', 'install'])
+            self.assertIn('elfutils', packages)
+            self.assertIn(('eu-strip', '--version'), [call.args for call in report.capture.call_args_list])
+            self.assertIn(('eu-elfcompress', '--version'), [call.args for call in report.capture.call_args_list])
             self.assertFalse(any('release' in cmd or 'publish' in cmd for cmd in commands))
+
+    def test_missing_elfutils_tool_stops_before_runtime_download_and_build(self):
+        for tool in ('eu-strip', 'eu-elfcompress'):
+            with self.subTest(tool=tool), tempfile.TemporaryDirectory() as directory:
+                report = Mock(directory=Path(directory) / 'logs')
+                responses = [str(ROOT), self.sha, '']
+                if tool == 'eu-elfcompress':
+                    responses.append('eu-strip fixture')
+                report.capture.side_effect = [*responses, subprocess.CalledProcessError(127, [tool, '--version'])]
+                args = Mock(source_sha=self.sha, arch='x86_64', work_dir=Path(directory) / 'work')
+                with patch.dict(ci.os.environ, self.environment, clear=True), patch.object(ci.platform, 'machine', return_value='x86_64'):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        ci.operation(args, report)
+                commands = [call.args[0] for call in report.run.call_args_list]
+                self.assertFalse(any('flatpak' == cmd[0] or 'scripts/build-flatpak.sh' in cmd for cmd in commands))
 
 
 if __name__ == '__main__':
