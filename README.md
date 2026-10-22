@@ -6,6 +6,12 @@ Cloud Mounter is an applet for the COSMIC™ desktop for managing storage
 connections to **OneDrive**, **SharePoint**, **Google Drive**, **Box**, **SMB**, and **SFTP**. It supports
 direct **Online mount** and **Offline mirror** mode.
 
+**0.5.5** updates connection controls, repairs Google Drive and Box browser
+authentication, improves Google directory preload, and retires the legacy
+abraunegg/onedrive mirror engine. See the [0.5.5 release notes](docs/releases/v0.5.5.md)
+for upgrade guidance and validation limits. Packages are being prepared;
+0.5.5 has not yet been published.
+
 The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
 unavailable.
@@ -16,13 +22,9 @@ Example screenshots of the applet and its separate windows:
   <tr>
     <td><a href="./resources/Popup.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="275"></a></td>
     <td>
-    <a href="./resources/Settings.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Settings.png" alt="Settings window" width="200"></a>
-    <a href="./resources/Reorder_Connections.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Reorder_Connections.png" alt="Reorder Connections window" width="140"></a>
+    <a href="./resources/Settings.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Settings.png" alt="Settings window" width="275"></a>
     </td>
-  </tr>
-  <tr>
     <td><a href="./resources/Add_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></a></td>
-    <td><a href="./resources/Change_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Change_Connection.png" alt="Modify Connection window" width="275"></a></td>
   </tr>
 </table>
 
@@ -37,22 +39,21 @@ The following connection engines are used to connect to the providers:
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) for supported mirrors |
+| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) |
 | Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
-| SharePoint | `rclone mount` | managed `rclone bisync` schedule, disabled until explicitly started |
+| SharePoint | `rclone mount` | `rclone bisync`  |
 
-`jstaf/onedriver` is ideal for on-demand access to OneDrive.
+`rclone` handles all Offline mirrors and all Online mounts except OneDrive.
+`jstaf/onedriver` provides on-demand OneDrive Online access.
 
-> **0.5.5 development:** abraunegg/onedrive is retired. Existing profiles remain visible, without conversion; files and credentials are preserved. Owned legacy monitors are retired through systemd. Use separate folders and new authentication for a replacement rclone mirror. Installed upgrade acceptance remains pending; see the [draft notes](docs/releases/v0.5.5.md).
-
-> **0.5.4:** New OneDrive mirrors use rclone. Run Preview and the confirmed initial Sync Now before Start enables scheduled sync (15 minutes by default). Existing abraunegg mirrors remain supported for this release; there is no automatic conversion. See the [release notes](docs/releases/v0.5.4.md) for migration guidance and acceptance status.
-
-New OneDrive mirrors need **rclone 1.74.3 or newer** and use the primary personal or work/school drive. In Add/Modify, choose the drive type, enter the expected account, and connect a new remote or verify an existing one. Custom Microsoft clients and alternate roots are not supported for these mirrors. SharePoint and legacy custom-client guidance is in [Microsoft cloud authentication setup](docs/microsoft-cloud-auth-setup.md).
-
-`rclone` also supports Microsoft Teams and SharePoint document libraries.
+Legacy abraunegg/onedrive profiles remain visible as retired, with authentication
+and sync unavailable. Their local data and credentials are preserved; verified
+applet-owned monitor units are stopped, disabled and retired. There is no automatic
+conversion. To replace a legacy mirror, preserve unsynchronized files and create
+a new rclone mirror with separate local and recovery folders and new authentication.
 
 ## Data Integrity Warning
 
@@ -78,8 +79,10 @@ The [documentation index](docs/index.md) links to setup guides, release notes,
 and engineering records.
 
 [Release 0.5.4](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.4)
-provides Debian packages and Flatpak bundles. COSMIC Flatpak repository
-submission is planned for 0.5.5.
+is the current published release and provides Debian packages and Flatpak bundles.
+The commands below install the latest published release, not the unpublished
+0.5.5 candidates. A PR to the COSMIC Flatpak repository is planned after the
+0.5.5 release; GitHub bundles do not imply COSMIC repository approval.
 
 When replacing an existing installation, stop its connections, close its windows
 and remove it from the panel first. Run only one native or Flatpak edition at a
@@ -88,7 +91,8 @@ time; they share saved connections and host services.
 ### Dependencies
 
 Both Debian and Flatpak installations require storage engines on the host.
-The dependency installer installs the supported engines, rclone and onedriver:
+The supported engines are **rclone >= 1.74.3** and **onedriver >= 0.15.0**;
+Online mounts also require FUSE3. The dependency installer sets up these engines:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/install-dependencies.sh | bash
@@ -144,18 +148,29 @@ A small count beside the name shows pending work when an engine can estimate it;
 
 ## Settings
 
-Open the Settings window by clicking the gear icon. `Add Connection`, `Refresh`,
-and `Reorder` are available under **Connections**. Add and Modify connections
-share the same editor.
+Open the Settings window by clicking the gear icon. **Add Connection**,
+**Remove Remote**, and **Reorder** are available under **Connections**.
+Add and Modify connections share the same editor.
 
-Add mode exposes `Test Connection`, `Save Connection`, `Import`, and the
-provider-specific setup and rclone remote-management actions needed to create
-or select a storage remote.
+In Add mode, use **Detect** to find existing remotes or **Connect** to set up a
+new one. Enter the connection details, run **Test**, then **Save**. An existing
+OneDrive Offline remote is verified as part of Test. Choose its matching
+Personal or Work or school account type and enter the expected account email.
 
-Modify mode exposes `Test Connection`, `Save Connection`, `Disable` or `Enable`,
-and `Remove`. Offline mirrors also expose `Preview` and `Sync Now`. The
-Information section summarizes the selected engine, generated unit validation,
-and confirmation policy.
+Modify mode uses **Re-Connect**, **Re-Test**, **Save**, **Disable** or **Enable**,
+and **Remove**, according to provider and connection state. Offline mirrors also
+expose **Preview** and **Sync Now**. Relevant edits require a successful Re-Test
+before Save. When remote sharing needs acknowledgment, Save changes to
+**Confirm Save** for the second click; editing the details clears that confirmation.
+
+Blue actions indicate recommended next steps, grey actions are secondary, and
+red actions disable or remove a connection. Blocked and running actions keep
+their base color with reduced contrast; progress labels indicate work in flight.
+
+New Offline mirrors are saved with background synchronization paused. Run Preview
+and the confirmed initial Sync Now before Start enables their schedule.
+**Sync interval in minutes** controls the first scheduled delay after Start and
+the delay after each background sync finishes. **Sync Now** runs immediately.
 
 **Unmount for Sleep**: Because a busy mount may delay sleep, settings can
 unmount Online connections before sleep and restore them after wake.
@@ -166,6 +181,10 @@ are cancelled before unmount, repair, removal, or sleep cleanup.
 The preload approach is optimized for each provider and connection type.
 Preload is disabled by default and should be tested before leaving it enabled.
 *Warning: Preloading can trigger provider rate limits or exhaust API quotas.*
+
+**Google Drive:** mounts enable fast-list at creation. Preload refreshes the root
+directory first, then recursively fills the directory cache within its time limit.
+There is no selectable shallow-depth preload setting.
 
 **SMB:** connections may individually override the global preload setting.
 
@@ -182,20 +201,24 @@ __SFTP__ supports a password, SSH key, or SSH agent and requires a known-hosts f
 __SharePoint__ can use a verified existing rclone document-library remote or the
 editor's Microsoft sign-in setup.
 
+__Google Drive__ and __Box__ new-remote setup open the browser for authorization.
+Selecting an existing remote allows access testing without creating another one.
+
 __Google Drive__ setup accepts the client ID and matching client secret from a
 Google Cloud Desktop OAuth application managed through the
-[Google Auth Platform](https://console.cloud.google.com/auth/overview). Leaving
-both blank uses rclone's shared client for compatibility, but that shared client
-is scheduled for retirement during 2026; configure a private client before
-then.
+[Google Auth Platform](https://console.cloud.google.com/auth/overview).
+Use your own client for independent API quota and reliable access. Leaving both
+fields blank uses rclone's shared client for compatibility; do not rely on its
+continued availability.
 
 To configure a private __Google Drive OAuth__ client, follow
 [Google Cloud authentication setup](docs/google-cloud-auth-setup.md).
 This applet does not provide a Google Cloud project or client ID/secret for you.
 
-In Modify mode, **Update Google OAuth Client** changes an existing Drive remote
+In Modify mode, **Update Google OAuth** changes an existing Drive remote
 and opens browser authorization to issue a new token for the selected Google
-account. Your personal Google client can authorize also Google Workspace
+account. Remount active connections using that remote after updating it.
+Your personal Google client can also authorize Google Workspace
 accounts when the Workspace policy permits it.
 
 ## VPN Integration
@@ -219,9 +242,10 @@ applet-owned systemd user units. Connection removal does **not** delete
 provider credentials, cloud data, local mirror data, caches, recovery directories,
 or original imported legacy service files.
 
-Unused rclone remotes can be removed separately from the Add Connection rclone
-management area. That action requires confirmation and changes rclone
-configuration, not only applet configuration.
+Open **Settings → Remove Remote** to list rclone remotes and whether saved
+connections use them. **In use** entries cannot be removed. Unused entries use
+**Remove → Confirm Remove**. This changes rclone configuration, not only applet
+configuration, and does not delete cloud files.
 
 ## Conflict Recovery and Limitations
 
@@ -256,7 +280,7 @@ sudo apt remove cosmic-ext-applet-mounter
 When installed from Flatpak:
 
 ```sh
-flatpak uninstall io.github.uutzinger.cosmic-ext-applet-mounter
+flatpak uninstall --user --app --no-related io.github.uutzinger.cosmic-ext-applet-mounter
 ```
 
 When installed from source with `just install-user`, remove the installed user
