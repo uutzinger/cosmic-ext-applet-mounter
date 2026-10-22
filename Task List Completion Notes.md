@@ -2434,3 +2434,428 @@ approved commit. Final worktree/source identity does not establish package
 acceptance. No push, tag, hosted dispatch, build, install or publication occurred.
 Next: approved single Debian/Flatpak build set, followed by package inspection
 and the combined installed upgrade/regression checklist.
+
+
+## 0.5.5 push and hosted dispatch — October 22, 2026
+
+Operator explicitly authorizes push and dispatch. Fetched origin/master (exit 0),
+verified no upstream divergence (0 behind, 4 ahead), pushed the four commits
+(exit 0), and verified remote refs/heads/master equals packaging revision
+cd1b465160d692052f32dbb53010583c8ed11a19. Main manifest pins application source
+13e204ec93049587611978c0cfbad0f9e0a5968c. No tag or release publication occurred.
+
+Debian dispatch/tracking uses the maintained run_github_linux_build.sh with
+--ref master --repo uutzinger/cosmic-ext-applet-mounter. Its request ID is
+6cbcf7a09341473dbcf096cb96494205; run 39842941118, six Ubuntu/CPU targets. The
+wrapper continues its own bounded polling/download sequence; do not redispatch.
+Resume by explicit run ID/receipt if needed, rather than starting another matrix.
+
+Dispatched the maintained build-flatpak.yml workflow once through gh workflow
+run with architecture=both and request_id=release-055-cd1b465-20261022 (exit 0).
+Selected run 39842934431, x86_64/aarch64. A single gh run list inspection (exit 0)
+confirms both runs are in progress at exactly cd1b465. No build success, final
+artifact identity or installed acceptance is claimed yet. GitHub Pages also
+completed automatically on push; it is not the application release publication.
+
+Only task/evidence notes changed after the frozen build revision. Keep these
+later observations separate from that immutable source; no rebuild merely to
+include them. Source tests were not repeated for push/dispatch. Next: inspect
+producer summaries/artifact coverage when the runs finish, then approve/install
+the selected bytes for the combined package-upgrade/regression checks.
+
+
+## Hosted Flatpak candidates verified; Debian progressing — October 22, 2026
+
+Read run 39842934431 and its artifact inventory: both x86_64 and aarch64 jobs
+succeeded at packaging cd1b465; both bundle artifacts are unexpired. Maintained
+python3 scripts/promote_release.py v0.5.5 --inspect-flatpaks --repo
+uutzinger/cosmic-ext-applet-mounter --flatpak-run x86_64=39842934431
+--flatpak-run aarch64=39842934431 completed successfully (exit 0).
+
+Receipt target/task-runs/release-promotion-4fdzna92/summary.json; artifacts.json
+and FLATPAK-PROVENANCE.json retain hashes/source/runtime/producer evidence. Both
+bundles are retained in its flatpak-artifacts/flatpak-<arch>/ directories.
+Verified bundle SHA256:
+- x86_64: a6110a0a33f516caf97ffbc971e54f723e35fec49adb2a3bf2e92893011e52b1
+- aarch64: 191ec80e73a69d26617a6a7e627e1335e87afa3b3bf026dc4d56409c10cb80d9
+These are inspected existing candidates, not installed or publication-accepted.
+No build was repeated, no tag created, and nothing installed or published.
+
+Debian run 39842941118 observed at the same packaging SHA: Ubuntu 22.04/24.04/
+26.04 arm64 all passed; three amd64 jobs still in progress. Maintained tracker
+session remains active, receipt target/task-runs/hosted-build-5k1nfh5i/summary.json.
+Do not redispatch or wrap its polling in another CI polling loop. Next: finish
+Debian artifact verification and select an inspected package for approved
+installation/combined upgrade checks. Task/evidence notes only changed; scoped
+completion-notes whitespace check exited 0. No source tests repeated.
+
+
+## Laptop Flatpak removal; native installation preserved — October 22, 2026
+
+Operator explicitly requests removing the laptop Flatpak app so it is absent
+from panel selection and Store updates, retaining the working just install-user
+installation. Future Flatpak acceptance will use another computer. Read-only
+inspection found only user Flatpak 0.5.4, not running, and zero managed service
+files invoking this Flatpak. Native launcher uses the native executable.
+
+Reviewed flatpak uninstall help, then executed the approved package-manager
+operation: flatpak uninstall --user --app --no-related --noninteractive
+app/io.github.uutzinger.cosmic-ext-applet-mounter/x86_64/master (exit 0).
+No --delete-data, --unused, --all or forced removal. No runtime/service/panel
+restart was performed. This normal package-manager operation is the explicit
+operator-requested uninstall, not a candidate installer or release publication.
+
+Post-operation checks pass (exit 0): app absent from both user/system installed
+Flatpak app lists, exported Flatpak desktop entry removed, app data directory
+retained, and native executable/desktop launcher SHA256 unchanged. No cloud
+data or native configuration was changed. Store/panel rendered cache refresh
+was not observed; their next refresh should remove the stale choice/update.
+Only this evidence record changed in the repository; no source tests required.
+Completion-notes whitespace validation exited 0.
+
+
+## Ubuntu 26.04 amd64 dependency-install stall — October 22, 2026
+
+Operator reports unchanged Azure mirror cmake download line (14.1 MB). Read-only
+GitHub job inspection confirms Debian run 39842941118 now has five successful
+targets; only Ubuntu 26.04 amd64 job 120048575388 remains in progress. It entered
+Install native and Debian build dependencies at 19:46:07 UTC and was still there
+at approximately 20:08 UTC. Rust toolchain and compilation have not started.
+This suggests an external APT mirror/download stall, not an observed application
+build failure. Running-job logs are unavailable via gh run view --log (exit 1:
+job still in progress); API job/run inspections succeeded (exit 0). No precise
+network cause is established and no CLI-log progress comparison is possible yet.
+No run cancellation or retry occurred. Preserve all five successful targets if
+operator authorizes recovery of only the stuck job. Existing tracker remains
+active; do not start a second full matrix. Only evidence notes changed; no
+source tests repeated. Scoped whitespace validation exited 0.
+
+
+## Approved single-target Debian retry — October 22, 2026
+
+Operator explicitly authorizes stopping and retrying the slow target. Read
+current run/job identity and CLI help, requested cancellation of run 39842941118
+(exit 0), and waited through gh run watch until cancelled (exit 1, expected
+non-success cancellation). Only Ubuntu 26.04 amd64 was unfinished; it ended
+after 38m44s during APT dependencies, before Rust installation or compilation.
+Five completed jobs remained successful.
+
+Initial gh run rerun supplied both run ID and --job and was rejected locally
+(exit 1: specify only one); no dispatch occurred. Corrected command gh run rerun
+--repo uutzinger/cosmic-ext-applet-mounter --job 120048575388 succeeded (exit 0).
+Read-only verification confirms same run, attempt 2, unchanged packaging SHA
+cd1b465160d692052f32dbb53010583c8ed11a19. Only Ubuntu 26.04 amd64 is in progress
+(new job 120068845122); all five other latest jobs are completed/success, not a
+new full matrix. Prior Flatpak builds are untouched. The existing maintained
+Debian tracker observed queued retry and continues; no second tracking/build
+wrapper started.
+
+Task/evidence records only changed. No source/package inputs altered, no tests
+repeated, no installation/tag/publication. Scoped notes whitespace check exited
+0. Next: wait for this retry, inspect its result and verify retained six-target
+artifacts, not another automatic retry or full matrix.
+
+
+## README aligned with 0.5.5 — October 22, 2026
+
+Operator requests updating the main README. Read its current worktree and diff
+before editing: operator had simplified the engine table and screenshot layout,
+removed older transition paragraphs, and replaced/added screenshot assets.
+Preserved those choices and all screenshot file bytes. Updated popup HTML link
+to the operator's new case-sensitive PopUp.png and removed an unmatched td close.
+New image remains operator-provided/untracked; no screenshot was generated or
+visually accepted by this text review.
+
+README now describes current Settings/Add/Modify action labels, shared-remote
+Confirm Save, required OneDrive Offline account type/email, paused initial mirror
+workflow and sync interval, Google root-first preload, browser authentication,
+private OAuth recommendation, Settings remote inventory/removal, retired legacy
+profiles and replacement data preservation. Host minimums match the dependency
+guide. Published 0.5.4 downloads are distinguished from unpublished 0.5.5
+candidates; COSMIC repository PR remains later. Flatpak uninstall example is
+user-scoped, app-only and retains related runtimes/data. No uninstall executed.
+
+Checks: python3 tests/repo_hygiene_test.py exits 0 (four tests). Focused read-only
+assertions exit 0 for local HTML image/link targets, balanced three-cell table,
+preserved operator three-image layout/widths, absent obsolete labels, and
+unchanged hashes of four screenshot files. README and completion-notes whitespace
+checks exit 0. No Rust, scripts, translation, manifest or package inputs edited;
+no source gate, build or provider test repeated. No rendered README review claimed.
+
+Files edited: README.md, Task List and completion notes. Earlier dirty task/notes
+and screenshot edits preserved. No commit/push/tag/publication occurred; hosted
+artifacts remain tied to cd1b465, not this later documentation working tree.
+Next: review/commit documentation at the appropriate release-record boundary
+without silently changing the accepted build/tag source identity.
+
+
+## Debian six-target artifacts ready — October 22, 2026
+
+Operator reports Debian completion. The original tracker process is no longer
+attached (write_stdin reports unknown process); its durable receipt confirms
+success, exit 0, phase artifacts-ready, run 39842941118, packaging source
+cd1b465160d692052f32dbb53010583c8ed11a19. No second tracker or build started.
+
+Maintained producer summary: target/task-runs/hosted-build-5k1nfh5i/summary.json.
+Downloaded six-package set and checksums: target/artifacts/ci-39842941118/receipt.json.
+Wrapper completed run/source/artifact coverage, package version/architecture
+and checksum verification before recording success. All Ubuntu 22.04/24.04/
+26.04 amd64/arm64 packages are retained. Single-target retry succeeded without
+rebuilding the five earlier successful targets. Reuse these passing checks; no
+new source/test input warrants rerunning them.
+
+Together with release-promotion-4fdzna92, both Flatpak bundles and all six Debian
+packages are built/downloaded/inspected. Installed final-package acceptance is
+still pending; native just install-user results do not establish this level.
+No package installed, tag created or release published. Task/evidence records
+updated only; README/screenshot worktree edits preserved. Scoped completion-notes
+whitespace check exited 0. Next: transfer the selected exact artifacts to the
+test machine for the combined installed upgrade/retired-profile and sandbox
+checks; keep the laptop native installation intact.
+
+
+## README-only commit — October 22, 2026
+
+Operator explicitly requests committing README changes. Source/index/worktree
+review confirms the index initially empty. Commit 5ad29ab succeeded (exit 0),
+containing README.md only. Kept existing tracked Popup.png reference so the
+commit has no missing untracked image dependency. User screenshot edits and
+PopUp.png remain unchanged and unstaged; rendered inspection found organization/
+VPN-profile labels, so those images were not added under the agent-guide
+documentation rule. No image edit or sanitization was performed.
+
+After the popup-link adjustment, repository hygiene passes (four tests, exit 0)
+and README whitespace check passes (exit 0). Pending Task List/completion notes
+remain outside the commit. No push, tag, build or publication. Existing release
+artifacts still identify cd1b465; this later documentation commit must not be
+silently substituted as their source/tag identity. Scoped notes whitespace
+validation exited 0.
+
+
+## Test-computer Debian panel smoke — October 22, 2026
+
+Operator transferred the Ubuntu 24.04 amd64 package from the verified run set,
+followed target installation/version guidance, confirmed version 0.5.5 and now
+reports the panel applet loaded and looks as expected. Accept reported installed
+Debian version and rendered panel smoke at that scope. The target also had a
+Flatpak entry; removal/native-entry guidance was supplied, but removal and
+independent runtime-process identity have not been reported. Do not infer them
+or full package/upgrade acceptance merely from appearance.
+
+Next focused observation: open Settings from that applet and inspect a saved
+connection editor; confirm communication is available and current action labels
+render. Then run an appropriate small disposable connection lifecycle, reusing
+unchanged native provider tests. Retained legacy-profile/missing-unit acceptance
+and final Flatpak testing remain separate. No agent target-machine operation,
+source edit or repeated automated test occurred. Task/evidence notes updated;
+scoped completion-notes whitespace check exited 0.
+
+
+## Test-computer Debian Settings/editor smoke — October 22, 2026
+
+After the guided gear-icon/connection-editor check, operator reports all looks
+as expected. Accept reported installed Debian Settings/editor rendering and no
+communication warning in this check. This extends the panel smoke; it is not
+independent process identity, engine lifecycle, legacy upgrade or Flatpak proof.
+No new automated check is needed for this live operator observation.
+
+Next: exercise one small disposable Online connection through Test, Mount,
+folder listing and Unmount using this installed package. Reuse previous provider
+lifecycles rather than repeat every provider. Keep saved-data and legacy-profile
+upgrade checks distinct. Task/evidence records only updated, no agent target
+operation/source edit. Scoped completion-notes whitespace check exited 0.
+
+
+## Test-computer Debian Online lifecycle — October 22, 2026
+
+Following the installed-package Online smoke guide, operator reports Test and
+Mount succeeded. After the explicit Unmount prompt, operator confirms the toggle
+is off. Accept reported Debian Test/Mount/Unmount and final off-toggle behavior.
+Provider and file listing/read-write content observations were not separately
+reported; do not infer them. No repeat across all providers is required for this
+scoped packaging smoke. Installed mirror worker/legacy retirement and Flatpak
+acceptance remain distinct. Task/evidence notes only changed, no agent runtime
+operation/source edit or repeated automated test. Scoped completion-notes
+whitespace validation exited 0. Next: one small installed Debian mirror
+Preview/Sync Now check, then final Flatpak acceptance on the test computer.
+
+
+## Test-computer Debian Offline smoke — October 22, 2026
+
+After the guided small disposable cloud-subfolder file -> Preview -> Sync Now
+-> local arrival check with scheduling off, operator reports "test passed".
+Accept reported installed Debian manual mirror smoke at that guided scope.
+Provider, counts, checksums and scheduled-worker observations were not separately
+reported; none are inferred. Panel, Settings/editor and Online/manual Offline
+package smoke now have scoped operator acceptance. Retained retired-profile
+upgrade/missing-unit handling and final installed Flatpak behavior remain open.
+
+Only task/evidence notes changed; no agent target/runtime/source operation or
+repeated automated test. Scoped completion-notes whitespace check exited 0.
+Next: transfer the verified existing x86_64 Flatpak bundle to the test computer
+and follow the maintained installer/identity/rollback procedure, keeping the
+laptop native and preventing competing runtime owners on the test machine.
+
+
+## Final Flatpak test-computer installation guided — October 22, 2026
+
+Operator agrees to proceed with final Flatpak installed checks on the separate
+test computer. Reviewed maintained install-flatpak-release.sh local --bundle
+mode: verifies sibling SHA256SUMS, installs user Flathub/Freedesktop 25.08 as
+needed, then installs/updates only the selected bundle. Native Debian remains
+installed; first stop connections, close Settings and remove the native panel
+instance. No competing owners. Guidance transfers the already inspected x86_64
+bundle/checksums plus the standalone installer; no rebuild or unpublished-asset
+download. Installer needs no repository checkout on the target.
+
+Expected inspected Flatpak OSTree commit:
+b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098.
+Use flatpak info --user to verify installed identity, then add the Flatpak panel
+entry and check flatpak ps rather than infer sandbox identity from appearance.
+No target installation or acceptance reported yet. Laptop stays native. No agent
+remote communication, install, source edit, test repeat or publication occurred.
+Only evidence record appended; scoped whitespace check exited 0.
+
+
+## Final Flatpak running process and UI smoke — October 22, 2026
+
+Operator supplies target terminal screenshot: the second flatpak ps listing
+contains io.github.uutzinger.cosmic-ext-applet-mounter (PID 73240), confirming a
+sandbox process rather than inferring transport from identical native UI. After
+the guided popup/gear/connection-editor check, operator reports looks okay.
+Accept reported Flatpak popup/Settings/editor rendering and no communication
+warning in this check. Full installed info/OSTree commit was not visible in the
+provided screenshot; retain exact installed identity as separate confirmation.
+
+Next: one disposable Online connection Test/Mount/folder listing/Unmount in this
+sandbox, then mirror directories selected via separate Browse grants and a
+small Preview/Sync check. Browser/worker/upgrade acceptance remains separate; no
+blanket filesystem grants or native fallback inferred. Task/evidence records
+only changed. No agent target/source operation or repeated automated tests;
+scoped completion-notes whitespace check exited 0.
+
+
+## Final Flatpak Online lifecycle smoke — October 22, 2026
+
+Following the explicit Test/Re-Test -> Mount -> folder listing -> Unmount/off
+toggle guide, operator reports "Passed". Accept reported installed Flatpak
+Online access test, mount, visible file listing and unmount/off state at that
+scope. Provider/content checksums or writes were not separately reported; no
+extra acceptance inferred. Reuse prior native provider tests rather than repeat
+all providers. Next: small disposable Offline mirror with local and recovery
+directories selected separately via Browse, then Preview/Sync/local file
+arrival. Keep background scheduling off for this manual check. Task/evidence
+records only updated; no agent target/source operation or repeated automated
+test. Scoped completion-notes whitespace check exited 0.
+
+
+## Final Flatpak business OneDrive mirror deletion — October 22, 2026
+
+Operator identifies the sandbox mirror as business OneDrive and reports Sync
+Now completed. In the subsequent observation, a file deleted through the cloud
+folder also disappeared locally. Accept reported installed Flatpak mirror sync
+completion and cloud-to-local deletion propagation. The report did not separately
+confirm initial test-file download, Preview, Browse-grant selection, invocation
+timing for deletion, recovery copy, or schedule; do not infer those results.
+
+Next ask the operator to inspect the configured recovery directory for the
+deleted test file. This checks preservation independently of propagated deletion
+and command completion. Task/evidence records only updated; no agent cloud/data
+operation, source edit or repeated automated test. Scoped notes whitespace
+validation exited 0. Exact installed OSTree identity remains pending.
+
+
+## Final Flatpak business OneDrive recovery copy — October 22, 2026
+
+After the explicit recovery-directory inspection prompt, operator confirms the
+cloud-deleted file is preserved in the local recovery folder. Accept installed
+Flatpak business OneDrive recovery-copy presence alongside the previously
+observed propagated deletion. File contents, hashes and restoration were not
+reported, and no scheduled execution is inferred. Task/evidence notes only
+updated; no agent data/runtime/source operation or repeated automated test.
+Scoped notes whitespace validation exited 0. Next: confirm exact installed
+Flatpak commit before extending acceptance to this inspected release candidate.
+
+
+## Final Flatpak installed identity confirmed — October 22, 2026
+
+Operator confirms flatpak info --user --show-commit matches the expected
+b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098. This binds
+reported sandbox UI/Online and business OneDrive manual sync/deletion/recovery
+observations to the inspected x86_64 candidate from run 39842934431, packaging
+cd1b465 and pinned app source 13e204e. It is not ARM installed acceptance.
+
+Next focused sandbox check is one automatic scheduled business OneDrive download:
+place a distinct disposable file in the cloud test subfolder, Start background
+scheduling, wait its configured interval plus operation time without Sync Now,
+confirm local arrival, then Stop. This checks installed scheduled-worker launch
+independently of manual sync. Retained retired-profile upgrade/missing-service
+regression remains separate. Task/evidence records only updated; no source or
+agent runtime/data operation or repeated automated test. Scoped notes whitespace
+check exited 0. No publication or tag.
+
+
+## Remaining release acceptance reconciled — October 22, 2026
+
+Operator requests skipping the 15-minute Flatpak scheduler check; explicitly
+waived, not passed. No observation of the final candidate's scheduled worker is
+inferred from manual Sync Now or earlier native timer tests. The request does
+not waive other open checks. Mirror off-state after this instruction is not yet
+reported; operator was asked to stop it if started.
+
+Built/inspected: six Debian targets and both Flatpak architectures. Installed
+reported smoke: Debian panel/Settings/editor, Online Test/Mount/Unmount and manual
+Offline flow; exact x86_64 Flatpak identity, UI/Online lifecycle, manual business
+OneDrive sync, cloud deletion/local propagation and recovery-copy presence.
+
+Outstanding release review:
+- Combined package legacy-profile upgrade/absent-retired-unit regression remains
+  open, despite earlier native retirement/data-preservation and fake tests. Test
+  a suitable retained/disposable profile or obtain an explicit recorded waiver.
+- SharePoint whole-library live acceptance remains open (test small library or
+  explicitly retain limit). Google/Box whole-root and final Flatpak timer runs are
+  already deliberately skipped. Fresh repaired Google/Box browser consent in this
+  exact sandbox package and installed ARM acceptance are unrun; reuse only prior
+  evidence at original scope and disclose those limits in final acceptance.
+- Final acceptance receipt/source/tag selection must retain artifact identity:
+  packages built at cd1b465, Flatpak app source 13e204e. Later README commit
+  5ad29ab is not those artifacts' packaging SHA. Tagging that later commit would
+  fail exact-source promotion; do not rebuild merely for README/receipt inclusion.
+  Keep documentation updates separate from the accepted built revision unless
+  operator changes release source and explicitly approves new affected builds.
+- After acceptance/limits resolved, obtain tag/publication approval, promote the
+  existing bytes and verify public asset checksums/coverage. COSMIC PR remains
+  later, broader expansion backlog deferred.
+
+Task/evidence records updated only; source/build/install/publish untouched.
+Scoped completion-notes whitespace check exited 0. No tests repeated for this
+reconciliation. Nothing additionally marked installed-passed or published.
+
+
+## Approved push and v0.5.5 tag preparation — October 22, 2026
+
+Operator explicitly requests push and tag after the remaining acceptance review.
+This does not confer publication approval or silently waive pending package
+legacy/SharePoint/other limits. Fetched origin/master: no new upstream commits,
+local README one ahead. Retain built packaging cd1b465 as tag identity, with
+later README/evidence on master rather than rebuilding for documentation.
+
+The maintained release helper requires a clean branch whose remote points to
+the build SHA. Created isolated worktree /tmp/cloud-mounter-release-v0.5.5 with
+branch release/0.5.5 at cd1b465160d692052f32dbb53010583c8ed11a19 and pushed that
+branch (exit 0), preserving main-worktree screenshot edits. Ran approved
+scripts/build_release.sh --repo uutzinger/cosmic-ext-applet-mounter
+--run-id 39842941118 --download-dir <original verified ci-39842941118 directory>
+--log-dir <target/task-runs/release-prepare-v055> from the clean checkout.
+
+Helper succeeded (exit 0), created/pushed annotated v0.5.5 at cd1b465, validated
+the existing successful run, and reused the six checksum/identity-verified Debian
+packages. Receipt target/task-runs/release-prepare-v055/summary.json; phase
+artifacts-ready. No new matrix, compilation, install or publication occurred.
+Flatpak run 39842934431 also has packaging cd1b465 and app pin 13e204e.
+
+Commit only pending Task List/completion notes for master under the approved
+release-record scope; README 5ad29ab is already committed. Leave all screenshot
+edits/untracked PopUp.png outside the commit. Fetch immediately before master
+push and verify remote branch/tag identities. Source checks are reused; scoped
+notes whitespace check exits 0. GitHub release publication remains unapproved.

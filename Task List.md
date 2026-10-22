@@ -417,6 +417,9 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
   old Flatpak pin before the single release build. Use the combined package
   checklist in `docs/engineering/cosmic-submission-audit.md`; install/upgrade
   acceptance, tag and publication remain separate. COSMIC repository PR later.
+  - [x] October 22 README refresh: align current controls, engine retirement,
+    setup/authentication, remote management and scheduling with 0.5.5. Preserve
+    operator screenshot/layout edits; distinguish published downloads from candidates.
   - [x] Read-only Flatpak preflight: all four required x86_64 refs available;
     dirty packaging checkout blocks build. Old 0.5.4 app pin identified separately.
     Cargo vendor parity tests pass; 23 declared grants and retained host-engine
@@ -431,6 +434,65 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
     removed Push Buttons after its inventory moved to engineering documentation.
     Finalized app inputs committed as 13e204e; Flatpak pin refreshed to its full
     SHA before building. Package acceptance, builds and publication remain separate.
+  - [x] October 22 pushed cd1b465 after upstream fetch/reconciliation (0 behind,
+    4 ahead), verified remote identity and dispatched Debian run 39842941118
+    (six targets) and Flatpak run 39842934431 (both architectures). Both runs
+    were in progress at confirmation; artifacts/acceptance are not yet passed.
+  - [x] October 22 Flatpak run 39842934431: both architectures built
+    successfully. Maintained candidate inspector downloaded and verified source/
+    provenance/checksums/metadata for both bundles; receipt release-promotion-4fdzna92.
+    Installed package acceptance remains pending. Debian last observed 3/6 passed
+    (all arm64), amd64 still running; existing tracker continues, no redispatch.
+  - [x] October 22 Ubuntu 26.04 amd64 retry: operator approved canceling
+    the slow dependency-download job after about 38 minutes. Same run 39842941118
+    attempt 2 retries only that target at cd1b465 (job 120068845122). Five other
+    targets retained success. Retry and six-package download/verification passed;
+    receipt target/artifacts/ci-39842941118/receipt.json. Installed acceptance pending.
+  - [x] October 22 test-computer Debian smoke: operator confirms installed
+    package version 0.5.5 and panel applet loads/looks as expected after guided
+    Ubuntu 24.04 amd64 package installation. Native UI smoke only; independent
+    running-process identity, Settings, connection lifecycle and retained-profile
+    upgrade checks remain separate. Duplicate Flatpak removal not confirmed.
+  - [x] October 22 test-computer Debian Settings/editor smoke: following
+    gear/editor guidance, operator reports all looks as expected. Accept reported
+    Settings/editor appearance and absence of communication warning; backend
+    connection lifecycle and retained-profile upgrade acceptance remain separate.
+  - [x] October 22 test-computer Debian Online smoke: operator reports
+    Test and Mount succeeded, then Unmount returned the toggle to off. Provider
+    and file-list/content observations were not separately specified; accept this
+    reported package lifecycle only. Mirror/legacy upgrade/Flatpak remain separate.
+  - [x] October 22 test-computer Debian Offline smoke: operator reports
+    the guided small-subfolder Preview/Sync Now/download test passed. Accept
+    reported manual mirror package smoke; scheduled worker, retained-profile
+    upgrade and Flatpak acceptance remain separate.
+  - [x] October 22 test-computer Flatpak runtime/UI smoke: screenshot of
+    flatpak ps identifies Cloud Mounter running in the sandbox; operator confirms
+    popup/Settings/editor look okay after guided checks. Exact installed OSTree
+    commit and connection/portal/worker/upgrade checks remain separate.
+  - [x] October 22 test-computer Flatpak Online smoke: operator reports
+    the guided Test/Mount/folder listing/Unmount check passed, with toggle off.
+    This accepts the scoped installed sandbox Online lifecycle; mirror, exact
+    installed commit and retained-profile/upgrade checks remain separate.
+  - [x] October 22 test-computer Flatpak business OneDrive Offline: operator
+    reports Sync Now completed, then a cloud-deleted file also disappeared
+    locally. Accept reported sync completion and cloud-to-local deletion;
+    recovery-copy presence, initial download and scheduling remain separate.
+  - [x] October 22 test-computer Flatpak business OneDrive recovery: operator
+    confirms the cloud-deleted file is preserved in the configured local recovery
+    folder. Presence accepted; restore/content integrity and scheduled execution
+    were not separately tested.
+  - [x] October 22 test-computer Flatpak exact identity: operator confirms
+    installed OSTree commit b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098,
+    matching the inspected x86_64 candidate from run 39842934431. Scoped sandbox
+    UI/Online/manual business-mirror deletion/recovery results apply to this artifact.
+  - [o] October 22 operator skips the 15-minute final Flatpak scheduled-worker
+    check. Record exact-candidate scheduled execution as untested; reuse earlier
+    timer evidence only at its original scope. Manual Flatpak sync/recovery passed.
+  - [x] October 22 tag preparation: approved isolated release/0.5.5 branch
+    and v0.5.5 tag point to built packaging cd1b465. Maintained release script
+    reused verified Debian run 39842941118; no rebuild/publication. Receipt:
+    target/task-runs/release-prepare-v055/summary.json. README/evidence remain
+    later master commits; package upgrade limitations remain explicit.
 
 ## 0.5.5 validation and expansion backlog
 
