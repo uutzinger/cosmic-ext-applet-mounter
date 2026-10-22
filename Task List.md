@@ -421,6 +421,10 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
     dirty packaging checkout blocks build. Old 0.5.4 app pin identified separately.
     Cargo vendor parity tests pass; 23 declared grants and retained host-engine
     rationale reviewed. No build, install or dispatch performed.
+  - [x] Approved source freeze: b43f316 records 0.5.5 implementation/tests/docs;
+    Flatpak app pin updated to its full SHA in a separate packaging commit.
+    Push Buttons remains untracked. Final release metadata/package acceptance
+    are pending; no push, tag, build or publication implied.
 
 ## 0.5.5 validation and expansion backlog
 

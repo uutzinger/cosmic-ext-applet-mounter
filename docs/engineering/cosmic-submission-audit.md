@@ -139,3 +139,14 @@ Sources: [README](https://github.com/pop-os/cosmic-flatpak/blob/master/README.md
 [PR template](https://github.com/pop-os/cosmic-flatpak/blob/master/.github/PULL_REQUEST_TEMPLATE.md).
 The repository justfile could not be fetched in this review; layout evidence above
 retains its October 19 scope rather than claiming a new current recipe check.
+
+
+### Approved development source freeze — October 22
+
+Application source is now b43f31617b8c147f80dd4aff924cb30c2c2676d7. The manifest
+was updated from the historical 0.5.4 pin to that exact commit, with packaging
+recorded separately. The earlier dirty-tree/old-pin observations above retain
+their pre-freeze chronology. AppStream development status and draft notes remain;
+no final release tag, package build or acceptance is implied. Finalizing embedded
+metadata later changes application inputs and requires updating the app pin
+before the final single build set.
