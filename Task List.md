@@ -429,7 +429,8 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
     AppStream 0.5.5, Debian unstable entry/date and versioned release notes/index.
     Native/package evidence and whole-root limits remain explicit. Operator
     removed Push Buttons after its inventory moved to engineering documentation.
-    Commit finalized app inputs, then refresh the Flatpak pin before building.
+    Finalized app inputs committed as 13e204e; Flatpak pin refreshed to its full
+    SHA before building. Package acceptance, builds and publication remain separate.
 
 ## 0.5.5 validation and expansion backlog
 

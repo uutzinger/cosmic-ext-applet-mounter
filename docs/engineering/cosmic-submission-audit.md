@@ -150,3 +150,13 @@ their pre-freeze chronology. AppStream development status and draft notes remain
 no final release tag, package build or acceptance is implied. Finalizing embedded
 metadata later changes application inputs and requires updating the app pin
 before the final single build set.
+
+
+### Finalized metadata source — October 22
+
+Application commit 13e204ec93049587611978c0cfbad0f9e0a5968c supersedes the earlier
+development source pin. It includes finalized stable AppStream/Debian metadata
+and prepared release notes with explicit package acceptance limits. The main
+manifest now pins that exact app commit; packaging is committed separately.
+Metadata/publication preflight passes, which does not confer installed package
+acceptance or publication approval. No build bytes exist for this identity yet.

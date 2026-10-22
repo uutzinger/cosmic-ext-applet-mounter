@@ -2419,3 +2419,18 @@ No Rust changes; reuse source gate dev-gate-sbk8qk3q at its recorded scope.
 Commit finalized app metadata under the approved 0.5.5 scope, then update the
 manifest to that exact full app SHA in a separate packaging commit before any
 build. Build/installation/tag/push/publication approvals remain separate.
+
+
+## Final metadata pin refreshed — October 22, 2026
+
+Metadata commit 13e204ec93049587611978c0cfbad0f9e0a5968c succeeded (exit 0). Main
+Flatpak manifest pins that exact app commit; packaging guide, readiness audit
+and task status reflect this source identity. Inspection of the pinned Git
+objects confirms stable AppStream 0.5.5 and finalized versioned notes (exit 0).
+Vendor parity (two tests), repository hygiene (four tests) and scoped whitespace
+checks pass (all exit 0). Existing metadata check jabc3e8s remains valid for
+unchanged AppStream input; no repeated Rust gate. Record packaging in a separate
+approved commit. Final worktree/source identity does not establish package
+acceptance. No push, tag, hosted dispatch, build, install or publication occurred.
+Next: approved single Debian/Flatpak build set, followed by package inspection
+and the combined installed upgrade/regression checklist.

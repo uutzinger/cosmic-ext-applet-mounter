@@ -10,13 +10,13 @@ submission. It requires a selected JSON manifest in a separate clean checkout
 at an expected commit, tracked referenced inputs, full Git source commit pins
 and SHA-256 for remote archives/files. Tags alone and directory-source prototypes
 are rejected. The source manifest now pins reviewed 0.5.5 implementation commit
-`b43f31617b8c147f80dd4aff924cb30c2c2676d7` for the development candidate.
+`13e204ec93049587611978c0cfbad0f9e0a5968c` for package preparation.
 The wrapper does not change that pin or choose a runtime. The packaging changes
 must also be committed before a clean-checkout candidate build.
 
 **0.5.5 preparation:** the app commit is frozen and the manifest pin updated.
-Final release metadata and package acceptance remain open; this is a development
-candidate, not a published release. The October 22 preflight
+Release metadata is finalized; final package acceptance remains open.
+No release is published. The October 22 preflight
 found the required x86_64 runtime refs installed but the worktree dirty. See the
 [current readiness/checklist](../../docs/engineering/cosmic-submission-audit.md#055-readiness-review--october-22).
 
@@ -324,7 +324,7 @@ app/io.github.uutzinger.cosmic-ext-applet-mounter/io.github.uutzinger.cosmic-ext
 ```
 
 The current manifest pins implementation commit
-`b43f31617b8c147f80dd4aff924cb30c2c2676d7` and uses generated `cargo-sources.json`.
+`13e204ec93049587611978c0cfbad0f9e0a5968c` and uses generated `cargo-sources.json`.
 Offline contract tests compare every registry archive/checksum with Cargo.lock,
 check vendor checksum metadata/config, and verify Git commits and source selectors.
 The checked-in vendor list already matches this revision; regeneration is not
