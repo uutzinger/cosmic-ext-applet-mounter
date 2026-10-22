@@ -425,6 +425,11 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
     Flatpak app pin updated to its full SHA in a separate packaging commit.
     Push Buttons remains untracked. Final release metadata/package acceptance
     are pending; no push, tag, build or publication implied.
+  - [x] October 22 release metadata finalized for package preparation: stable
+    AppStream 0.5.5, Debian unstable entry/date and versioned release notes/index.
+    Native/package evidence and whole-root limits remain explicit. Operator
+    removed Push Buttons after its inventory moved to engineering documentation.
+    Commit finalized app inputs, then refresh the Flatpak pin before building.
 
 ## 0.5.5 validation and expansion backlog
 

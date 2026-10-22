@@ -1,4 +1,4 @@
-cosmic-ext-applet-mounter (0.5.5) UNRELEASED; urgency=medium
+cosmic-ext-applet-mounter (0.5.5) unstable; urgency=medium
 
   * Retire the legacy abraunegg OneDrive offline engine while preserving old
     profiles and user data for replacement or removal.
@@ -13,7 +13,7 @@ cosmic-ext-applet-mounter (0.5.5) UNRELEASED; urgency=medium
   * Support whole-library SharePoint mirror targets and reconnect Settings
     after the panel applet restarts.
 
- -- Urs Utzinger <uutzinger@users.noreply.github.com>  Wed, 21 Oct 2026 05:30:00 -0700
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Thu, 22 Oct 2026 12:39:29 -0700
 
 cosmic-ext-applet-mounter (0.5.4) unstable; urgency=medium
 

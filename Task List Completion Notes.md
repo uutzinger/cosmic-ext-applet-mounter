@@ -2390,3 +2390,32 @@ Task List whitespace. Source gate, metadata and vendor/hygiene results above
 retain their original scope. This authorization includes no push, tag, hosted
 build dispatch, installation or publication. Development AppStream/draft notes
 remain explicit; these commits do not constitute a final release tag.
+
+
+## Final 0.5.5 release metadata — October 22, 2026
+
+Operator requests finalization after approving the 0.5.5 commit sequence. Updated
+AppStream entry to stable 0.5.5 dated October 22, Debian changelog to unstable
+with the current Phoenix timestamp, and release notes/index to prepared status.
+Notes distinguish finalized change descriptions from unperformed final package
+acceptance/publication; they include host minimums, planned target matrix, large
+Google/Box root limits and open SharePoint whole-library validation. No package
+acceptance has been invented by removing the development labels.
+
+Operator confirms personally removing Push Buttons after its inventory was
+incorporated into engineering documentation; its absence is intentional. Earlier
+failed final hash inspection therefore does not indicate agent deletion.
+Source commit b43f316 and packaging commit ef9868f both succeeded (exit 0).
+
+Checks after finalization:
+- bash scripts/dev.sh metadata-check: exit 0;
+  target/task-runs/dev-metadata-check-jabc3e8s/summary.json.
+- bash scripts/check-release-publication.sh v0.5.5: exit 0; version/notes only,
+  explicitly reports acceptance is a manual gate.
+- python3 tests/repo_hygiene_test.py: exit 0, four tests pass.
+- Scoped git diff --check: exit 0. Preserved Task List whitespace unchanged.
+No Rust changes; reuse source gate dev-gate-sbk8qk3q at its recorded scope.
+
+Commit finalized app metadata under the approved 0.5.5 scope, then update the
+manifest to that exact full app SHA in a separate packaging commit before any
+build. Build/installation/tag/push/publication approvals remain separate.
