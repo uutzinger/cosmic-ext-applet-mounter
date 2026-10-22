@@ -9,9 +9,7 @@ use cosmic_ext_applet_mounter::model::*;
 use cosmic_ext_applet_mounter::providers::{
     RcloneBackend, onedriver_mount_plan, rclone_mount_plan,
 };
-use cosmic_ext_applet_mounter::sync::{
-    OneDriveIsolationReport, one_drive_mirror_plan, rclone_bisync_plan,
-};
+use cosmic_ext_applet_mounter::sync::rclone_bisync_plan;
 
 const LEGACY: &str = r#"(
     id:"2a3f5d45-e867-47e7-943f-66cf60e777ad",name:"Legacy mirror",provider:OneDrive,
@@ -60,16 +58,7 @@ fn onedrive_configuration_legacy_round_trip_keeps_engine_and_wire_format() {
     assert!(!serialized.contains("onedrive_identity:"));
     assert_eq!(ron::from_str::<Connection>(&serialized).unwrap(), old);
     assert!(RcloneBackend::try_from(&old).is_err());
-    assert!(
-        one_drive_mirror_plan(
-            &old,
-            Path::new("/home/example/State"),
-            &OneDriveIsolationReport {
-                active_onedriver_paths: vec![]
-            }
-        )
-        .is_ok()
-    );
+    assert!(old.ensure_supported_engine().is_err());
 }
 
 #[test]
@@ -146,16 +135,7 @@ fn onedrive_configuration_both_drive_types_round_trip_and_select_rclone() {
             serde_json::from_str::<Connection>(&serde_json::to_string(&new).unwrap()).unwrap(),
             new
         );
-        assert!(
-            one_drive_mirror_plan(
-                &new,
-                Path::new("/home/example/State"),
-                &OneDriveIsolationReport {
-                    active_onedriver_paths: vec![]
-                }
-            )
-            .is_err()
-        );
+        assert!(new.ensure_supported_engine().is_ok());
         let plan = rclone_bisync_plan(&new, Path::new("/home/example/State")).unwrap();
         assert!(plan.preflight_command.is_some());
         assert!(plan.work_directory.to_string_lossy().contains("target-"));
@@ -301,7 +281,7 @@ fn onedrive_configuration_blocks_legacy_recovery_and_runtime_work_overlap() {
 
 #[test]
 fn onedrive_configuration_legacy_overlap_blocks_equal_parent_child_in_either_order() {
-    // Disabled legacy profiles still own their paths; both engines can be resumed.
+    // Retired profiles still reserve their paths so replacement cannot overwrite data.
     let old = legacy();
     for kind in [OneDriveDriveType::Personal, OneDriveDriveType::Business] {
         for root in [
@@ -346,24 +326,13 @@ fn onedrive_configuration_legacy_overlap_blocks_equal_parent_child_in_either_ord
 fn onedrive_configuration_replacement_keeps_legacy_state_out_of_rclone_plan() {
     let old = legacy();
     let before = ron::to_string(&old).unwrap();
-    let legacy_plan = one_drive_mirror_plan(
-        &old,
-        Path::new("/home/example/Config"),
-        &OneDriveIsolationReport {
-            active_onedriver_paths: vec![],
-        },
-    )
-    .unwrap();
+    let legacy_directory = Path::new("/home/example/Config/onedrive-sync").join(old.id.to_string());
     for kind in [OneDriveDriveType::Personal, OneDriveDriveType::Business] {
         let new = mirror(kind);
         assert!(config(vec![old.clone(), new.clone()]).validate().is_ok());
         let plan = rclone_bisync_plan(&new, Path::new("/home/example/State")).unwrap();
         assert_ne!(new.id, old.id);
-        assert!(
-            !plan
-                .work_directory
-                .starts_with(&legacy_plan.config_directory)
-        );
+        assert!(!plan.work_directory.starts_with(&legacy_directory));
         assert!(!plan.service.arguments.iter().any(|argument| {
             argument == "--confdir"
                 || argument.contains(&old.id.to_string())

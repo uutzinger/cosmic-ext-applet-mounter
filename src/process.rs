@@ -98,7 +98,6 @@ pub enum Executable {
     Flatpak,
     Rclone,
     Onedriver,
-    OneDrive,
     Fusermount3,
     Mountpoint,
     #[cfg(any(test, feature = "development-probes"))]
@@ -135,7 +134,6 @@ impl Executable {
             Self::Flatpak => "flatpak",
             Self::Rclone => "rclone",
             Self::Onedriver => "onedriver",
-            Self::OneDrive => "onedrive",
             Self::Fusermount3 => "fusermount3",
             Self::Mountpoint => "mountpoint",
             #[cfg(any(test, feature = "development-probes"))]
@@ -171,7 +169,6 @@ impl Executable {
             Self::Flatpak => vec!["flatpak", "/usr/bin/flatpak"],
             Self::Rclone => vec!["rclone"],
             Self::Onedriver => vec!["onedriver"],
-            Self::OneDrive => vec!["onedrive"],
             Self::Fusermount3 => vec!["fusermount3"],
             Self::Mountpoint => vec!["mountpoint"],
             #[cfg(any(test, feature = "development-probes"))]

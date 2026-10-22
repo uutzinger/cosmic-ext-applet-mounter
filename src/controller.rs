@@ -370,6 +370,7 @@ fn restore_connection(
     snapshot: &ControllerSnapshot,
     connection: &Connection,
 ) -> ConnectionRowState {
+    let unsupported_engine = connection.ensure_supported_engine().err();
     let status = match &connection.mode {
         ConnectionMode::OnlineMount(_) => {
             ConnectionStatus::OnlineMount(online_status(snapshot, connection))
@@ -390,10 +391,27 @@ fn restore_connection(
                         | OnlineMountStatus::Detaching
                 )
         }
+        (ConnectionMode::OfflineMirror(_), _) if unsupported_engine.is_some() => matches!(
+            snapshot.sync_state.get(&connection.id),
+            Some(SyncRuntimeState::Idle | SyncRuntimeState::Running)
+        ),
         (ConnectionMode::OfflineMirror(_), _) => !snapshot.paused_syncs.contains(&connection.id),
         _ => false,
     };
-    let warnings = warnings(snapshot, connection, &status);
+    let mut warnings = warnings(snapshot, connection, &status);
+    if let Some(error) = unsupported_engine {
+        warnings.push(error.to_string());
+    }
+    let mut available_actions = actions(&status);
+    if unsupported_engine.is_some() {
+        // Keep Pause available for an observed running legacy service until
+        // owned-unit retirement has completed. Never offer a new engine run.
+        for action in &mut available_actions {
+            if action.operation != Operation::PauseSync {
+                action.enabled = false;
+            }
+        }
+    }
     ConnectionRowState {
         id: connection.id,
         name: connection.name.clone(),
@@ -402,7 +420,7 @@ fn restore_connection(
         persistent_active,
         local_path: connection.local_path.clone(),
         vpn_profile_id: connection.vpn_profile_id,
-        actions: actions(&status),
+        actions: available_actions,
         settings: settings(connection),
         status,
         warnings,
@@ -463,6 +481,9 @@ fn offline_status(snapshot: &ControllerSnapshot, connection: &Connection) -> Off
         _ => {}
     }
     let observed_active = runtime_state == Some(SyncRuntimeState::Idle);
+    if connection.ensure_supported_engine().is_err() && !observed_active {
+        return OfflineMirrorStatus::Unavailable;
+    }
     if !connection.enabled && !observed_active {
         return OfflineMirrorStatus::Unavailable;
     }
@@ -707,7 +728,6 @@ fn dependency_warnings(
             let dependency = match report.kind {
                 DependencyKind::Rclone => "rclone".to_owned(),
                 DependencyKind::Onedriver => "onedriver".to_owned(),
-                DependencyKind::OneDriveSync => "onedrive".to_owned(),
                 DependencyKind::Fuse3 => fl!("dependency-fuse3"),
                 DependencyKind::NetworkManager => "NetworkManager".to_owned(),
                 DependencyKind::SystemdUser => fl!("dependency-systemd-user"),
@@ -863,6 +883,92 @@ mod tests {
             sftp_preload_override: None,
             onedrive_identity: None,
             teams_identity: None,
+        }
+    }
+
+    #[test]
+    fn retired_engine_profiles_round_trip_and_remain_visible_without_start_actions() {
+        use crate::model::{OfflineEngine, UnsupportedEngine};
+
+        for engine in [None, Some(OfflineEngine::LegacyOnedrive)] {
+            let mut connection = offline(id("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"));
+            connection.provider = Provider::OneDrive;
+            if let ConnectionMode::OfflineMirror(options) = &mut connection.mode {
+                options.engine = engine;
+            }
+            let encoded = serde_json::to_value(&connection).unwrap();
+            let restored: Connection = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(restored, connection);
+            assert_eq!(
+                restored.ensure_supported_engine(),
+                Err(UnsupportedEngine(OfflineEngine::LegacyOnedrive))
+            );
+            let mut snapshot = ControllerSnapshot {
+                config: ConfigDocument {
+                    connections: vec![restored],
+                    ..ConfigDocument::default()
+                },
+                ..ControllerSnapshot::default()
+            };
+            let view = restore(&snapshot);
+            assert_eq!(
+                view.rows[0].status,
+                ConnectionStatus::OfflineMirror(OfflineMirrorStatus::Unavailable)
+            );
+            assert!(!view.rows[0].persistent_active);
+            assert!(view.rows[0].actions.iter().all(|action| !action.enabled));
+            for state in [SyncRuntimeState::Idle, SyncRuntimeState::Running] {
+                snapshot.sync_state.insert(connection.id, state);
+                let view = restore(&snapshot);
+                assert_eq!(view.rows.len(), 1);
+                let row = &view.rows[0];
+                assert_eq!(row.id, connection.id);
+                assert_eq!(row.local_path, connection.local_path);
+                assert!(row.warnings.iter().any(|text| text.contains("retired")));
+                for operation in [
+                    Operation::SyncNow,
+                    Operation::ResumeSync,
+                    Operation::PreviewInitialSync,
+                    Operation::Repair,
+                ] {
+                    assert!(!decide_operation(row, operation).allowed);
+                }
+                assert!(decide_operation(row, Operation::PauseSync).allowed);
+                assert_eq!(
+                    serde_json::to_value(&snapshot.config.connections[0]).unwrap(),
+                    encoded
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn retired_engine_policy_preserves_supported_provider_modes() {
+        use crate::model::OfflineEngine;
+
+        for provider in [
+            Provider::OneDrive,
+            Provider::Teams,
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut connection = online(id("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"));
+            connection.provider = provider;
+            assert_eq!(connection.ensure_supported_engine(), Ok(()));
+            connection.mode = ConnectionMode::OfflineMirror(OfflineMirrorConfig {
+                engine: Some(OfflineEngine::Rclone),
+                ..OfflineMirrorConfig::default()
+            });
+            assert_eq!(connection.ensure_supported_engine(), Ok(()));
+            if let ConnectionMode::OfflineMirror(options) = &mut connection.mode {
+                options.engine = None;
+            }
+            assert_eq!(
+                connection.ensure_supported_engine().is_ok(),
+                provider != Provider::OneDrive
+            );
         }
     }
 
@@ -1339,7 +1445,6 @@ mod tests {
             reports: [
                 DependencyKind::Rclone,
                 DependencyKind::Onedriver,
-                DependencyKind::OneDriveSync,
                 DependencyKind::Fuse3,
             ]
             .into_iter()
@@ -1364,23 +1469,27 @@ mod tests {
         };
         assert!(restore(&snapshot).dependency_warnings.is_empty());
         for (engine, expected) in [
-            (OfflineEngine::Rclone, "rclone:"),
-            (OfflineEngine::LegacyOnedrive, "onedrive:"),
+            (OfflineEngine::Rclone, Some("rclone:")),
+            (OfflineEngine::LegacyOnedrive, None),
         ] {
             if let ConnectionMode::OfflineMirror(ref mut options) = connection.mode {
                 options.engine = Some(engine);
             }
             snapshot.config.connections = vec![connection.clone()];
             let warnings = restore(&snapshot).dependency_warnings;
-            assert_eq!(warnings.len(), 1);
-            assert!(warnings[0].starts_with(expected), "{warnings:?}");
+            if let Some(expected) = expected {
+                assert_eq!(warnings.len(), 1);
+                assert!(warnings[0].starts_with(expected), "{warnings:?}");
+            } else {
+                assert!(warnings.is_empty());
+            }
         }
-        // Old profiles with absent engine still need the legacy tool.
+        // Retired profiles never recommend installing the retired tool.
         if let ConnectionMode::OfflineMirror(ref mut options) = connection.mode {
             options.engine = None;
         }
         snapshot.config.connections = vec![connection.clone()];
-        assert!(restore(&snapshot).dependency_warnings[0].starts_with("onedrive:"));
+        assert!(restore(&snapshot).dependency_warnings.is_empty());
         connection.mode = ConnectionMode::OnlineMount(OnlineMountConfig::default());
         snapshot.config.connections = vec![connection.clone()];
         let warnings = restore(&snapshot).dependency_warnings;

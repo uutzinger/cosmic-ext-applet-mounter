@@ -97,8 +97,9 @@ Offline mirror is a full local working tree, not a mount cache. Applications
 interact only with local files; a background engine compares local and remote
 trees when required connectivity is available. All Offline mirrors use
 `rclone bisync` (SharePoint document libraries included), as scheduled
-synchronization plus Sync Now, not continuous monitoring. Existing
-`abraunegg/onedrive` mirrors are a transition case; see FR-031C.
+synchronization plus Sync Now, not continuous monitoring. Retired
+`abraunegg/onedrive` profiles follow the preservation and retirement rules in
+FR-031C.
 
 ### 4.3 Google cloud-native documents
 
@@ -236,8 +237,8 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
     an idle mirror shows unknown, not an uncoordinated dry-run or inferred zero.
     Preview is an explicit coordinator operation, not a background scrape. A
     failed or interrupted run never implies zero, and new changes can raise the
-    count. Legacy `abraunegg/onedrive` connections keep their read-only
-    `--display-sync-status` reading during the transition release.
+    count. Retired `abraunegg/onedrive` profiles do not execute a pending-count
+    command.
   - Scheduled rclone bisync runs shall publish structured app-owned progress
     state tied to the current systemd invocation ID. The applet compares it with
     the unit's D-Bus `InvocationID`, tolerates a partially written final record,
@@ -374,7 +375,7 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   or by typed operation-time results rather than relying only on a version
   string or repeated runtime help probes.
 - **FR-026A:** Production startup shall not run `rclone version`, rclone help,
-  `onedriver --version`, `onedriver --help`, `onedrive --version`,
+  `onedriver --version`, `onedriver --help`,
   `fusermount3 --version`, or `fuser --version` solely as dependency probes.
   Packaging shall declare minimum dependencies, focused diagnostic/build tests
   shall retain capability coverage, and operation-time failures shall remain
@@ -427,11 +428,11 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   OneDrive Offline mirror operation against the same OneDrive account or an
   overlapping remote subtree, and shall prevent an rclone OneDrive mirror from
   sharing or overlapping a local tree with a legacy `abraunegg/onedrive` mirror.
-- **FR-031C:** Existing `abraunegg/onedrive` OneDrive Offline connections shall keep
-  running unchanged for one transition release with a deprecation notice, shall not
-  be newly creatable, and shall load as unsupported after the removal release with
-  their units not regenerated and local data untouched. No conversion tool is
-  provided; the abraunegg database, cache and token are never reused.
+- **FR-031C:** Existing `abraunegg/onedrive` OneDrive Offline connections shall
+  load as visible, removable unsupported profiles. They shall not be newly
+  creatable, authenticated, tested, synchronized, repaired or regenerated. Their
+  local mirror, recovery data, database, cache and credentials remain untouched;
+  no conversion tool is provided and rclone shall never reuse that state.
 - **FR-032:** SMB passwords shall remain in rclone's credential mechanism.
 - **FR-033:** Google cloud-native documents shall be excluded from Offline
   mirrors and reported in the UI.
@@ -471,9 +472,10 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
 - **FR-043:** Automatic remount retries shall use bounded exponential backoff.
 - **FR-044:** An Online mount cache shall never be presented as complete offline
   availability.
-- **FR-044A:** Google Drive recursive VFS refresh requests shall enable
-  rclone's fast-list mode. Online mount service commands shall not include the
-  ignored `--fast-list` argument. Box and SMB shall not inherit the Google Drive
+- **FR-044A:** Google Drive mount service commands shall enable `--fast-list`
+  when creating the VFS, so recursive refresh uses its retained configuration.
+  Request-local RC overrides do not update an existing VFS context. Box and SMB
+  shall not inherit the Google Drive
   refresh behavior. Automated tests shall cover provider selection; live tests
   shall compare ordinary and shared drives, directory-list latency, memory use,
   and API/rate-limit behavior. Before starting an rclone Online mount, the
@@ -482,7 +484,11 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   connection.
 - **FR-044B:** After a Google Drive mount, the applet shall wait a bounded time
   for both the filesystem and its private per-user Unix RC endpoint and submit
-  recursive `vfs/refresh` with `fast_list=true` and `_async=true`. The service
+  root-only `vfs/refresh recursive=false _async=true`. After verified root
+  completion, submit `recursive=true _async=true` for the remaining tree. Both
+  phases shall share one duration budget starting at root dispatch, including
+  time before monitoring begins; root failure shall prevent recursive work.
+  Fast-list shall be inherited from mount creation (FR-044A). The service
   shall explicitly allow unauthenticated commands on that private Unix socket.
   It shall retain the returned job ID and rclone execution ID by connection,
   poll `job/status` through completion, and enforce the configured provider
@@ -559,8 +565,7 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   monitoring shall be 15 minutes after the previous run completes.
 - **FR-052:** The user shall have Sync Now, Pause, and Resume actions.
 - **FR-053:** OneDrive Offline mirrors shall use scheduled rclone bisync plus Sync
-  Now; continuous monitoring is not required. Legacy `abraunegg/onedrive`
-  connections keep their monitor service during the transition release.
+  Now; continuous monitoring is not required.
 - **FR-054:** Only one synchronization operation may run per connection.
 - **FR-055:** Automatic synchronization shall pause on metered networks by
   default, with Sync Now and a per-connection override available.
@@ -590,13 +595,14 @@ Settings`; the app-wide window shall be titled `Cloud Mounter Settings`.
   inactive/non-failed. It shall preserve the renewable bisync lock and direct
   the user to wait through its two-minute maximum or use reviewed manual
   recovery; it shall never delete the lock or trigger implicit resync.
-- **FR-060C:** During the transition release, `abraunegg/onedrive` Repair for a
-  legacy connection shall stop and disable only its
-  continuous monitor service, reset only observed failed state, and preserve
-  its configuration, token, sync database, lock/state, local mirror, recovery
-  data, selection, and initialization markers. It shall not create an rclone
-  timer, invoke sync/resync/reauthentication, or touch a `jstaf/onedriver`
-  Online mount or cache.
+- **FR-060C:** Startup and profile removal shall retire an old app-owned
+  `abraunegg/onedrive` monitor through the systemd user-manager D-Bus API only
+  after structural ownership, connection UUID, unit path and exact executable
+  checks pass. Retirement shall disable and stop the unit, confirm it is inactive
+  and disabled, then remove the unchanged unit file and reload systemd. Missing
+  units are a no-op. Unverified or changed units shall remain untouched; failure
+  shall never enable, start or restart the retired engine. Configuration, token,
+  sync database, lock/state, local mirror, recovery data and credentials remain.
 - **FR-061:** A resync or state-database rebuild shall not run as routine startup
   behavior and shall require a dry preview and explicit confirmation.
 - **FR-062:** Synchronization errors shall preserve local user work.
@@ -846,7 +852,6 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 | Google Drive, Box, SMB, SFTP, SharePoint Offline mirror | `rclone` 1.74.3 or newer with required bisync safety features |
 | OneDrive Online mount | `jstaf/onedriver` 0.15.0 or newer |
 | OneDrive Offline mirror | `rclone` 1.74.3 or newer with bisync safety features (a OneDrive-specific minimum is an open item in the [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md)) |
-| Legacy OneDrive Offline mirror (transition release only) | `abraunegg/onedrive` 2.5.10 or newer |
 | User service/timer control and optional sleep cleanup | Host systemd user-manager and logind D-Bus services |
 | NetworkManager VPN | NetworkManager D-Bus service |
 | OpenConnect VPN | Host `network-manager-openconnect` plugin and authentication dialog |
@@ -855,11 +860,10 @@ OneDrive caused the reported suspend hang or that every busy mount will detach.
 Dependencies shall be checked independently. An unavailable mode shall not
 disable unrelated modes.
 
-The manual browser/response-URL handoff remains available for existing legacy
-`abraunegg/onedrive` connections during the transition release. Version 0.5.4
-removes the WebKit sign-in helper and its helper-only Debian recommendations and
-installer options. Existing legacy synchronization and credentials are retained;
-rclone OneDrive setup does not consume legacy authentication files.
+The legacy `abraunegg/onedrive` browser/response-URL handoff and executable route
+are removed. Dependency setup does not install or uninstall that package.
+Existing profiles and provider-owned files remain for safe replacement or
+removal; rclone OneDrive setup does not consume legacy authentication files.
 
 ### 8.3 Permissions
 
@@ -880,7 +884,7 @@ COSMIC configuration, and systemd user services.
 | `app` | COSMIC model, messages, popup, and settings |
 | `model` | Connection, mode, provider, VPN, operation, and status types |
 | `config` | Versioning, validation, migration, and atomic persistence |
-| `providers` | rclone and `jstaf/onedriver` adapters (and the legacy `abraunegg/onedrive` adapter until removal) |
+| `providers` | rclone and `jstaf/onedriver` adapters; retired-engine identities return typed unsupported results |
 | `mounts` | Mount lifecycle, mount-table inspection, and VFS health |
 | `sync` | Preview, scheduling, conflict/recovery state, and sync lifecycle |
 | `services` | systemd unit/timer rendering and user-manager D-Bus control |
@@ -987,8 +991,8 @@ a Flatpak-private credential or configuration store:
 
 - the applet's own saved connection list and VPN profile references;
 - existing rclone remotes and credentials;
-- `jstaf/onedriver` authentication state (and legacy `abraunegg/onedrive` state
-  until removal);
+- `jstaf/onedriver` authentication state and preserved retired
+  `abraunegg/onedrive` artifacts;
 - generated user systemd services and timers under the host user session;
 - user-selected mountpoints, mirror directories, cache directories, and
   recovery directories;
@@ -1005,7 +1009,8 @@ Any such helper shall keep the native safety constraints (fixed operations,
 validated connection IDs and paths, applet ownership markers for unit changes,
 atomic writes, no secret disclosure, no general-purpose shell execution) and
 shall make clear which state is applet-owned and which remains provider-owned by
-rclone, onedriver, onedrive, NetworkManager, OpenConnect, or systemd.
+rclone, onedriver, retired provider artifacts, NetworkManager, OpenConnect, or
+systemd.
 
 Flatpak permissions shall start from the accepted COSMIC applet pattern with
 Wayland/session access. Add narrowly scoped access to NetworkManager, the
@@ -1210,7 +1215,9 @@ Google Drive post-mount directory warm-up:
 ```text
 mountpoint --quiet <local mountpoint>
 rclone rc --unix-socket <connection socket> rc/noop
-rclone rc --unix-socket <connection socket> vfs/refresh recursive=true fast_list=true _async=true
+rclone rc --unix-socket <connection socket> vfs/refresh recursive=false _async=true
+# Wait for successful root job completion before the following request:
+rclone rc --unix-socket <connection socket> vfs/refresh recursive=true _async=true
 ```
 
 The managed rclone service enables unauthenticated RC commands only on its
@@ -1290,8 +1297,8 @@ not silently restore shell execution.
 - Online mount shall use `jstaf/onedriver`'s supported user-service behavior.
 - Offline mirror shall use an rclone OneDrive remote, a dedicated local directory
   and bisync state per connection, and the restricted scheduled worker.
-- Legacy `abraunegg/onedrive` connections keep a dedicated configuration, sync
-  directory and monitor service during the transition release only.
+- Retired `abraunegg/onedrive` profiles keep their configuration and user data;
+  only verified app-owned monitor units are stopped, disabled and removed.
 - Destructive resync/state rebuild options require explicit reviewed recovery.
 
 ### 11.4 Ownership
@@ -1502,9 +1509,9 @@ Details shall show:
   command construction, explicit existing-remote update, and form clearing.
 - VFS queue states and safe/unsafe auto-detach decisions.
 - Automatic remount readiness and backoff.
-- Google Drive refresh-level fast-list selection, private Unix RC readiness,
-  background VFS refresh lifecycle, nested-result error handling, deadline, and
-  cancellation.
+- Google Drive VFS-creation fast-list selection, private Unix RC readiness,
+  root-before-recursive sequencing, one shared phase deadline, actual local-rclone
+  RC/cache integration, nested-result error handling and cancellation.
 - OneDrive, Box, and SMB directory-only traversal boundaries, root readiness,
   provider defaults, depth limits, configurable deadlines, incremental timeout
   behavior, and cancellation before unmount or sleep.
@@ -1885,6 +1892,11 @@ library it denotes using authenticated metadata.
 
 ### 18.3 Offline mirror with rclone bisync
 
+- An empty optional folder selects the entire verified document library. A
+  nonempty value selects an existing folder relative to that library; reject
+  absolute paths, traversal and malformed components. Library-root and subfolder
+  targets have distinct bisync state and guard bindings. Switching either way
+  invalidates prior Preview/initial-sync confirmation and requires a fresh Preview.
 - Reuse the verified SharePoint rclone `onedrive` document-library remote. Keep
   SharePoint bisync listings, lock, local directory, and recovery
   data separate from every Online mount and other mirror. Never copy or expose
@@ -1903,7 +1915,10 @@ library it denotes using authenticated metadata.
   library, limit both remote and local paths to a disposable folder; prove that
   no proposed operation or recovery write escapes the approved scope before any
   test sync.
-- Preserve overwritten/deleted files in applet-owned recovery areas. If remote
+- Preserve overwritten/deleted files in applet-owned recovery areas. For a whole
+  library mirror, keep remote recovery under the library's applet-owned
+  `.cosmic-mounter-recovery/<connection-id>` directory and exclude that recovery
+  directory from the synchronized set, just as for a selected subfolder. If remote
   recovery cannot be kept within an approved scope without bisync reading its
   own backups, do not run a writable mirror until an explicit safe location is
   chosen and verified. Never create a recovery folder elsewhere in the work

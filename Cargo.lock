@@ -919,8 +919,9 @@ dependencies = [
 
 [[package]]
 name = "cosmic-ext-applet-mounter"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
+ "enumflags2",
  "i18n-embed",
  "i18n-embed-fl",
  "jiff",

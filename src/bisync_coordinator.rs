@@ -24,7 +24,7 @@ use crate::offline_coordinator::{
     write_state,
 };
 use crate::process::{CommandError, CommandOutput, CommandRequest, CommandRunner, Executable};
-use crate::sync::{RcloneBisyncPlan, rclone_bisync_filter_file, rclone_bisync_plan};
+use crate::sync::{RcloneBisyncPlan, rclone_bisync_filter_file_for_connection, rclone_bisync_plan};
 
 const OWNER_MARKER: &str = ".cosmic-mounter-owner";
 const RETENTION_DAYS: u64 = 32;
@@ -438,7 +438,7 @@ fn prepare_inputs(
     })?;
     write_atomic(
         &plan.filters_file,
-        rclone_bisync_filter_file(connection.provider).as_bytes(),
+        rclone_bisync_filter_file_for_connection(connection).as_bytes(),
     )?;
     if connection.provider == Provider::OneDrive
         && connection.offline_engine() == Some(crate::model::OfflineEngine::Rclone)
@@ -1350,18 +1350,78 @@ fn command_failure(stage: &str, error: CommandError) -> String {
             "ui-bisync-coordinator-stage-could-not-start-rclone",
             stage = (stage).to_string()
         ),
-        CommandError::NonZero { code, .. } => match code {
-            Some(code) => crate::fl!(
-                "ui-bisync-coordinator-stage-failed-with-exit-status-code",
-                stage = (stage).to_string(),
-                code = (code).to_string()
-            ),
-            None => crate::fl!(
-                "ui-bisync-coordinator-stage-failed",
-                stage = (stage).to_string()
-            ),
-        },
+        CommandError::NonZero { code, stderr, .. } => {
+            let summary = match code {
+                Some(code) => crate::fl!(
+                    "ui-bisync-coordinator-stage-failed-with-exit-status-code",
+                    stage = (stage).to_string(),
+                    code = (code).to_string()
+                ),
+                None => crate::fl!(
+                    "ui-bisync-coordinator-stage-failed",
+                    stage = (stage).to_string()
+                ),
+            };
+            let diagnostic = mirror_command_diagnostic(&stderr);
+            if diagnostic.is_empty() {
+                summary
+            } else {
+                crate::fl!(
+                    "mirror-command-diagnostic",
+                    summary = summary,
+                    diagnostic = diagnostic
+                )
+            }
+        }
     }
+}
+
+// External engine text is diagnostic data only, never an input to state policy.
+// Do not include command arguments or stdout (which can contain file listings).
+fn mirror_command_diagnostic(output: &crate::process::CapturedOutput) -> String {
+    if output.invalid_utf8 {
+        return String::new();
+    }
+    let redacted = crate::process::redact_text(&output.text);
+    let mut quoted = None;
+    let mut text = String::new();
+    for character in redacted.chars() {
+        if let Some(quote) = quoted {
+            if character == quote {
+                quoted = None;
+            }
+        } else if matches!(character, '\'' | '"' | '`') {
+            quoted = Some(character);
+            text.push_str("[REDACTED]");
+        } else if !character.is_control() || character == '\n' {
+            text.push(character);
+        }
+    }
+    let lines: Vec<String> = text
+        .lines()
+        .rev()
+        .take(8)
+        .map(|line| {
+            line.split_whitespace()
+                .map(|word| {
+                    if word.contains('/') || word.contains('\\') || word.contains(':') {
+                        "[REDACTED]"
+                    } else {
+                        word
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    lines
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(1600)
+        .collect()
 }
 
 struct OperationLock {
@@ -2096,16 +2156,57 @@ mod tests {
     }
 
     #[test]
+    fn command_failure_includes_bounded_redacted_stderr_only() {
+        let error = CommandError::NonZero {
+            command: "rclone bisync hidden_remote: /private/mirror".into(),
+            code: Some(7),
+            stdout: output("hidden file listing").stdout,
+            stderr: crate::process::CapturedOutput {
+                text: "Failed to bisync: unsupported option --example\nremote_name:path /private/mirror \"private file name\" token=synthetic-secret".into(),
+                truncated: false,
+                invalid_utf8: false,
+            },
+            attempts: 1,
+        };
+        let message = command_failure("bisync initial-preview", error);
+        assert!(message.contains("exit status 7"));
+        assert!(message.contains("unsupported option --example"));
+        for private in [
+            "hidden_remote",
+            "hidden file listing",
+            "remote_name",
+            "/private",
+            "private file name",
+            "synthetic-secret",
+        ] {
+            assert!(!message.contains(private), "leaked {private}");
+        }
+        let large = crate::process::CapturedOutput {
+            text: format!("old diagnostic\n{}", "é".repeat(4000)),
+            truncated: true,
+            invalid_utf8: false,
+        };
+        assert_eq!(mirror_command_diagnostic(&large).chars().count(), 1600);
+        let invalid = crate::process::CapturedOutput {
+            invalid_utf8: true,
+            ..large
+        };
+        assert!(mirror_command_diagnostic(&invalid).is_empty());
+    }
+
+    #[test]
     fn command_failures_do_not_expose_remote_or_local_paths() {
+        let mut captured = output("");
+        captured.stderr.text = "Failed for secret_remote:path /home/person/private".into();
         let error = CommandError::NonZero {
             command: "rclone bisync secret_remote:path /home/person/private".into(),
             code: Some(7),
             stdout: output("provider secret").stdout,
-            stderr: output("/home/person/private").stderr,
+            stderr: captured.stderr,
             attempts: 1,
         };
         let message = command_failure("bisync sync", error);
-        assert_eq!(message, "bisync sync failed with exit status 7");
+        assert!(message.starts_with("bisync sync failed with exit status 7"));
         assert!(!message.contains("secret_remote"));
         assert!(!message.contains("/home"));
     }

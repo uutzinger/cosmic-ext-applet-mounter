@@ -12,7 +12,6 @@ use crate::vpn::DbusNetworkManagerVpn;
 
 pub const MIN_RCLONE_VERSION: &str = "1.74.3";
 pub const MIN_ONEDRIVER_VERSION: &str = "0.15.0";
-pub const MIN_ONEDRIVE_VERSION: &str = "2.5.10";
 pub const RCLONE_REQUIRED_CAPABILITIES: &[(&str, &str)] = &[
     ("command:mount", "mount"),
     ("command:bisync", "bisync"),
@@ -38,7 +37,6 @@ pub const ONEDRIVER_REQUIRED_CAPABILITIES: &[(&str, &str)] = &[
 pub enum DependencyKind {
     Rclone,
     Onedriver,
-    OneDriveSync,
     Fuse3,
     NetworkManager,
     SystemdUser,
@@ -58,10 +56,6 @@ impl DependencyKind {
             Self::Onedriver => connections.iter().any(|connection| {
                 connection.provider == Provider::OneDrive
                     && matches!(connection.mode, ConnectionMode::OnlineMount(_))
-            }),
-            Self::OneDriveSync => connections.iter().any(|connection| {
-                connection.provider == Provider::OneDrive
-                    && connection.offline_engine() == Some(OfflineEngine::LegacyOnedrive)
             }),
             Self::Fuse3 => connections
                 .iter()
@@ -125,13 +119,6 @@ impl DependencyInventory {
                 Executable::Onedriver,
                 true,
                 "https://github.com/jstaf/onedriver",
-            ),
-            inspect_executable(
-                runner,
-                DependencyKind::OneDriveSync,
-                Executable::OneDrive,
-                true,
-                "https://github.com/abraunegg/onedrive",
             ),
             inspect_executable(
                 runner,
@@ -445,18 +432,6 @@ mod tests {
             "https://github.com/jstaf/onedriver",
         );
         assert_eq!(onedriver.state, DependencyState::Available);
-
-        let onedrive = assess_versioned(
-            DependencyKind::OneDriveSync,
-            true,
-            "/usr/bin/onedrive".into(),
-            parse_version("onedrive v2.5.10"),
-            MIN_ONEDRIVE_VERSION,
-            &[],
-            "",
-            "https://github.com/abraunegg/onedrive",
-        );
-        assert_eq!(onedrive.state, DependencyState::Available);
     }
 
     #[tokio::test]
@@ -464,7 +439,7 @@ mod tests {
         let inventory =
             DependencyInventory::inspect(&FakeCommandRunner::default(), CancellationToken::new())
                 .await;
-        assert_eq!(inventory.reports.len(), 6);
+        assert_eq!(inventory.reports.len(), 5);
         assert!(inventory.reports.iter().all(|report| {
             matches!(
                 report.kind,
@@ -485,7 +460,6 @@ mod tests {
         let runner = FakeCommandRunner::default().with_resolved([
             Executable::Rclone,
             Executable::Onedriver,
-            Executable::OneDrive,
             Executable::Fusermount3,
         ]);
 

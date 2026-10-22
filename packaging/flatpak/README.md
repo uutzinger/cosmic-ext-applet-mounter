@@ -14,6 +14,12 @@ are rejected. The source manifest now pins accepted implementation commit
 The wrapper does not change that pin or choose a runtime. The packaging changes
 must also be committed before a clean-checkout candidate build.
 
+**0.5.5 preparation:** that pin is historical 0.5.4 development source, not the
+current tested worktree. Select the reviewed immutable 0.5.5 app commit and update
+the pin before creating the clean packaging candidate. The October 22 preflight
+found the required x86_64 runtime refs installed but the worktree dirty. See the
+[current readiness/checklist](../../docs/engineering/cosmic-submission-audit.md#055-readiness-review--october-22).
+
 Example interface (placeholders, not a request to build now):
 
 ```sh
@@ -332,7 +338,7 @@ repository submission remains pending.
 
 The reviewed manifests do not grant `--filesystem=host`. Retained engine/helper
 commands use the typed `flatpak-spawn --host` runner, and generated units run host
-tools such as `rclone`, `onedriver`, `onedrive`, and `fusermount3`
+tools such as `rclone`, `onedriver`, and `fusermount3`
 outside the sandbox. The Flatpak itself needs only enough filesystem access to
 share applet state and app-owned engine metadata with the host user session.
 
@@ -352,7 +358,7 @@ Retained command families are reconciled in the
 |---|---|
 | `rclone` | Remote setup/auth/configuration; scoped access checks; private RC readiness, queue/health/refresh/job operations; coordinator preview/sync, recovery markers, checksum verification, and ownership-checked retention. |
 | `onedriver` | Online OneDrive authentication; generated service runs the mount engine directly. |
-| `onedrive` | Legacy Offline OneDrive authentication, preview/sync/status only; its retained service runs the monitor directly. New OneDrive mirrors use rclone. |
+| `onedrive` (retired in 0.5.5) | No executable route remains. Legacy profiles/data are preserved; owned monitor retirement uses systemd D-Bus. |
 | `fusermount3` | Clean FUSE detach and confirmed lazy recovery. |
 | `mountpoint`, `find`, `cat` | Host mount readiness, path/emptiness/preload checks, and mount-namespace inspection; native mountinfo instead reads local `/proc`. |
 | `flatpak document-info` | Explicit Documents portal-v4 compatibility exception, selected only for the unsupported sandbox interface-version result. |
@@ -424,8 +430,8 @@ Current final-manifest `finish-args`:
   share the applet's native-visible COSMIC configuration document with source
   and Debian installations.
 - `--filesystem=xdg-config/cosmic-ext-applet-mounter:create`: store app-owned
-  engine configuration such as isolated onedriver and abraunegg/onedrive
-  metadata in host-visible paths used by host services.
+  engine configuration such as isolated onedriver metadata in host-visible paths
+  used by host services; existing legacy metadata is preserved.
 - `--filesystem=xdg-config/systemd/user:create`: write generated user systemd
   service/timer files where the host user manager can load them.
 - `--filesystem=xdg-cache/cosmic-ext-applet-mounter:create`: store app-owned
@@ -460,6 +466,17 @@ present. Final acceptance must inspect effective permissions (including BaseApp
 defaults), exact source/runtime identity, generated worker/guard units, and live
 Tasks (5)/(6) behavior before release. Do not enable `development-probes` in the
 shipping build, advance the tag prematurely, or substitute a different base/runtime.
+
+### 0.5.5 development retirement
+
+The legacy engine and browser/manual handoff are removed from current source.
+Owned legacy monitor units are stopped/disabled through systemd D-Bus and removed
+only after inactive-state verification. No new host command or permission is
+introduced; rclone and onedriver still require existing host access. Installed
+native unit retirement/data preservation has passed. Debian/Flatpak upgrade and
+retained-profile missing-service regression acceptance remain pending and will
+be combined. The following 0.5.4
+notes record historical behavior, not the current execution surface.
 
 > **0.5.4 development:** new OneDrive Offline mirrors use host rclone >= 1.74.3 and the shared applet OAuth/coordinator path. The `onedrive` host command remains for legacy profiles for one transition release; its removal is a later phase. The WebKit auth helper is retired in 0.5.4. Integrated Flatpak/browser acceptance is still pending. See the [OneDrive Offline contracts](../../docs/engineering/onedrive-rclone-offline-contracts.md).
 

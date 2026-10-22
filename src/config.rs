@@ -1314,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn teams_offline_storage_requires_a_scoped_verified_folder() {
+    fn teams_offline_storage_accepts_verified_library_root_and_rejects_unsafe_folders() {
         let mut teams = offline_connection("/home/example/Cloud/TeamsMirror");
         teams.provider = Provider::Teams;
         teams.remote_reference = "assessment".into();
@@ -1334,7 +1334,7 @@ mod tests {
 
         teams.remote_subpath = None;
         config.document.connections = vec![teams.clone()];
-        assert!(config.validate().is_err());
+        assert!(config.validate().is_ok());
         teams.remote_subpath = Some(".".into());
         config.document.connections = vec![teams];
         assert!(config.validate().is_err());

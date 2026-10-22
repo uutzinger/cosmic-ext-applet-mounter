@@ -12,20 +12,21 @@ use crate::model::{
     Connection, ConnectionId, ConnectionMode, OfflineEngine, OfflineMirrorConfig,
     OfflineMirrorStatus, Provider, RecoveryReason, RecoveryRecord,
 };
-use crate::process::{CommandError, CommandRequest, Executable, RetryPolicy};
+use crate::process::CommandError;
+#[cfg(test)]
+use crate::process::{CommandRequest, Executable, RetryPolicy};
 use crate::services::{ServiceCommand, ServiceSpec, TimerSpec};
 
 const DEFAULT_RCLONE: &str = "/usr/bin/rclone";
-const DEFAULT_ONEDRIVE: &str = "/usr/bin/onedrive";
 const RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
 // Bisync interprets max-delete as a percentage of each previous listing, unlike
 // one-way sync's file-count flag. Match bisync's default; never bypass with force.
 const BISYNC_MAX_DELETE_PERCENT: u8 = 50;
-const ONEDRIVE_PREVIEW_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncError {
     InvalidMode,
+    UnsupportedEngine(crate::model::UnsupportedEngine),
     UnsupportedProvider(Provider),
     InvalidRemoteReference,
     InvalidRemoteSubpath,
@@ -45,6 +46,7 @@ pub enum SyncError {
 impl fmt::Display for SyncError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedEngine(error) => error.fmt(formatter),
             Self::InvalidMode => {
                 formatter.write_str(&crate::fl!("ui-sync-connection-is-not-an-offline-mirror"))
             }
@@ -186,43 +188,13 @@ pub struct RcloneBisyncPlan {
     pub timer: TimerSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OneDriveMirrorPlan {
-    pub connection_id: ConnectionId,
-    pub sync_directory: PathBuf,
-    pub config_directory: PathBuf,
-    pub recovery_directory: PathBuf,
-    pub single_directory: Option<String>,
-    pub service: ServiceSpec,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OneDriveNativeState {
-    Idle,
-    Syncing,
-    Offline,
-    Conflict,
-    RecoveryRequired,
-    Error,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OneDriveStatusSnapshot {
-    pub authenticated: bool,
-    pub monitor_running: bool,
-    pub native_state: OneDriveNativeState,
-    pub readiness: SyncReadiness,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OneDriveIsolationReport {
-    pub active_onedriver_paths: Vec<PathBuf>,
-}
-
 pub fn rclone_bisync_plan(
     connection: &Connection,
     work_root: &Path,
 ) -> Result<RcloneBisyncPlan, SyncError> {
+    connection
+        .ensure_supported_engine()
+        .map_err(SyncError::UnsupportedEngine)?;
     match connection.provider {
         Provider::OneDrive if connection.offline_engine() == Some(OfflineEngine::Rclone) => {
             crate::onedrive::MirrorGuardBinding::from_connection(connection)
@@ -255,9 +227,6 @@ fn rclone_bisync_plan_inner(
                 .map_or(true, |parsed| parsed.site_url != identity.site_url)
         {
             return Err(SyncError::InvalidSharePointIdentity);
-        }
-        if connection.remote_subpath.is_none() {
-            return Err(SyncError::InvalidRemoteSubpath);
         }
     }
     validate_directory_roots(
@@ -523,151 +492,6 @@ pub fn rclone_bisync_sync_request(plan: &RcloneBisyncPlan) -> Result<CommandRequ
         .pipe(Ok)
 }
 
-pub fn one_drive_mirror_plan(
-    connection: &Connection,
-    config_root: &Path,
-    isolation: &OneDriveIsolationReport,
-) -> Result<OneDriveMirrorPlan, SyncError> {
-    if connection.provider != Provider::OneDrive
-        || connection.offline_engine() != Some(OfflineEngine::LegacyOnedrive)
-    {
-        return Err(SyncError::UnsupportedProvider(connection.provider));
-    }
-    let options = offline_options(connection)?;
-    validate_directory_roots(
-        &connection.local_path,
-        config_root,
-        &options.recovery_directory,
-    )?;
-    if let Some(path) = isolation
-        .active_onedriver_paths
-        .iter()
-        .find(|path| paths_overlap(path, &connection.local_path))
-    {
-        return Err(SyncError::OverlapsOnedriverPath(path.clone()));
-    }
-    let config_directory = config_root
-        .join("onedrive-sync")
-        .join(connection.id.to_string());
-    let mut arguments = vec![
-        "--confdir".to_owned(),
-        config_directory.display().to_string(),
-        "--syncdir".to_owned(),
-        connection.local_path.display().to_string(),
-        "--monitor".to_owned(),
-        "--monitor-interval".to_owned(),
-        "300".to_owned(),
-        "--disable-notifications".to_owned(),
-    ];
-    if let Some(subpath) = &connection.remote_subpath {
-        validate_remote_subpath(subpath)?;
-        arguments.push("--single-directory".to_owned());
-        arguments.push(subpath.clone());
-    }
-    Ok(OneDriveMirrorPlan {
-        connection_id: connection.id,
-        sync_directory: connection.local_path.clone(),
-        config_directory,
-        recovery_directory: options.recovery_directory.clone(),
-        single_directory: connection.remote_subpath.clone(),
-        service: ServiceSpec {
-            connection_id: connection.id,
-            description: crate::fl!(
-                "ui-sync-cloud-mounter-onedrive-mirror-value1",
-                value1 = (connection.name).to_string()
-            ),
-            executable: PathBuf::from(DEFAULT_ONEDRIVE),
-            arguments,
-            pre_start_condition: Some(
-                crate::vpn::offline_readiness_guard_command(connection.id)
-                    .map_err(|_| SyncError::InvalidRemoteReference)?,
-            ),
-            restart_on_failure: true,
-            skip_on_metered: false,
-        },
-    })
-}
-
-pub fn one_drive_preview_request(
-    plan: &OneDriveMirrorPlan,
-) -> Result<CommandRequest, CommandError> {
-    let mut request = CommandRequest::new(Executable::OneDrive)
-        .arg("--confdir")?
-        .arg(plan.config_directory.as_os_str())?
-        .arg("--syncdir")?
-        .arg(plan.sync_directory.as_os_str())?
-        .arg("--sync")?
-        .arg("--dry-run")?
-        .arg("--verbose")?;
-    if let Some(single_directory) = &plan.single_directory {
-        request = request.arg("--single-directory")?.arg(single_directory)?;
-    }
-    Ok(request.with_timeout(ONEDRIVE_PREVIEW_TIMEOUT))
-}
-
-pub fn one_drive_auth_request(plan: &OneDriveMirrorPlan) -> Result<CommandRequest, CommandError> {
-    CommandRequest::new(Executable::OneDrive)
-        .arg("--confdir")?
-        .arg(plan.config_directory.as_os_str())?
-        .arg("--reauth")?
-        .with_timeout(Duration::from_secs(10 * 60))
-        .pipe(Ok)
-}
-
-pub fn one_drive_auth_files_request(
-    plan: &OneDriveMirrorPlan,
-    auth_url_file: &Path,
-    response_url_file: &Path,
-) -> Result<CommandRequest, CommandError> {
-    CommandRequest::new(Executable::OneDrive)
-        .arg("--confdir")?
-        .arg(plan.config_directory.as_os_str())?
-        .arg("--reauth")?
-        .arg("--auth-files")?
-        .arg(format!(
-            "{}:{}",
-            auth_url_file.display(),
-            response_url_file.display()
-        ))?
-        .with_timeout(Duration::from_secs(10 * 60))
-        .pipe(Ok)
-}
-
-pub fn one_drive_sync_request(plan: &OneDriveMirrorPlan) -> Result<CommandRequest, CommandError> {
-    one_drive_sync_request_with_resync(plan, false)
-}
-
-pub fn one_drive_initial_sync_request(
-    plan: &OneDriveMirrorPlan,
-) -> Result<CommandRequest, CommandError> {
-    one_drive_sync_request_with_resync(plan, true)
-}
-
-fn one_drive_sync_request_with_resync(
-    plan: &OneDriveMirrorPlan,
-    resync: bool,
-) -> Result<CommandRequest, CommandError> {
-    let mut request = CommandRequest::new(Executable::OneDrive)
-        .arg("--confdir")?
-        .arg(plan.config_directory.as_os_str())?
-        .arg("--syncdir")?
-        .arg(plan.sync_directory.as_os_str())?
-        .arg("--sync")?;
-    if resync {
-        request = request.arg("--resync")?.arg("--resync-auth")?;
-    }
-    if let Some(single_directory) = &plan.single_directory {
-        request = request.arg("--single-directory")?.arg(single_directory)?;
-    }
-    Ok(request
-        .with_timeout(Duration::from_secs(15 * 60))
-        .with_retry(RetryPolicy {
-            max_attempts: 1,
-            delay: Duration::ZERO,
-            retry_nonzero: false,
-        }))
-}
-
 pub fn sync_now_request(
     request: SyncRequest,
     options: &OfflineMirrorConfig,
@@ -790,6 +614,24 @@ pub fn rclone_bisync_filter_file(provider: Provider) -> String {
     }
 }
 
+/// Root mirrors contain the app's remote recovery directory. Exclude it before
+/// the catch-all include; retain existing subfolder filters byte-for-byte so
+/// initialized mirrors do not acquire an unrelated bisync filter-hash change.
+#[must_use]
+pub fn rclone_bisync_filter_file_for_connection(connection: &Connection) -> String {
+    let filters = rclone_bisync_filter_file(connection.provider);
+    let root = connection.remote_subpath.as_deref().is_none_or(|path| {
+        Path::new(path)
+            .components()
+            .all(|component| component == Component::CurDir)
+    });
+    if root && matches!(connection.provider, Provider::Box | Provider::GoogleDrive) {
+        format!("- /.cosmic-mounter-recovery/\n{filters}")
+    } else {
+        filters
+    }
+}
+
 #[must_use]
 pub fn parse_preview(output: &str) -> PreviewSummary {
     let mut summary = PreviewSummary::default();
@@ -890,29 +732,6 @@ pub fn parse_preview(output: &str) -> PreviewSummary {
         }
     }
     summary
-}
-
-#[must_use]
-pub fn onedrive_status(snapshot: OneDriveStatusSnapshot) -> OfflineMirrorStatus {
-    if !snapshot.authenticated {
-        return OfflineMirrorStatus::Unavailable;
-    }
-    if !snapshot.readiness.network_ready {
-        return OfflineMirrorStatus::Offline;
-    }
-    if !snapshot.readiness.vpn_ready {
-        return OfflineMirrorStatus::WaitingForVpn;
-    }
-    match snapshot.native_state {
-        OneDriveNativeState::Idle if snapshot.monitor_running => OfflineMirrorStatus::Idle,
-        OneDriveNativeState::Syncing => OfflineMirrorStatus::Syncing,
-        OneDriveNativeState::Offline => OfflineMirrorStatus::Offline,
-        OneDriveNativeState::Conflict => OfflineMirrorStatus::Conflict,
-        OneDriveNativeState::RecoveryRequired | OneDriveNativeState::Error => {
-            OfflineMirrorStatus::Error
-        }
-        OneDriveNativeState::Idle => OfflineMirrorStatus::Paused,
-    }
 }
 
 fn offline_options(connection: &Connection) -> Result<&OfflineMirrorConfig, SyncError> {
@@ -1041,12 +860,14 @@ fn parse_first_bytes(lowercase_line: &str) -> Option<u64> {
     })
 }
 
+#[cfg(test)]
 trait Pipe: Sized {
     fn pipe<T>(self, function: impl FnOnce(Self) -> T) -> T {
         function(self)
     }
 }
 
+#[cfg(test)]
 impl<T> Pipe for T {}
 
 #[cfg(test)]
@@ -1099,6 +920,46 @@ mod tests {
             sftp_preload_override: None,
             onedrive_identity: None,
             teams_identity: None,
+        }
+    }
+
+    #[test]
+    fn root_recovery_filters_exclude_backups_without_changing_subfolder_filters() {
+        for provider in [Provider::Box, Provider::GoogleDrive] {
+            let mut connection = offline(provider);
+            let original = rclone_bisync_filter_file(provider);
+            assert_eq!(
+                rclone_bisync_filter_file_for_connection(&connection),
+                original
+            );
+            for subpath in [None, Some(".".to_owned()), Some("./".to_owned())] {
+                connection.remote_subpath = subpath;
+                let filters = rclone_bisync_filter_file_for_connection(&connection);
+                assert!(filters.starts_with("- /.cosmic-mounter-recovery/\n"));
+                assert!(filters.ends_with(&original));
+                assert!(
+                    filters.find("- /.cosmic-mounter-recovery/").unwrap()
+                        < filters.find("+ **").unwrap()
+                );
+            }
+            connection.remote_subpath = Some("Projects".into());
+            assert_eq!(
+                rclone_bisync_filter_file_for_connection(&connection),
+                original
+            );
+        }
+        for provider in [
+            Provider::OneDrive,
+            Provider::Teams,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
+            let mut connection = offline(provider);
+            connection.remote_subpath = None;
+            assert_eq!(
+                rclone_bisync_filter_file_for_connection(&connection),
+                rclone_bisync_filter_file(provider)
+            );
         }
     }
 
@@ -1237,27 +1098,6 @@ mod tests {
                 "{provider:?}"
             );
         }
-
-        let connection = offline(Provider::OneDrive);
-        let plan = one_drive_mirror_plan(
-            &connection,
-            Path::new("/config"),
-            &OneDriveIsolationReport {
-                active_onedriver_paths: Vec::new(),
-            },
-        )
-        .expect("OneDrive plan");
-        assert_eq!(
-            plan.service
-                .pre_start_condition
-                .as_ref()
-                .expect("offline readiness condition")
-                .arguments,
-            vec![
-                crate::vpn::OFFLINE_READINESS_GUARD_FLAG.to_owned(),
-                connection.id.to_string(),
-            ]
-        );
     }
 
     #[test]
@@ -1381,10 +1221,18 @@ mod tests {
             rclone_bisync_filter_file(Provider::Teams).contains("- /.cosmic-mounter-recovery/\n")
         );
         connection.remote_subpath = None;
-        assert!(matches!(
-            rclone_bisync_plan(&connection, Path::new("/state")),
-            Err(SyncError::InvalidRemoteSubpath)
-        ));
+        let root_plan = rclone_bisync_plan(&connection, Path::new("/state")).unwrap();
+        assert_eq!(root_plan.path1_remote, "test_teams:");
+        assert_eq!(root_plan.service.arguments[1], "test_teams:");
+        assert_eq!(
+            root_plan.remote_recovery_path,
+            format!("test_teams:.cosmic-mounter-recovery/{}", id())
+        );
+        assert_ne!(root_plan.work_directory, plan.work_directory);
+        assert_ne!(root_plan.preflight_command, plan.preflight_command);
+        assert_eq!(root_plan.access_marker_name, plan.access_marker_name);
+        assert!(root_plan.verify_after_sync);
+        assert!(root_plan.preflight_command.is_some());
     }
 
     #[test]
@@ -1410,7 +1258,9 @@ mod tests {
             original.work_directory
         );
 
-        for changed in ["remote", "drive", "library", "folder", "local", "recovery"] {
+        for changed in [
+            "remote", "drive", "library", "folder", "root", "local", "recovery",
+        ] {
             let mut edited = connection.clone();
             match changed {
                 "remote" => edited.remote_reference = "another_remote".into(),
@@ -1420,6 +1270,7 @@ mod tests {
                         "https://example.sharepoint.com/sites/assessment/Other".into();
                 }
                 "folder" => edited.remote_subpath = Some("AnotherDisposable".into()),
+                "root" => edited.remote_subpath = None,
                 "local" => edited.local_path = PathBuf::from("/home/example/Cloud/Other"),
                 "recovery" => {
                     let ConnectionMode::OfflineMirror(options) = &mut edited.mode else {
@@ -1453,94 +1304,6 @@ mod tests {
             ),
             Err(SyncError::InvalidWorkDirectory)
         ));
-    }
-
-    #[test]
-    fn onedrive_plan_blocks_active_onedriver_overlap() {
-        let connection = offline(Provider::OneDrive);
-        let isolation = OneDriveIsolationReport {
-            active_onedriver_paths: vec![PathBuf::from("/home/example/Cloud")],
-        };
-        assert!(matches!(
-            one_drive_mirror_plan(
-                &connection,
-                Path::new("/home/example/.config/cosmic-mounter"),
-                &isolation,
-            ),
-            Err(SyncError::OverlapsOnedriverPath(_))
-        ));
-    }
-
-    #[test]
-    fn onedrive_plan_uses_isolated_config_and_monitor_mode() {
-        let connection = offline(Provider::OneDrive);
-        let plan = one_drive_mirror_plan(
-            &connection,
-            Path::new("/home/example/.config/cosmic-mounter"),
-            &OneDriveIsolationReport {
-                active_onedriver_paths: Vec::new(),
-            },
-        )
-        .expect("plan");
-        assert_eq!(plan.service.executable, PathBuf::from(DEFAULT_ONEDRIVE));
-        assert!(plan.service.arguments.contains(&"--monitor".to_owned()));
-        assert!(
-            plan.service
-                .arguments
-                .windows(2)
-                .any(|pair| pair == ["--single-directory", "Projects"])
-        );
-        assert!(
-            plan.config_directory
-                .starts_with("/home/example/.config/cosmic-mounter/onedrive-sync")
-        );
-        assert_eq!(
-            plan.sync_directory,
-            PathBuf::from("/home/example/Cloud/Engineering")
-        );
-        assert_eq!(
-            one_drive_auth_request(&plan)
-                .expect("auth")
-                .sanitized_command(),
-            "onedrive --confdir /home/example/.config/cosmic-mounter/onedrive-sync/2a3f5d45-e867-47e7-943f-66cf60e777ad --reauth"
-        );
-        assert_eq!(
-            one_drive_auth_files_request(
-                &plan,
-                Path::new("/tmp/cosmic-onedrive-auth-url"),
-                Path::new("/tmp/cosmic-onedrive-response-url"),
-            )
-            .expect("auth files")
-            .sanitized_command(),
-            "onedrive --confdir /home/example/.config/cosmic-mounter/onedrive-sync/2a3f5d45-e867-47e7-943f-66cf60e777ad --reauth --auth-files /tmp/cosmic-onedrive-auth-url:/tmp/cosmic-onedrive-response-url"
-        );
-        let preview = one_drive_preview_request(&plan).expect("preview");
-        assert!(preview.sanitized_command().contains(" --dry-run"));
-        assert_eq!(preview.timeout, Duration::from_secs(10 * 60));
-        assert!(
-            one_drive_sync_request(&plan)
-                .expect("sync")
-                .sanitized_command()
-                .contains(" --sync")
-        );
-        assert!(
-            !one_drive_sync_request(&plan)
-                .expect("sync")
-                .sanitized_command()
-                .contains(" --resync")
-        );
-        assert!(
-            one_drive_initial_sync_request(&plan)
-                .expect("initial sync")
-                .sanitized_command()
-                .contains(" --resync")
-        );
-        assert!(
-            one_drive_initial_sync_request(&plan)
-                .expect("initial sync")
-                .sanitized_command()
-                .contains(" --resync-auth")
-        );
     }
 
     #[test]
@@ -1766,27 +1529,6 @@ Deleted: 1 (files), 0 (dirs), 13 B (freed)\n",
                 &[],
             ),
             OfflineMirrorStatus::Syncing
-        );
-    }
-
-    #[test]
-    fn onedrive_native_status_maps_to_applet_status() {
-        let snapshot = OneDriveStatusSnapshot {
-            authenticated: true,
-            monitor_running: true,
-            native_state: OneDriveNativeState::Conflict,
-            readiness: SyncReadiness {
-                network_ready: true,
-                vpn_ready: true,
-            },
-        };
-        assert_eq!(onedrive_status(snapshot), OfflineMirrorStatus::Conflict);
-        assert_eq!(
-            onedrive_status(OneDriveStatusSnapshot {
-                authenticated: false,
-                ..snapshot
-            }),
-            OfflineMirrorStatus::Unavailable
         );
     }
 

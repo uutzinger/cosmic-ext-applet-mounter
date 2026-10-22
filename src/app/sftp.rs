@@ -78,6 +78,30 @@ impl Default for SftpDraft {
 }
 
 impl SftpDraft {
+    pub(super) fn has_secrets(&self) -> bool {
+        !self.password.is_empty() || !self.key_passphrase.is_empty()
+    }
+
+    pub(super) fn setup_values(&self) -> Vec<String> {
+        vec![
+            self.host.trim().to_owned(),
+            self.port
+                .trim()
+                .parse::<u16>()
+                .map_or_else(|_| self.port.clone(), |v| v.to_string()),
+            self.user.trim().to_owned(),
+            format!("{:?}", self.auth),
+            self.key_file.trim().to_owned(),
+            self.known_hosts.trim().to_owned(),
+        ]
+    }
+
+    pub(super) fn setup_error(&self, name: &str) -> Option<String> {
+        validate_rclone_remote_create_name(name.trim())
+            .and_then(|()| self.validate())
+            .err()
+    }
+
     pub fn clear_secrets(&mut self) {
         self.password.clear();
         self.key_passphrase.clear();
@@ -220,6 +244,7 @@ impl AppModel {
         self.sftp_settings_revision = self.sftp_settings_revision.wrapping_add(1);
         self.sftp_settings_dirty = false;
         self.sftp_retry_secret_auth = None;
+        self.editor_setup_baseline = Some(SetupInputs::from_draft(&self.draft));
     }
 
     pub(super) fn finish_sftp_settings_update(
@@ -237,9 +262,10 @@ impl AppModel {
         }
     }
 
-    fn sftp_action_highlighted(&self, adding: bool) -> bool {
+    pub(super) fn sftp_action_highlighted(&self, adding: bool) -> bool {
         !self.sftp_setup_pending
-            && (self.sftp_settings_dirty
+            && (self.editor_remote_update_pending()
+                || (self.sftp_settings_dirty && self.editor_setup_baseline.is_none())
                 || (adding
                     && !self
                         .rclone_remotes
@@ -264,21 +290,12 @@ impl AppModel {
         } else if self.sftp_update_ack.is_some() {
             fl!("sftp-action-confirm")
         } else if adding {
-            fl!("sftp-action-create-update")
+            fl!("connect")
         } else {
-            fl!("sftp-action-update")
-        };
-        let button = if self.sftp_action_highlighted(adding) {
-            widget::button::suggested(label)
-        } else {
-            widget::button::standard(label)
+            fl!("re-connect")
         };
         field_with_help(
-            if self.sftp_setup_pending {
-                button
-            } else {
-                button.on_press(Message::ApplySftpRemote)
-            },
+            self.editor_button(EditorAction::Connect, label, Message::ApplySftpRemote),
             fl!("sftp-action-help"),
         )
     }
@@ -700,6 +717,7 @@ mod tests {
                 name: "remote".into(),
                 backend: "sftp".into(),
                 drive_type: None,
+                document_library: false,
             });
             assert!(!app.sftp_action_highlighted(true));
             let _ = app.update(Message::DraftSftp(field, value.into()));
@@ -990,8 +1008,8 @@ mod tests {
         };
         assert_eq!(app.matching_rclone_remotes(Provider::Sftp).len(), 1);
         assert_eq!(app.matching_rclone_remotes(Provider::Sftp)[0].name, "ssh");
-        assert!(rclone_remote_help(Provider::Sftp, false).contains("Update SFTP Remote"));
-        assert!(rclone_remote_help(Provider::Sftp, true).contains("Create/Update"));
+        assert!(rclone_remote_help(Provider::Sftp, false).contains("Re-Connect"));
+        assert!(rclone_remote_help(Provider::Sftp, true).contains("Connect"));
     }
 
     #[tokio::test]

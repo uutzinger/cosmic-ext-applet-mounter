@@ -251,27 +251,6 @@ pub async fn rclone_preview_pending(
         .ok_or_else(|| fl!("onedrive-preview-count-unavailable"))
 }
 
-/// The OneDrive CLI reports directional pending items separately. A non-clean
-/// status with missing counters is unknown, never a verified zero.
-pub fn parse_onedrive_mirror_status(output: &str) -> Result<u64, String> {
-    let status = output
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("Overall status:"))
-        .map(str::trim)
-        .ok_or_else(|| fl!("pending-count-mirror-unreadable"))?;
-    match status {
-        "IN SYNC" => Ok(0),
-        "NOT IN SYNC" => {
-            let remote = status_count(output, "Pending remote items:")
-                .ok_or_else(|| fl!("pending-count-mirror-unreadable"))?;
-            let local = status_count(output, "Pending local items:")
-                .ok_or_else(|| fl!("pending-count-mirror-unreadable"))?;
-            Ok(remote.saturating_add(local))
-        }
-        _ => Err(fl!("pending-count-mirror-indeterminate")),
-    }
-}
-
 /// Bisync logs per-side detected changes before applying them. Require its
 /// success marker so a partial or unrecognized dry-run cannot claim zero.
 pub fn parse_rclone_mirror_status(output: &str) -> Result<u64, String> {
@@ -440,14 +419,6 @@ fn rclone_mirror_progress_for_invocation(
     progress.pending()
 }
 
-fn status_count(output: &str, label: &str) -> Option<u64> {
-    output.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix(label)
-            .and_then(|value| value.trim().parse().ok())
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,23 +456,6 @@ mod tests {
                 .is_err()
         );
         assert!(parse_rclone_pending("{}", r#"{"diskCache":{}}"#).is_err());
-    }
-
-    #[test]
-    fn onedrive_status_requires_a_classified_bidirectional_count() {
-        assert_eq!(
-            parse_onedrive_mirror_status("Overall status: IN SYNC").unwrap(),
-            0
-        );
-        assert_eq!(
-            parse_onedrive_mirror_status(
-                "Pending remote items: 2\nPending local items: 3\nOverall status: NOT IN SYNC\n"
-            )
-            .unwrap(),
-            5
-        );
-        assert!(parse_onedrive_mirror_status("Overall status: NOT IN SYNC").is_err());
-        assert!(parse_onedrive_mirror_status("Overall status: INDETERMINATE").is_err());
     }
 
     #[test]

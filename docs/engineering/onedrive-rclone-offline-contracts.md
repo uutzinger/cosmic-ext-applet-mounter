@@ -780,3 +780,24 @@ URL; helper dispatcher, install payloads and GUI-only dependency recommendations
 removed. Earlier helper-retention statements are historical and superseded only
 for the helper, not engine retirement. Source/pin replacement and affected checks
 required; completed rclone Flatpak behavior tests remain reusable.
+
+### 0.5.5 legacy engine retirement — October 20, 2026
+
+Implementation update: legacy profiles retain their original engine identity;
+they are never reinterpreted as rclone. Authentication, scheduling, preview,
+sync and pending-count execution are removed, including the executable route.
+Onedriver Online and rclone setup/guards remain supported.
+
+The runtime owner checks existing legacy units at startup. Retirement requires
+an ordinary unit file, matching ownership markers/UUID, structural validation,
+a legacy executable, the expected loaded fragment and no drop-ins. It disables,
+stops and verifies inactivity before removing the generated unit. Failure keeps
+or restores the unit file for retry without enabling or restarting it. Cancellation
+is checked between operations. No user mirror/recovery/database/credential data
+is deleted. A missing unit file needs no file mutation. Unverified units are
+reported rather than changed. Legacy profile removal waits for retirement before
+removing the configuration entry and rejects a changed profile.
+
+Automated evidence belongs in completion notes. Installed native/Debian/Flatpak
+upgrade acceptance remains open and requires owned disposable legacy resources;
+the earlier 0.5.4 engine/live-test waivers do not establish removal acceptance.

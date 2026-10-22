@@ -76,20 +76,21 @@ fn release_preparation_supports_reuse_and_does_not_publish() {
 }
 
 #[test]
-fn debian_keeps_engines_without_retired_webkit_runtime() {
+fn debian_keeps_supported_engines_without_retired_onedrive_runtime() {
     let control = include_str!("../debian/control");
     let binary = control
         .split("\n\n")
         .find(|block| block.starts_with("Package:"))
         .unwrap();
-    for retired in ["python3-gi", "gir1.2-gtk-3.0", "gir1.2-webkit2-4.1"] {
+    for retired in [
+        "python3-gi",
+        "gir1.2-gtk-3.0",
+        "gir1.2-webkit2-4.1",
+        "onedrive (>=",
+    ] {
         assert!(!binary.contains(retired), "{retired}");
     }
-    for retained in [
-        "rclone (>= 1.74.3)",
-        "onedriver (>= 0.15.0)",
-        "onedrive (>= 2.5.10)",
-    ] {
+    for retained in ["rclone (>= 1.74.3)", "onedriver (>= 0.15.0)"] {
         assert!(binary.contains(retained), "{retained}");
     }
     assert!(

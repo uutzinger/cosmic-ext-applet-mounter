@@ -206,10 +206,19 @@ pub struct UnitStatus {
     pub result: String,
 }
 
+/// Absence is structured backend evidence, distinct from a failed observation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnitStatusObservation {
+    Present(UnitStatus),
+    Missing,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemdAction {
     DaemonReload,
     ValidateLoaded,
+    ValidateRetirementLoaded,
     Enable,
     Disable,
     Start,
@@ -506,6 +515,14 @@ impl UnitStore for FileUnitStore {
 
     fn read(&self, name: &UnitName) -> Result<Option<String>, ServiceError> {
         let path = self.path(name);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if !metadata.file_type().is_file() => {
+                return Err(ServiceError::OwnershipMismatch { path });
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
         match fs::read_to_string(path) {
             Ok(content) => Ok(Some(content)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -869,7 +886,7 @@ pub fn systemd_user_status_blocking(unit: &UnitName) -> Result<UnitStatus, Strin
 pub async fn systemd_user_status_batch(
     units: &[UnitName],
     cancellation: CancellationToken,
-) -> Result<Vec<(UnitName, Option<UnitStatus>)>, String> {
+) -> Result<Vec<(UnitName, UnitStatusObservation)>, String> {
     if cancellation.is_cancelled() {
         return Err(crate::fl!("unit-status-refresh-unavailable"));
     }
@@ -887,7 +904,14 @@ pub async fn systemd_user_status_batch(
         for unit in units {
             let read = async {
                 let name = unit.file_name();
-                let path = systemd_user_unit_path(&connection, &name).await?;
+                let path: OwnedObjectPath = match manager.call("LoadUnit", &(name.as_str(),)).await
+                {
+                    Ok(path) => path,
+                    Err(error) if unit_load_reports_missing(&error) => {
+                        return Ok(UnitStatusObservation::Missing);
+                    }
+                    Err(error) => return Err(ServiceError::Runtime(error.to_string())),
+                };
                 let proxy =
                     systemd_user_unit_proxy(&connection, &path, SYSTEMD_UNIT_INTERFACE).await?;
                 let active: String = proxy
@@ -898,10 +922,9 @@ pub async fn systemd_user_status_batch(
                     .get_property("SubState")
                     .await
                     .map_err(|error| ServiceError::Runtime(error.to_string()))?;
-                let enabled: String = manager
-                    .call("GetUnitFileState", &(name.as_str(),))
-                    .await
-                    .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                let enabled = observed_unit_file_enabled(
+                    manager.call("GetUnitFileState", &(name.as_str(),)).await,
+                )?;
                 let result = if unit.kind == UnitKind::Service {
                     systemd_user_unit_proxy(&connection, &path, SYSTEMD_SERVICE_INTERFACE)
                         .await?
@@ -917,25 +940,45 @@ pub async fn systemd_user_status_batch(
                         "unit-status-refresh-unavailable"
                     )));
                 }
-                Ok::<_, ServiceError>(UnitStatus {
+                Ok::<_, ServiceError>(UnitStatusObservation::Present(UnitStatus {
                     active,
-                    enabled: matches!(
-                        enabled.as_str(),
-                        "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
-                    ),
+                    enabled,
                     detail,
                     result,
-                })
+                }))
             };
             let status = tokio::time::timeout(Duration::from_secs(2), read)
                 .await
                 .ok()
-                .and_then(Result::ok);
+                .and_then(Result::ok)
+                .unwrap_or(UnitStatusObservation::Unavailable);
             observations.push((unit.clone(), status));
         }
         Ok(observations)
     };
     bounded_unit_observation(operation, Duration::from_secs(5), cancellation).await
+}
+
+fn unit_load_reports_missing(error: &zbus::Error) -> bool {
+    matches!(error, zbus::Error::MethodError(name, _, _)
+        if name.as_str() == "org.freedesktop.systemd1.NoSuchUnit")
+}
+
+fn observed_unit_file_enabled(result: Result<String, zbus::Error>) -> Result<bool, ServiceError> {
+    match result {
+        Ok(state) => Ok(matches!(
+            state.as_str(),
+            "enabled" | "enabled-runtime" | "linked" | "linked-runtime"
+        )),
+        // A loaded service can remain active after its file is removed. Keep
+        // its observed activity visible instead of reporting it as absent.
+        Err(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "org.freedesktop.systemd1.NoSuchUnitFile" =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(ServiceError::Runtime(error.to_string())),
+    }
 }
 
 async fn bounded_unit_observation<T>(
@@ -1044,7 +1087,7 @@ impl SystemdManager for DbusSystemdManager {
                             .map_err(|error| ServiceError::Runtime(error.to_string()))?;
                         Ok(None)
                     }
-                    SystemdAction::ValidateLoaded => {
+                    SystemdAction::ValidateLoaded | SystemdAction::ValidateRetirementLoaded => {
                         let name = unit
                             .ok_or_else(|| {
                                 ServiceError::InvalidSpec(crate::fl!(
@@ -1075,6 +1118,17 @@ impl SystemdManager for DbusSystemdManager {
                             .get_property("NeedDaemonReload")
                             .await
                             .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                        if action == SystemdAction::ValidateRetirementLoaded {
+                            let dropins: Vec<String> = proxy
+                                .get_property("DropInPaths")
+                                .await
+                                .map_err(|error| ServiceError::Runtime(error.to_string()))?;
+                            if !dropins.is_empty() {
+                                return Err(ServiceError::Validation(fl!(
+                                    "legacy-retirement-ownership"
+                                )));
+                            }
+                        }
                         let expected_fragment = std::env::var_os("HOME")
                             .map(PathBuf::from)
                             .ok_or_else(|| {
@@ -1233,6 +1287,65 @@ impl<S, M> UnitController<S, M> {
 }
 
 impl<S: UnitStore, M: SystemdManager> UnitController<S, M> {
+    /// Retire only a structurally valid, app-owned legacy monitor. A failure
+    /// never re-enables or restarts it; the retained file permits a safe retry.
+    pub async fn retire_legacy_mirror(
+        &self,
+        id: ConnectionId,
+        cancellation: CancellationToken,
+    ) -> Result<(), ServiceError> {
+        let name = UnitName::new(id, UnitKind::Service);
+        let Some(content) = self.store.read(&name)? else {
+            return Ok(());
+        };
+        let document = UnitDocument {
+            name: name.clone(),
+            content,
+        };
+        StructuralUnitValidator.validate(&document)?;
+        if self.store.state(&name)? != UnitFileState::Managed(id)
+            || !document
+                .content
+                .lines()
+                .any(|line| line.starts_with("ExecStart=\"/usr/bin/onedrive\" "))
+        {
+            return Err(ServiceError::Validation(fl!("legacy-retirement-ownership")));
+        }
+        for action in [
+            SystemdAction::ValidateRetirementLoaded,
+            SystemdAction::Disable,
+            SystemdAction::Stop,
+        ] {
+            if cancellation.is_cancelled() {
+                return Err(ServiceError::Runtime(fl!("legacy-retirement-incomplete")));
+            }
+            if self.store.read(&name)?.as_ref() != Some(&document.content) {
+                return Err(ServiceError::Validation(fl!("legacy-retirement-ownership")));
+            }
+            self.manager
+                .action(action, Some(&name), cancellation.child_token())
+                .await?;
+        }
+        let status = self
+            .manager
+            .action(
+                SystemdAction::Status,
+                Some(&name),
+                cancellation.child_token(),
+            )
+            .await?;
+        if !status.is_some_and(|status| {
+            !status.enabled && matches!(status.active, ActiveState::Inactive | ActiveState::Failed)
+        }) || cancellation.is_cancelled()
+        {
+            return Err(ServiceError::Runtime(fl!("legacy-retirement-incomplete")));
+        }
+        if self.store.read(&name)?.as_ref() != Some(&document.content) {
+            return Err(ServiceError::Validation(fl!("legacy-retirement-ownership")));
+        }
+        self.remove(&name, cancellation).await
+    }
+
     pub async fn install(
         &self,
         document: &UnitDocument,
@@ -1540,6 +1653,147 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn retired_engine_retirement_requires_observed_inactive_disabled_state() {
+        for state in [
+            None,
+            Some((ActiveState::Active, false)),
+            Some((ActiveState::Unknown, false)),
+            Some((ActiveState::Inactive, true)),
+        ] {
+            let temp = TempDir::new().unwrap();
+            let store =
+                FileUnitStore::new(temp.path().join("units"), Arc::new(StructuralUnitValidator));
+            let mut document = service();
+            document.content = document
+                .content
+                .replace("/usr/bin/example", "/usr/bin/onedrive");
+            store.write(&document).unwrap();
+            let manager = FakeSystemdManager::default();
+            for _ in 0..3 {
+                manager.push(Ok(None));
+            }
+            manager.push(Ok(state.map(|(active, enabled)| UnitStatus {
+                active,
+                enabled,
+                detail: String::new(),
+                result: String::new(),
+            })));
+            assert!(
+                UnitController::new(store.clone(), manager.clone())
+                    .retire_legacy_mirror(id(), CancellationToken::new())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(store.read(&document.name).unwrap(), Some(document.content));
+            assert_eq!(manager.actions().len(), 4);
+        }
+        let temp = TempDir::new().unwrap();
+        let store =
+            FileUnitStore::new(temp.path().join("units"), Arc::new(StructuralUnitValidator));
+        let manager = FakeSystemdManager::default();
+        UnitController::new(store, manager.clone())
+            .retire_legacy_mirror(id(), CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(manager.actions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn retired_engine_unit_retirement_preserves_data_and_never_restarts_on_failure() {
+        for fail_at in 0..=5 {
+            let temp = TempDir::new().unwrap();
+            let store =
+                FileUnitStore::new(temp.path().join("units"), Arc::new(StructuralUnitValidator));
+            let mut document = service();
+            document.content = document
+                .content
+                .replace("/usr/bin/example", "/usr/bin/onedrive");
+            store.write(&document).unwrap();
+            let data = temp.path().join("mirror-file");
+            fs::write(&data, "synthetic unsynchronized content").unwrap();
+            let manager = FakeSystemdManager::default();
+            for index in 0..5 {
+                manager.push(if index == fail_at {
+                    Err(ServiceError::Runtime("synthetic failure".into()))
+                } else if index == 3 {
+                    Ok(Some(UnitStatus {
+                        active: ActiveState::Inactive,
+                        enabled: false,
+                        detail: "dead".into(),
+                        result: "success".into(),
+                    }))
+                } else {
+                    Ok(None)
+                });
+            }
+            let result = UnitController::new(store.clone(), manager.clone())
+                .retire_legacy_mirror(id(), CancellationToken::new())
+                .await;
+            assert_eq!(result.is_ok(), fail_at == 5);
+            assert_eq!(
+                fs::read_to_string(data).unwrap(),
+                "synthetic unsynchronized content"
+            );
+            assert_eq!(
+                store.read(&document.name).unwrap(),
+                (fail_at != 5).then_some(document.content)
+            );
+            assert!(manager.actions().iter().all(|(action, _)| !matches!(
+                action,
+                SystemdAction::Start | SystemdAction::Restart | SystemdAction::Enable
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn retired_engine_unit_retirement_refuses_foreign_malformed_and_cancelled_units() {
+        for case in 0..5 {
+            let temp = TempDir::new().unwrap();
+            let root = temp.path().join("units");
+            let store = FileUnitStore::new(root.clone(), Arc::new(StructuralUnitValidator));
+            let mut document = service();
+            if case != 0 {
+                document.content = document
+                    .content
+                    .replace("/usr/bin/example", "/usr/bin/onedrive");
+            }
+            store.write(&document).unwrap();
+            let path = root.join(document.name.file_name());
+            if case == 1 {
+                fs::write(&path, "[Service]\nExecStart=/usr/bin/onedrive\n").unwrap();
+            }
+            if case == 2 {
+                fs::write(
+                    &path,
+                    format!(
+                        "{}\n[Service]\nExecStart=/usr/bin/other\n",
+                        document.content
+                    ),
+                )
+                .unwrap();
+            }
+            if case == 3 {
+                let original = temp.path().join("unrelated.service");
+                fs::rename(&path, &original).unwrap();
+                std::os::unix::fs::symlink(original, &path).unwrap();
+            }
+            let cancellation = CancellationToken::new();
+            if case == 4 {
+                cancellation.cancel();
+            }
+            let manager = FakeSystemdManager::default();
+            assert!(
+                UnitController::new(store, manager.clone())
+                    .retire_legacy_mirror(id(), cancellation)
+                    .await
+                    .is_err()
+            );
+            assert!(manager.actions().is_empty());
+            assert!(path.exists());
+        }
+    }
+
+    #[tokio::test]
     async fn unit_observation_deadline_does_not_block_executor() {
         let operation = async { std::future::pending::<Result<(), String>>().await };
         let result = bounded_unit_observation(
@@ -1549,6 +1803,45 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn unit_observation_absence_uses_only_typed_systemd_errors() {
+        let method_error = |name: &str| {
+            zbus::Error::MethodError(
+                name.try_into().unwrap(),
+                Some("synthetic missing unit diagnostic".into()),
+                zbus::Message::method_call("/org/freedesktop/systemd1", "LoadUnit")
+                    .unwrap()
+                    .build(&())
+                    .unwrap(),
+            )
+        };
+        assert!(unit_load_reports_missing(&method_error(
+            "org.freedesktop.systemd1.NoSuchUnit"
+        )));
+        for name in [
+            "org.freedesktop.DBus.Error.AccessDenied",
+            "org.freedesktop.DBus.Error.Timeout",
+            "org.freedesktop.systemd1.LoadFailed",
+            "org.freedesktop.systemd1.NoSuchUnitFile",
+        ] {
+            assert!(!unit_load_reports_missing(&method_error(name)));
+        }
+        assert!(
+            !observed_unit_file_enabled(Err(method_error(
+                "org.freedesktop.systemd1.NoSuchUnitFile"
+            )))
+            .unwrap()
+        );
+        assert!(
+            observed_unit_file_enabled(Err(method_error(
+                "org.freedesktop.DBus.Error.AccessDenied"
+            )))
+            .is_err()
+        );
+        assert!(observed_unit_file_enabled(Ok("enabled".into())).unwrap());
+        assert!(!observed_unit_file_enabled(Ok("disabled".into())).unwrap());
     }
 
     #[tokio::test]

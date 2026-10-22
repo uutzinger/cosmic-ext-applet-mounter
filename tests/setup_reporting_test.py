@@ -206,9 +206,9 @@ class SetupReportingTests(unittest.TestCase):
             self.assertIn("saved VPN profile were not removed", result.stderr)
 
     def test_dependency_components_default_and_package_failure_with_reporting(self):
-        for option, expected, code in [("", "base rclone onedriver onedrive", 0),
+        for option, expected, code in [("", "base rclone onedriver", 0),
                                         ("--base", "base", 0),
-                                        ("--onedrive", "onedrive", 0),
+                                        ("--onedriver", "onedriver", 0),
                                         ("--base", "base", 29)]:
             with self.subTest(option=option, code=code), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -220,7 +220,6 @@ class SetupReportingTests(unittest.TestCase):
                     install_base() { echo base >> "$FIXTURE_ROOT/calls"; return CODE; }
                     install_rclone() { echo rclone >> "$FIXTURE_ROOT/calls"; }
                     install_onedriver() { echo onedriver >> "$FIXTURE_ROOT/calls"; }
-                    install_onedrive() { echo onedrive >> "$FIXTURE_ROOT/calls"; }
                     setup_entry --log-dir "$1" OPTIONS
                 '''.replace("CODE", str(code)).replace("OPTIONS", option), root / "logs")
                 self.assertEqual(result.returncode, code, result.stderr)

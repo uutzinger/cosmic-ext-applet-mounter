@@ -7,11 +7,11 @@ applet does not run startup version/help probes or install or upgrade
 dependencies. The installer and packaging requirements below enforce the
 supported minimum versions.
 
-For the 0.5.4 development source, **rclone 1.74.3 or newer** handles new
-OneDrive Offline mirrors. OneDrive Online mounts still need `onedriver`;
-`onedrive` is needed only for retained legacy Offline profiles; sign-in uses
-the browser/manual response-URL handoff, without a WebKit helper. Installed native/Flatpak acceptance of the new integration is
-pending; an older installed applet keeps its existing engine behavior.
+For 0.5.5 development, **rclone 1.74.3 or newer** handles OneDrive Offline
+mirrors and `onedriver` handles OneDrive Online. The abraunegg `onedrive` engine
+is retired; its package is neither installed nor uninstalled by this change.
+Existing profiles and recovery data are preserved without conversion.
+Installed upgrade acceptance remains pending.
 
 The automated installer supports Debian, Ubuntu, Pop!_OS, Fedora, Arch Linux,
 openSUSE Tumbleweed, and Gentoo:
@@ -32,10 +32,10 @@ To install only the engine for new OneDrive mirrors, select `--rclone`:
 bash scripts/install-dependencies.sh --rclone
 ```
 
-No options and `--all` retain all engines for compatibility; they do not install
-the retired WebKit helper runtime.
-Use `--onedriver` for OneDrive Online or `--onedrive` for existing legacy mirrors.
-These commands install/update packages; the applet never installs them itself.
+No options and `--all` install base dependencies, rclone and onedriver.
+Use `--onedriver` for OneDrive Online. The retired `--onedrive` option is rejected
+before privileged work. These commands install/update packages; the applet never
+installs them itself.
 
 Optionally add `--log-dir /tmp/dependency-setup-report` (a new directory with
 an existing parent) to retain private logs and a JSON result. Prompts/output
@@ -50,7 +50,7 @@ bash scripts/install-dependencies.sh --all --rclone-selfupdate
 ```
 
 On Arch Linux, an AUR helper (`yay` or `paru`) is required for the `onedriver`
-and `onedrive` packages. On Gentoo and openSUSE, those packages must be built or
+package. On Gentoo and openSUSE, those packages must be built or
 installed manually; the script will report the upstream instructions.
 
 Manual instructions are retained below for reference and for other distributions.
@@ -61,7 +61,6 @@ Manual instructions are retained below for reference and for other distributions
 |---|---|---|
 | [`rclone`](https://rclone.org/) | Google Drive, Box, SMB, SFTP and SharePoint mounts/mirrors; new OneDrive Offline mirrors | 1.74.3 or newer |
 | [`onedriver`](https://github.com/jstaf/onedriver) | OneDrive Online mount | 0.15.0 or newer |
-| [`onedrive`](https://github.com/abraunegg/onedrive) | Legacy OneDrive Offline mirror only | 2.5.10 or newer |
 | [`fusermount3`](https://github.com/libfuse/libfuse) / FUSE 3 | Online mounts | installed |
 | [NetworkManager](https://networkmanager.dev/) | network and VPN readiness over D-Bus | installed |
 | systemd user manager and logind | service/timer control and optional sleep cleanup over D-Bus | host services available |
@@ -74,25 +73,21 @@ prototype tests used 1.75.0. This is source compatibility evidence for 1.74.3,
 not a live test of that release. See the
 [version and flag assessment](engineering/onedrive-rclone-offline-contracts.md#rclone-version-and-flag-assessment).
 
-### Legacy OneDrive reauthentication
+### Retired legacy OneDrive profiles
 
-Existing legacy mirrors keep their onedrive engine and stored authentication.
-For reauthentication, use the editor's browser/manual response-URL handoff:
-prepare the handoff, open sign-in through the desktop portal, then paste and
-submit the final Microsoft native-client redirect URL in the editor. Treat the
-URL as a credential; never paste it in logs or support messages.
-
-Version 0.5.4 retires the applet's WebKit helper and its PyGObject/GTK/WebKit-only
-recommendations and installer options. It does not uninstall libraries from the
-host; other applications may need them. Python remains a build/developer-tool
-prerequisite where those tools use it. New rclone mirrors use their own supported
-Microsoft browser flow and do not consume legacy authentication files.
+Version 0.5.5 removes legacy authentication, preview, sync and scheduling.
+Existing profiles remain readable and removable. Preserve unsynchronized files;
+create a replacement rclone connection with separate mirror/recovery folders and
+new authentication. Do not copy legacy databases or credentials into rclone.
+The runtime owner retires only verified app-owned monitor units through systemd;
+failures are reported without restarting the engine. No user files or packages
+are removed. See [draft release notes](releases/v0.5.5.md).
 
 ### Dependency diagnostics
 
 The inventory lists supported executables. Missing-tool warnings follow saved
 connections: new OneDrive mirrors use rclone, Online OneDrive uses onedriver,
-and legacy Offline OneDrive uses onedrive. FUSE is needed for Online mounts;
+and retired legacy profiles no longer request an engine installation. FUSE is needed for Online mounts;
 NetworkManager and the systemd user manager remain common host prerequisites.
 Saved disabled profiles still retain their engine requirements. Version/capability
 probes are not run at applet startup; actual operations report typed failures.
@@ -186,42 +181,11 @@ Reference:
 
 - <https://github.com/jstaf/onedriver>
 
-## abraunegg/onedrive (legacy OneDrive Mirror)
+## abraunegg/onedrive (retired)
 
-> **Transition release:** the 0.5.4 source creates OneDrive Offline mirrors with `rclone bisync`. Retain `onedrive` for existing legacy profiles for one release; engine removal is a later phase. The WebKit helper is retired in 0.5.4. There is no automatic conversion. See the [OneDrive Offline contracts](engineering/onedrive-rclone-offline-contracts.md).
-
-Ubuntu 24.04 repositories may provide an obsolete 2.4.x package. Use an
-upstream-supported package source that provides version 2.5.10 or newer.
-
-For Pop!_OS/Ubuntu 24.04 using the Open Build Service repository:
-
-```sh
-sudo apt install wget gnupg
-
-wget -qO - \
-  https://download.opensuse.org/repositories/home:/npreining:/debian-ubuntu-onedrive/xUbuntu_24.04/Release.key \
-  | gpg --dearmor \
-  | sudo tee /usr/share/keyrings/obs-onedrive.gpg >/dev/null
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/obs-onedrive.gpg] https://download.opensuse.org/repositories/home:/npreining:/debian-ubuntu-onedrive/xUbuntu_24.04/ ./" \
-  | sudo tee /etc/apt/sources.list.d/onedrive.list
-
-sudo apt update
-apt-cache policy onedrive
-sudo apt install --no-install-recommends --no-install-suggests onedrive
-onedrive --version
-```
-
-For an operating system other than Ubuntu 24.04, check the onedrive installation instructions in the reference below.
-
-Before installing, confirm `apt-cache policy onedrive` selects the OBS package
-and version 2.5.10 or newer.
-
-References:
-
-- <https://github.com/abraunegg/onedrive/blob/master/docs/ubuntu-package-install.md>
-- <https://github.com/abraunegg/onedrive/blob/master/docs/usage.md>
-- <https://github.com/abraunegg/onedrive/blob/master/docs/advanced-usage.md>
+The 0.5.5 installer no longer installs this engine. The published
+[0.5.4 release notes](releases/v0.5.4.md) retain the transition-release history.
+Python remains available for maintained build and developer tools.
 
 ## Cisco-compatible VPN through NetworkManager OpenConnect
 

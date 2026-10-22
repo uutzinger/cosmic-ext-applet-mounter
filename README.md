@@ -37,7 +37,7 @@ The following connection engines are used to connect to the providers:
 
 | Provider | Online mount | Offline mirror |
 |---|---|---|
-| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) for new mirrors; legacy `abraunegg/onedrive` retained |
+| OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) for supported mirrors |
 | Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
@@ -45,6 +45,8 @@ The following connection engines are used to connect to the providers:
 | SharePoint | `rclone mount` | managed `rclone bisync` schedule, disabled until explicitly started |
 
 `jstaf/onedriver` is ideal for on-demand access to OneDrive.
+
+> **0.5.5 development:** abraunegg/onedrive is retired. Existing profiles remain visible, without conversion; files and credentials are preserved. Owned legacy monitors are retired through systemd. Use separate folders and new authentication for a replacement rclone mirror. Installed upgrade acceptance remains pending; see the [draft notes](docs/releases/v0.5.5.md).
 
 > **0.5.4:** New OneDrive mirrors use rclone. Run Preview and the confirmed initial Sync Now before Start enables scheduled sync (15 minutes by default). Existing abraunegg mirrors remain supported for this release; there is no automatic conversion. See the [release notes](docs/releases/v0.5.4.md) for migration guidance and acceptance status.
 
@@ -86,7 +88,7 @@ time; they share saved connections and host services.
 ### Dependencies
 
 Both Debian and Flatpak installations require storage engines on the host.
-The dependency installer installs all supported engines, including legacy onedrive:
+The dependency installer installs the supported engines, rclone and onedriver:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/install-dependencies.sh | bash
@@ -173,7 +175,7 @@ follow symbolic links. Each connection may individually override the global prel
 ## Authentication
 
 The applet does not store provider credentials. They stay with `rclone`,
-`jstaf/onedriver`, `abraunegg/onedrive`, or the operating system.
+`jstaf/onedriver`, or the operating system. Retired legacy credentials remain untouched.
 
 __SFTP__ supports a password, SSH key, or SSH agent and requires a known-hosts file.
 

@@ -51,8 +51,9 @@ Each connection uses exactly one access mode.
   all Offline mirrors, including OneDrive and SharePoint. Offline is scheduled
   synchronization plus Sync Now, not continuous monitoring.
 - OneDrive Offline mirrors created by earlier versions with `abraunegg/onedrive`
-  keep working for one transition release, cannot be newly created, and are then
-  removed; users recreate them as rclone connections. See the
+  remain visible but unsupported. Authentication and synchronization are blocked;
+  verified app-owned monitors are retired without deleting profile or user data.
+  Users recreate them as separate rclone connections. See the
   [OneDrive Offline contracts](docs/engineering/onedrive-rclone-offline-contracts.md).
 - The applet requires current supported releases of its external tools. It
   detects missing or outdated ones and gives installation guidance, but never
@@ -114,10 +115,10 @@ and the file manager touch only the local directory.
 - Offline Repair is a separately confirmed recover-and-pause operation: it
   disables the schedule, stops the finite service and keeps the bisync lock and
   recovery state. It never syncs, resyncs, authenticates, deletes recovery state
-  or uses Online FUSE Repair. For a legacy `abraunegg/onedrive` connection it
-  stops only the continuous monitor and preserves token, database, lock, mirror
-  and recovery data. The resulting row state is read back from the coordinator
-  and systemd, not assumed from a successful stop.
+  or uses Online FUSE Repair. Retired `abraunegg/onedrive` connections do not
+  offer Repair. Their verified app-owned monitor is stopped and disabled during
+  retirement, with final state read back from systemd; token, database, lock,
+  mirror and recovery data remain untouched.
 - Google Docs, Sheets and Slides are excluded because their exports cannot be
   safely edited and round-tripped. The applet lists skipped documents and points
   the user to Google Drive in a browser.
@@ -141,7 +142,7 @@ default) so home, LAN, corporate and VPN shares need not share one compromise.
 
 | Provider | Default | Maximum | Method |
 |---|---|---:|---|
-| Google Drive | On | 60 s | Asynchronous recursive `vfs/refresh` with fast-list |
+| Google Drive | On | 60 s | Root-first asynchronous `vfs/refresh`, then the full tree with fast-list |
 | OneDrive | On | 60 s | Directory-only walk of the mounted tree |
 | Box | On | 60 s | Directory-only walk, depth 2 |
 | SharePoint | Off | 30 s | Directory-only walk, depth 2 |
@@ -154,8 +155,9 @@ Durations accept 5–600 seconds; depth, where offered, accepts 1–10.
 - App-managed walks list directories only: no file contents opened, no symlinks
   followed, no leaving the mounted filesystem.
 - Google Drive waits for the mount and its private per-user RC socket, then
-  submits the refresh as an asynchronous job that does not delay mount
-  completion. Success requires both the top-level status and every
+  submits a root-only asynchronous refresh, followed by the full tree after root
+  success. Both phases share the configured time budget and do not delay mount
+  completion. Fast-list is enabled when the Google VFS is created. Success requires both the top-level status and every
   `output.result` entry to be `OK`.
 - Box and SMB do not use recursive `vfs/refresh`: live tests showed Box hitting
   HTTP 429 and SMB failing to stop promptly or keep partial cache work.
@@ -362,9 +364,11 @@ applet-managed connection and generated unit. Original legacy units are preserve
 disabling one is a separate confirmed action.
 
 Generated units carry an applet ownership marker and the connection UUID.
-Removing a connection removes only applet-owned unit files. Credentials, cloud
-data, mirror data, caches, recovery directories and legacy units are preserved
-unless a separate, explicitly confirmed cleanup says otherwise.
+Removing a connection removes only applet-owned unit files. A retired OneDrive
+monitor must first pass structural ownership checks and be confirmed stopped and
+disabled; otherwise removal fails without changing the profile. Credentials,
+cloud data, mirror data, caches, recovery directories and external legacy units
+are preserved unless a separate, explicitly confirmed cleanup says otherwise.
 
 ## Failure Handling
 

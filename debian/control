@@ -25,11 +25,10 @@ Recommends:
  rclone (>= 1.74.3),
  fuse3,
  network-manager,
- onedriver (>= 0.15.0),
- onedrive (>= 2.5.10)
+ onedriver (>= 0.15.0)
 Description: applet for COSMIC to manage cloud mounts and offline storage mirrors
  Cloud Mounter manages supported cloud and network storage connections from the
  COSMIC panel.
  .
  It can manage online mounts and offline mirrors for OneDrive, Google Drive,
- Box, SMB, and SFTP through external tools such as rclone, onedriver, and onedrive.
+ Box, SMB, and SFTP through external tools such as rclone and onedriver.

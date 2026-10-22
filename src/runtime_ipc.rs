@@ -4,7 +4,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cosmic::iced::{Subscription, futures::SinkExt, stream};
+use cosmic::iced::{
+    Subscription,
+    futures::{SinkExt, StreamExt},
+    stream,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
@@ -19,7 +23,6 @@ const SETTINGS_INTERFACE: &str = "io.github.uutzinger.CloudMounter.Settings";
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Command {
     Status,
-    Refresh,
     SetUnmount(bool),
     SetRestore(bool),
     SetPreload(PreloadSettings),
@@ -161,26 +164,49 @@ pub fn settings_subscription() -> Subscription<Event> {
 }
 
 async fn serve(settings: bool, mut output: cosmic::iced::futures::channel::mpsc::Sender<Event>) {
+    if !settings {
+        // Retry transient bus startup/disconnection failures with a fixed bound.
+        // Competing panel instances queue on D-Bus instead of polling the owner.
+        for attempt in 0..5 {
+            let (sender, receiver) = mpsc::channel(16);
+            let result = async {
+                let connection = zbus::connection::Builder::session()?
+                    .serve_at(OBJECT_PATH, RuntimeInterface(sender))?
+                    .build()
+                    .await?;
+                serve_runtime_connection(connection, receiver, &mut output).await
+            }
+            .await;
+            if let Err(error) = result {
+                if output
+                    .send(Event::Error(crate::fl!(
+                        "ui-runtime-ipc-window-communication-unavailable-error",
+                        error = error.to_string()
+                    )))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            } else {
+                return;
+            }
+            if attempt < 4 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+        std::future::pending::<()>().await;
+    }
     let (sender, mut receiver) = mpsc::channel(16);
     let result = async {
         let builder = zbus::connection::Builder::session()?;
-        if settings {
-            builder
-                .allow_name_replacements(false)
-                .replace_existing_names(false)
-                .name(SETTINGS_NAME)?
-                .serve_at(OBJECT_PATH, SettingsInterface(sender))?
-                .build()
-                .await
-        } else {
-            builder
-                .allow_name_replacements(false)
-                .replace_existing_names(false)
-                .name(RUNTIME_NAME)?
-                .serve_at(OBJECT_PATH, RuntimeInterface(sender))?
-                .build()
-                .await
-        }
+        builder
+            .allow_name_replacements(false)
+            .replace_existing_names(false)
+            .name(SETTINGS_NAME)?
+            .serve_at(OBJECT_PATH, SettingsInterface(sender))?
+            .build()
+            .await
     }
     .await;
     match result {
@@ -195,12 +221,8 @@ async fn serve(settings: bool, mut output: cosmic::iced::futures::channel::mpsc:
             }
         }
         Err(error) => {
-            if settings && activate_settings().await {
+            if activate_settings().await {
                 let _ = output.send(Event::DuplicateWindow).await;
-            } else if !settings && request(Command::Status).await.is_ok() {
-                // More than one panel may contain the applet. Only one instance
-                // owns the runtime bus name; the others remain usable clients.
-                let _ = output.send(Event::ClientReady).await;
             } else {
                 let _ = output
                     .send(Event::Error(crate::fl!(
@@ -210,6 +232,58 @@ async fn serve(settings: bool, mut output: cosmic::iced::futures::channel::mpsc:
                     .await;
             }
             std::future::pending::<()>().await;
+        }
+    }
+}
+
+// Register signal listeners before requesting the name, avoiding a handoff race.
+// Empty request flags queue without replacing or allowing replacement of an owner.
+async fn serve_runtime_connection(
+    connection: zbus::Connection,
+    mut receiver: mpsc::Receiver<Event>,
+    output: &mut cosmic::iced::futures::channel::mpsc::Sender<Event>,
+) -> zbus::Result<()> {
+    use zbus::fdo::{DBusProxy, RequestNameReply};
+    let bus = DBusProxy::new(&connection).await?;
+    let mut acquired = bus.receive_name_acquired().await?;
+    let mut lost = bus.receive_name_lost().await?;
+    let reply = connection
+        .request_name_with_flags(RUNTIME_NAME, enumflags2::BitFlags::empty())
+        .await?;
+    let mut owner = matches!(
+        reply,
+        RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner
+    );
+    if output
+        .send(if owner {
+            Event::Ready
+        } else {
+            Event::ClientReady
+        })
+        .await
+        .is_err()
+    {
+        return Ok(());
+    }
+    loop {
+        tokio::select! {
+            signal = acquired.next() => {
+                let signal = signal.ok_or(zbus::Error::Failure(crate::fl!("runtime-ipc-connection-closed")))?;
+                if signal.args()?.name.as_str() == RUNTIME_NAME && !owner {
+                    owner = true;
+                    if output.send(Event::Ready).await.is_err() { return Ok(()); }
+                }
+            }
+            signal = lost.next() => {
+                let signal = signal.ok_or(zbus::Error::Failure(crate::fl!("runtime-ipc-connection-closed")))?;
+                if signal.args()?.name.as_str() == RUNTIME_NAME {
+                    return Err(zbus::Error::NameTaken);
+                }
+            }
+            event = receiver.recv() => {
+                let Some(event) = event else { return Ok(()); };
+                if output.send(event).await.is_err() { return Ok(()); }
+            }
         }
     }
 }
@@ -242,6 +316,116 @@ mod tests {
         assert_eq!(status.operation_revision, 0);
         assert!(status.operation_completions.is_empty());
         assert!(!status.sleep_needs_attention);
+    }
+
+    #[tokio::test]
+    async fn runtime_ipc_queued_panels_take_over_without_replacing_the_owner() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let runtime_dir = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(runtime_dir.path(), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+            let child = std::process::Command::new("dbus-daemon")
+                .env("XDG_RUNTIME_DIR", runtime_dir.path())
+                .args([
+                    "--session",
+                    "--nofork",
+                    "--print-address=1",
+                    "--address=unix:tmpdir=/tmp",
+                ])
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut bus = TestBus(child);
+            let mut address = String::new();
+            std::io::BufReader::new(bus.0.stdout.take().unwrap())
+                .read_line(&mut address)
+                .unwrap();
+            let address = address.trim();
+            let original = zbus::connection::Builder::address(address)
+                .unwrap()
+                .allow_name_replacements(false)
+                .replace_existing_names(false)
+                .name(RUNTIME_NAME)
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+            let observer = zbus::connection::Builder::address(address)
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+            let bus_proxy = zbus::fdo::DBusProxy::new(&observer).await.unwrap();
+            let original_id = original.unique_name().unwrap().as_str().to_owned();
+            let mut panels = Vec::new();
+            for _ in 0..2 {
+                let (sender, receiver) = mpsc::channel(16);
+                let connection = zbus::connection::Builder::address(address)
+                    .unwrap()
+                    .serve_at(OBJECT_PATH, RuntimeInterface(sender))
+                    .unwrap()
+                    .build()
+                    .await
+                    .unwrap();
+                let id = connection.unique_name().unwrap().as_str().to_owned();
+                let (mut output, mut events) = cosmic::iced::futures::channel::mpsc::channel(16);
+                let task = tokio::spawn(async move {
+                    serve_runtime_connection(connection, receiver, &mut output).await
+                });
+                assert!(matches!(events.next().await, Some(Event::ClientReady)));
+                assert_eq!(
+                    bus_proxy
+                        .get_name_owner(RUNTIME_NAME.try_into().unwrap())
+                        .await
+                        .unwrap()
+                        .as_str(),
+                    original_id
+                );
+                panels.push((id, events, task));
+            }
+            original.close().await.unwrap();
+            let (first_id, first_events, first_task) = &mut panels[0];
+            assert!(matches!(first_events.next().await, Some(Event::Ready)));
+            assert_eq!(
+                bus_proxy
+                    .get_name_owner(RUNTIME_NAME.try_into().unwrap())
+                    .await
+                    .unwrap()
+                    .as_str(),
+                first_id
+            );
+            let proxy = zbus::Proxy::new(&observer, RUNTIME_NAME, OBJECT_PATH, RUNTIME_INTERFACE)
+                .await
+                .unwrap();
+            let args = (serde_json::to_string(&Command::ConfigurationChanged).unwrap(),);
+            let request = proxy.call::<_, _, String>("Request", &args);
+            let handle = async {
+                let Some(Event::Request(Command::ConfigurationChanged, reply)) =
+                    first_events.next().await
+                else {
+                    panic!("expected configuration reload");
+                };
+                reply.complete(Ok(Status::default()));
+            };
+            let (response, ()) = tokio::join!(request, handle);
+            assert!(response.is_ok());
+            first_task.abort();
+            let _ = first_task.await;
+            let (second_id, second_events, second_task) = &mut panels[1];
+            assert!(matches!(second_events.next().await, Some(Event::Ready)));
+            assert_eq!(
+                bus_proxy
+                    .get_name_owner(RUNTIME_NAME.try_into().unwrap())
+                    .await
+                    .unwrap()
+                    .as_str(),
+                second_id
+            );
+            second_task.abort();
+            let _ = second_task.await;
+        })
+        .await
+        .expect("bounded owner handoff");
     }
 
     // Never uses the desktop's bus, configuration, mounts, or sleep service.
@@ -292,7 +476,6 @@ mod tests {
             Command::SetUnmount(true),
             Command::SetRestore(true),
             Command::SetPreload(PreloadSettings::default()),
-            Command::Refresh,
             Command::ConfigurationChanged,
             Command::RunOperation(
                 ConnectionId::from_uuid(

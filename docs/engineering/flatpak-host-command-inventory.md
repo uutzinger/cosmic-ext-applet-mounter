@@ -6,7 +6,24 @@ Status: October 19 command/permission reconciliation and scoped worker/VPN gates
 
 Created: October 7, 2026
 
-Last reviewed: October 19, 2026
+Last reviewed: October 22, 2026
+
+## 0.5.5 removal update — October 20, 2026
+
+Source implementation: the legacy `onedrive` executable identity, authentication,
+preview/sync/status factories and monitor startup are removed. Native and Flatpak
+share typed retirement through systemd D-Bus, with ownership, loaded-file and
+inactive-state checks. Unit-file rollback never enables or restarts the engine.
+Existing profile identity and user files/credentials remain intact. Automated
+verification is recorded in completion notes; native unit-retirement/data
+preservation acceptance passed October 21. Package upgrade and retained-profile
+missing-service regression acceptance remain pending, combined for 0.5.5.
+
+The dated 0.5.4 observations below remain historical evidence. Every legacy
+`onedrive` invocation in those observations is retired in 0.5.5. Supported rclone
+and onedriver still require the host gateway; no shared permission is removed.
+Prototype rclone evidence remains development-only and does not imply installed
+upgrade acceptance or COSMIC submission approval.
 
 ## Scope and method
 
@@ -39,7 +56,8 @@ The inventory is maintained; the
 
 ## Default executable surface
 
-The shipping typed runner contains only these nine variants:
+The shipping typed runner contains eight variants in 0.5.5; the retired ninth
+entry is retained below to explain the historical removal:
 
 | Executable | Classification | Role |
 |---|---|---|
@@ -47,7 +65,7 @@ The shipping typed runner contains only these nine variants:
 | `flatpak` | **Unavoidable invocation** | Version-gated Documents portal compatibility lookup. |
 | `rclone` | **Unavoidable invocation** | Provider configuration, authentication, storage operations, and private RC client. |
 | `onedriver` | **Unavoidable invocation** | Online OneDrive authentication. |
-| `onedrive` | **Unavoidable invocation** | Legacy Offline OneDrive authentication, preview, sync, and status only; retained for the transition release. |
+| `onedrive` | **Removed in 0.5.5** | Legacy Offline OneDrive authentication, preview, sync, and status only; retained for the transition release. |
 | `fusermount3` | **Unavoidable invocation** | Clean detach and confirmed lazy recovery. |
 | `cat` | **Unavoidable invocation** | Host mount-namespace inspection. |
 | `mountpoint` | **Unavoidable invocation** | Host mount readiness. |
@@ -175,6 +193,27 @@ conversion or a reason to postpone the source inventory scan.
 
 ### Storage engines
 
+October 22 Google setup follow-up: Google Create uses the existing
+`config create` host-engine route with automatic/default-answer browser OAuth
+(`config_is_local true`, no `--non-interactive`). Create/Update now require a
+successful existing `lsf` access probe before success. Both stages keep fixed
+validated arguments and bounded deadlines/output; no new host executable,
+transport or permission. Rclone owns browser OAuth and credential storage.
+Creation rollback only targets the newly attempted, initially absent remote;
+existing remotes are never deleted on Update failure. Retire these engine calls
+when an equivalent reviewed structured engine API replaces process execution.
+Source/synthetic verification does not establish installed Flatpak browser/portal
+acceptance, which remains pending.
+
+October 22 Box follow-up: Box creation uses the same automatic-browser
+`config create` engine route and the shared completion/access checks, with the
+same five-minute OAuth and 20-second/16-KiB read-only probe bounds. Error payloads
+are not exposed. Initially absent new-remote rollback is retained, with failed
+rollback reported. Both Online/Offline editors use this path. No additional
+host command, desktop-control CLI, permission or credential location is added;
+owner and removal criteria remain the shared engine runner/API replacement above.
+Installed native/Flatpak Box browser authorization is not yet verified.
+
 Every row below is an engine-specific operation; neither desktop D-Bus nor a
 portal implements its storage/configuration semantics.
 
@@ -187,11 +226,11 @@ portal implements its storage/configuration semantics.
 | `rclone config delete <remote>` | **Unavoidable invocation** | Confirmed unused-remote removal or setup rollback. |
 | `rclone lsjson <remote:path> --stat` | **Unavoidable invocation** | Bounded OneDrive token refresh and selected-directory access; metadata only. |
 | `rclone lsjson <remote-or-local> --recursive --files-only --no-mimetype --filter-from <filters>` | **Unavoidable invocation** | Explicit OneDrive Preview estimate only; two read-only inventories, each 30 seconds/4 MiB, under coordinator lock. Same scoped host gateway and owned paths; no new permission. Remove when an equivalent reviewed structured engine API replaces spawning. |
-| `rclone lsf <remote:path> --max-depth 1` | **Unavoidable invocation** | Read-only remote/library access checks. |
+| `rclone lsf <remote:path> --max-depth 1` | **Unavoidable invocation** | Read-only remote/library access checks, including Google/Box post-OAuth verification (20 seconds, 16 KiB capture). Owner: shared app engine runner; same native/host-gateway path and permissions. |
 | `rclone rc --unix-socket <socket> rc/noop` | **Unavoidable invocation** | Private RC readiness. |
 | `rclone rc --unix-socket <socket> vfs/stats` | **Unavoidable invocation** | Cache/upload health and sleep safety. |
 | `rclone rc --unix-socket <socket> vfs/queue` | **Unavoidable invocation** | Structured queued/in-progress counts. |
-| `rclone rc --unix-socket <socket> vfs/refresh recursive=true _async=true ...` | **Unavoidable invocation** | Tracked directory refresh. |
+| `rclone rc --unix-socket <socket> vfs/refresh recursive=<false/true> _async=true` | **Unavoidable invocation** | Tracked Google root-first then recursive directory refresh, sharing one deadline; fast-list belongs to VFS creation. |
 | `rclone rc --unix-socket <socket> job/status jobid=<id>` / `job/stop jobid=<id>` | **Unavoidable invocation** | Refresh observation/cancellation. |
 | `rclone bisync <remote> <local> ... [--resync] [--dry-run]` | **Unavoidable invocation** | The coordinator's fixed preview/initial/manual/scheduled transactions. |
 | `rclone mkdir <remote-recovery-day>` | **Unavoidable invocation** | Prepare the selected engine's recovery area. |
@@ -202,10 +241,10 @@ portal implements its storage/configuration semantics.
 | `rclone lsf --dirs-only --max-depth 1 <remote-recovery-root>` | **Unavoidable invocation** | Inspect retention candidates after successful synchronization. |
 | `rclone purge <verified-owned-expired-day>` | **Unavoidable invocation** | Remove only validated, applet-owned expired remote recovery data. |
 | `onedriver --auth-only --config-file <file> --cache-dir <dir> <mountpoint>` | **Unavoidable invocation** | Engine-owned Online OneDrive authentication; validation otherwise inspects metadata. |
-| `onedrive --confdir <dir> --reauth [--auth-files <url-file:response-file>]` | **Unavoidable invocation** | Legacy Offline OneDrive authentication. |
-| `onedrive --confdir <dir> --syncdir <dir> --sync --dry-run --verbose [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive preview/validation. |
-| `onedrive --confdir <dir> --syncdir <dir> --sync [--resync --resync-auth] [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive initial/ordinary synchronization. |
-| `onedrive --confdir <dir> --syncdir <dir> --display-sync-status [--single-directory <path>]` | **Unavoidable invocation** | Legacy Offline OneDrive pending/status inspection. |
+| `onedrive --confdir <dir> --reauth [--auth-files <url-file:response-file>]` | **Removed in 0.5.5** | Historical Legacy Offline OneDrive authentication. |
+| `onedrive --confdir <dir> --syncdir <dir> --sync --dry-run --verbose [--single-directory <path>]` | **Removed in 0.5.5** | Historical Legacy Offline OneDrive preview/validation. |
+| `onedrive --confdir <dir> --syncdir <dir> --sync [--resync --resync-auth] [--single-directory <path>]` | **Removed in 0.5.5** | Historical Legacy Offline OneDrive initial/ordinary synchronization. |
+| `onedrive --confdir <dir> --syncdir <dir> --display-sync-status [--single-directory <path>]` | **Removed in 0.5.5** | Historical Legacy Offline OneDrive pending/status inspection. |
 
 RC CLI calls already use rclone's structured private API. A future direct
 Unix-socket client could reduce spawns; that is an engine-transport optimization,
@@ -274,7 +313,7 @@ reviewed to avoid overlooking an indirect host executable.
 |---|---|---|
 | `rclone mount ...` | **Unavoidable invocation** | Host systemd Online service; lifecycle control is D-Bus. |
 | `onedriver --config-file ... --cache-dir ... <mountpoint>` | **Unavoidable invocation** | Host systemd Online OneDrive service. |
-| `onedrive --confdir ... --syncdir ... --monitor ...` | **Unavoidable invocation** | Retained legacy Offline OneDrive monitor; new mirrors use the shared rclone worker/timer. |
+| `onedrive --confdir ... --syncdir ... --monitor ...` | **Removed in 0.5.5** | Historical legacy Offline OneDrive monitor; new mirrors use the shared rclone worker/timer. |
 | Installed applet `--run-bisync scheduled <UUID>` | **Unavoidable invocation** | Native/Debian service runs the installed binary; Flatpak service uses fixed `/usr/bin/flatpak run --command=... <app-id> ...`. Both enter the same coordinator before GUI/IPC ownership. |
 | App-owned readiness/mount guards | **Unavoidable invocation** | Fixed flags and validated saved identities through that package-specific launcher. |
 | User-installed OpenConnect secret-agent service | **Replaced by D-Bus** | Applet starts/restarts the fixed service through the user manager. Its external nm-applet/plugin process is required authentication infrastructure, not an applet host CLI control path. |

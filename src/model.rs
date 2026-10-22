@@ -126,6 +126,18 @@ pub enum OfflineEngine {
     LegacyOnedrive,
 }
 
+/// Compatibility profiles remain readable even when their engine is retired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedEngine(pub OfflineEngine);
+
+impl fmt::Display for UnsupportedEngine {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&crate::fl!("onedrive-legacy-engine-retired"))
+    }
+}
+
+impl std::error::Error for UnsupportedEngine {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OneDriveDriveType {
@@ -268,6 +280,16 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Check runtime support without changing stored identity or touching files.
+    pub fn ensure_supported_engine(&self) -> Result<(), UnsupportedEngine> {
+        match self.offline_engine() {
+            Some(OfflineEngine::LegacyOnedrive) => {
+                Err(UnsupportedEngine(OfflineEngine::LegacyOnedrive))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Resolves legacy documents without migrating or silently changing engines.
     #[must_use]
     pub fn offline_engine(&self) -> Option<OfflineEngine> {

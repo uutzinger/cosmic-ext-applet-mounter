@@ -413,6 +413,11 @@ pub fn rclone_mount_plan(
         "--rc-addr".to_owned(),
         format!("unix://{}", rc_socket.display()),
     ];
+    if connection.provider == Provider::GoogleDrive {
+        // VFS retains the configuration from creation. RC call-local overrides
+        // do not change the context used by its later recursive refresh.
+        arguments.push("--fast-list".to_owned());
+    }
     arguments.push("--no-modtime".to_owned());
     if connection.provider == Provider::Teams {
         // SharePoint may rewrite Office files during upload, changing their size
@@ -979,7 +984,7 @@ mod tests {
         );
         assert!(plan.service.arguments.contains(&"--rc".to_owned()));
         assert!(plan.service.arguments.contains(&"--rc-no-auth".to_owned()));
-        assert!(!plan.service.arguments.contains(&"--fast-list".to_owned()));
+        assert!(plan.service.arguments.contains(&"--fast-list".to_owned()));
     }
 
     #[test]
@@ -1024,6 +1029,7 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--transfers", "1"])
         );
+        assert!(!plan.service.arguments.contains(&"--fast-list".to_owned()));
         for provider in [
             Provider::GoogleDrive,
             Provider::Box,
@@ -1062,17 +1068,23 @@ mod tests {
     }
 
     #[test]
-    fn rclone_mount_plan_does_not_put_fast_list_on_mount_commands() {
-        for provider in [Provider::GoogleDrive, Provider::Box, Provider::Smb] {
+    fn rclone_mount_plan_enables_fast_list_only_for_google_vfs() {
+        for provider in [
+            Provider::GoogleDrive,
+            Provider::Box,
+            Provider::Smb,
+            Provider::Sftp,
+        ] {
             let plan = rclone_mount_plan(
                 &connection(provider),
                 Path::new("/run/user/1000/cosmic-mounter"),
                 Path::new("/home/example/.cache/cosmic-mounter"),
             )
             .expect("plan");
-            assert!(
-                !plan.service.arguments.contains(&"--fast-list".to_owned()),
-                "{provider:?} mount must not receive a flag that rclone ignores"
+            assert_eq!(
+                plan.service.arguments.contains(&"--fast-list".to_owned()),
+                provider == Provider::GoogleDrive,
+                "{provider:?} VFS startup fast-list selection"
             );
             assert!(plan.service.arguments.contains(&"--rc-no-auth".to_owned()));
         }

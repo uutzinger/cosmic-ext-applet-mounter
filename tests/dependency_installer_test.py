@@ -12,7 +12,8 @@ class DependencyInstallerTests(unittest.TestCase):
         result = subprocess.run(["bash", "-s", "--", "--help"], input=INSTALLER.read_text(),
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--onedrive", result.stdout)
+        self.assertIn("--onedriver", result.stdout)
+        self.assertNotIn("--onedrive ", result.stdout)
         self.assertNotIn("--onedrive-auth-helper", result.stdout)
 
     def run_shell(self, body, *arguments):
@@ -29,14 +30,13 @@ class DependencyInstallerTests(unittest.TestCase):
             install_base() { echo step-base; }
             install_rclone() { echo step-rclone; }
             install_onedriver() { echo step-onedriver; }
-            install_onedrive() { echo step-onedrive-current; }
             main "$@"
         """, *arguments)
         self.assertEqual(result.returncode, 0, result.stderr)
         return [line for line in result.stdout.splitlines() if line.startswith("step-")]
 
     def test_default_and_all_retain_engines_without_helper(self):
-        expected = ["step-base", "step-rclone", "step-onedriver", "step-onedrive-current"]
+        expected = ["step-base", "step-rclone", "step-onedriver"]
         self.assertEqual(self.flow(), expected)
         self.assertEqual(self.flow("--all"), expected)
 
@@ -67,12 +67,11 @@ class DependencyInstallerTests(unittest.TestCase):
 
     def test_engine_selections_remain_independent(self):
         for option, expected in [("--rclone", "step-rclone"),
-                                 ("--onedrive", "step-onedrive-current"),
                                  ("--onedriver", "step-onedriver"), ("--base", "step-base")]:
             self.assertEqual(self.flow(option), [expected])
 
     def test_retired_helper_options_fail_before_privileged_work(self):
-        for option in ["--onedrive-auth-helper", "--skip-onedrive-auth-helper"]:
+        for option in ["--onedrive", "--onedrive-auth-helper", "--skip-onedrive-auth-helper"]:
             result = self.run_shell("""
                 require_sudo() { echo unexpected-sudo; return 99; }
                 pkg_install() { echo unexpected-install; return 99; }

@@ -27,6 +27,7 @@ pub struct RcloneRefreshJob {
     pub execute_id: String,
     rc_socket: PathBuf,
     timeout: Duration,
+    started: Instant,
 }
 
 pub use crate::preload_report::PreloadOutcome as RcloneRefreshOutcome;
@@ -121,22 +122,15 @@ async fn start_with(
             }
         }
 
-        let request = rc_request(&rc_socket, "vfs/refresh")?
-            .arg("recursive=true")
-            .map_err(|error| error.to_string())?
-            .arg("fast_list=true")
-            .map_err(|error| error.to_string())?
-            .arg("_async=true")
-            .map_err(|error| error.to_string())?;
-        let output = tokio::select! {
+        let started = Instant::now();
+        // Finish the root listing before starting a full-tree refresh. The
+        // latter installs its tree only after every listing has completed.
+        let (job_id, execute_id) = tokio::select! {
             biased;
             () = control.cancellation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
             () = operation.cancelled() => return Err(crate::fl!("refresh-cancelled")),
-            result = runner.run(request, control.cancellation.child_token()) => {
-                result.map_err(|error| error.to_string())?
-            }
+            result = submit_refresh(runner, &rc_socket, false, &control.cancellation) => result?,
         };
-        let (job_id, execute_id) = parse_job_start(&output.stdout.text)?;
         *control.job_id.lock().expect("rclone refresh job id") = Some(job_id);
         if control.cancellation.is_cancelled() || !is_current(connection_id, &control) {
             let _ = stop_job(runner, &rc_socket, job_id).await;
@@ -148,6 +142,7 @@ async fn start_with(
             execute_id,
             rc_socket,
             timeout,
+            started,
         })
     }
     .await;
@@ -174,8 +169,10 @@ async fn monitor_with(
         }
     };
 
-    let started = Instant::now();
+    let started = job.started;
     let deadline = started + job.timeout;
+    let mut active_job_id = job.job_id;
+    let mut recursive = false;
     let report = || PreloadReport {
         duration_seconds: started.elapsed().as_secs_f64(),
         limit_seconds: job.timeout.as_secs_f64(),
@@ -185,30 +182,54 @@ async fn monitor_with(
     let result = async {
         loop {
             if Instant::now() >= deadline {
-                let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
+                let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
                 break Ok(RcloneRefreshOutcome::TimedOut(report()));
             }
             let request = rc_request(&job.rc_socket, "job/status")?
-                .arg(format!("jobid={}", job.job_id))
+                .arg(format!("jobid={active_job_id}"))
                 .map_err(|error| error.to_string())?;
             let output = tokio::select! {
                 biased;
                 () = control.cancellation.cancelled() => {
-                    let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
+                    let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
                     break Ok(RcloneRefreshOutcome::Cancelled);
                 }
                 () = operation.cancelled() => {
-                    let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
+                    let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
                     break Ok(RcloneRefreshOutcome::Cancelled);
                 }
                 result = runner.run(request, control.cancellation.child_token()) => {
                     result.map_err(|error| error.to_string())?
                 }
             };
-            let status = parse_job_status(&output.stdout.text, &job.execute_id, job.job_id)?;
+            let status = parse_job_status(&output.stdout.text, &job.execute_id, active_job_id)?;
             if status.finished {
                 if status.success {
-                    break Ok(RcloneRefreshOutcome::Completed(report()));
+                    if recursive {
+                        break Ok(RcloneRefreshOutcome::Completed(report()));
+                    }
+                    // Both phases share one deadline, including dispatch time.
+                    if Instant::now() >= deadline {
+                        break Ok(RcloneRefreshOutcome::TimedOut(report()));
+                    }
+                    let next = tokio::select! {
+                        biased;
+                        () = control.cancellation.cancelled() => break Ok(RcloneRefreshOutcome::Cancelled),
+                        () = operation.cancelled() => break Ok(RcloneRefreshOutcome::Cancelled),
+                        result = submit_refresh(runner, &job.rc_socket, true, &control.cancellation) => result?,
+                    };
+                    active_job_id = next.0;
+                    *control.job_id.lock().expect("rclone refresh job id") = Some(active_job_id);
+                    if next.1 != job.execute_id {
+                        let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
+                        break Err(crate::fl!("ui-rclone-refresh-rclone-restarted-while-the-directory-refresh-was"));
+                    }
+                    if control.cancellation.is_cancelled() || !is_current(job.connection_id, &control) {
+                        let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
+                        break Ok(RcloneRefreshOutcome::Cancelled);
+                    }
+                    recursive = true;
+                    continue;
                 }
                 break Err(if status.error.is_empty() {
                     crate::fl!(
@@ -224,11 +245,11 @@ async fn monitor_with(
             tokio::select! {
                 biased;
                 () = control.cancellation.cancelled() => {
-                    let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
+                    let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
                     break Ok(RcloneRefreshOutcome::Cancelled);
                 }
                 () = operation.cancelled() => {
-                    let _ = stop_job(runner, &job.rc_socket, job.job_id).await;
+                    let _ = stop_job(runner, &job.rc_socket, active_job_id).await;
                     break Ok(RcloneRefreshOutcome::Cancelled);
                 }
                 () = tokio::time::sleep(JOB_POLL_INTERVAL) => {}
@@ -274,6 +295,23 @@ fn rc_request(rc_socket: &Path, method: &str) -> Result<CommandRequest, String> 
         .arg(method)
         .map_err(|error| error.to_string())
         .map(|request| request.with_timeout(RC_COMMAND_TIMEOUT))
+}
+
+async fn submit_refresh(
+    runner: &dyn CommandRunner,
+    rc_socket: &Path,
+    recursive: bool,
+    cancellation: &CancellationToken,
+) -> Result<(u64, String), String> {
+    let request = rc_request(rc_socket, "vfs/refresh")?
+        .arg(format!("recursive={recursive}"))
+        .and_then(|request| request.arg("_async=true"))
+        .map_err(|error| error.to_string())?;
+    let output = runner
+        .run(request, cancellation.child_token())
+        .await
+        .map_err(|error| error.to_string())?;
+    parse_job_start(&output.stdout.text)
 }
 
 async fn stop_job(runner: &dyn CommandRunner, rc_socket: &Path, job_id: u64) -> Result<(), String> {
@@ -433,6 +471,8 @@ mod tests {
         runner.push(Ok(output(
             r#"{"id":7,"executeId":"instance-a","finished":true,"success":true,"duration":2.5,"error":""}"#,
         )));
+        runner.push(Ok(output(r#"{"jobid":8,"executeId":"instance-a"}"#)));
+        runner.push(Ok(output(r#"{"id":8,"executeId":"instance-a","finished":true,"success":true,"output":{"result":{"":"OK"}}}"#)));
         let connection_id = id("2a3f5d45-e867-47e7-943f-66cf60e777ad");
         let socket = PathBuf::from("/run/user/1000/rclone-test.sock");
         let mountpoint = PathBuf::from("/home/example/Google Drive");
@@ -467,8 +507,24 @@ mod tests {
         );
         assert_eq!(
             requests[2].sanitized_command(),
-            "rclone rc --unix-socket /run/user/1000/rclone-test.sock vfs/refresh recursive=true fast_list=true _async=true"
+            "rclone rc --unix-socket /run/user/1000/rclone-test.sock vfs/refresh recursive=false _async=true"
         );
+        assert!(
+            requests[3]
+                .sanitized_command()
+                .ends_with("job/status jobid=7")
+        );
+        assert!(
+            requests[4]
+                .sanitized_command()
+                .ends_with("vfs/refresh recursive=true _async=true")
+        );
+        assert!(
+            requests[5]
+                .sanitized_command()
+                .ends_with("job/status jobid=8")
+        );
+        assert!(current_control(connection_id, 8).is_none());
         assert_eq!(
             requests[3].sanitized_command(),
             "rclone rc --unix-socket /run/user/1000/rclone-test.sock job/status jobid=7"
@@ -497,6 +553,7 @@ mod tests {
             rc_socket: socket,
             // Force the deadline branch without a real-time sleep.
             timeout: Duration::ZERO,
+            started: Instant::now(),
         };
         let RcloneRefreshOutcome::TimedOut(report) = monitor_with(&runner, job).await.unwrap()
         else {
@@ -535,6 +592,269 @@ mod tests {
             runner.requests()[3].sanitized_command(),
             "rclone rc --unix-socket /run/user/1000/rclone-cancel.sock job/stop jobid=9"
         );
+    }
+
+    #[tokio::test]
+    async fn root_failure_or_malformed_status_never_starts_recursive_refresh() {
+        for response in [
+            r#"{"id":7,"executeId":"instance","finished":true,"success":true,"output":{"result":{"":"provider failed"}}}"#,
+            r#"{"id":7,"executeId":"new-instance","finished":true,"success":true}"#,
+            "invalid json",
+        ] {
+            let runner = FakeCommandRunner::default();
+            runner.push(Ok(output("")));
+            runner.push(Ok(output("{}")));
+            runner.push(Ok(output(r#"{"jobid":7,"executeId":"instance"}"#)));
+            runner.push(Ok(output(response)));
+            let job = start_with(
+                &runner,
+                ConnectionId::new(),
+                PathBuf::from("/tmp/root-error.sock"),
+                PathBuf::from("/tmp/mount"),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+            let connection_id = job.connection_id;
+            assert!(monitor_with(&runner, job).await.is_err());
+            assert_eq!(runner.requests().len(), 4);
+            assert!(current_control(connection_id, 7).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn root_dispatch_and_delayed_monitor_share_one_budget() {
+        let runner = FakeCommandRunner::default();
+        for value in ["", "{}", r#"{"jobid":7,"executeId":"instance"}"#, "{}"] {
+            runner.push(Ok(output(value)));
+        }
+        let mut job = start_with(
+            &runner,
+            ConnectionId::new(),
+            PathBuf::from("/tmp/budget.sock"),
+            PathBuf::from("/tmp/mount"),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+        job.started = Instant::now() - Duration::from_secs(61);
+        assert!(matches!(
+            monitor_with(&runner, job).await.unwrap(),
+            RcloneRefreshOutcome::TimedOut(_)
+        ));
+        assert_eq!(runner.requests().len(), 4);
+        assert!(
+            runner.requests()[3]
+                .sanitized_command()
+                .ends_with("job/stop jobid=7")
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_root_targets_recursive_job() {
+        let runner = FakeCommandRunner::default();
+        for value in [
+            "",
+            "{}",
+            r#"{"jobid":7,"executeId":"instance"}"#,
+            r#"{"id":7,"executeId":"instance","finished":true,"success":true}"#,
+            r#"{"jobid":8,"executeId":"instance"}"#,
+            r#"{"id":8,"executeId":"instance","finished":false,"success":false}"#,
+            "{}",
+            "{}",
+        ] {
+            runner.push(Ok(output(value)));
+        }
+        let connection_id = ConnectionId::new();
+        let job = start_with(
+            &runner,
+            connection_id,
+            PathBuf::from("/tmp/cancel-next.sock"),
+            PathBuf::from("/tmp/mount"),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+        let monitor = monitor_with(&runner, job);
+        let cancel = async {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while runner.requests().len() < 6 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(cancel_with(&runner, connection_id).await.unwrap());
+        };
+        let (outcome, ()) = tokio::join!(monitor, cancel);
+        assert_eq!(outcome.unwrap(), RcloneRefreshOutcome::Cancelled);
+        assert!(
+            runner.requests()[6]
+                .sanitized_command()
+                .ends_with("job/stop jobid=8")
+        );
+        assert!(current_control(connection_id, 8).is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires installed rclone and local sockets; synthetic local directories only"]
+    async fn real_rclone_root_first_refresh_uses_mount_config() {
+        use crate::process::SystemCommandRunner;
+        use std::process::{Child, Command, Stdio};
+        struct Server(Child);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let temporary = tempfile::tempdir().unwrap();
+        let source = temporary.path().join("source");
+        std::fs::create_dir_all(source.join("a/b")).unwrap();
+        for file in ["root.txt", "a/child.txt", "a/b/leaf.txt"] {
+            std::fs::write(source.join(file), "synthetic metadata fixture").unwrap();
+        }
+        let config = temporary.path().join("empty.conf");
+        std::fs::write(&config, "").unwrap();
+        let socket = temporary.path().join("rc.sock");
+        let mut server = Server(
+            Command::new("/usr/bin/rclone")
+                .arg("serve")
+                .arg("webdav")
+                .arg(&source)
+                .args([
+                    "--addr",
+                    "127.0.0.1:0",
+                    "--read-only",
+                    "--fast-list",
+                    "--rc",
+                    "--rc-no-auth",
+                ])
+                .arg("--rc-addr")
+                .arg(format!("unix://{}", socket.display()))
+                .arg("--config")
+                .arg(&config)
+                .arg("--cache-dir")
+                .arg(temporary.path().join("cache"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let runner = SystemCommandRunner;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                assert!(
+                    server.0.try_wait().unwrap().is_none(),
+                    "local test server exited"
+                );
+                if socket.exists()
+                    && runner
+                        .run(
+                            rc_request(&socket, "rc/noop").unwrap(),
+                            CancellationToken::new(),
+                        )
+                        .await
+                        .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let settings = runner
+            .run(
+                rc_request(&socket, "options/get")
+                    .unwrap()
+                    .arg("blocks=main")
+                    .unwrap(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let settings: Value = serde_json::from_str(&settings.stdout.text).unwrap();
+        assert_eq!(settings.pointer("/main/UseListR"), Some(&Value::Bool(true)));
+        let started = Instant::now();
+        let cancellation = CancellationToken::new();
+        let (job_id, execute_id) = submit_refresh(&runner, &socket, false, &cancellation)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = runner
+                    .run(
+                        rc_request(&socket, "job/status")
+                            .unwrap()
+                            .arg(format!("jobid={job_id}"))
+                            .unwrap(),
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap();
+                let status = parse_job_status(&status.stdout.text, &execute_id, job_id).unwrap();
+                if status.finished {
+                    assert!(status.success);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let stats = runner
+            .run(
+                rc_request(&socket, "vfs/stats").unwrap(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let stats: Value = serde_json::from_str(&stats.stdout.text).unwrap();
+        // Rclone's metadataCache/files counter includes directory entries:
+        // the root contains only root.txt and a/, not their descendants yet.
+        assert_eq!(
+            stats
+                .pointer("/metadataCache/files")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+        let connection_id = ConnectionId::new();
+        ACTIVE_REFRESHES.lock().unwrap().insert(
+            connection_id,
+            Arc::new(ActiveRefresh {
+                rc_socket: socket.clone(),
+                cancellation,
+                job_id: Mutex::new(Some(job_id)),
+            }),
+        );
+        let job = RcloneRefreshJob {
+            connection_id,
+            job_id,
+            execute_id,
+            rc_socket: socket.clone(),
+            timeout: Duration::from_secs(10),
+            started,
+        };
+        assert!(matches!(
+            monitor_with(&runner, job).await.unwrap(),
+            RcloneRefreshOutcome::Completed(_)
+        ));
+        let stats = runner
+            .run(
+                rc_request(&socket, "vfs/stats").unwrap(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let stats: Value = serde_json::from_str(&stats.stdout.text).unwrap();
+        assert_eq!(
+            stats
+                .pointer("/metadataCache/files")
+                .and_then(Value::as_u64),
+            Some(5)
+        );
+        assert_eq!(std::fs::read_dir(&source).unwrap().count(), 2);
     }
 
     #[test]

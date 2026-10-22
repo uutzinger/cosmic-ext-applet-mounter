@@ -1,3 +1,20 @@
+cosmic-ext-applet-mounter (0.5.5) UNRELEASED; urgency=medium
+
+  * Retire the legacy abraunegg OneDrive offline engine while preserving old
+    profiles and user data for replacement or removal.
+  * Stop, disable, and remove only structurally verified app-owned legacy
+    monitor units during upgrade.
+  * Keep OneDrive Online through onedriver and new OneDrive Offline mirrors
+    through rclone.
+  * Unify editor action states and shared-remote save confirmation; manage
+    unused rclone remotes from Settings.
+  * Repair Google Drive and Box browser authentication and Google directory
+    preload; improve mirror diagnostics, recovery exclusions, and status.
+  * Support whole-library SharePoint mirror targets and reconnect Settings
+    after the panel applet restarts.
+
+ -- Urs Utzinger <uutzinger@users.noreply.github.com>  Wed, 21 Oct 2026 05:30:00 -0700
+
 cosmic-ext-applet-mounter (0.5.4) unstable; urgency=medium
 
   * Use rclone bisync for new personal and work/school OneDrive mirrors.

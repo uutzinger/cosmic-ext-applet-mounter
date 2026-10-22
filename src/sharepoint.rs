@@ -181,21 +181,23 @@ impl MirrorGuardBinding {
                 "ui-teams-the-sharepoint-mirror-guard-requires-a-sharepoint"
             ));
         }
-        let subpath = connection
-            .remote_subpath
-            .as_deref()
-            .ok_or(crate::fl!("ui-teams-select-a-folder-before-mirroring"))?;
         crate::sync::validate_remote_name(&connection.remote_reference)
             .map_err(|error| error.to_string())?;
-        crate::sync::validate_remote_subpath(subpath).map_err(|error| error.to_string())?;
-        if subpath
-            .split('/')
-            .any(|component| component.is_empty() || matches!(component, "." | ".."))
-        {
-            return Err(crate::fl!(
-                "ui-teams-select-a-folder-within-the-sharepoint-library"
-            ));
+        // None selects the verified library root. Keep rejecting malformed
+        // explicit paths, including empty strings and dot components.
+        if let Some(subpath) = connection.remote_subpath.as_deref() {
+            crate::sync::validate_remote_subpath(subpath).map_err(|error| error.to_string())?;
+            if subpath
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
+            {
+                return Err(crate::fl!(
+                    "ui-teams-select-a-folder-within-the-sharepoint-library"
+                ));
+            }
         }
+        // Preserve the existing serialized binding shape for installed units.
+        let subpath = connection.remote_subpath.as_deref().unwrap_or_default();
         let identity = connection.teams_identity.as_ref().ok_or(crate::fl!(
             "ui-teams-the-sharepoint-connection-has-no-verified-library"
         ))?;
@@ -294,7 +296,7 @@ pub async fn verify_mirror_binding<R: CommandRunner>(
             CancellationToken::new(),
         )
         .await
-        .map_err(|error| rclone_read_error(&error, true))?;
+        .map_err(|error| rclone_read_error(&error, !binding.remote_subpath.is_empty()))?;
     Ok(())
 }
 
@@ -843,7 +845,29 @@ mod tests {
         changed.remote_subpath = Some(".".into());
         assert!(MirrorGuardBinding::from_connection(&changed).is_err());
         changed.remote_subpath = None;
-        assert!(MirrorGuardBinding::from_connection(&changed).is_err());
+        let root = MirrorGuardBinding::from_connection(&changed).unwrap();
+        assert_eq!(root.remote_subpath, "");
+        let decoded_root: MirrorGuardBinding =
+            serde_json::from_str(&serde_json::to_string(&root).unwrap()).unwrap();
+        assert!(decoded_root.matches_saved_connection(&changed).is_ok());
+        assert!(decoded.matches_saved_connection(&changed).is_err());
+        assert!(decoded_root.matches_saved_connection(&connection).is_err());
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "/",
+            "folder/",
+            "folder//child",
+            "folder/./child",
+            "../other",
+        ] {
+            changed.remote_subpath = Some(invalid.into());
+            assert!(
+                MirrorGuardBinding::from_connection(&changed).is_err(),
+                "{invalid}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -855,15 +879,22 @@ mod tests {
             sync_interval_minutes: 15,
             sync_on_metered: false,
         });
-        let binding = MirrorGuardBinding::from_connection(&connection).unwrap();
-        connection.remote_subpath = Some("Other".into());
         let runner = FakeCommandRunner::default();
-        assert!(
-            verify_mirror_binding(&binding, &connection, &runner)
-                .await
-                .is_err()
-        );
-        assert!(runner.requests().is_empty());
+        for (before, after) in [
+            (Some("Reports"), Some("Other")),
+            (Some("Reports"), None),
+            (None, Some("Reports")),
+        ] {
+            connection.remote_subpath = before.map(str::to_owned);
+            let binding = MirrorGuardBinding::from_connection(&connection).unwrap();
+            connection.remote_subpath = after.map(str::to_owned);
+            assert!(
+                verify_mirror_binding(&binding, &connection, &runner)
+                    .await
+                    .is_err()
+            );
+            assert!(runner.requests().is_empty());
+        }
     }
 
     #[test]

@@ -89,6 +89,125 @@ fn disposable_connection(root: &Path, sftp: bool) -> Connection {
     }
 }
 
+/// Run explicitly with `cargo test --locked --test bisync_coordinator_live
+/// root_mirror_recovery_exclusion -- --ignored --nocapture`.
+/// Uses only a temporary local alias remote and synthetic files, no cloud auth.
+#[tokio::test]
+#[ignore = "requires installed rclone; disposable local-only engine integration"]
+async fn root_mirror_recovery_exclusion() {
+    for provider in [Provider::Box, Provider::GoogleDrive] {
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("remote");
+        let reserved = remote.join(".cosmic-mounter-recovery/existing");
+        fs::create_dir_all(&reserved).unwrap();
+        fs::write(reserved.join("preserved.txt"), "recovery-only").unwrap();
+        fs::write(remote.join("remote.txt"), "original").unwrap();
+        // Keep the overwrite below bisync's all-files-changed safety guard.
+        fs::write(remote.join("stable-one.txt"), "stable-one").unwrap();
+        fs::write(remote.join("stable-two.txt"), "stable-two").unwrap();
+        let config = root.path().join("rclone.conf");
+        fs::write(
+            &config,
+            format!("[probe]\ntype = alias\nremote = {}\n", remote.display()),
+        )
+        .unwrap();
+        let runner = IsolatedRunner { config };
+        let mut connection = disposable_connection(root.path(), false);
+        connection.provider = provider;
+        connection.remote_subpath = None;
+        let work = root.path().join("state");
+        let plan = rclone_bisync_plan(&connection, &work).unwrap();
+        fs::create_dir_all(&plan.work_directory).unwrap();
+        fs::create_dir_all(&connection.local_path).unwrap();
+        // Reproduce the old root filter with the actual planned backup dirs.
+        fs::write(
+            &plan.filters_file,
+            cosmic_ext_applet_mounter::sync::rclone_bisync_filter_file(provider),
+        )
+        .unwrap();
+        let mut request = CommandRequest::new(Executable::Rclone);
+        for argument in &plan.service.arguments {
+            request = request.arg(argument).unwrap();
+        }
+        request = request
+            .arg("--resync")
+            .unwrap()
+            .arg("--dry-run")
+            .unwrap()
+            .with_timeout(Duration::from_secs(30))
+            .with_output_limit(16 * 1024);
+        let old = runner.run(request, CancellationToken::new()).await;
+        assert!(
+            matches!(
+                old,
+                Err(cosmic_ext_applet_mounter::process::CommandError::NonZero {
+                    code: Some(7),
+                    ..
+                })
+            ),
+            "old filter must reproduce overlap failure"
+        );
+        for mode in [BisyncMode::InitialPreview, BisyncMode::InitialSync] {
+            run(&connection, mode, &work, &runner, CancellationToken::new())
+                .await
+                .unwrap();
+            if mode == BisyncMode::InitialPreview {
+                assert!(!connection.local_path.join("remote.txt").exists());
+                assert!(!plan.work_directory.join("initial-sync-complete").exists());
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(connection.local_path.join("remote.txt")).unwrap(),
+            "original"
+        );
+        assert!(
+            !connection
+                .local_path
+                .join(".cosmic-mounter-recovery")
+                .exists()
+        );
+        // Overwrite a synchronized file; recovery must still work and stay out
+        // of the synchronized tree on the opposite side.
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        fs::write(
+            connection.local_path.join("remote.txt"),
+            "changed-longer-content",
+        )
+        .unwrap();
+        run(
+            &connection,
+            BisyncMode::Sync,
+            &work,
+            &runner,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(remote.join("remote.txt")).unwrap(),
+            "changed-longer-content"
+        );
+        let backups = recovery_files(
+            &remote
+                .join(".cosmic-mounter-recovery")
+                .join(connection.id.to_string()),
+            "remote.txt-",
+        );
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), "original");
+        assert_eq!(
+            fs::read_to_string(reserved.join("preserved.txt")).unwrap(),
+            "recovery-only"
+        );
+        assert!(
+            !connection
+                .local_path
+                .join(".cosmic-mounter-recovery")
+                .exists()
+        );
+    }
+}
+
 async fn lifecycle(sftp: bool) {
     let root = tempfile::tempdir().unwrap();
     let remote = root.path().join("remote");

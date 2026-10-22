@@ -6,7 +6,7 @@ set -euo pipefail
 # Supported distributions (where COSMIC itself is packaged):
 #   Debian/Ubuntu/Pop!_OS  apt
 #   Fedora                 dnf
-#   Arch Linux             pacman (+ AUR helper for onedriver/onedrive)
+#   Arch Linux             pacman (+ AUR helper for onedriver)
 #   openSUSE Tumbleweed    zypper
 #   Gentoo                 emerge
 #
@@ -17,7 +17,6 @@ set -euo pipefail
 
 readonly RCLONE_MIN_VERSION="1.74.3"
 readonly ONEDRIVER_MIN_VERSION="0.15.0"
-readonly ONEDRIVE_MIN_VERSION="2.5.10"
 
 # Set to true with --rclone-selfupdate to try rclone's package-aware selfupdate
 # before falling back to the official installer.
@@ -435,106 +434,6 @@ install_onedriver() {
 }
 
 # ---------------------------------------------------------------------------
-# abraunegg/onedrive
-# ---------------------------------------------------------------------------
-
-get_onedrive_version() {
-    if command -v onedrive >/dev/null 2>&1; then
-        onedrive --version 2>/dev/null | head -n1 | awk '{print $1}' | sed 's/^v//'
-    else
-        printf '%s' "0.0.0"
-    fi
-}
-
-install_onedrive_debian() {
-    local suffix
-    suffix="$(obs_repo_suffix)"
-    if [ -z "$suffix" ]; then
-        error "No Open Build Service repository mapping for $(read_os_release ID) $(read_os_release VERSION_ID)."
-        error "Install abraunegg/onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/ubuntu-package-install.md"
-        exit 1
-    fi
-
-    info "Adding npreining OBS repository for ${suffix}..."
-
-    local key_url="https://download.opensuse.org/repositories/home:/npreining:/debian-ubuntu-onedrive/${suffix}/Release.key"
-    local list_file="/etc/apt/sources.list.d/onedrive.list"
-    local keyring="/usr/share/keyrings/obs-onedrive-mirror.gpg"
-
-    curl --fail --show-error --silent "$key_url" \
-        | gpg --dearmor \
-        | run_sudo tee "$keyring" >/dev/null
-
-    printf 'deb [arch=%s signed-by=%s] https://download.opensuse.org/repositories/home:/npreining:/debian-ubuntu-onedrive/%s/ /\n' \
-        "$(dpkg --print-architecture)" "$keyring" "$suffix" \
-        | run_sudo tee "$list_file" >/dev/null
-
-    pkg_update_index
-    run_sudo apt-cache policy onedrive
-    pkg_install onedrive
-}
-
-install_onedrive_fedora() {
-    info "Enabling abraunegg/onedrive COPR..."
-    run_sudo dnf copr enable -y abraunegg/onedrive
-    pkg_update_index
-    pkg_install onedrive
-}
-
-install_onedrive_arch() {
-    local helper
-    helper="$(detect_aur_helper)"
-    if [ -z "$helper" ]; then
-        error "An AUR helper (yay or paru) is required to install abraunegg/onedrive on Arch Linux."
-        error "Install one manually, then re-run this script, or install onedrive from the AUR yourself:"
-        error "  https://aur.archlinux.org/packages/onedrive-abraunegg"
-        exit 1
-    fi
-    info "Installing onedrive from AUR using ${helper}..."
-    "$helper" -Sy --noconfirm onedrive-abraunegg
-}
-
-install_onedrive_opensuse() {
-    error "openSUSE does not have a prebuilt abraunegg/onedrive package in this script."
-    error "Build and install onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/INSTALL.md"
-    exit 1
-}
-
-install_onedrive_gentoo() {
-    error "Gentoo does not have an official abraunegg/onedrive package."
-    error "Build and install onedrive manually from: https://github.com/abraunegg/onedrive/blob/master/docs/INSTALL.md"
-    exit 1
-}
-
-install_onedrive() {
-    info "Checking abraunegg/onedrive..."
-    local current_version
-    current_version="$(get_onedrive_version)"
-
-    if version_ge "$current_version" "$ONEDRIVE_MIN_VERSION"; then
-        info "onedrive ${current_version} already meets the minimum (${ONEDRIVE_MIN_VERSION})."
-        return 0
-    fi
-
-    warn "onedrive ${current_version} is below the recommended minimum ${ONEDRIVE_MIN_VERSION}."
-
-    case "$(detect_distro)" in
-        debian) install_onedrive_debian ;;
-        fedora) install_onedrive_fedora ;;
-        arch) install_onedrive_arch ;;
-        opensuse) install_onedrive_opensuse ;;
-        gentoo) install_onedrive_gentoo ;;
-    esac
-
-    current_version="$(get_onedrive_version)"
-    if ! version_ge "$current_version" "$ONEDRIVE_MIN_VERSION"; then
-        error "onedrive installation failed or version is still too old: ${current_version}"
-        exit 1
-    fi
-    info "onedrive ${current_version} installed."
-}
-
-# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -545,11 +444,6 @@ print_summary() {
         printf '  %-12s %s\n' "onedriver" "$(get_onedriver_version) (min ${ONEDRIVER_MIN_VERSION})"
     else
         printf '  %-12s %s\n' "onedriver" "not installed (min ${ONEDRIVER_MIN_VERSION})"
-    fi
-    if command -v onedrive >/dev/null 2>&1; then
-        printf '  %-12s %s\n' "onedrive" "$(get_onedrive_version) (min ${ONEDRIVE_MIN_VERSION})"
-    else
-        printf '  %-12s %s\n' "onedrive" "not installed (min ${ONEDRIVE_MIN_VERSION})"
     fi
     printf '  %-12s %s\n' "fusermount3" "$(command -v fusermount3 >/dev/null 2>&1 && echo present || echo missing)"
     printf '  %-12s %s\n' "nmcli" "$(command -v nmcli >/dev/null 2>&1 && echo present || echo missing)"
@@ -566,12 +460,11 @@ Usage: $0 [OPTION]...
 Install or update host dependencies for cosmic-ext-applet-mounter.
 
 Options:
-  --all                Install/update all engines, including the legacy OneDrive engine.
+  --all                Install/update supported engines (rclone and onedriver).
   --base               Install base tools only (fuse3, network-manager).
   --rclone             Install/update rclone (new OneDrive mirrors and other providers).
   --rclone-selfupdate  Try rclone's package-aware selfupdate first (opt-in).
   --onedriver          Install/update jstaf/onedriver (OneDrive Online mounts).
-  --onedrive           Install/update legacy OneDrive mirror engine (browser/manual sign-in).
   --help               Show this help message.
   --log-dir DIR        Mirror visible output to a new private log/report directory.
 
@@ -686,7 +579,6 @@ main() {
     local do_base=false
     local do_rclone=false
     local do_onedriver=false
-    local do_onedrive=false
 
     if [ $# -eq 0 ]; then
         do_all=true
@@ -699,7 +591,6 @@ main() {
             --rclone) do_rclone=true ;;
             --rclone-selfupdate) PREFER_RCLONE_SELFUPDATE=true ;;
             --onedriver) do_onedriver=true ;;
-            --onedrive) do_onedrive=true ;;
             --help) usage; exit 0 ;;
             *) error "Unknown option: $1"; usage; exit 1 ;;
         esac
@@ -710,7 +601,6 @@ main() {
         do_base=true
         do_rclone=true
         do_onedriver=true
-        do_onedrive=true
     fi
 
     require_supported_distro
@@ -725,9 +615,6 @@ main() {
     fi
     if [ "$do_onedriver" = true ]; then
         install_onedriver
-    fi
-    if [ "$do_onedrive" = true ]; then
-        install_onedrive
     fi
     print_summary
     info "Done."

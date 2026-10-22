@@ -14,6 +14,7 @@
       Cloud Mounter helps keep file-manager workflows responsive when
       cloud storage, VPN, or network connectivity is intermittent.
     </p>
+    <p>OneDrive Online mounts use onedriver; Offline mirrors use rclone. Retired legacy profiles and their local data are preserved.</p>
     <p>Features include:</p>
     <ul>
       <li>Online mounts and offline mirrors for OneDrive, Google Drive, Box, SMB, and SFTP.</li>
@@ -78,6 +79,17 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.5.5" date="2026-10-22" type="development">
+      <description>
+        <p>Retire the legacy OneDrive mirror engine and improve connection setup and controls.</p>
+        <ul>
+          <li>Preserve retired profiles and local data while retiring verified app-owned monitor units.</li>
+          <li>Unify editor button states, shared-remote save confirmation, and unused remote management.</li>
+          <li>Repair Google Drive and Box browser authentication and improve Google directory preload.</li>
+          <li>Improve mirror recovery handling, diagnostics, and Settings reconnection.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.4" date="2026-10-18">
       <description>
         <p>New OneDrive offline mirrors use rclone bisync for personal and work or school accounts.</p>

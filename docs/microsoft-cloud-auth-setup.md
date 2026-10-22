@@ -1,14 +1,15 @@
 # Microsoft Cloud Authentication Setup
 
-For the **0.5.4 development source**, new OneDrive Offline mirrors use the
+For the **0.5.5 development source**, new OneDrive Offline mirrors use the
 built-in rclone client. The editor creates or verifies a primary personal/work
 or school drive and binds reconnect to its saved identity. Custom client IDs,
 secrets, tenant endpoints, alternate roots and client-credential flows are
 rejected for these mirrors. Leave these advanced fields unset when selecting an
 existing remote. Installed integration acceptance remains pending.
 
-The private-client procedures below apply to **SharePoint and retained legacy
-OneDrive Offline profiles**, not new rclone OneDrive mirrors. OneDrive Online
+The current private-client procedures below apply to **SharePoint**, not new
+rclone OneDrive mirrors. Legacy abraunegg sections are historical reference
+only: 0.5.5 removes legacy authentication and never updates its credentials. OneDrive Online
 continues to use onedriver. Personal mirror sign-in requires `User.Read` to
 verify the expected account; business mirror sign-in verifies drive ownership
 without adding `User.Read`. SharePoint profile labels are optional. Recurring
@@ -35,7 +36,7 @@ Which engine uses which IDs:
 
 | Connection | Engine | Where the IDs go |
 |---|---|---|
-| Legacy OneDrive Offline mirror | `abraunegg/onedrive` | `config` file in the connection's `onedrive-sync/<connection-id>/` directory |
+| Retired legacy OneDrive Offline mirror | No supported engine in 0.5.5 | Existing configuration/credentials preserved; historical setup instructions below do not apply to current runtime |
 | New OneDrive Offline mirror | `rclone` built-in client | Custom IDs unsupported; use the editor |
 | SharePoint / Teams library | `rclone` | rclone remote (`rclone config`) |
 | OneDrive Online mount | `jstaf/onedriver` | Not configurable from Cloud Mounter |
