@@ -14,11 +14,11 @@ are rejected. The source manifest now pins reviewed 0.5.5 implementation commit
 The wrapper does not change that pin or choose a runtime. The packaging changes
 must also be committed before a clean-checkout candidate build.
 
-**0.5.5 preparation:** the app commit is frozen and the manifest pin updated.
-Release metadata is finalized; final package acceptance remains open.
-No release is published. The October 22 preflight
-found the required x86_64 runtime refs installed but the worktree dirty. See the
-[current readiness/checklist](../../docs/engineering/cosmic-submission-audit.md#055-readiness-review--october-22).
+**Published 0.5.5:** tag/packaging cd1b465 uses the app pin above. Both Flatpak
+architectures built and were inspected; exact x86_64 installed UI/Online/manual
+mirror smoke passed. Remaining acceptance limits and immutable identities are in
+the [current submission baseline](../../docs/engineering/cosmic-submission-audit.md#current-submission-baseline--published-055).
+The earlier dirty-checkout preflight is historical, not a current build blocker.
 
 Example interface (placeholders, not a request to build now):
 
@@ -374,6 +374,11 @@ to scrape pending counts; active runs publish invocation-matched app-owned state
 Keeping `org.freedesktop.Flatpak` permits host execution at the sandbox boundary;
 application-side fixed commands do not turn that grant into an OS-enforced
 per-executable allowlist. This retained exception still requires submission review.
+
+The published built metadata also includes an inherited `x11` socket, in addition
+to `wayland` and `fallback-x11`. No new grant is proposed. Inspect the full built
+policy and installed overrides when reviewing effective access; the test computer
+overrides were not independently captured.
 
 Current final-manifest `finish-args`:
 

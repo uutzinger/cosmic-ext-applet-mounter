@@ -2859,3 +2859,245 @@ release-record scope; README 5ad29ab is already committed. Leave all screenshot
 edits/untracked PopUp.png outside the commit. Fetch immediately before master
 push and verify remote branch/tag identities. Source checks are reused; scoped
 notes whitespace check exits 0. GitHub release publication remains unapproved.
+
+
+## v0.5.5 published and public bytes verified — October 22, 2026
+
+Operator requests completing the last publication step after push/tag. Ran the
+maintained promote_release.py with v0.5.5, Debian run 39842941118 and both
+Flatpak architectures from run 39842934431, --publish --accepted, in the clean
+tagged checkout. Exit 0; source cd1b465. Existing verified artifacts reused,
+no build. Producer receipt /tmp/cloud-mounter-release-v0.5.5/target/task-runs/
+release-promotion-e8zpajq5/summary.json and artifacts.json.
+
+Public GitHub release v0.5.5 is neither draft nor prerelease. Six Debian packages,
+two Flatpak bundles, FLATPAK-PROVENANCE.json and SHA256SUMS present. GitHub returned
+no asset digests, so downloaded all ten public assets to
+target/artifacts/v0.5.5-public-verification and compared every SHA256 against the
+publication receipt: all match (exit 0). No installed coverage beyond recorded
+operator observations is inferred; previously disclosed limits remain. COSMIC
+repository PR remains later. Source tag was not moved. Later master README and
+acceptance records remain distinct from the tagged package source.
+
+
+## Validation/expansion backlog reconciled — October 22, 2026
+
+Operator requests reconciliation following stale-item review. Updated only the
+backlog section in Task List, preserving original October 1 planning chronology
+and the existing 0.5.5 heading. Removed shipped/not-yet-existing prerequisites;
+separated future COSMIC Store channel checks from already available GitHub
+Flatpak testing. Narrowed UI checks to residual coverage, citing scoped native
+keyboard/theme/Save and packaged UI acceptance rather than closing broad items.
+Kept larger/shared-drive, provider errors, cancellation, MFA, advanced OneDrive,
+watcher evaluation and suspend-fault work open. Replaced the stale sleep gate
+reference with historical audit/archive links. Final scheduled-worker skip stays
+a limitation, not a pass. Advanced target testing does not expand supported
+OneDrive semantics. No original open scenario was silently marked completed.
+
+Pre-reconciliation backlog retained below as a chronological wording snapshot;
+the active Task List above remains authoritative for current status.
+
+```markdown
+## 0.5.5 validation and expansion backlog
+
+Deferred validation and functional expansion planned after the 0.5.4 release.
+Originally recorded October 1, 2026 as follow-ups to the native SFTP release; they
+are not gates for any current release. Move one into a release gate only if its
+supported behavior changes or testing exposes a related defect.
+
+- [ ] After the public COSMIC Flatpak repository/package is available, test
+  installed Flatpak SFTP editor notices, Online and Offline controls, generated
+  host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
+  test, including OneDrive (onedriver Online, rclone Offline). The local Flatpak
+  prototype and host bridge have separate evidence.
+- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
+  unreadable-file, permission, agent, and timeout variants, and live-check a
+  VPN-bound SFTP connection. Direct protocol and automated classifier tests
+  already cover these errors; they are not repeat gates for the native release.
+- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
+  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
+  preload trials without reading or changing file contents.
+- [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
+  cancellation on OneDrive (onedriver), Box, SMB, and Google Drive's RC refresh when
+  suitable active-preload shares are available.
+- [ ] Complete broader installed native/Flatpak Settings title, focus,
+  keyboard, scaling, long-list, editor-save, and background-poll visual checks,
+  including the rclone-based OneDrive Offline setup editor once it exists.
+- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
+  and rejected-credential path with a real VPN profile; add the separately
+  planned waiting/Cancel/Retry UI before accepting that extended workflow.
+  Include a VPN-bound SFTP connection when that combination is available.
+- [ ] After the rclone OneDrive Offline mirror ships, broaden its testing: very
+  large trees, shared-with-me and SharePoint-backed libraries, personal vault,
+  Graph throttling (HTTP 429) and retry behavior, Office-document metadata changes,
+  and tenant conditional-access/consent policies.
+- [ ] Evaluate whether a debounced local-change trigger (starting one scheduled
+  bisync after local edits) is worth a separate watcher, since scheduled polling
+  replaces abraunegg's immediate local upload. Measure CPU/power first; do not add
+  a second writer to a mirror.
+- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
+  fault cases, then investigate the separately reported onedriver (OneDrive
+  Online) sleep hang with journal evidence. The native SFTP release gate above includes one
+  normal sleep/wake cycle only.
+```
+
+Only Task List and completion notes edited. Existing publication receipt and
+operator screenshot edits preserved. No source/runtime action, test repetition,
+commit or push. Repository hygiene and scoped whitespace checks reported below.
+
+Validation: python3 tests/repo_hygiene_test.py exits 0 (four checks);
+scoped git diff --check for Task List and completion notes exits 0. No broader
+source gate repeated for this documentation-only reconciliation.
+
+
+## Backlog moved after Flatpak PR — October 22, 2026
+
+Operator explicitly requests prioritizing Flatpak PR before validation/expansion
+in Task List. Moved the entire reconciled backlog after the full Flatpak PR
+section and before the Future Task List. Both sections retain their exact text,
+status markers and original planning dates; prefix and future sections remain
+unchanged. Section/content preservation assertions pass (exit 0). User-requested
+priority order supersedes the default chronological placement for this move.
+No scope, acceptance or implementation changed. Only task/evidence records edited;
+no commit/push/runtime action or source test repeated.
+
+
+## Published 0.5.5 COSMIC baseline refresh — October 22, 2026
+
+Operator requests refreshing manifest identity, host-command inventory, dependency
+and permission rationale. Current manifest already pins published app 13e204e;
+no manifest/source/permission change needed. Added current published baseline to
+COSMIC audit ahead of dated historical candidate facts, updated host inventory,
+packaging guide and engineering index, and marked the scoped refresh complete
+in Task List. Replaced obsolete retained-legacy dependency answer with retirement
+behavior. No PR description or external submission was authored.
+
+Current tag/packaging cd1b465, app pin full 13e204e, published Flatpak run
+39842934431 and installed x86_64 OSTree commit are distinguished. Manifest/vendor
+bytes equal tagged inputs and verified publication hashes (assertions exit 0);
+23 grants unchanged. Typed runner inspection confirms eight shipping variants,
+with legacy onedrive absent. Per-family retained ownership/removal criteria
+remain applicable. Dependency minimums match Debian and dependency guide; Python
+is build/development tooling, not new runtime payload. No rebuild is warranted.
+
+Built metadata inspection includes inherited x11 in addition to wayland/fallback
+x11. This is documented without pretending 23 manifest declarations fully
+describe effective policy or OS-restrict host execution. Remote installed
+overrides were not independently captured. Exact x86_64 smoke and manual mirror
+delete/recovery pass; ARM installed, final timer, legacy-package regression,
+SharePoint whole-library and fresh final-sandbox Google/Box consent retain their
+explicit limits. Published release is not COSMIC maintainer acceptance.
+
+Checks: source-pin/hash/tag-input assertions exit 0; python3
+tests/repo_hygiene_test.py exits 0 (four checks); scoped whitespace exits 0.
+Earlier vendor/source tests reused because inputs unchanged. No source/runtime/
+package operation, commit, push, tag or submission occurred in this refresh.
+Operator screenshot edits and earlier records preserved. Next: current COSMIC
+rules recheck and review proposed manifest placement/maintainer questions before
+the operator authors a contribution.
+
+
+## Current host-command exemption summary clarified — October 22, 2026
+
+Operator needs the current exception inventory for independently authored PR,
+not the D-Bus migration checklist. Existing authoritative file remains
+docs/engineering/flatpak-host-command-inventory.md. Added a prominently named
+Current 0.5.5 exemption summary with eight retained runner identities, purpose,
+source owner/boundary and replacement/removal condition; separately disclosed
+fixed worker/guard and conditional OpenConnect agent service payloads. Clearly
+marked historical October 19 engine table as superseded for exemption selection,
+including retired legacy onedrive. Removed/D-Bus-replaced commands are not new
+exception requests. Proposed justification is not maintainer approval.
+
+No manifest/command/runtime change, PR prose, submission or package operation.
+Four repository-hygiene checks and inventory whitespace pass (exit 0). Current
+source/published identity checks from preceding refresh reused; no repeated
+source gate. User edits and prior records preserved. Not committed or pushed.
+
+
+## Root architecture/source design guide — October 22, 2026
+
+Operator explicitly requests root Design.md explaining structure, mount/mirror
+solutions, host mechanisms and a grouped source inventory for software engineers.
+That explicit location overrides the default engineering-record directory rule;
+linked from the engineering index and README without duplicating the guide.
+Read Cargo/main/lib, per-module interfaces, key provider/coordinator/worker, IPC,
+configuration, portal, service and command paths before writing. No full product
+specification was loaded or changed.
+
+Created Design.md with purpose/mode comparison, process/runtime ownership,
+configuration versus observed state, Online lifecycle, shared manual/scheduled
+Offline transaction and guards, host D-Bus/portal/process mechanisms, distinct
+host/authorized local paths, persistence ownership, authentication/VPN/sleep,
+retired profiles, design tradeoffs and change guidance. Two Mermaid diagrams
+show component boundaries and mirror execution. Source map groups all 36 Rust
+files, including development-only orchestration, without moving source files.
+Describes actual IPC JSON-over-D-Bus rather than claiming generated typed wire
+methods, and broad host gateway authority rather than an OS executable allowlist.
+Preview app-state mutation, private RC socket auth boundary and unrun acceptance
+limits are explicit; architecture description is not proof of every live path.
+
+Files edited: new Design.md, README, engineering index, Task List and completion
+notes. Existing documentation/screenshot changes preserved; no runtime/source
+code or package input changed and no new build/gate required. Verification:
+- Full source-set equality and uniqueness: all 36 src/**/*.rs entries represented
+  once (exit 0), with Design local links and fenced diagrams structurally valid.
+- python3 tests/repo_hygiene_test.py: exit 0, four checks pass.
+- Scoped tracked-document git diff --check: exit 0. New-file no-index check
+  emitted no whitespace diagnostics (exit 1 is the ordinary new-file difference).
+- Final scoped notes/README/index whitespace validation: exit 0.
+Diagrams/Markdown were not independently rendered; no new engine, service, UI or
+package acceptance claimed. No commit, push or PR submission performed.
+
+
+## Release installer default 0.5.5 — October 23, 2026
+
+Operator requests updating installer version. Changed both standalone Debian and
+Flatpak GitHub-release installers' default and help from 0.5.4 to published
+0.5.5. Explicit --version and Flatpak local --bundle paths remain unchanged.
+Updated script catalog/current inventory while preserving dated 0.5.4 history.
+Existing Debian fixtures now supply 0.5.5 package identity; supported-target tests
+assert the actual default checksum/package download URLs select v0.5.5. Existing
+Flatpak CPU tests assert default v0.5.5 URLs; explicit override test now selects
+v0.5.4 to prove a different version is still honored.
+
+Checks: python3 tests/debian_installer_test.py exit 0 (5 tests, all supported
+OS/CPU combinations and verification/APT-failure cases); python3
+tests/flatpak_release_installer_test.py exit 0 (6 tests, both CPU mappings,
+verification failures, partial changes, explicit override and local-bundle mode).
+bash -n for both scripts exit 0; scoped diff whitespace exit 0. All adapters fake
+network/package commands; no live install, runtime/repository change, app build
+or publication. No Rust changes or broader source gate warranted. Existing user
+documents, PR file and screenshots preserved. Not committed or pushed; online
+master download defaults do not change until these scripts are pushed.
+
+
+## README published 0.5.5 wording corrected — October 23, 2026
+
+Operator asks that README refer to 0.5.5. Preserved their current v0.5.5 release
+link and removed contradictory preparation/unpublished-candidate wording. README
+now states publication October 22 and that the updated installers default to
+0.5.5 with explicit version overrides. COSMIC PR remains planned, not accepted.
+Existing Design link/layout/user edits preserved. Repository hygiene passes
+(four checks, exit 0); README whitespace passes (exit 0), and targeted search
+finds no remaining 0.5.4/unpublished reference. No source/package/runtime action,
+commit or push. Changes remain local alongside the installer updates.
+
+
+## Documentation and 0.5.5 installer commit/push authorized — October 23, 2026
+
+Operator explicitly asks to add, commit and push pending updates. Scope: README,
+root Design, task/evidence records, engineering index/readiness/host-interaction
+justification, Flatpak packaging guide, script catalog/inventory, both download
+installer defaults and focused tests. Exclude operator-authored PR draft and
+all screenshot modifications/untracked image. Preserve operator README/inventory
+edits without reformatting; one trailing-space diagnostic in operator inventory
+prose is intentionally retained.
+
+Upstream fetch finds local and origin/master equal at 1b630d6. No staged files
+preceded this operation. Existing 11 focused installer tests and shell syntax
+checks pass at unchanged script/test inputs; no repeat warranted. Current four
+repository hygiene tests and source-inventory/default-version assertions pass
+(exit 0). Source manifest/pins/runtime unchanged; no app rebuild or tag movement.
+Commit approved intended files, fetch again before push, verify remote identity.
+This does not publish another release, submit a COSMIC PR or add screenshot data.

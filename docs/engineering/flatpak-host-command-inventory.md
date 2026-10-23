@@ -2,11 +2,75 @@
 
 Type: Inventory
 
-Status: October 19 command/permission reconciliation and scoped worker/VPN gates complete; COSMIC maintainer exception review and final release acceptance open
+Status: Published 0.5.5 host surface refreshed; scoped installed package smoke recorded; COSMIC host-execution review pending
 
 Created: October 7, 2026
 
 Last reviewed: October 22, 2026
+
+## Published 0.5.5 surface refresh — October 22, 2026
+
+Baseline: packaging/tag cd1b465, app source 13e204e, published Flatpak run
+39842934431. The manifest and cargo sources match those published build inputs;
+no executable or permission change is made by this documentation refresh.
+Default runner has eight shipping variants: flatpak-spawn, flatpak, rclone,
+onedriver, fusermount3, mountpoint, find and cat. Test/development-only variants
+remain excluded. Legacy onedrive is absent; retirement uses typed systemd D-Bus.
+Generated host units additionally use fixed flatpak run worker launch and the
+conditional OpenConnect agent, as documented in the payload inventory below.
+
+The reviewed 23 declared grants still serve current supported engines and shared
+host state. org.freedesktop.Flatpak permits broad host execution; fixed validated
+requests, bounded output/deadlines/cancellation and ownership checks constrain
+application behavior, not the user's OS authority. NetworkManager/systemd/logind
+remain typed D-Bus operations. Per-family owners, paths and removal criteria in
+the October 19 matrix below remain applicable to retained families.
+
+Published built metadata also includes inherited x11 alongside wayland and
+fallback-x11; reviewers must consider complete packaged policy and any installed
+overrides, not only manifest declarations. Remote test overrides were not captured.
+Exact x86_64 Flatpak UI/Online/manual business mirror/deletion/recovery smoke
+passed; final scheduled-worker and package legacy regression are not claimed.
+Earlier native retirement passed; full per-provider sandbox/browser, portal and
+active-transfer coverage retain their recorded limits. See the
+[current submission baseline](cosmic-submission-audit.md#current-submission-baseline--published-055).
+
+## Current 0.5.5 exemption summary
+
+Cloud Mounter manages storage mounts and synchronization in the user's host
+session. File managers and scheduled user services must be able to use those
+mounts and local folders outside the applets sandbox. It requires permission to interact with the host through the following operations. 
+
+| Required host interaction | Why it must reach outside the sandbox | Access required | Application safeguards |
+|---|---|---|---|
+| Launch host commands through `flatpak-spawn --host` | Storage engines and filesystem helpers run in the host user session and mount namespace. | Session-bus access to `org.freedesktop.Flatpak`, which enables broad host command execution. | Fixed executable identities and separately validated arguments; bounded output, deadlines and cancellation. These checks are application policy, not an OS-enforced executable allowlist. |
+| Run `rclone` for storage setup and access | Host engines authenticate accounts, mount cloud storage and synchronize host-visible mirror folders. Desktop portals do not provide these provider-specific storage operations. | Host-installed rclone and its configuration, selected storage paths and app-owned working state. | Validated remote/path identities, credential redaction, ownership checks and guarded synchronization/recovery operations. |
+| Run `onedriver` for OneDrive Online access | The OneDrive FUSE mount must be available to host applications and managed by a host user service. | Host-installed onedriver, app-owned configuration/cache and the selected mountpoint. | Separate app-owned engine metadata and validated mount targets; service lifecycle controlled through systemd D-Bus. |
+| Detach mounts with `fusermount3 -u` or `-uz` | The FUSE mount belongs to the host mount namespace. | Host FUSE helper and the connection's mountpoint. | Ownership/target checks; lazy detach only after separate confirmation in an eligible recovery state. |
+| Read host mount information with `cat /proc/self/mountinfo` | Mounts visible inside the sandbox do not fully describe mounts seen by ordinary host applications. | Fixed host mountinfo path through the host command gateway. | Fixed read-only request, asynchronous execution and bounded output. |
+| Check host mount readiness with `mountpoint --quiet <path>` | Starting or stopping a connection requires observing its actual host mount state. | Validated host mountpoint through the host command gateway. | Fixed operation and validated target; no caller-supplied command text. |
+| Inspect host directories with bounded `find` operations | The app checks directories, prevents mounting over existing files and optionally preloads directory metadata visible on the host. | Selected host directory or mountpoint through the host command gateway. | Validated paths; bounded readiness/preload operations, depth/exclusion rules and directory-only preload without symlink traversal. |
+| Resolve selected host paths with `flatpak document-info <portal-path>` on Documents portal v4 | The supported v4 portal lacks a sandbox-accessible host-path lookup needed by host engines and services. | Host Flatpak helper and a validated portal-selected path. | Typed portal lookup first; compatibility helper only for unsupported interface versions, with a five-second/64-KiB bound. General v5 errors do not activate this fallback. |
+
+Host services are also part of this execution model:
+
+- Online services run host `rclone mount` or `onedriver`. Cloud Mounter controls
+  their lifecycle through the systemd user-manager D-Bus API.
+- Mirror and guard services start fixed app worker entry points using
+  `/usr/bin/flatpak run --command=...` with a validated operation and connection
+  identifier. The sandboxed Rust worker coordinates host-engine synchronization.
+- OpenConnect VPN authentication can require a user-installed nm-applet secret
+  agent and NetworkManager plugin/dialog. The app starts the fixed agent service
+  through systemd D-Bus; NetworkManager handles VPN activation and deactivation.
+
+The host command gateway grants substantial authority. App-side validation does
+not restrict that authority at the operating-system boundary. The manifest does
+not request blanket host filesystem access or blanket bus sockets; app state
+uses named filesystem grants, and user-selected directories use portal grants.
+Host execution and direct filesystem grants are separate permissions, and both
+need review. Per-operation source references and command bounds are documented
+below. The [submission baseline](cosmic-submission-audit.md#current-submission-baseline--published-055)
+identifies the published source, packaged permissions, tests and unrun limits.
 
 ## 0.5.5 removal update — October 20, 2026
 
@@ -404,6 +468,9 @@ above. Nmcli/Systemctl references found by text search are cfg-gated tests or
 development probes; sleep's systemctl helper is test-only. No shipping shell,
 proprietary Cisco or removed GUI-helper launch route was found. This is reviewed
 source reachability, not a new formal whole-program proof.
+
+Historical October 19 matrix (0.5.4); superseded for current exemption selection
+by the 0.5.5 summary above. In particular, its legacy onedrive row is retired.
 
 | Retained family | Permission and host path boundary | Source owner | Removal criterion |
 |---|---|---|---|

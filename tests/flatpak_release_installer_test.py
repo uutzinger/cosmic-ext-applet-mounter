@@ -71,6 +71,9 @@ elif name == 'flatpak':
                 self.assertEqual(result.returncode, 0, result.stderr)
                 flatpak = [c for c in calls if c[0] == 'flatpak']
                 self.assertEqual(len(flatpak), 3)
+                downloads = [c for c in calls if c[0] == 'curl']
+                self.assertEqual(len(downloads), 2)
+                self.assertTrue(all('/v0.5.5/' in c[-1] for c in downloads))
                 self.assertTrue(all('--user' in c for c in flatpak))
                 self.assertIn('--arch=' + expected, flatpak[1])
                 self.assertIn('org.freedesktop.Platform//25.08', flatpak[1])
@@ -99,9 +102,9 @@ elif name == 'flatpak':
             self.assertIn('"exit_code":42', result.stdout)
 
     def test_explicit_version_and_stdin_arguments(self):
-        result, calls = self.flow(arguments=('--version', 'v0.5.5'))
+        result, calls = self.flow(arguments=('--version', 'v0.5.4'))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(all('/v0.5.5/' in c[-1] for c in calls if c[0] == 'curl'))
+        self.assertTrue(all('/v0.5.4/' in c[-1] for c in calls if c[0] == 'curl'))
         for args, code in ((['--help'], 0), (['--version', '../bad'], 1), (['--version'], 1)):
             result = subprocess.run(['bash', '-s', '--', *args], input=SCRIPT.read_text(),
                                     capture_output=True, text=True, timeout=10)

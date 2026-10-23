@@ -2,7 +2,7 @@
 
 Type: Audit
 
-Status: 0.5.5 readiness review recorded; immutable candidate and package acceptance pending; COSMIC submission separate from release
+Status: Published 0.5.5 manifest/dependency/permission identity refreshed; scoped x86_64 installed acceptance recorded; COSMIC submission and maintainer decisions pending
 
 Created: October 19, 2026
 
@@ -18,6 +18,37 @@ and GUI cleanup before pursuing COSMIC submission in 0.5.5. The questions below
 remain preparation for that later review; maintainer approval is not a condition
 of the independently distributed 0.5.4 bundle. Refresh candidate facts for 0.5.5.
 
+## Current submission baseline — published 0.5.5
+
+The manifest remains unchanged: it already selects the published implementation.
+Use these identities for COSMIC preparation; dated preparation sections below
+retain history and are superseded by this baseline for current status.
+
+| Item | Verified identity or boundary |
+|---|---|
+| Release | v0.5.5, published October 22, 2026; annotated tag resolves to packaging cd1b465160d692052f32dbb53010583c8ed11a19. Later master documentation is not the built source. |
+| Application pin | 13e204ec93049587611978c0cfbad0f9e0a5968c, fixed full Git commit in the main manifest; not a mutable branch or tag. |
+| Manifest/dependencies | packaging/flatpak/io.github.uutzinger.cosmic-ext-applet-mounter.json and relative cargo-sources.json match the tagged build inputs. Keep both together when preparing app/<app-id>/<app-id>.json. |
+| Manifest SHA256 | b9d1094ae1909d297e42c4fba81b0fcc0d3d6a82106d1ffc85bffd350419c9e8 |
+| Cargo sources SHA256 | 0c098520c9e8933773ddd935afaa3cb109a78f137593ab9d7ac0ac1693b8815f |
+| Published Flatpak build | Run 39842934431, both architectures succeeded; app/io.github.uutzinger.cosmic-ext-applet-mounter/<arch>/master. Runtime commits and producer identities retained in published FLATPAK-PROVENANCE.json. |
+| Installed x86_64 identity | b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098; operator confirmed exact installed commit and sandbox process. ARM built/inspected; no installed ARM acceptance. |
+| Build environment | Freedesktop Platform/SDK 25.08, rust-stable SDK extension, COSMIC BaseApp stable. Successful source builds on both architectures; no runtime substitution. BaseApp/SDK refs are versioned channels, not promises of immutable future runtime contents. |
+| Host dependencies | rclone >=1.74.3; onedriver >=0.15.0 for OneDrive Online; FUSE3 for mounts; NetworkManager for network/VPN integration. OpenConnect plugin/dialog and on-demand nm-applet agent apply only to that VPN workflow. No legacy onedrive engine required. |
+| Build-only tools | Rust/Cargo/SDK and Python dependency-source tooling belong to builds, not app runtime. External engines/plugins are not bundled in /app. |
+| Declared permissions | 23 finish-args, unchanged from the published manifest; narrowly named filesystem/bus entries, plus broad host execution through org.freedesktop.Flatpak. No filesystem=host or blanket bus socket. |
+| Built permissions | Inspected built-metadata.ini includes sockets x11, wayland and fallback-x11, shared network/ipc, dri, nine scoped filesystem entries and the documented session/system bus policies. Inherited x11 is part of the packaged baseline; 23 declarations alone are not a full effective-policy description. User/global overrides on the remote test computer were not independently captured. |
+| Installed evidence | Debian UI/Online/manual mirror smoke; exact x86_64 Flatpak UI/Online smoke and manual business OneDrive synchronization, cloud deletion and local recovery-copy presence. Reuse earlier native/0.5.4 evidence only at recorded scope. |
+| Limits | Final Flatpak scheduled execution deliberately skipped; live Google/Box whole-root mirrors skipped. Package-specific legacy/absent-unit regression, SharePoint whole-library and fresh Google/Box browser consent in the final sandbox remain unrun. These are disclosed limits, not new passes. |
+
+All ten public release asset hashes matched the verified publisher receipt.
+See [completion notes](../../Task%20List%20Completion%20Notes.md) for publication
+and installed observations, and the [host-command inventory](flatpak-host-command-inventory.md)
+for per-family owners/removal criteria. Publication does not establish COSMIC
+maintainer approval. Review host gateway, external dependency model, runtime
+compatibility and portal-v4 fallback with maintainers; do not change shared
+COSMIC machinery or prepare AI-authored PR prose from this internal record.
+
 ## Historical 0.5.4 candidate facts
 
 | Item | Prepared identity or boundary |
@@ -32,7 +63,7 @@ of the independently distributed 0.5.4 bundle. Refresh candidate facts for 0.5.5
 | Host VPN setup | NetworkManager OpenConnect plugin/dialog, on-demand nm-applet secret agent and app-owned user agent service; installed separately using the maintained setup guide. |
 | Permission boundary | 23 reviewed finish-args; org.freedesktop.Flatpak permits broad host execution. Typed fixed operations constrain the app, not OS authority. Scoped state/unit/cache paths and explicit portal-selected directory grants; no filesystem=host or blanket bus socket. |
 
-## Evidence available for human review
+## Historical 0.5.4 evidence available for human review
 
 The [acceptance map](release-054-acceptance-audit.md) distinguishes current
 source/fake tests, earlier native/prototype tests and installed source Flatpak
@@ -69,8 +100,7 @@ pre-acknowledged. No claim of current maintainer approval is made.
 
 - Whether the org.freedesktop.Flatpak gateway and documented fixed host command
   surface are acceptable for this applet, including host configuration/unit paths.
-- Whether the external engine/plugin/secret-agent installation model and legacy
-  transition dependency are acceptable; no engine/runtime swap is assumed.
+- Whether the external engine/plugin/secret-agent installation model is acceptable; no engine/runtime swap is assumed.
 - Whether retaining Platform25.08/COSMIC BaseApp stable and the supported-host
   Documents-v4 fallback is acceptable for a new submission.
 
@@ -81,8 +111,9 @@ a human-authored contribution after the operator chooses that action.
 
 ## 0.5.5 readiness review — October 22
 
-This section supersedes the historical candidate facts for new release planning;
-it does not change the identity or acceptance of any earlier package.
+This pre-build checkpoint is historical; the current published baseline above
+supersedes its dirty-tree/old-pin/pending-build status. It does not change earlier
+package identities or acceptance.
 
 | Item | Current source review and remaining boundary |
 |---|---|

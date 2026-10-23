@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage: install-flatpak-release.sh [--version X.Y.Z] [--bundle FILE] [--help]
-Install Cloud Mounter from GitHub Releases (default: 0.5.4).
+Install Cloud Mounter from GitHub Releases (default: 0.5.5).
 Detects x86_64 or aarch64 and verifies the matching bundle against SHA256SUMS.
 Requires Flatpak, curl and sha256sum. Run as your desktop user, without sudo.
 Adds user Flathub, installs Freedesktop Platform 25.08, then installs/updates
@@ -39,7 +39,7 @@ download() {
 }
 
 main() (
-    local version=0.5.4 architecture tool workdir='' status local_bundle=''
+    local version=0.5.5 architecture tool workdir='' status local_bundle=''
     while (( $# )); do
         case "$1" in
             --help|-h) usage; return 0 ;;

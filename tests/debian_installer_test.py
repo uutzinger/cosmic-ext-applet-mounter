@@ -29,7 +29,7 @@ if name == 'dpkg':
 elif name == 'curl':
     if failure == 'download': sys.exit(22)
     output = pathlib.Path(args[args.index('--output') + 1])
-    filename = 'cosmic-ext-applet-mounter_0.5.4_ubuntu' + os.environ['OS_VERSION'] + '_' + os.environ['ARCH'] + '.deb'
+    filename = 'cosmic-ext-applet-mounter_0.5.5_ubuntu' + os.environ['OS_VERSION'] + '_' + os.environ['ARCH'] + '.deb'
     digest = hashlib.sha256(b'fixture-package').hexdigest()
     if failure == 'checksum': digest = '0' * 64
     if output.name == 'SHA256SUMS':
@@ -38,7 +38,7 @@ elif name == 'curl':
     else:
         output.write_bytes(b'fixture-package')
 elif name == 'dpkg-deb':
-    fields = {'Package': 'cosmic-ext-applet-mounter', 'Version': '0.5.4', 'Architecture': os.environ['ARCH']}
+    fields = {'Package': 'cosmic-ext-applet-mounter', 'Version': '0.5.5', 'Architecture': os.environ['ARCH']}
     print('wrong' if failure == args[-1] else fields[args[-1]])
 elif name in ('apt-get', 'sudo'):
     sys.exit(int(os.environ['APT_STATUS']))
@@ -72,6 +72,9 @@ detect_platform() { detect_fixture_platform "$fixture_release"; }
                         self.assertEqual(len(apt), 1)
                         self.assertIn(f'_ubuntu{version}_{arch}.deb', apt[0][-1])
                         self.assertIn('--reinstall', apt[0])
+                        downloads = [c for c in calls if c[0] == 'curl']
+                        self.assertEqual(len(downloads), 2)
+                        self.assertTrue(all('/v0.5.5/' in c[-1] for c in downloads))
                         self.assertFalse(Path(apt[0][-1]).exists())
 
     def test_unsupported_systems_do_not_download_or_install(self):

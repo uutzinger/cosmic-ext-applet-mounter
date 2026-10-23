@@ -494,58 +494,29 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
     target/task-runs/release-prepare-v055/summary.json. README/evidence remain
     later master commits; package upgrade limitations remain explicit.
 
-## 0.5.5 validation and expansion backlog
+## Release installer follow-up — October 23, 2026
 
-Deferred validation and functional expansion planned after the 0.5.4 release.
-Originally recorded October 1, 2026 as follow-ups to the native SFTP release; they
-are not gates for any current release. Move one into a release gate only if its
-supported behavior changes or testing exposes a related defect.
-
-- [ ] After the public COSMIC Flatpak repository/package is available, test
-  installed Flatpak SFTP editor notices, Online and Offline controls, generated
-  host services/timers, and a clean-profile mount/mirror/VPN/uninstall smoke
-  test, including OneDrive (onedriver Online, rclone Offline). The local Flatpak
-  prototype and host bridge have separate evidence.
-- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
-  unreadable-file, permission, agent, and timeout variants, and live-check a
-  VPN-bound SFTP connection. Direct protocol and automated classifier tests
-  already cover these errors; they are not repeat gates for the native release.
-- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
-  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
-  preload trials without reading or changing file contents.
-- [ ] Live-check Box and SMB preload on the UA and LAN shares, and shared
-  cancellation on OneDrive (onedriver), Box, SMB, and Google Drive's RC refresh when
-  suitable active-preload shares are available.
-- [ ] Complete broader installed native/Flatpak Settings title, focus,
-  keyboard, scaling, long-list, editor-save, and background-poll visual checks,
-  including the rclone-based OneDrive Offline setup editor once it exists.
-- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
-  and rejected-credential path with a real VPN profile; add the separately
-  planned waiting/Cancel/Retry UI before accepting that extended workflow.
-  Include a VPN-bound SFTP connection when that combination is available.
-- [ ] After the rclone OneDrive Offline mirror ships, broaden its testing: very
-  large trees, shared-with-me and SharePoint-backed libraries, personal vault,
-  Graph throttling (HTTP 429) and retry behavior, Office-document metadata changes,
-  and tenant conditional-access/consent policies.
-- [ ] Evaluate whether a debounced local-change trigger (starting one scheduled
-  bisync after local edits) is worth a separate watcher, since scheduled polling
-  replaces abraunegg's immediate local upload. Measure CPU/power first; do not add
-  a second writer to a mirror.
-- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
-  fault cases, then investigate the separately reported onedriver (OneDrive
-  Online) sleep hang with journal evidence. The native SFTP release gate above includes one
-  normal sleep/wake cycle only.
+- [x] Update Debian and Flatpak download installer defaults/help to published
+  0.5.5, retaining explicit version overrides and fail-closed verification.
+  Run focused fake-adapter tests; no live installation or release rebuild.
 
 ## 0.5.5 Flatpak Pull Request, AI consideration
+
+Design documentation follow-up requested October 22: create root `Design.md`
+for engineers preparing host-integration review; inventory every Rust source
+file, explain Online/Offline execution and distinguish source design from tests.
+
+- [x] Write and check the architecture/source guide, linking it from README and
+  the engineering index. Root location is explicitly requested by the operator.
 
 Deferred from 0.5.4 on October 19, 2026. Refresh the submission against the
 accepted 0.5.5 source after legacy removal and GUI cleanup; reuse unchanged
 evidence. GitHub bundle distribution in 0.5.4 does not imply COSMIC approval.
 
-- [ ] Refresh the final manifest/source identity, host-command inventory,
-  dependency and permission rationale after phases 1 and 2. The retained
-  “Why retain `onedrive`?” row below describes 0.5.4; replace that answer in
-  submission material with verified 0.5.5 retirement behavior.
+- [x] October 22 refresh against published 0.5.5: manifest/app/package identities,
+  host-command inventory, dependencies and permission rationale reconciled in
+  docs/engineering/cosmic-submission-audit.md. Existing manifest is correct;
+  no source/grant change or rebuild. Scoped installed evidence and limits explicit.
 - [ ] Recheck current COSMIC contribution rules before submission; preserve the
   operator-authored PR/reply boundary below. Read release/packaging procedures
   before candidate preparation; link reused receipts and identify changed-input
@@ -554,22 +525,15 @@ evidence. GitHub bundle distribution in 0.5.4 does not imply COSMIC approval.
   changes; operator authors and acknowledges the contribution. Obtain maintainer
   decisions on host execution/dependencies and runtime/portal compatibility.
 
+### PR Submissions Rules
+
 **Your app code and its Flatpak manifest:** AI assistance or generation is permitted under that exception.
 
 **The submission itself:** 
-- [ ] You should personally write the PR description and review replies. 
-- [ ] AI-generated changes to COSMIC Flatpak repository’s shared machinery, are outside the stated exception. For Cloud Mounter, "No shared build-system changes are currently identified as necessary." 
+- [x] You should personally write the PR description and review replies. 
+- [x] AI-generated changes to COSMIC Flatpak repository’s shared machinery, are outside the stated exception. For Cloud Mounter, "No shared build-system changes are currently identified as necessary." 
 
 **Your responsibility:** You must understand the submitted changes, explain them during review, and accurately describe what was tested. Using AI does not transfer that responsibility.
-
-| Likely review question | What you should understand |
-|---|---|
-| What does this applet do? | It manages cloud mounts and offline mirrors through external engines. |
-| Why does it need these permissions? | It communicates with NetworkManager, systemd and portals, and launches host engines. |
-| Why allow host execution? | Engines and managed services run outside the sandbox. This permission grants substantial authority; our fixed command handling limits application behavior, rather than restricting that authority at the OS level. |
-| What must users install separately? | The applicable cloud engines and VPN components. |
-| Why retain `onedrive`? | Existing legacy connections remain supported temporarily; new OneDrive mirrors use rclone. |
-| What was tested? | Which candidate was installed, which operations actually passed, and which checks were reused, skipped or remain open. |
 
 **Licensing and provenance:** You must be able to make the required certification about your right to contribute the material. The Developer Certificate of Origin concerns contribution rights and licensing; it does not require that you manually typed every line.
 
@@ -580,23 +544,81 @@ Title: Identify the applet being added.
 Purpose
 - What does Cloud Mounter let users do?
 - Why does it belong in the COSMIC applet repository?
+
 Package
 - Which version and source commit does the manifest build?
 - Which runtime does it use?
 - Which dependencies must users install on the host?
+
 Permissions
 - Why does it need NetworkManager and systemd access?
 - Why does it need host execution?
 - How are local directory permissions granted?
+
 Testing
 - Identify the installed Flatpak candidate.
 - Summarize the operations actually exercised.
 - State relevant limitations and skipped checks.
-Review questions
-- Ask whether the host execution permissions and external dependency model are acceptable.
 
-Then retain their checklist and acknowledge it only after reviewing each requirement.
-A few short paragraphs plus testing bullets should suffice. Our internal audit contains the supporting detail; the PR should give reviewers enough context to assess the package without reproducing the development history.
+## 0.5.5 validation and expansion backlog
+
+Originally recorded October 1, 2026 as follow-ups to the native SFTP release.
+Reconciled October 22 after publication of 0.5.4 and 0.5.5; remaining work carries
+forward without changing its planning date. These are not release gates unless
+changed behavior or an observed defect makes a focused check necessary.
+
+Completed scoped native keyboard/focus, light/dark, editor actions, OneDrive
+setup and Debian/Flatpak smoke checks remain in the preceding acceptance record
+and completion notes. Reuse them rather than repeat the whole matrix. Ordinary
+panel/Settings/editor rendering does not establish exhaustive accessibility or
+all-provider sandbox acceptance.
+
+- [ ] Extend installed Flatpak coverage beyond the accepted 0.5.5 UI/Online and
+  manual business OneDrive mirror/deletion/recovery smoke: provider-specific
+  setup/browser consent, portal-grant persistence, generated host service/timer
+  behavior, and clean-profile mount/mirror/VPN/uninstall combinations. The final
+  0.5.5 scheduled-worker run was deliberately skipped, not passed. Reuse earlier
+  tests at their recorded scope; local prototypes are separate evidence.
+- [ ] After COSMIC repository acceptance, check Store discovery, installation,
+  updates and removal from that channel. GitHub bundle availability and its
+  installed smoke checks do not establish COSMIC Store acceptance.
+- [ ] If later needed, broaden installed SFTP error-notice checks to host-key,
+  unreadable-file, permission, agent, and timeout variants, and live-check a
+  VPN-bound SFTP connection. Direct protocol and automated classifier tests
+  already cover these errors; they are not repeat gates for the native release.
+- [ ] Broaden Google Drive `--fast-list` testing to a larger ordinary drive and
+  shared drive, including API/rate-limit behavior; repeat cloud cold-cache
+  preload trials without reading or changing file contents. Root-first browsing
+  improvement already passed natively; selectable shallow-depth scopes remain
+  deliberately out of scope.
+- [ ] Live-check Box and SMB preload on suitable cloud/LAN shares, and shared
+  cancellation on OneDrive (onedriver), Box, SMB, and Google Drive's RC refresh
+  when suitable active-preload shares are available.
+- [ ] Extend native/Flatpak Settings/editor visual coverage to alternate scaling,
+  long lists, long or localized titles/labels, all-window keyboard/focus behavior,
+  editor-save edge cases and background status updates. Native Return/Tab/focus,
+  light/dark appearance at usual scaling, shared Save confirmations and scoped
+  packaged Settings/editor smoke already passed. OneDrive rclone Offline setup
+  exists; new/existing-remote verification has native acceptance.
+- [ ] Exercise the full Cisco/NetworkManager password/MFA, concurrent-request,
+  and rejected-credential path with a real VPN profile; add the separately
+  planned waiting/Cancel/Retry UI before accepting that extended workflow.
+  Include a VPN-bound SFTP connection when that combination is available.
+- [ ] Broaden the shipped rclone OneDrive Offline mirror's testing: very large
+  trees, shared-with-me and SharePoint-backed libraries, personal vault, Graph
+  throttling (HTTP 429) and retry behavior, Office-document metadata changes,
+  and tenant conditional-access/consent policies. These scenarios do not imply
+  additional supported target types; review support boundaries before testing.
+- [ ] Evaluate whether a debounced local-change trigger (starting one scheduled
+  bisync after local edits) is worth a separate watcher, since scheduled polling
+  replaces abraunegg's immediate local upload. Measure CPU/power first; do not add
+  a second writer to a mirror.
+- [ ] Exercise repeated logind/inhibitor and native/Flatpak lid/menu suspend
+  fault cases, then investigate the separately reported onedriver (OneDrive
+  Online) sleep hang with journal evidence. Reuse normal/idle sleep observations
+  only at their recorded scope; see the [historical acceptance map](docs/engineering/release-054-acceptance-audit.md)
+  and [archived execution notes](docs/archive/task-list-completion-notes-through-v0.5.4.md).
+  Those observations do not establish active-transfer or repeated fault handling.
 
 # Cloud Mounter Applet Future Task List
 

@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage: install-debian.sh [--version X.Y.Z] [--help]
-Install Cloud Mounter from GitHub Releases (default: 0.5.4).
+Install Cloud Mounter from GitHub Releases (default: 0.5.5).
 Automatically selects Ubuntu/Pop!_OS 22.04, 24.04 or 26.04 and amd64/arm64.
 Verifies SHA256SUMS and package identity before APT installation/reinstallation.
 APT installs declared dependencies; optional storage engines need separate setup.
@@ -51,7 +51,7 @@ install_package() {
 }
 
 main() (
-    local version=0.5.4 ubuntu_version architecture tool workdir='' status
+    local version=0.5.5 ubuntu_version architecture tool workdir='' status
     while (( $# )); do
         case "$1" in
             --help|-h) usage; return 0 ;;

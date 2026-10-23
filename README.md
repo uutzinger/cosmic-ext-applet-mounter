@@ -9,8 +9,8 @@ direct **Online mount** and **Offline mirror** mode.
 **0.5.5** updates connection controls, repairs Google Drive and Box browser
 authentication, improves Google directory preload, and retires the legacy
 abraunegg/onedrive mirror engine. See the [0.5.5 release notes](docs/releases/v0.5.5.md)
-for upgrade guidance and validation limits. Packages are being prepared;
-0.5.5 has not yet been published.
+for upgrade guidance and validation limits. Version 0.5.5 was published on
+October 22, 2026, with Debian packages and Flatpak bundles.
 
 The applet simplifies mounting cloud storage. Users can turn storage
 connections on or off to reduce file manager stalls when the network is slow or
@@ -49,12 +49,6 @@ The following connection engines are used to connect to the providers:
 `rclone` handles all Offline mirrors and all Online mounts except OneDrive.
 `jstaf/onedriver` provides on-demand OneDrive Online access.
 
-Legacy abraunegg/onedrive profiles remain visible as retired, with authentication
-and sync unavailable. Their local data and credentials are preserved; verified
-applet-owned monitor units are stopped, disabled and retired. There is no automatic
-conversion. To replace a legacy mirror, preserve unsynchronized files and create
-a new rclone mirror with separate local and recovery folders and new authentication.
-
 ## Data Integrity Warning
 
 Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
@@ -78,11 +72,11 @@ To reduce data integrity risks, **do not**:
 The [documentation index](docs/index.md) links to setup guides, release notes,
 and engineering records.
 
-[Release 0.5.4](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.4)
+[Release 0.5.5](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/tag/v0.5.5)
 is the current published release and provides Debian packages and Flatpak bundles.
-The commands below install the latest published release, not the unpublished
-0.5.5 candidates. A PR to the COSMIC Flatpak repository is planned after the
-0.5.5 release; GitHub bundles do not imply COSMIC repository approval.
+The download installers below default to **0.5.5** and accept an explicit
+`--version X.Y.Z` override. A PR to the COSMIC Flatpak repository is planned;
+GitHub bundles do not imply COSMIC repository approval.
 
 When replacing an existing installation, stop its connections, close its windows
 and remove it from the panel first. Run only one native or Flatpak edition at a
@@ -184,7 +178,6 @@ Preload is disabled by default and should be tested before leaving it enabled.
 
 **Google Drive:** mounts enable fast-list at creation. Preload refreshes the root
 directory first, then recursively fills the directory cache within its time limit.
-There is no selectable shallow-depth preload setting.
 
 **SMB:** connections may individually override the global preload setting.
 
@@ -201,7 +194,7 @@ __SFTP__ supports a password, SSH key, or SSH agent and requires a known-hosts f
 __SharePoint__ can use a verified existing rclone document-library remote or the
 editor's Microsoft sign-in setup.
 
-__Google Drive__ and __Box__ new-remote setup open the browser for authorization.
+__Google Drive__ and __Box__ remote setup open the browser for authorization.
 Selecting an existing remote allows access testing without creating another one.
 
 __Google Drive__ setup accepts the client ID and matching client secret from a
@@ -300,14 +293,16 @@ gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 
 This applet was developed with agent-assisted programming.
 
+See [Design.md](Design.md) for the architecture, host integration, mount/mirror
+lifecycles and a grouped source-file inventory.
+
 The developer describes applet functionality in [Applet Description.md](Applet%20Description.md).
 The description is translated into [Requirements and Specifications.md](Requirements%20and%20Specifications.md).
 The author reviews these documents before implementation.
 The requirements drive [Task List.md](Task%20List.md), and its execution history
 is documented in [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md).
 The author supervises and approves each task and its verification.
-
-Task List and Task List Completion notes are archived to docs/archive after releases so that token usage is reduced.
+After a release a Task List and its Completion history is archived in docs folder.
 
 ## Contributing & Feature Requests
 
@@ -316,7 +311,7 @@ Task List and Task List Completion notes are archived to docs/archive after rele
 For a feature contribution, update the [description](Applet%20Description.md)
 and use your AI agent to update [requirements](Requirements%20and%20Specifications.md) and append its
 implementation and verification steps to the [task list](Task%20List.md).
-Instruct your AI agent to implement and test each step individually in the task list. It will record the completion in
+Instruct your AI agent to implement and test each step in the task list. It will record the completion in
 [Task List Completion Notes.md](Task%20List%20Completion%20Notes.md). You will need to approve each task individually. When your feature works submit a pull request. 
 
 ### Bug Reports
