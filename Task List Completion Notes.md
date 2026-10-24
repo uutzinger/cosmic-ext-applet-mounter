@@ -3123,3 +3123,23 @@ Verification at source a600e562ae2e25defbcda33ebed583453ee3fc8d (dirty):
 Source checks and unit/fake-adapter tests only; no installed or rendered UI
 acceptance is claimed. Next: commit the three intended documents, fetch again
 immediately before push, inspect divergence and verify the remote commit.
+
+## Settings screenshot update — October 23, 2026
+
+Operator explicitly authorizes adding and pushing the updated Settings picture.
+Scope: `resources/Settings.png` and required task/evidence records. Viewed the
+472 x 657 image; no credentials or organization names are visible. PNG signature,
+all chunk CRCs and IDAT decompression pass (Python validation, exit 0). SHA-256:
+`cb44851fb29fc6d8ecb1353e69a9590ab4e189b0ebd109550dfe3d91ccb59b02`.
+
+Reused the successful `dev-gate` receipt from source
+`a600e562ae2e25defbcda33ebed583453ee3fc8d`, source_dirty true, exit 0:
+`target/task-runs/dev-gate-1izh04qa/summary.json`, log
+`target/task-runs/dev-gate-1izh04qa/task.log`. Since that check only README and
+task records were committed; Rust/script/test inputs remain unchanged, and no
+test or build recipe references this screenshot. No repeat of passing checks.
+This verifies the image artifact, not installed applet behavior.
+
+Upstream fetch and divergence check exit 0, result 0/0. Next: commit intended
+files, fetch again immediately before push and verify remote identity. Leave
+Add Connection/PopUp image changes and the PR draft local.

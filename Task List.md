@@ -625,6 +625,11 @@ all-provider sandbox acceptance.
 - [x] Review and verify the latest README edits for the authorized commit/push,
   excluding screenshot changes and the PR draft. See completion notes for checks.
 
+## Settings screenshot update — October 23, 2026
+
+- [x] Inspect and validate the updated `resources/Settings.png` for the authorized
+  commit/push; retain unrelated local images and the PR draft.
+
 # Cloud Mounter Applet Future Task List
 
 Items that will be activated at some time in the future.
