@@ -12,7 +12,7 @@ Fedora, Arch Linux, openSUSE Tumbleweed, and Gentoo.
 ## Install the on-demand service
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/setup-openconnect.sh | bash -s -- install
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/setup-openconnect.sh | bash -s -- install
 ```
 
 Or download and run it locally:
@@ -29,7 +29,7 @@ inspect any partial changes before retrying.
 To remove only the on-demand agent service later:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/setup-openconnect.sh | bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/setup-openconnect.sh | bash -s -- uninstall
 ```
 
 Installing `openconnect` alone is not sufficient: NetworkManager also needs the
@@ -40,7 +40,7 @@ OpenConnect plugin and its graphical authentication dialog.
 Run the setup script with the `uninstall` command:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/main/scripts/setup-openconnect.sh | bash -s -- uninstall
+curl -fsSL https://raw.githubusercontent.com/uutzinger/cosmic-ext-applet-mounter/master/scripts/setup-openconnect.sh | bash -s -- uninstall
 ```
 
 Or do it manually by stopping the service, removing its unit, and reloading the

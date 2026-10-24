@@ -6,7 +6,7 @@ Status: Published 0.5.5 manifest/dependency/permission identity refreshed; scope
 
 Created: October 19, 2026
 
-Last reviewed: October 22, 2026
+Last reviewed: October 24, 2026
 
 Scope: Consolidated release step7 in [Task List](../../Task%20List.md).
 These are internal facts and questions, not a ready-to-submit PR description.
@@ -37,9 +37,11 @@ retain history and are superseded by this baseline for current status.
 | Host dependencies | rclone >=1.74.3; onedriver >=0.15.0 for OneDrive Online; FUSE3 for mounts; NetworkManager for network/VPN integration. OpenConnect plugin/dialog and on-demand nm-applet agent apply only to that VPN workflow. No legacy onedrive engine required. |
 | Build-only tools | Rust/Cargo/SDK and Python dependency-source tooling belong to builds, not app runtime. External engines/plugins are not bundled in /app. |
 | Declared permissions | 23 finish-args, unchanged from the published manifest; narrowly named filesystem/bus entries, plus broad host execution through org.freedesktop.Flatpak. No filesystem=host or blanket bus socket. |
-| Built permissions | Inspected built-metadata.ini includes sockets x11, wayland and fallback-x11, shared network/ipc, dri, nine scoped filesystem entries and the documented session/system bus policies. Inherited x11 is part of the packaged baseline; 23 declarations alone are not a full effective-policy description. User/global overrides on the remote test computer were not independently captured. |
-| Installed evidence | Debian UI/Online/manual mirror smoke; exact x86_64 Flatpak UI/Online smoke and manual business OneDrive synchronization, cloud deletion and local recovery-copy presence. Reuse earlier native/0.5.4 evidence only at recorded scope. |
-| Limits | Final Flatpak scheduled execution deliberately skipped; live Google/Box whole-root mirrors skipped. Package-specific legacy/absent-unit regression, SharePoint whole-library and fresh Google/Box browser consent in the final sandbox remain unrun. These are disclosed limits, not new passes. |
+| Built permissions | Inspected built-metadata.ini includes sockets x11, wayland and fallback-x11, shared network/ipc, dri, nine scoped filesystem entries and the documented session/system bus policies. Inherited x11 is part of the packaged baseline; 23 declarations alone are not a full effective-policy description. October 24 VM override check: user-global read-only GTK/KDE theme entries only; system-global and both app-specific scopes empty (details below). |
+| Installed evidence | Debian UI/Online/manual mirror smoke; exact x86_64 Flatpak UI/Online smoke and manual business OneDrive synchronization, cloud deletion and local recovery-copy presence. October 24: personal OneDrive scheduled download/upload, saved folder-grant reuse, and fresh Google authorization/Test/Save/mount/listing reported. Separately uploaded DOCX opens with expected content/size; suspected native Google document opens empty at zero bytes. Reuse earlier evidence only at recorded scope. |
+| Limits | October 22 scheduled skip superseded by October 24 personal OneDrive transfers; content hashes and other-provider scheduling unverified. Google native-document mount limitation recorded; presentations not live-tested. Google and Box browser authorization and unmount passed; Box Re-Test/Save and mounted/web text agreement reported. Package legacy/absent-unit regression remains open. Google/Box whole-root mirrors remain skipped. |
+| SharePoint whole-library initial mirror | October 24: small test library, blank remote subfolder, new mirror/recovery folders; setup and Preview passed, then expected local files reported after initial Sync Now guidance. No explicit content/hash comparison, ongoing two-way sync or recovery pass inferred. |
+| SharePoint recovery restoration | October 24 follow-up: disposable text-file upload, cloud deletion/local propagation, recovery-copy preservation and manual copy-back/upload accepted. Operator confirms original text in recovery and restored web copies. No byte/hash verification or fault handling inferred. |
 
 All ten public release asset hashes matched the verified publisher receipt.
 See [completion notes](../../Task%20List%20Completion%20Notes.md) for publication
@@ -191,3 +193,185 @@ and prepared release notes with explicit package acceptance limits. The main
 manifest now pins that exact app commit; packaging is committed separately.
 Metadata/publication preflight passes, which does not confer installed package
 acceptance or publication approval. No build bytes exist for this identity yet.
+
+## Contribution-rule recheck — October 23, 2026
+
+Documentation review complete; submission and maintainer acceptance remain open.
+Read the [release/packaging procedures](release-packaging-procedures-contracts.md)
+before this review. No candidate build, installation or submission was performed.
+
+Direct GitHub API lookup resolves cosmic-flatpak master to
+`f702d691ce9060f50c2908d36a7d83b6676703a8`. Fetched the following official files
+at that revision, rather than relying on cached browser snapshots:
+
+- [README](https://github.com/pop-os/cosmic-flatpak/blob/f702d691ce9060f50c2908d36a7d83b6676703a8/README.md):
+  repository covers COSMIC applets and other packages unsuitable for Flathub;
+  ordinary COSMIC applications should first try Flathub.
+- [PR template](https://github.com/pop-os/cosmic-flatpak/blob/f702d691ce9060f50c2908d36a7d83b6676703a8/.github/PULL_REQUEST_TEMPLATE.md):
+  personal acknowledgment covers trademark policy, contribution rights, accurate
+  commits, understanding/review responses and tested behavior. Its AI exception
+  covers the contributor's own app source and manifest. It does not extend to
+  descriptions, replies or shared repository machinery.
+- [Build recipe](https://github.com/pop-os/cosmic-flatpak/blob/f702d691ce9060f50c2908d36a7d83b6676703a8/justfile):
+  `just build <app-id>` reads `app/<app-id>/<app-id>.json`, builds for the host
+  architecture using sandboxed flatpak-builder with dependencies from Flathub,
+  and writes `build/app/<app-id>/<arch>` and `log/app/<app-id>/<arch>.txt`.
+  This closes the October 22 recipe-fetch gap; the recipe was inspected, not run.
+
+Also fetched the linked [general contributor guide](https://github.com/pop-os/pop/blob/master/CONTRIBUTING.md),
+[trademark policy](https://github.com/pop-os/cosmic-epoch/blob/master/TRADEMARK.md)
+and [DCO 1.1](https://developercertificate.org/). The general guide excludes AI
+contributions; the repository-specific template supplies the narrow app/manifest
+exception. Keep this internal audit outside the submitted diff. The operator
+must personally assess provenance, licensing and every acknowledgment; none is
+checked on their behalf. Third-party branding must not imply official status.
+These sources do not approve this app's host-command/dependency/runtime model.
+
+The operator's [PR draft](../../Cosmic%20Aplet%20Repository%20Pull%20Request.md)
+is preserved byte-for-byte. Its existing appendix identifies AI assistance;
+the operator must assess the actual submission against the exception before
+copying any material. This review neither rewrites nor certifies the draft.
+Raw source snapshots and URL/SHA256 index are local evidence at
+`target/cosmic-contribution-review-2026-10-23/sources.json` (not PR material).
+
+### Reused evidence and changed-input checks
+
+| Evidence | Reuse and limit |
+|---|---|
+| [Flatpak inspection receipt](../../target/task-runs/release-promotion-4fdzna92/summary.json) and [hosted run 39842934431](https://github.com/uutzinger/cosmic-ext-applet-mounter/actions/runs/39842934431) | Existing successful inspection of both architectures, packaging cd1b465, app pin 13e204e. Receipt success was reread; no new build or full artifact inspection. |
+| [Release preparation receipt](../../target/task-runs/release-prepare-v055/summary.json) | Existing successful six-target Debian reuse at cd1b465; no native/Flatpak installed acceptance implied. |
+| [Published provenance](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.5/FLATPAK-PROVENANCE.json) and [checksums](https://github.com/uutzinger/cosmic-ext-applet-mounter/releases/download/v0.5.5/SHA256SUMS) | Previously verified public artifacts; local provenance reread for source, pins and manifest/dependency hashes. No repeat download or hash of every package. Publication observations remain in the [completion record](../../Task%20List%20Completion%20Notes.md#v055-published-and-public-bytes-verified--october-22-2026). |
+| [Exact installed identity](../../Task%20List%20Completion%20Notes.md#final-flatpak-installed-identity-confirmed--october-22-2026) | Reuse x86_64 b8f91a7 recorded UI/Online/manual business OneDrive sync, deletion propagation and recovery-copy presence only. No new installed test. |
+
+Current manifest and cargo-sources hashes still equal the published baseline
+above and local published provenance. Compared them against v0.5.5: no changes.
+Post-release edits affect documentation, installers and screenshots, not the
+manifest's pinned app or vendored sources. Rebuilding the published bundles for
+this rules/doc review would not add acceptance evidence. Changed documentation
+gets link/hygiene and whitespace checks; unchanged code gates are reused.
+
+When the operator prepares the destination app directory, compare both copied
+JSON files to these hashes and check relative dependency resolution. Moving the
+files has not yet been tested in the COSMIC checkout. A destination repository
+build validates its integration and is separate from reuse of these release
+bundles. Any source, dependency, runtime/BaseApp, grant or payload change needs
+affected build/inspection and installed checks; do not substitute acceptance
+from the old bundle. No shared build-system change is currently identified.
+
+### Remaining installed/package acceptance
+
+- October 24 update: final x86_64 personal OneDrive scheduled download and upload
+  are now accepted by operator report. This supersedes the October 22 skip for
+  this scoped check; other providers, exact timing and content hashes are not
+  established. See the [scheduled-sync evidence](../../Task%20List%20Completion%20Notes.md#vm-personal-onedrive-scheduled-download-and-upload-accepted--october-24-2026).
+- Package legacy-profile upgrade/absent-retired-unit regression was not run:
+  October 24 operator confirms no retained abraunegg/onedrive settings on the VM.
+  Retain an explicit untested limitation; native/fake tests and current-profile
+  package smoke do not establish legacy upgrade compatibility. Revisit if a
+  suitable disposable legacy fixture/test environment becomes available.
+- October 24: fresh Google and Box browser authorization, Test/Re-Test, Save,
+  mount/file access and unmount now accepted at their recorded scopes.
+  Small SharePoint whole-library setup/Preview/initial local-file arrival now
+  accepted by operator report; explicit content/hash checks and ongoing two-way
+  behavior remain outside that result. Google/Box whole-root mirrors remain
+  skipped; use small approved disposable resources for any new live test.
+- ARM packages were built/inspected but have no installed acceptance; operator
+  has no ARM64 test computer.
+- October 24 follow-up: SharePoint disposable-file recovery restoration and
+  original-text agreement are now accepted; no checksum or automatic-restore
+  claim for that text-file restoration test.
+  October 24 VM feasibility attempts did not yield a working idle suspend/wake
+  baseline: initial DRM/framebuffer workers blocked; a later timed s2idle trial
+  had no observed RTC/key wake and guest agent became unavailable. Active-transfer
+  sleep testing remains blocked by VM sleep/wake reliability. The VM was recovered;
+  independent VPN authentication, protected-resource access and disconnection
+  subsequently passed by operator report. Applet-driven VPN connection, mount
+  accessibility and file listing then passed by operator report. Following
+  toggle-off guidance, operator confirms VPN no longer connected; accept VPN
+  release at that scope. Separate file-open/content and explicit unmount-completion
+  results are not supplied. Subsequent VPN-only SMB upload test shows write timeout,
+  retries and success on try 4 after reconnection; direct server-read SHA256 now
+  matches the preserved 128 MiB source. Accept scoped SMB VPN-loss recovery and
+  byte integrity. Other-provider fault coverage remains untested; no applet cause
+  is established for the VM sleep/display failure.
+
+Before submission the operator must describe these limits accurately and obtain
+maintainer decisions on host execution, externally installed engines/plugins and
+runtime/portal compatibility. No new pass or blanket waiver is inferred.
+
+### Test VM override baseline — October 24, 2026
+
+Operator supplied a screenshot of user-global override output and separately
+confirmed empty output for system-global and both app-specific commands:
+
+| Scope (`flatpak override ... --show`) | Observed overrides |
+|---|---|
+| User global (`--user`) | `xdg-config/gtk-3.0:ro`, `xdg-config/gtk-4.0:ro`, `xdg-config/kdeglobals:ro`, `xdg-data/color-schemes:ro` |
+| System global (`--system`) | None reported |
+| User app-specific (`--user <app-id>`) | None reported |
+| System app-specific (`--system <app-id>`) | None reported |
+
+App ID: `io.github.uutzinger.cosmic-ext-applet-mounter`. This captures the four
+override scopes on the test VM; no broad host/home or mirror-folder override is
+shown. Read-only theme overrides do not explain mirror-directory access. Folder
+picker grants are separate and were exercised by the reported personal OneDrive
+checks. No permission was changed, no overrides reset, and no exhaustive audit
+of portal grants or all effective permissions is claimed by these commands.
+
+### Google-native document mount limitation — October 24, 2026
+
+Operator observed an original without a web filename extension appear as a
+zero-byte DOCX and open empty in LibreOffice. A browser-downloaded, renamed and
+reuploaded DOCX opened with correct content and size through the same mount.
+Native Google MIME type is inferred, not independently captured. Live Slides/
+Sheets behavior, editing/upload through the mount and content hashes were not
+tested. Google authorization and regular-file access pass at the reported scope;
+native-document opening does not pass.
+
+[rclone documentation](https://rclone.org/drive/#importexport-of-google-documents)
+confirms export suffixes; its [limitations](https://rclone.org/drive/#limitations-of-google-docs)
+describe unknown sizes and application-dependent empty mount reads. The
+[1.74.3 backend](https://github.com/rclone/rclone/blob/v1.74.3/backend/drive/drive.go#L4286-L4295)
+requires import formats to update native documents. `src/providers.rs` enables
+full VFS caching but no import/export override or read-only enforcement. Existing
+remote configuration could override defaults; it was not inspected on the VM.
+See [user-facing limitations](../../README.md#conflict-recovery-and-limitations).
+
+### Google unmount and Box file observation — October 24, 2026
+
+Operator reports Google unmounted without problems; accept Google Online
+unmount at that scope. In response to the Box test procedure, operator reports
+opening a VM test file and matching newly created text between the mount and
+web browser. Accept reported Box mounted/web text agreement; no checksum or
+specific write-direction assertion. Operator subsequently confirms Re-Test and
+Save passed and Box unmounted cleanly, then explicitly confirms a new connection
+completed browser authorization. Fresh Box authorization and the reported Online
+lifecycle are accepted. No repeated live test or new artifact is implied.
+
+### SharePoint content-verified recovery restoration — October 24, 2026
+
+After a disposable local text file uploaded with expected web content, operator
+deleted that file in SharePoint, observed local deletion and found the recovery
+copy. Following manual copy-back to the mirror and Sync Now, the file reappeared
+remotely. Operator explicitly confirms both recovery and restored web files
+contain the original test text. Accept this content-verified manual restoration
+cycle on the identified x86_64 Flatpak. No byte/hash comparison, other-filetype
+coverage, automatic restoration, scheduled recovery or sleep/VPN fault pass is
+inferred. Earlier presence-only observations retain their historical scope.
+
+### SMB active-upload VPN loss and byte integrity accepted — October 24, 2026
+
+On the identified 0.5.5 x86_64 VM Flatpak, operator copied a new 128 MiB file to
+a disposable folder on VPN-only SMB, then disconnected the tunnel. The applet
+reported VPN off and offered Repair. Manual VPN reconnection cleared Repair
+without invoking it or remounting. Engine journal shows an interrupted write,
+three failed attempts with retry backoff, then upload success on try 4.
+
+Operator subsequently ran `rclone hashsum SHA256 <remote-test-file> --download`
+with bounded retries/timeouts outside the mount's VFS. Screenshot confirms the
+server bytes hash to the preserved source SHA256:
+`3f32cc4309c5a4e6ce59f26e6bed5c483717b46141c3d21b956769c7f838c226`.
+Accept this upload-interruption/recovery and integrity case. It establishes
+neither byte-offset resumption nor automatic VPN reconnection, pending-count UI
+correctness, fault handling on other providers or successful sleep/wake.
+Synthetic source and test copies are retained; no cleanup has been performed.

@@ -500,6 +500,105 @@ Source: [Push Buttons.md](Push%20Buttons.md) (exact filename; retained unchanged
   0.5.5, retaining explicit version overrides and fail-closed verification.
   Run focused fake-adapter tests; no live installation or release rebuild.
 
+## 0.5.5 installed/package acceptance before COSMIC submission — October 23, 2026
+
+These are project acceptance priorities, not an exhaustive COSMIC-mandated test
+list. Describe tested behavior and remaining limits accurately; maintainers may
+request additional checks. Reuse unchanged release artifacts and scoped evidence
+in the [submission audit](docs/engineering/cosmic-submission-audit.md#remaining-installedpackage-acceptance).
+Use approved disposable resources for live checks and record results in the
+completion notes. Preserve the earlier skipped-test history.
+
+Highest priorities:
+
+- [x] Test automatic scheduled synchronization in the final x86_64 Flatpak;
+  confirm file transfer without Sync Now. Manual sync does not establish worker
+  scheduling. This reopens the October 22 skipped check without marking it passed.
+  October 24: VM screenshot confirms expected b8f91a7 Flatpak commit and running
+  sandbox process. Personal OneDrive interval edits/Re-Test/Save reuse folder
+  grants after panel removal/re-addition. Operator confirms scheduled personal
+  OneDrive remote-to-local download and local-to-remote upload at the five-minute
+  test interval. File-content hashes and other providers are not covered.
+- [x] Test fresh Google Drive browser consent in the final Flatpak. October 24:
+  operator reports authorization, Test/Save, mount, folder listing and opening
+  an uploaded DOCX with correct content/size passed. Native Google document
+  appeared as zero-byte DOCX and opened empty; see completion notes and README
+  limitations. Native presentation behavior checked in documentation, not live.
+- [x] Confirm Google Drive unmount/off state after the VM test. October 24:
+  operator reports Google unmounted without problems.
+- [x] Test fresh Box browser consent in the final Flatpak. October 24: operator
+  confirms a new connection completed browser authorization; Re-Test, Save,
+  mounted/web test-file text agreement and clean unmount passed.
+- [x] Capture effective user/global Flatpak overrides on the test computer to
+  establish the permission baseline used for installed checks.
+  October 24: user-global read-only GTK/KDE theme entries only; system-global
+  and both app-specific scopes empty. No broad storage override observed.
+
+Other acceptance and disclosure:
+
+- [o] Legacy-profile upgrade/absent-retired-unit package regression not run:
+  October 24 operator confirms no retained abraunegg/onedrive settings are
+  available on the VM. Retain this untested limitation; current package checks
+  do not establish legacy upgrade compatibility.
+- [x] Test a small SharePoint whole-library mirror, or explicitly retain its
+  untested scope. Google/Box whole-root mirrors remain skipped and disclosed.
+  October 24: guided setup with blank subfolder passed. Preview: 1 anchor upload,
+  2 downloads, 0 deletes/conflicts, 6 skipped. After initial Sync Now guidance,
+  operator reports local files are as expected. Accept scoped initial whole-library
+  mirroring; explicit content/hash comparisons, ongoing two-way sync and recovery
+  are not established by that report.
+- [o] Installed ARM64 testing: no ARM64 computer is available. Disclose that
+  ARM64 packages were built and inspected but not tested installed.
+- [x] Test content-verified recovery restoration. October 24: disposable
+  SharePoint text file uploaded, cloud deletion propagated locally, recovery
+  copy preserved, and manual restoration uploaded back to SharePoint. Operator
+  confirms original text in both recovery and restored web copies; no hash test.
+- [ ] Test active-transfer sleep faults, or retain explicit coverage limits.
+  October 24: idle VM suspend/wake feasibility failed before transfer testing
+  (graphics blockage, then no observed timed/key wake); VM recovered. Active-
+  transfer sleep remains blocked, with no applet cause established. Preserve
+  detailed failure/recovery chronology in completion notes.
+  New feasible experiment: host 8.4.5 emits ICH9-LPC.disable_s3=1 for q35+pve1.
+  Back up configuration and cleanly shut down before enabling S3 explicitly;
+  cold-boot and check for guest deep sleep before another idle test.
+  Operator reports stopped, follows S3-enable/start guidance; guest now shows
+  s2idle [deep]. Idle S3 suspend/wake verification is next; no pass yet.
+  Subsequent guest-agent suspend request could not be delivered; QEMU reports
+  running and SPICE output inactive. Recover and inspect previous-boot sleep
+  logs before another suspend or display/firmware change; S3 entry unconfirmed.
+  Previous-boot systemd log now shows suspend returned and service finished
+  successfully (14:13:31–14:14:23). Kernel sleep mode and graphics/session
+  recovery still need diagnosis; no active-transfer sleep acceptance yet.
+  Kernel now confirms suspend entry (deep), waking from S3, low-level resume
+  complete and suspend exit. Desktop/SPICE recovery remains unsuccessful; inspect
+  unfiltered resume warning/trace before another configuration change.
+  Unfiltered log shows an unchecked MSR write during CPU-state restoration,
+  followed by CPUs/devices returning and suspend exit. The warning does not
+  establish the cause of the inactive display; host CPU/QEMU compatibility
+  remains to be checked before another idle experiment.
+  Host confirmed Ryzen 9 5900XT and pve-qemu-kvm 9.2.0-7. Temporary
+  x86-64-v2-AES CPU experiment caused desktop application launching to fail;
+  logout/reboot controls remained available. Operator reports restoring
+  cpu: host. Subsequent diagnostics found guest networking disabled and no
+  routes; enabling networking restored reported operation. Cause of the
+  disabled networking and its relationship to application launching remain
+  unconfirmed. Active-transfer sleep acceptance remains outstanding.
+- [x] Establish independent VM VPN baseline. October 24: operator reports manual
+  NetworkManager connection/authentication, protected-resource access and
+  disconnection worked. This does not establish applet activation or VPN-loss handling.
+- [x] Test VM Flatpak activation of the saved VPN dependency and applet-owned
+  VPN release. October 24: operator reports VPN connected, mount accessible,
+  files visible, then VPN no longer connected following toggle-off guidance.
+  Separate file-open/content and explicit unmount-completion results were not
+  supplied. OpenConnect guide URLs corrected locally after an HTTP 404; no
+  setup-script installation outcome was separately reported.
+- [x] Test active-upload VPN loss on the VM's VPN-only SMB mount. October 24:
+  128 MiB disposable upload failed during outage, retried and succeeded on try 4
+  after manual VPN reconnect; Repair cleared without invocation or remount.
+  Direct server read with rclone hashsum SHA256 --download matches the preserved
+  source hash. Accept this scoped retry/recovery and byte-integrity test; sleep
+  and other-provider fault coverage remain separate.
+
 ## 0.5.5 Flatpak Pull Request, AI consideration
 
 Design documentation follow-up requested October 22: create root `Design.md`
@@ -517,13 +616,28 @@ evidence. GitHub bundle distribution in 0.5.4 does not imply COSMIC approval.
   host-command inventory, dependencies and permission rationale reconciled in
   docs/engineering/cosmic-submission-audit.md. Existing manifest is correct;
   no source/grant change or rebuild. Scoped installed evidence and limits explicit.
-- [ ] Recheck current COSMIC contribution rules before submission; preserve the
+- [x] Recheck current COSMIC contribution rules before submission; preserve the
   operator-authored PR/reply boundary below. Read release/packaging procedures
   before candidate preparation; link reused receipts and identify changed-input
   checks and remaining installed/package acceptance explicitly.
+  October 23: official rules/build recipe checked at f702d691; internal audit
+  links reused receipts and records changed-input checks and acceptance gaps.
+  Operator-authored PR draft and personal acknowledgment boundary preserved.
 - [ ] Prepare the actual COSMIC repository submission after the planned 0.5.5
   changes; operator authors and acknowledges the contribution. Obtain maintainer
   decisions on host execution/dependencies and runtime/portal compatibility.
+- [x] October 24: apply requested plain-language wording to the PR draft's
+  Storage engines appendix table only; retain bounds and permission details,
+  preserve other operator text and the AI-assistance disclosure. Local editing
+  does not establish submission eligibility or authorize publication.
+- [x] October 24: simplify the PR appendix's FUSE and host inspection table,
+  retaining confirmation, recovery eligibility and directory-scan limits.
+- [x] October 24: recheck appendix command coverage against the published
+  source and host-command inventory; clarify worker arguments and network
+  guards, and correct authentication-component naming.
+- [x] October 24: review pending documentation for the requested Git commit;
+  no untracked files found. Seven documentation files selected; preserve
+  operator-authored draft text and formatting. Push is outside this request.
 
   See [COSMIC applet repository PR draft](Cosmic%20Aplet%20Repository%20Pull%20Request.md).
 
@@ -579,8 +693,10 @@ all-provider sandbox acceptance.
   manual business OneDrive mirror/deletion/recovery smoke: provider-specific
   setup/browser consent, portal-grant persistence, generated host service/timer
   behavior, and clean-profile mount/mirror/VPN/uninstall combinations. The final
-  0.5.5 scheduled-worker run was deliberately skipped, not passed. Reuse earlier
-  tests at their recorded scope; local prototypes are separate evidence.
+  October 22 scheduled-worker check was skipped; October 24 personal OneDrive
+  scheduled download/upload passed on the final x86_64 Flatpak (see pre-submission
+  acceptance above). Reuse tests at their recorded scope; local prototypes are
+  separate evidence.
 - [ ] After COSMIC repository acceptance, check Store discovery, installation,
   updates and removal from that channel. GitHub bundle availability and its
   installed smoke checks do not establish COSMIC Store acceptance.
@@ -640,6 +756,18 @@ all-provider sandbox acceptance.
 # Cloud Mounter Applet Future Task List
 
 Items that will be activated at some time in the future.
+
+## 0.5.6 — Google Drive native-document configuration
+
+Planned October 24, 2026; implementation and mode scope are not yet agreed.
+
+- [ ] Update Google Drive configuration with a choice of how Google-native
+  documents are displayed: Microsoft Office formats (DOCX/XLSX/PPTX),
+  OpenOffice/LibreOffice OpenDocument formats (ODT/ODS/ODP), or browser links.
+- [ ] Discuss whether these options apply to Online mount, Offline mirror, or
+  both before implementation. Current Offline mirror exclusions remain in place
+  until that scope is agreed; display/export choices do not imply import or
+  native-document editing support.
 
 ## Future Tasks depending on Pop!_OS or COSMIC desktop upgrades
 

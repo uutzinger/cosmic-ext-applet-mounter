@@ -253,6 +253,14 @@ retained by applet policy for 30 days.
 Google Docs, Sheets, Slides, and related browser-native Google document types
 are excluded from rclone Offline mirrors.
 
+In Online mounts, rclone presents Google-native files with export suffixes
+such as `.docx`, `.xlsx` and `.pptx`. They can appear as zero bytes and open
+empty in desktop applications; see [rclone's Google Docs limitations](https://rclone.org/drive/#limitations-of-google-docs).
+Edit native originals in the browser. Native-document updates require explicit
+[rclone import configuration](https://github.com/rclone/rclone/blob/v1.74.3/backend/drive/drive.go#L4286-L4295),
+which the applet does not enable. This is not an enforced read-only guarantee.
+An exported, separately uploaded Office file is distinct from its native original.
+
 ## Uninstallation
 
 Package removal does not delete configuration and data in the user's home

@@ -3166,3 +3166,851 @@ log `target/task-runs/dev-gate-1izh04qa/task.log`: Rust/script/test inputs remai
 unchanged. Rechecked the affected documentation-link tests separately above.
 Next: commit this scope, fetch immediately before push, reconcile if necessary
 and verify remote identity.
+
+## COSMIC contribution-rule recheck — October 23, 2026
+
+Completed the specifically requested rules/evidence review. Read release and
+packaging procedures and engineering-record rules. Updated the existing
+submission audit, engineering index and task status; operator PR draft unchanged
+(SHA256 `4113a6835cc849472238d73b2641a0afb5b1bde926b27b29366ad57b02df49b0`).
+
+Browser results included cached pages and raw recipe/API fetch failures. Initial
+direct curl exited 6 (sandbox DNS); authorized direct retry exited 0 and resolved
+cosmic-flatpak master to f702d691ce9060f50c2908d36a7d83b6676703a8. Downloaded
+README/template/recipe at that immutable revision plus linked contributor,
+trademark and DCO sources (exit 0). URL/hash index and snapshots:
+`target/cosmic-contribution-review-2026-10-23/sources.json`. The current recipe
+still reads app/<id>/<id>.json; no destination checkout build was run.
+
+Template retains the own-app source/manifest AI exception; general guide still
+excludes AI contributions. Operator authors PR/replies and personally certifies
+the actual diff. The existing draft's AI-assisted appendix needs operator review
+against that exception. No rewrite, acknowledgment or external message performed.
+
+Reused successful Flatpak inspection and release preparation receipts and scoped
+October 22 installed observations, linked in the audit. Reread local published
+provenance; current manifest/cargo-source hashes match both architectures and
+v0.5.5. No source/runtime/grant change or rebuild justified. Preserved installed
+limits: skipped final scheduler and whole-root cases; unrun sandbox browser,
+package retirement regression, whole-library SharePoint and installed ARM;
+recovery-copy presence does not establish restoration. Maintainer host/runtime/
+dependency acceptance and destination repository integration remain open.
+
+Validation: `python3 tests/repo_hygiene_test.py`, four tests, exit 0;
+`git diff --check`, exit 0; provenance/hash/draft/code-gate-input assertions,
+exit 0, `target/cosmic-contribution-review-2026-10-23/checks.json`.
+Reuse `target/task-runs/dev-gate-1izh04qa/summary.json` (source a600e562,
+source_dirty true, succeeded, exit 0; sibling task.log): no Rust/script/test/
+justfile inputs changed since that run. Only affected documentation checks ran.
+This is a source/document review, not new installed or package acceptance.
+Next: operator reviews the actual submission and acknowledgments; prepare the
+destination candidate separately, retaining these acceptance limits. No commit,
+push, build dispatch, install or submission in this task.
+
+## Pre-submission acceptance priorities added — October 23, 2026
+
+Operator requests placing the discussed acceptance priorities immediately before
+the 0.5.5 Flatpak PR/AI section. Added scheduled sync, fresh Google/Box consent
+and effective overrides as highest priorities; retained package-upgrade,
+SharePoint and recovery/fault checks or explicit disclosure. ARM64 installed
+testing is deliberately skipped because the operator has no ARM64 computer;
+built/inspected status is not an installed pass. Historical skipped checks remain
+unchanged. These are project priorities, not a claimed mandatory COSMIC test list.
+
+Scoped whitespace and placement/status assertions pass (exit 0). No code or
+test inputs changed; reuse the passing gate receipt documented in the preceding
+review. No live tests, commit or push. Next: execute the selected installed
+checks and record their actual results and limits.
+
+## VM personal OneDrive scheduled-sync check started — October 24, 2026
+
+Operator offers the existing personal OneDrive mirror on the virtual machine for
+scheduled synchronization testing. Begin by confirming the installed Flatpak
+commit, running sandbox process and configured interval. Use only a newly
+created disposable text file in the mirrored scope; do not infer scheduled
+execution from Sync Now, an initial Start-triggered sync or an active timer.
+No test result or changed VM state is reported yet. Earlier skipped-test history
+remains unchanged; current acceptance item stays open. No source, installation,
+build, commit or push action. Next: collect identity/interval, then observe a
+file created after any immediate sync has finished arriving on a later schedule.
+
+## VM Flatpak identity reconfirmed — October 24, 2026
+
+Operator supplies terminal screenshot: `flatpak info --user --show-commit`
+reports b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098,
+matching the inspected 0.5.5 x86_64 candidate. `flatpak ps` lists the app ID
+io.github.uutzinger.cosmic-ext-applet-mounter as a running sandbox process.
+Accept installed identity/running-process evidence only; no scheduled transfer
+is shown. The personal OneDrive mirror's interval and Started/Stopped state
+remain to be supplied before timing the disposable-file check. No VM operation,
+source change, build or repeated automated test performed by the agent.
+
+## VM interval edit blocked before scheduler test — October 24, 2026
+
+Operator reports interval was 15 minutes, edited to 5; only Detect, Disable and
+Remove are clickable. A saved five-minute configuration and running schedule
+are not established. Source action rules can block Test/Save for a retired
+legacy profile or invalid/incomplete connection/setup inputs; button availability
+alone does not identify the cause. Request the editor's visible blocking reason
+and popup toggle state before changing the connection or timing a scheduled run.
+No runtime operation or acceptance pass; no source edit or repeated code tests.
+
+## VM interval edit requires identity and folder grants — October 24, 2026
+
+Operator reports entering the expected account email enabled Re-Connect/Re-Test.
+Re-Test then required choosing both mirror and recovery folders through Browse;
+it passed after those selections. Operator believes selected paths are unchanged;
+path equality and saved five-minute interval are not independently confirmed.
+Accept reported installed personal OneDrive Re-Test success only, not scheduled
+execution or persistent folder-grant reuse.
+
+Source inspection: draft_from_connection deliberately clears the expected email;
+an existing test asserts it is not serialized and is blank on reopening. Interval
+edits clear validated_draft, and Save requires a matching validated connection.
+mirror_access persists folder-picker grant records and revalidates them; a typed
+host path alone is not a grant. Missing grant metadata requests Browse selection.
+This explains first-time/recovery selection, but does not establish why the VM's
+previous folder grants were unavailable. Requiring fresh Browse selection on
+every unchanged-path interval edit would warrant investigation; persistence is
+intended. No code changes or repeated code tests. Next: Save and reopen to verify
+the interval, then continue the scheduled-file test and assess grant persistence.
+
+## VM personal OneDrive folder grants persist — October 24, 2026
+
+Operator reports interval changes to 3 and back to 5 minutes, each allowing
+Re-Test/Save after entering the account email without reselecting folders. After
+removing the applet from the panel and adding it again, another interval edit
+also worked without Browse. Accept reported saved-folder grant reuse across
+these edits and panel removal/re-addition on the identified x86_64 Flatpak.
+This does not establish persistence across VM reboot or logout.
+
+Operator suspects an earlier folder-path error. The original paths/grant state
+were not captured; record the cause as unresolved rather than a confirmed path
+typo or recurring permission defect. No source fix is established as necessary.
+Scheduled worker execution remains unverified. Next: use a saved five-minute
+interval, Start scheduling, allow any current run to finish, create a new
+disposable text file through OneDrive web in the mirrored scope, and observe
+automatic local arrival/content without Sync Now while the VM stays awake.
+No source change, code-test repeat or VM operation by the agent.
+
+## VM personal OneDrive scheduled download and upload accepted — October 24, 2026
+
+Following the scheduled-file procedure, operator reports the schedule completed
+in both directions: a new remote file downloaded into the local mirror and a
+new local file uploaded to OneDrive. Accept reported scheduled bidirectional
+new-file transfer at the five-minute test interval on the VM's identified
+0.5.5 x86_64 Flatpak b8f91a7bb2c6a0b321ee887718f488131bbe42798cd3944e1f5d07473b929098.
+This closes the reopened scheduled-worker check for personal OneDrive; retain
+the October 22 skipped test as historical evidence. Exact completion timing,
+content/hash equality, other providers, deletion/conflict/restore behavior and
+reboot persistence were not reported and are not inferred.
+
+Updated active task, future coverage summary, submission audit and engineering
+index; preserved earlier reports and operator-authored PR draft. No code,
+installation or build changed. Documentation checks: four repository-hygiene
+tests and scoped whitespace check, exit 0. Reuse existing passing code gate at
+unchanged inputs; this is operator-reported installed acceptance, not an agent
+runtime test. Next: capture test-machine effective Flatpak overrides, then fresh
+Google/Box sandbox browser-consent checks. No commit or push.
+
+## VM override output observed; scope confirmation pending — October 24, 2026
+
+Operator screenshot shows all four requested user/system, global/app-specific
+override commands, followed by one Context block containing only read-only
+xdg-config/gtk-3.0, xdg-config/gtk-4.0, xdg-config/kdeglobals and
+xdg-data/color-schemes filesystem entries. No broad host/home filesystem or
+mirror-directory override is shown. Because the pasted commands are echoed
+together without output labels, the block's scope is not independently clear.
+Request the system-global command alone to attribute the block before closing
+the permission-baseline item. No overrides changed and no new runtime test.
+
+## VM override baseline accepted — October 24, 2026
+
+Operator ran scopes separately to resolve the initial unlabeled output. Reports
+system-global output empty; supplies screenshot confirming user-global Context
+contains only read-only xdg-config/gtk-3.0, xdg-config/gtk-4.0,
+xdg-config/kdeglobals and xdg-data/color-schemes. Then reports no output for both
+user and system app-specific commands for the Cloud Mounter app ID. Accept the
+four-scope override baseline on the identified VM Flatpak: no broad host/home
+or mirror-directory override observed. Portal folder grants are separate; these
+commands do not exhaustively enumerate those grants or all effective permissions.
+
+Marked override-capture task complete; updated submission audit and engineering
+index. No permissions changed or services touched. Four repository-hygiene tests
+and scoped whitespace validation pass (exit 0); reuse the passing code gate at
+unchanged code/test inputs. No source, package, build, commit or push action.
+Next: fresh Google Drive and Box browser-consent checks in the same Flatpak.
+
+## VM Google authorization and native-document limitation — October 24, 2026
+
+Operator reports fresh Google authorization and Save succeeded, Test passed,
+mount succeeded and folders/files were visible. In one folder, an apparent DOCX
+was listed at zero bytes and opened empty in LibreOffice, while the web version
+had content and no filename extension. After downloading via browser, renaming
+and uploading again, the new file showed a DOCX extension on the web and correct
+size/content when opened through the mount. Accept reported fresh Google setup,
+mount/listing and ordinary uploaded-DOCX access on the identified VM Flatpak.
+Record native-file opening as failed/limited, not a successful content test.
+Native MIME type is inferred; no Slides/Sheets live result, mount writeback,
+unmount or checksum comparison was reported.
+
+Checked official rclone Drive export/limitations documentation and 1.74.3 backend
+update implementation; links and scoped findings are in the submission audit.
+Source mount plan uses full VFS caching and no import/export or read-only flag.
+Do not describe the entire mount as read-only or all native exports as always
+unreadable. No remote configuration dump or live engine operation performed.
+
+Split Google consent (passed) from pending Box consent in Task List; retained
+Google unmount confirmation as open. Updated README limitations, audit and index.
+Four repository-hygiene tests and whitespace validation pass (exit 0). Unchanged
+code gate reused; no source/build/install/commit/push or PR-draft changes.
+
+## 0.5.6 Google Drive configuration future task — October 24, 2026
+
+Added the requested 0.5.6 entry in the Future Task List immediately before the
+desktop-upgrade-dependent tasks. It plans Microsoft Office, OpenDocument and
+browser-link representations of Google-native files. Online mount versus
+Offline mirror applicability remains an explicit future discussion; no new
+import/editing behavior or mirror support is approved or implemented. Scoped
+whitespace and heading-placement checks pass (exit 0). Code/test inputs remain
+unchanged; no code-gate repeat, commit or push. Next: agree mode scope before
+design and implementation.
+
+## 0.5.5 VM acceptance resumed — October 24, 2026
+
+Operator requests continuing installed/package acceptance. Reuse the recorded
+VM Flatpak identity, personal OneDrive scheduled transfers, override baseline
+and Google authorization/mount/file observations; do not repeat passed checks.
+Next guided checks: confirm Google unmount/off, then fresh Box Online connection
+authorization, Test/Save, mount/listing and unmount. No new pass reported yet;
+other acceptance and disclosure items remain open. Scoped whitespace check
+passes (exit 0); no code/test inputs changed, code gate not repeated. No source,
+build, installation, commit, push or PR-draft changes.
+
+## VM Google unmount and Box mounted-file content — October 24, 2026
+
+Operator reports Google unmounted without problems. Mark Google unmount complete.
+Following the Box procedure, operator reports opening a test file on the VM and
+newly created text matching between the mounted folder and provider web browser.
+Accept reported Box mounted/web text agreement; no hash, write direction or
+explicit fresh authorization/Test/Save/Box-unmount result was supplied. Request
+confirmation of those steps without repeating the completed content check.
+
+Updated task/evidence records, submission audit and index. Four documentation
+hygiene tests and whitespace check pass (exit 0); code gate reused at unchanged
+inputs. No code, runtime operation by the agent, build, installation, commit,
+push or operator PR-draft change. Next: close Box lifecycle evidence, then select
+the next remaining acceptance/disclosure item.
+
+## VM Box Re-Test, Save and unmount accepted — October 24, 2026
+
+Operator explicitly confirms Re-Test passed, Save passed and unmount completed
+cleanly. Accept these installed Box lifecycle observations alongside the prior
+mounted/web text agreement. Fresh Connect/browser consent was not explicitly
+confirmed in this response, so retain that one confirmation as pending without
+repeating completed tests. Updated task/audit/index and evidence notes; scoped
+whitespace validation passes (exit 0). Code/test inputs unchanged; code gate and
+documentation link tests reused from the preceding checks. No code, runtime,
+build, install, commit, push or PR-draft action. Next: confirm whether a fresh
+Box browser authorization was completed during this setup.
+
+## VM fresh Box browser authorization accepted — October 24, 2026
+
+Operator explicitly confirms creating a new connection and completing browser
+authorization. Close the fresh Box consent task alongside previously reported
+Re-Test, Save, mounted/web text agreement and clean unmount. All items under the
+pre-submission highest-priority checklist are now complete at their stated
+scope. No extra provider, checksum, reboot or mirror acceptance is inferred.
+
+Updated Task List, submission audit/index and these evidence notes. Four
+repository-hygiene tests and whitespace check pass (exit 0); unchanged code
+gate reused. No code, VM operation by the agent, build, installation, commit,
+push or PR-draft change. Remaining work: package legacy/absent-unit regression,
+small SharePoint whole-library mirror or explicit scope limitation, and
+recovery-restoration/sleep/VPN fault checks or retained limits. ARM64 installed
+testing remains skipped because no test computer is available.
+
+## VM small SharePoint whole-library test started — October 24, 2026
+
+Operator confirms a small SharePoint test library is available. Begin a new
+SharePoint Offline mirror on the same identified VM Flatpak, leaving the remote
+subfolder empty to select the whole document library. Use new empty local mirror
+and separate recovery directories selected through Browse. Connect/verify the
+library remote, Test and Save first; keep scheduling paused. Preview and the
+confirmed initial Sync Now follow only after setup results are reported. No
+setup result or whole-library acceptance claimed yet. Scoped whitespace passes
+(exit 0); no source/code-test inputs changed, no code gate repeated. No build,
+installation, commit, push or agent operation on the VM or cloud data.
+
+## VM SharePoint whole-library setup accepted — October 24, 2026
+
+Following the guided new SharePoint Offline connection with a blank library
+subfolder, separate Browse-selected mirror/recovery directories and
+Connect/Test/Save, operator reports setup passed. Accept reported setup at that
+scope on the identified VM Flatpak. No Preview, initial transfer, file-content
+comparison or scheduling result yet; whole-library mirror acceptance stays open.
+Next: run Preview and inspect its expected scope/change summary before initial
+Sync Now. Scoped whitespace passes (exit 0); no source/test inputs changed and
+no code gate repeated. No agent VM/cloud action, build, install, commit or push.
+
+## VM SharePoint initial Preview observed — October 24, 2026
+
+Operator screenshot reports Preview completed: uploads 1, downloads 2, deletes 0,
+conflicts 0, skipped 6; initial sync has not run and requires Sync Now confirmation.
+No library/connection name retained here. Accept Preview completion and displayed
+counts only; no transfer, content or exact skipped-file coverage inferred.
+
+Source inspection: SharePoint initial-preview preparation creates a local
+`.cloud-mounter-sharepoint-anchor-<connection-id>` access marker, so an upload
+from a new mirror directory is plausible. Actual queued filename was not shown.
+The preview parser counts skip/excluded/filtered log lines, so six skipped does
+not establish six distinct excluded user files. Next: verify the local directory
+contains only the expected marker and confirm the two remote files are expected
+before initial sync. Screenshot also shows grey Preview/Sync Now controls; actual
+clickability/reason has not been established. No source change or repeated code
+test; scoped whitespace check passes (exit 0). No agent VM/cloud operation.
+
+## VM SharePoint Preview scope confirmed — October 24, 2026
+
+Operator confirms the selected library has three directories and two files,
+and the local mirror contains the anchor file. This is consistent with the
+Preview's two downloads and one anchor upload; directory creation is distinct
+from file-copy totals. No other local file is reported. Initial transfer and
+directory/content verification remain pending. Next: Sync Now with its initial
+confirmation, keep scheduling paused, then check both files and three directories
+locally and compare file contents with the web copies. No agent VM/cloud action,
+source change or repeated code tests. Scoped whitespace passes (exit 0).
+
+## VM SharePoint whole-library initial mirroring accepted — October 24, 2026
+
+After initial Sync Now and expected local-file/directory checks were requested,
+operator reports local files are as expected. Accept reported initial local-file
+arrival for the small whole-library SharePoint mirror on the identified 0.5.5
+x86_64 VM Flatpak, following setup and Preview with blank remote subfolder.
+No explicit command-completion text, content/hash comparison, ongoing upload/
+download cycle, schedule or recovery result is inferred. Mark the small-library
+initial-mirroring task complete with those limits; larger libraries and broader
+lifecycle coverage remain separate.
+
+Updated task, submission audit/index and evidence notes. Four repository-hygiene
+tests and whitespace check pass (exit 0); unchanged code gate reused. No source,
+agent VM/cloud operation, build, installation, commit, push or PR-draft change.
+Next: establish a new disposable text-file baseline for content-verified recovery
+restoration, keeping background scheduling paused. Legacy-profile regression
+and sleep/VPN fault coverage remain open or require explicit retained limits.
+
+## VM SharePoint disposable recovery-file baseline accepted — October 24, 2026
+
+Following the new local recovery-test text-file upload procedure, operator
+confirms the file uploaded and has expected content. Accept reported local-to-
+SharePoint text transfer/content at this scope; no byte/hash comparison inferred.
+The file is the disposable resource for the next deletion/recovery/restoration
+steps. Keep scheduling paused; delete only that cloud test file, inspect Preview
+for expected local deletion, then confirm Sync Now and inspect the local recovery
+directory's dated subfolder for preserved content. Restoration remains separate.
+Source backup-dir2 resolves under local recovery/<UTC-day>; no agent VM/cloud
+action or source change. Scoped whitespace passes (exit 0); code inputs unchanged,
+no gate repeat. No build, installation, commit, push or PR-draft change.
+
+## VM SharePoint deletion and recovery-copy presence accepted — October 24, 2026
+
+Operator reports the disposable test file was deleted locally and a copy exists
+in the recovery folder after the guided cloud deletion/Preview/Sync Now steps.
+Accept reported deletion propagation and recovery-copy presence. Recovered-file
+content has not yet been confirmed; restoration is not a pass. Next: open the
+recovery copy and verify the original test text, copy it back to the mirror under
+the original filename while retaining the recovery copy, Preview/Sync Now, then
+confirm restored cloud content. Limit operations to this disposable test file.
+No source change or agent VM/cloud operation. Scoped whitespace passes (exit 0);
+unchanged code gate not repeated. No build, install, commit or push.
+
+## VM SharePoint restored file reappears remotely — October 24, 2026
+
+Following the recovery-copy restoration procedure, operator reports the file is
+back in the remote. Accept reported restored-file upload/presence in SharePoint.
+Original text in the recovery copy and restored web file has not been explicitly
+confirmed; content-verified restoration remains open pending that confirmation.
+No further sync is needed merely to confirm the text. Scoped whitespace passes
+(exit 0); no code/test inputs changed and no gate repeat. No agent VM/cloud
+action, build, installation, commit, push or PR-draft change.
+
+## VM SharePoint content-verified recovery restoration accepted — October 24, 2026
+
+Operator explicitly confirms original test text in both the recovery copy and
+restored SharePoint web file. Accept content-verified manual recovery restoration
+for the disposable text file on the identified 0.5.5 x86_64 VM Flatpak: upload,
+cloud deletion/local propagation, preserved recovery copy, manual copy-back and
+remote reupload with original text. No byte/hash equality, other file type,
+automatic restoration, schedule or sleep/VPN fault behavior is inferred.
+
+Split the combined active recovery/fault task to mark restoration complete while
+leaving active-transfer sleep/VPN checks or explicit limitations open. Updated
+submission audit/index and evidence notes. Four repository-hygiene tests and
+whitespace check pass (exit 0); unchanged code gate reused. No source, agent
+VM/cloud operation, build, installation, commit, push or PR-draft change.
+Next: determine availability of a retained legacy OneDrive profile for package
+upgrade/absent-retired-unit regression; fault cases remain separate.
+
+## VM legacy-profile package regression unavailable — October 24, 2026
+
+Operator confirms no retained settings from the retired abraunegg/onedrive
+engine. Record legacy-profile upgrade/absent-retired-unit package regression as
+not run because that VM setup is unavailable; no compatibility pass or blanket
+waiver is inferred. Mark the active item deliberately untested with its reason
+and retain the disclosure in the submission audit. Earlier native/fake tests
+retain their original scope; no synthetic old production profile is created.
+
+Scoped whitespace check passes (exit 0). No code or documentation-link inputs
+changed; existing code gate and link tests reused. No agent VM/cloud operation,
+source change, build, installation, commit, push or PR-draft change. Remaining
+active acceptance decision: exercise active-transfer sleep/VPN faults using
+disposable data, or explicitly retain that untested coverage limit.
+
+## VM active-transfer fault-test feasibility started — October 24, 2026
+
+Operator requests attempting the remaining sleep/VPN tests. Source inspection:
+src/sleep.rs scopes opt-in logind preparation and wake restoration to Online
+mounts, so an Offline mirror interrupted by suspension does not independently
+verify Online cleanup/remount behavior. VM-manager Pause/Resume is not evidence
+of guest logind PrepareForSleep handling. VPN disconnection from a public cloud
+transfer may leave routing intact; distinguish a declared VPN dependency and
+real VPN loss from a generic network outage.
+
+Asked whether guest-desktop Suspend works and whether the VM has a working VPN.
+Do not begin dependent interruption steps until setup is established. Plan one
+disposable transfer per fault, confirm it is active at interruption and compare
+original/downloaded SHA256 after recovery; preserve failed state and report
+typed/UI results before any repair. Existing native injected-fault/prototype
+coverage retains its scope and is not a new installed-package pass.
+
+No fault executed, fixture generated, service/network state changed or source
+edited. Scoped whitespace check passes (exit 0); unchanged code gate reused.
+No build, install, commit, push or PR-draft change. Next: select the first
+feasible VM fault case from the operator's environment answers.
+
+## VM guest-suspend feasibility needs wake diagnosis — October 24, 2026
+
+Operator reports no working VPN yet, but can attempt setup. Guest-desktop Suspend
+left the screen apparently frozen; Proxmox reports the VM running. Guest suspend
+state and responsiveness have not been independently established. This was a
+feasibility attempt, not an observed active-transfer interruption; no fault-test
+pass or applet-caused failure is inferred. Prior transfer/recovery passes remain.
+
+Checked official QEMU monitor documentation: `info status` inspects state and
+`system_wakeup` wakes a suspended guest. Proxmox qm manual web retrieval returned
+403; QEMU command semantics verified from its official monitor reference:
+https://www.qemu.org/docs/master/system/monitor.html . Guide operator through
+the selected VM's Monitor, then inspect Console responsiveness; do not reset,
+stop or power-cycle while wake diagnosis is pending. No agent hypervisor/VM
+operation or VPN installation. Scoped whitespace passes (exit 0); no code/test
+inputs changed, no gate repeated. Next: obtain status/wake output and whether
+the desktop resumes before preparing an active-transfer test.
+
+## VM responsive guest agent; display recovery pending — October 24, 2026
+
+Operator reports QEMU status running; system_wakeup returns unable to wake
+because the system is not in suspend state. Console reports display output
+inactive. Screenshot of the Proxmox host shell shows two `qm agent 105 ping`
+commands returning without output/error. Accept responsive guest-agent evidence;
+this does not establish a healthy graphical session or successful sleep/wake.
+No active-transfer fault result or applet-caused failure is inferred.
+
+Verified qm guest exec syntax in official Proxmox command reference and chvt
+behavior in the packaged kbd manual. Next guided recovery step: use guest agent
+to switch only VM 105 to text VT3, then inspect Console before any desktop or
+service restart. No agent hypervisor/guest operation, reset or configuration
+change. Scoped whitespace passes (exit 0); no code/test inputs changed, code gate
+not repeated. Acceptance remains pending while VM display is diagnosed.
+
+## VM graphical VT switch remains blocked — October 24, 2026
+
+Operator uses direct SPICE; restarting the viewer still reports display output
+inactive. Guest-agent `chvt 3` exited 0, but SPICE did not recover. Guest
+`loginctl list-sessions` shows graphical user session 3 on seat0/tty1, state
+online. Switching back with `chvt 1` exceeded the synchronous wait and returned
+guest PID 145933. Subsequent exec-status returned exited=0: process still running,
+not successful exit code 0. Do not queue repeated VT switches or infer a complete
+guest hang; guest-agent queries still respond.
+
+No reboot, reset, logout or display-manager restart has been requested. Next:
+inspect recent guest kernel messages through the agent for DRM/suspend errors,
+then choose recovery from that evidence. No active-transfer fault was exercised
+or accepted; no applet-caused failure inferred. Scoped whitespace passes (exit 0);
+no source/test inputs changed, no gate repeat, no agent hypervisor/VM operation.
+
+## VM kernel graphics workers blocked — October 24, 2026
+
+Guest journal read through the agent exited 0. Operator-provided excerpt contains
+kernel hung-task reports in drm_modeset_lock, drm_atomic_helper_swap_state,
+framebuffer removal and fbcon_register_existing_fbs; one worker waits on a mutex
+likely held by another worker. This supports blocked kernel graphics/modesetting
+as the immediate display/VT-switch problem. The original suspend failure's root
+cause and any applet involvement are not established from this excerpt. Terminal
+switch attempts may also contribute framebuffer/console work to the captured
+trace; do not equate all trace activity with the original suspend event.
+
+Record installed active-transfer sleep testing as blocked at VM feasibility;
+no transfer was deliberately arranged or observed at the interruption. Preserve
+earlier package passes. Recommended recovery is a graceful guest reboot after
+preserving available diagnostic output; it ends the current session and can
+lose unsaved application edits. No restart/reset executed or successful recovery
+claimed. Scoped whitespace passes (exit 0); no source/test inputs changed, code
+gate not repeated. Next: operator chooses graceful guest reboot, then confirms
+display and applet recovery before any further fault test.
+
+## VM force-stop and available sleep mode observed — October 24, 2026
+
+Operator reports plain qm stop timed out acquiring the VM lock. Supported
+`qm stop 105 --overrule-shutdown 1 --timeout 30` returned successfully and
+`qm status 105` reported stopped. No successful subsequent desktop recovery is
+reported yet. A later successful guest exec returned `/sys/power/mem_sleep` as
+`[s2idle]`; the transcript therefore spans VM-state changes whose timing is not
+fully shown. Recheck current VM status before further action.
+
+Reported configuration: q35, OVMF, manual virtio-gpu-pci and SPICE devices in args,
+with vga:none. The custom args supply a GPU despite vga:none; no missing-GPU
+diagnosis or virtual-hardware change is justified by that field alone. Omit
+host addresses, MACs and UUIDs from these records. Only suspend-to-idle is exposed
+to this guest; no deep suspend mode is listed. Linux documents in-band wakeup
+for s2idle, so QEMU suspended-state wake is not a general recovery mechanism for
+it. This does not establish whether the original transition entered or exited
+s2idle before the graphics lockup.
+
+No sleep-mode/firmware/display change or new fault test. Next: confirm running
+desktop recovery and kernel version, then assess a controlled wake source before
+another idle feasibility test. Active-transfer acceptance remains blocked, not
+passed. Scoped whitespace passes (exit 0); no code/test change or gate repeat.
+
+## VM desktop baseline recovered; RTC inspection next — October 24, 2026
+
+Operator reports VM 105 running; guest uname returns 7.2.6-76070206-generic,
+and explicitly confirms SPICE desktop is responsive again. Accept post-recovery
+guest/display baseline only; no successful suspend/wake or applet-specific
+post-reboot acceptance inferred. No repeat suspend yet.
+
+Verified rtcwake manual: mode show prints alarm state without setting an alarm;
+mode no sets an alarm without suspending. First inspect alarm/wakeup capability
+through guest agent before any timed sleep. Later applet sleep tests must use
+the logind/systemd suspend path; direct rtcwake sleep is not equivalent evidence
+for applet PrepareForSleep handling. No alarm or VM configuration changed by the
+agent. Scoped whitespace passes (exit 0); code/test inputs unchanged, no gate
+repeat. Next: obtain read-only RTC alarm and wakeup-state output.
+
+## VM RTC alarm readable and wakeup enabled — October 24, 2026
+
+Operator supplies successful guest-agent command results: rtcwake mode show
+reports RTC assumed UTC and alarm off; rtc0 device power/wakeup reports enabled.
+Accept readable RTC and configured wakeup state, not proven wake capability.
+Next controlled feasibility step: save work, pause mirror schedules and unmount
+Online connections, arm a 60-second RTC alarm using mode no, then promptly issue
+systemctl suspend only after alarm setup returns guest exitcode 0. Observe SPICE
+and guest responsiveness after the alarm; do not treat this idle trial as an
+active-transfer or Online cleanup pass. A repeated graphics hang remains possible.
+No alarm/suspend command has been executed by the agent. Scoped whitespace
+passes (exit 0); no code/test input changes or gate repeat. No build, install,
+commit, push or PR-draft action.
+
+## VM timed-suspend wake not observed; guest agent unavailable — October 24, 2026
+
+Operator reports completing RTC-arm and systemctl-suspend commands but no wake
+observed so far. Subsequent `qm agent 105 ping` reports guest agent not running.
+Alarm-programming/suspend output and exact elapsed time were not supplied;
+successful RTC delivery or failed guest resume cannot yet be established.
+An unavailable agent is compatible with suspended userspace and is not alone
+evidence of a crashed guest. No active transfer was deliberately tested.
+
+Next: inspect current QEMU status through Monitor. For a running QEMU guest,
+try a single injected Shift key via supported sendkey, independent of SPICE;
+for an actual QEMU suspended state, use system_wakeup. Recheck guest-agent and
+display responsiveness, avoiding repeated terminal switches or suspend requests.
+No new pass or applet-specific failure inferred. Scoped whitespace passes
+(exit 0); no source/test inputs changed, code gate not repeated. No agent
+hypervisor/VM action or new force-stop.
+
+## VM timed-suspend trial still lacks observable wake — October 24, 2026
+
+Operator reports QEMU running and no return after the injected-key guidance;
+interpret as display not returning unless operator clarifies the command itself
+is blocked. RTC/key wake success is not observed; guest agent was unavailable
+at the preceding query. Stop repeating sleep trials on this unchanged setup.
+Retain active-transfer sleep acceptance as blocked at idle-VM feasibility, not
+a completed fault test or applet failure. VPN setup remains separate.
+
+Recommend previously successful targeted force-stop with overrule-shutdown,
+verify stopped, then start VM 105; this discards unsaved guest state. No recovery
+executed by the agent or successful second restart claimed. Updated concise
+active task and audit limitation; kept earlier detailed failure/recovery chronology.
+Scoped whitespace passes (exit 0); unchanged code/link checks reused. Next:
+operator recovers the VM and confirms responsive SPICE; investigate virtual
+sleep/graphics support separately before another applet sleep test.
+
+## VM back online after second recovery — October 24, 2026
+
+Operator confirms the VM is back online following the targeted recovery guidance.
+Accept reported availability only; no successful suspend/wake, active-transfer
+recovery or post-reboot applet identity/health pass inferred. Prior acceptance
+results retain their scope. Leave sleep testing blocked on this VM configuration
+and avoid another unchanged suspend trial. VPN remains unconfigured; next determine
+which VPN protocol/profile is available before selecting its typed setup path.
+Scoped whitespace passes (exit 0); no code/test change or gate repeat. No agent
+VM/cloud operation, package build/install, commit, push or PR-draft change.
+
+## VM OpenConnect guide URL correction — October 24, 2026
+
+Operator screenshot shows HTTP 404 using main/scripts/setup-openconnect.sh with
+uninstall. Branch is master. During review the operator corrected the install
+URL locally; preserved it and corrected the remaining two uninstall guide URLs.
+Local setup script reviewed: install changes host packages, on-demand user
+authentication-agent unit and icon setting; uninstall retains packages/profiles.
+Neither creates a VPN profile. Script behavior and historical header examples
+are unchanged; no install/uninstall performed by the agent.
+
+Raw web lookup failed with cache miss; direct download failed sandbox DNS
+(exit 6). Escalated download verification was declined by user and did not run;
+remote response/script equality remain unverified. No bypass attempted.
+Four repository-hygiene tests and scoped whitespace check pass (exit 0);
+unchanged code gate reused. No package/service action, commit, push or PR-draft
+change. Next: operator uses master URL with install to set up OpenConnect on VM,
+then creates its VPN profile with nm-connection-editor.
+
+## VM independent VPN baseline accepted — October 24, 2026
+
+Operator requests testing outside Cloud Mounter first, followed by disconnect
+and applet activation. Following the manual NetworkManager procedure, operator
+reports it worked. Accept reported manual VPN authentication/connection,
+protected-resource access and disconnection at that scope. Do not infer the
+setup script installation outcome, applet-owned activation/release or loss of
+an active transfer. No private gateway, profile name or credentials recorded.
+
+Updated active checklist to separate passed manual baseline from pending applet
+activation and VPN-loss tests. If an nm-applet was launched manually, exit only
+that instance before testing the applet's on-demand authentication-agent service;
+avoid competing bus-name owners. Next: select the saved VPN on one test Online
+connection, Re-Test/Save if required, activate from a disconnected VPN baseline,
+check mounted access, unmount and observe VPN release. Scoped whitespace passes
+(exit 0); code/test/link inputs unchanged, earlier checks reused. No agent VM,
+service, cloud, build, install, commit, push or PR-draft action.
+
+## VM applet VPN activation and mounted listing accepted — October 24, 2026
+
+Following the applet VPN-dependency procedure from the disconnected baseline,
+operator reports it connected, the mount is accessible and files show up. Accept
+reported applet-driven VPN connection and mounted-directory listing on the VM
+Flatpak. File-open/content equality, exact prompt details, unmount and VPN release
+are not separately reported. No VPN-loss or active-transfer recovery result.
+
+Updated task/audit and these notes. Scoped whitespace passes (exit 0); unchanged
+code/test/link inputs retain earlier checks. No agent VM/service/cloud operation,
+source change, build, install, commit, push or PR-draft action. Next: switch the
+test mount off with other VPN-dependent connections off, confirm unmount and
+VPN release; retain file-content check as pending until reported.
+
+## VM applet-owned VPN release accepted — October 24, 2026
+
+After toggle-off/unmount/VPN-release guidance, operator reports VPN no longer
+connected. Accept reported VPN release alongside prior applet-driven activation,
+mount accessibility and file listing. Separate file-open/content and explicit
+unmount-completion observations were not supplied; no additional pass inferred.
+Mark the scoped VPN activation/release task complete with these limits.
+
+Next: identify the mounted provider and a disposable resource actually reachable
+only through the VPN before testing loss during transfer. Disconnecting a tunnel
+while public-cloud traffic uses an unaffected route is not evidence of interrupted
+data transport. No loss injected or active transfer result yet. Task/audit/notes
+updated; scoped whitespace passes (exit 0). Unchanged code/link checks reused;
+no source, agent VM/service/cloud operation, build, install, commit, push or
+PR-draft action.
+
+## VM VPN-loss test resource identified as VPN-only SMB — October 24, 2026
+
+Operator confirms the tested mount is SMB and reachable only through VPN. This
+supports a real network-dependency interruption test rather than assuming public
+cloud traffic stops on tunnel loss. Requested a disposable writable directory
+and its VM mount path before creating test data. No private remote identity,
+server address or credentials needed in these records.
+
+Source mount plan uses full VFS caching: a completed file-manager copy can mean
+local cache completion while upload is pending. A loss test must establish
+pending/active remote upload independently and verify the final server copy via
+an independent read; reading the same mount can return cached data. Preserve
+the local source and its SHA256, and avoid unmounting/deleting cache during an
+interrupted upload. No file created or fault injected yet. Scoped whitespace
+passes (exit 0); code/test inputs unchanged, existing gate reused. Next: select
+the approved disposable directory and prepare the bounded test file.
+
+## VM SMB disposable test directory confirmed — October 24, 2026
+
+Operator confirms a writable test directory, remounts the SMB connection and
+creates tmp on the share. File-manager screenshot supplies its full local path;
+do not reproduce organization-specific path text in these records. Target is
+only that approved tmp directory. VPN remains connected; no fault injected.
+
+Next create 128 MiB random disposable source data and a SHA256 baseline in a
+unique Downloads directory outside the mount. Keep the source/hash throughout
+the test. No remote copy yet; after preparation, confirm upload activity before
+VPN disconnection, preserve the mount/cache on failure and independently verify
+server bytes after recovery. No fixture created or VM/cloud operation by the
+agent. Scoped whitespace passes (exit 0); unchanged code/link checks reused.
+
+## VM SMB VPN-loss source/hash baseline created — October 24, 2026
+
+Operator screenshot confirms creation of 134217728 bytes in the unique Downloads
+test directory, outside the SMB mount; sha256sum completed and tee saved
+source.sha256. Synthetic source SHA256:
+`3f32cc4309c5a4e6ce59f26e6bed5c483717b46141c3d21b956769c7f838c226`.
+The displayed pre-test listing of the approved tmp directory is empty. Do not
+retain organization-specific mount path or username in these records.
+
+Next: copy source into that directory without overwriting, observe pending/
+active upload, manually disconnect VPN through NetworkManager while mount stays
+on, then observe status. Full VFS caching means cp completion alone is not proof
+of remote completion or in-flight transfer. If upload completes before loss,
+record that the interruption was not exercised. Keep source/hash and cache;
+no cleanup or unmount until recovery and independent server verification.
+No copy/fault/recovery pass yet. Scoped whitespace passes (exit 0); no source/
+test inputs changed, code gate reused. No agent VM/cloud operation or install.
+
+## VM SMB copy visible with partial upload artifact — October 24, 2026
+
+Operator reports no pending uploads observed and VPN remained connected, so no
+VPN-loss attempt has occurred. cp -n emitted a portability warning, not a
+reported copy error; avoid repeating it blindly. Screenshot shows mounted
+vpn-loss-test.bin at 128 MiB plus vpn-loss-test.bin.4fb71853.partial. Mounted
+size may come from VFS cache; neither this size nor partial-file presence proves
+completed server bytes or an active transfer. No server SHA256 result yet.
+
+Official rclone docs describe temporary .partial uploads renamed to final names
+on completion: https://rclone.org/docs/#inplace . A stale/retrying artifact is
+also possible here; do not infer current upload progress or delete it. Next:
+keep VPN and mount connected, inspect bounded matching user-service journal
+entries for upload completion/errors before choosing the interruption window.
+Source unit names match cosmic-mounter-*.service. No agent VM/cloud operation,
+new fixture or code change. Scoped whitespace passes (exit 0); existing code/
+link checks reused. Fault acceptance remains untested.
+
+## VM SMB first upload succeeded without interruption — October 24, 2026
+
+Operator journal screenshot shows synthetic tmp/vpn-loss-test.bin queued at
+13:42:41 for upload in 5 seconds, then Copied (new) and upload succeeded try #1
+at 13:43:29. Times are as displayed in the guest journal; no timezone conversion
+assumed. About 48 seconds elapsed from queue to completion. VPN stayed connected;
+accept engine-reported upload completion only, not independent server hashes or
+VPN-loss recovery. The earlier partial-file snapshot is consistent with a
+temporary upload artifact; current presence was not rechecked. Pending UI work
+was not observed by the operator, without enough evidence to establish a UI bug.
+
+Next reuse the unchanged 128 MiB source/hash with a unique new remote filename,
+copy with update=none, then disconnect VPN via NetworkManager roughly 10 seconds
+after cp returns while preserving the mount/cache. This timing targets the
+observed upload window but actual interruption still requires engine/status
+evidence. No automatic retry/recovery success inferred. Scoped whitespace passes
+(exit 0); no source/test inputs changed, code gate reused. No agent VM/cloud
+operation, build, install, commit, push or PR-draft action. Private host/remote
+identity and addresses from the raw screenshot are not copied into these notes.
+
+## VM SMB VPN loss detected; Repair offered — October 24, 2026
+
+Following the unique-filename copy and timed VPN-disconnect guidance, operator
+reports the applet says VPN is off and offers Repair. Accept reported loss notice
+and Repair availability only. Exact disconnect timing, upload-in-flight evidence,
+child/mount state and server integrity are not yet confirmed. No transfer-loss
+recovery or Repair pass inferred.
+
+Next reconnect VPN through NetworkManager while keeping the existing mount on,
+source/hash intact and cache untouched; do not invoke Repair first. Observe for
+up to 60 seconds whether state clears and upload retries or Repair remains
+required, then inspect bounded engine evidence. An observation window is not a
+guarantee of retry completion. Scoped whitespace passes (exit 0); code/test inputs
+unchanged, existing gate reused. No source or agent VM/service/cloud operation,
+build, install, commit, push or PR-draft action.
+
+## VM SMB state recovers after manual VPN reconnect — October 24, 2026
+
+Operator manually reconnects VPN and reports applet summary 1/7 connections
+active, Repair no longer displayed, mount running and row indicator 1. Accept
+reported connection-state recovery without invoking Repair. The row indicator
+is not a completed-transfer count; pending/queued upload completion is not yet
+established. No engine retry log or independent server hash result supplied.
+
+Next inspect recent bounded user-service journal entries for the unique second
+test filename, upload failure/retry and success timestamps; retain mount/cache
+and source/hash. Then verify server bytes independently of the cached mount.
+Scoped whitespace passes (exit 0); no source/test changes or gate repeat. No
+agent VM/service/cloud action, build, install, commit, push or PR-draft change.
+
+## VM interrupted SMB upload retries and succeeds — October 24, 2026
+
+Operator journal screenshot establishes the second synthetic file's transfer
+timeline (guest journal times as displayed): tmp/vpn-loss-1792875102.bin queued
+13:51:43; first write/copy failed 13:53:26 with TCP I/O timeout; VFS reported
+failed upload try 1 at 13:53:36, retry delay 10 seconds. Subsequent SMB connection/
+DNS errors led to failed tries 2 and 3 with 20/40-second backoff. Failed partial
+copy removal initially failed, later logged removal at 13:54:47. Copied (new)
+and upload succeeded try 4 both appear at 13:56:10. Raw host/share/account and
+network addresses are omitted from these records. Authentication-agent GLib
+assertion messages are also visible; no credentials, causal diagnosis or new
+authentication failure is inferred from those lines alone.
+
+Together with reported VPN disconnect/reconnect and automatic Repair clearing,
+accept actual interrupted SMB write and engine upload recovery without Repair
+or remount. Independent server-byte/hash validation remains pending; same-mount
+hash can read cached bytes. Next determine availability of smbclient (or another
+independent SMB reader) to download only the synthetic file to local Downloads
+and compare SHA256 with preserved source. No new upload, VPN interruption or
+cache removal needed. Scoped whitespace passes (exit 0); unchanged code/link
+checks reused. No source, agent VM/cloud action, build, install, commit or push.
+
+## VM independent SMB hash-reader selection — October 24, 2026
+
+Operator reports command -v smbclient printed nothing. Do not install a package
+solely for this check without approval. Existing host rclone can read the SMB
+backend directly outside the mount's VFS cache. Verified official hashsum
+documentation for SHA256 with --download; this can compute the server-file hash
+by reading its bytes without copying into the mounted path or changing the remote.
+Request only the saved remote name and remote subdirectory from the editor to
+construct a scoped read of the synthetic file. No secrets/config dump requested.
+No server hash yet; no engine command executed by the agent. Scoped whitespace
+passes (exit 0); code/test inputs unchanged, existing gate reused. Next compare
+direct remote SHA256 with the preserved baseline.
+
+## VM SMB VPN-loss recovery byte integrity accepted — October 24, 2026
+
+Operator screenshot shows successful direct rclone hashsum SHA256 of the unique
+second test file with --download, --retries 1, --timeout 60s and --max-duration 3m.
+Hash returned for vpn-loss-1792875102.bin:
+`3f32cc4309c5a4e6ce59f26e6bed5c483717b46141c3d21b956769c7f838c226`.
+It exactly matches the preserved 128 MiB local source baseline. Source is the
+remote SMB backend, not the mounted filesystem; this bypasses VFS cached reads.
+Private remote/share/account details are intentionally omitted here.
+
+Accept scoped active-upload VPN-loss handling on the identified VM Flatpak:
+VPN-off/Repair notice, actual interrupted SMB write, three failed attempts,
+manual VPN restoration, automatic upload success on try 4, Repair clearing
+without invocation/remount, and matching server bytes. This does not claim
+offset-based resume, automatic VPN reconnection, pending-count correctness,
+other providers or successful sleep/wake. Test source/hash and remote copies
+remain; no deletion/cleanup performed or authorized by this result.
+
+Marked VPN-loss check complete and separated still-blocked sleep acceptance.
+Condensed active checklist while preserving detailed failure/recovery chronology
+in these notes; updated audit/index. Four repository-hygiene tests and whitespace
+check pass (exit 0); unchanged code gate reused. No source, agent VM/cloud action,
+build, install, commit, push or PR-draft change. Remaining acceptance decision:
+active-transfer sleep testing is blocked by idle VM suspend/wake reliability;
+legacy-profile and installed ARM tests remain explicitly unavailable/unrun.
+
+### October 24, 2026 — requested documentation commit preparation
+
+Operator requested checking for new files, staging and committing. git status
+--short --branch --untracked-files=all found no untracked files on master.
+Reviewed the seven pending documentation files: PR draft, README, task list,
+completion notes, engineering index, COSMIC submission audit and OpenConnect
+guide. Changes retain scoped installed-test evidence and unrun limitations,
+future Google-native configuration work, corrected guide URLs, operator draft
+edits and the requested plain-language appendix. No packages, caches or raw
+logs selected. Reuse the just-passed four documentation hygiene tests and
+appendix assertions; runtime source remains unchanged from published 13e204e.
+Scoped task/evidence whitespace check passes (exit 0); repository-wide draft
+trailing whitespace was previously reported and is deliberately preserved.
+Commit authorized; push is not requested. Commit identity/outcome is recorded
+in Git history and the operator response, not predicted in this record.
