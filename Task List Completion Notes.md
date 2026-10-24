@@ -3143,3 +3143,26 @@ This verifies the image artifact, not installed applet behavior.
 Upstream fetch and divergence check exit 0, result 0/0. Next: commit intended
 files, fetch again immediately before push and verify remote identity. Leave
 Add Connection/PopUp image changes and the PR draft local.
+
+## Minor documentation and screenshot push preparation — October 23, 2026
+
+Operator authorizes documentation, screenshots and the PR draft together.
+Included the operator's build guide/OpenConnect deletions, Add Connection image,
+new PopUp image and PR draft. Corrected the task-list reference to the draft's
+actual filename and pointed README at the new PopUp image. Preserved PR draft
+wording and existing whitespace; removed one new build-guide blank line at EOF.
+This commits a draft only; it does not submit a repository PR.
+
+Checks (exit 0): PNG signature/chunk CRC/decompression validation for both
+screenshots; visual image inspection; `python3 tests/repo_hygiene_test.py`
+(four passing tests); `git diff --check` for tracked edits; upstream fetch and
+divergence check (0/0). The initial whitespace check found the extra build-guide
+EOF line; it was removed and the check passed. Draft whitespace is retained as
+operator-authored text. No new runtime or installed behavior is claimed.
+
+Reuse gate receipt `target/task-runs/dev-gate-1izh04qa/summary.json`, source
+`a600e562ae2e25defbcda33ebed583453ee3fc8d`, source_dirty true, succeeded, exit 0,
+log `target/task-runs/dev-gate-1izh04qa/task.log`: Rust/script/test inputs remain
+unchanged. Rechecked the affected documentation-link tests separately above.
+Next: commit this scope, fetch immediately before push, reconcile if necessary
+and verify remote identity.

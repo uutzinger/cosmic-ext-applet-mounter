@@ -20,7 +20,7 @@ Example screenshots of the applet and its separate windows:
 
 <table>
   <tr>
-    <td><a href="./resources/Popup.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Popup.png" alt="Cloud Mounter popup" width="275"></a></td>
+    <td><a href="./resources/PopUp.png" target="_blank" rel="noopener noreferrer"><img src="./resources/PopUp.png" alt="Cloud Mounter popup" width="275"></a></td>
     <td>
     <a href="./resources/Settings.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Settings.png" alt="Settings window" width="275"></a>
     </td>

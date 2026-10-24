@@ -525,6 +525,8 @@ evidence. GitHub bundle distribution in 0.5.4 does not imply COSMIC approval.
   changes; operator authors and acknowledges the contribution. Obtain maintainer
   decisions on host execution/dependencies and runtime/portal compatibility.
 
+  See [COSMIC applet repository PR draft](Cosmic%20Aplet%20Repository%20Pull%20Request.md).
+
 ### PR Submissions Rules
 
 **Your app code and its Flatpak manifest:** AI assistance or generation is permitted under that exception.
@@ -629,6 +631,11 @@ all-provider sandbox acceptance.
 
 - [x] Inspect and validate the updated `resources/Settings.png` for the authorized
   commit/push; retain unrelated local images and the PR draft.
+
+## Minor documentation and screenshot updates — October 23, 2026
+
+- [x] Validate the operator's guide edits, PR draft and screenshots for commit/push;
+  preserve draft wording and verify upstream before pushing.
 
 # Cloud Mounter Applet Future Task List
 
