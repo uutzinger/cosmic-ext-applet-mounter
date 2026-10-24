@@ -620,6 +620,11 @@ all-provider sandbox acceptance.
   and [archived execution notes](docs/archive/task-list-completion-notes-through-v0.5.4.md).
   Those observations do not establish active-transfer or repeated fault handling.
 
+## README commit and push — October 23, 2026
+
+- [x] Review and verify the latest README edits for the authorized commit/push,
+  excluding screenshot changes and the PR draft. See completion notes for checks.
+
 # Cloud Mounter Applet Future Task List
 
 Items that will be activated at some time in the future.

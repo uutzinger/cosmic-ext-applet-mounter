@@ -24,7 +24,7 @@ Example screenshots of the applet and its separate windows:
     <td>
     <a href="./resources/Settings.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Settings.png" alt="Settings window" width="275"></a>
     </td>
-    <td><a href="./resources/Add_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="275"></a></td>
+    <td><a href="./resources/Add_Connection.png" target="_blank" rel="noopener noreferrer"><img src="./resources/Add_Connection.png" alt="Add Connection window" width="350"></a></td>
   </tr>
 </table>
 
@@ -40,7 +40,7 @@ The following connection engines are used to connect to the providers:
 | Provider | Online mount | Offline mirror |
 |---|---|---|
 | OneDrive | [`jstaf/onedriver`](https://github.com/jstaf/onedriver) | [`rclone bisync`](https://rclone.org/) |
-| Google Drive | [`rclone mount`](https://rclone.org/) | [`rclone bisync`](https://rclone.org/) |
+| Google Drive | [`rclone mount`](https://rclone.org/) | `rclone bisync` |
 | Box | `rclone mount` | `rclone bisync` |
 | SMB | `rclone mount` | `rclone bisync` |
 | SFTP | `rclone mount` | `rclone bisync` |
@@ -52,8 +52,9 @@ The following connection engines are used to connect to the providers:
 ## Data Integrity Warning
 
 Cloud sync and mounts can delete, overwrite, duplicate, or hide files when they
-are configured incorrectly. **Before testing with important data, make an
-independent backup**.
+are configured incorrectly.
+
+**Before testing with important data, make an independent backup**.
 
 To reduce data integrity risks, **do not**:
 

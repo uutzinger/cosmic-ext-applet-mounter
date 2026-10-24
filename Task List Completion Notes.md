@@ -3101,3 +3101,25 @@ repository hygiene tests and source-inventory/default-version assertions pass
 (exit 0). Source manifest/pins/runtime unchanged; no app rebuild or tag movement.
 Commit approved intended files, fetch again before push, verify remote identity.
 This does not publish another release, submit a COSMIC PR or add screenshot data.
+
+## Latest README push preparation — October 23, 2026
+
+Operator requests pushing the latest README. Reviewed its screenshot width,
+Google Drive engine-link simplification and separated backup warning; removed
+one trailing space. Scope is README and required task/evidence records only.
+Screenshot changes and the PR draft remain local.
+
+Verification at source a600e562ae2e25defbcda33ebed583453ee3fc8d (dirty):
+- `git fetch origin`: initial exit 255 because Git metadata was read-only;
+  authorized retry exit 0. `git rev-list --left-right --count HEAD...origin/master`
+  exit 0, result 0/0.
+- `git diff --check -- README.md 'Task List.md'`: exit 0.
+- `bash scripts/dev.sh gate`: initial exit 1 because the sandbox blocked the
+  just runtime directory; authorized retry exit 0, status succeeded,
+  source_dirty true. Receipt `target/task-runs/dev-gate-1izh04qa/summary.json`,
+  log `target/task-runs/dev-gate-1izh04qa/task.log`; blocked attempt recorded in
+  `target/task-runs/dev-gate-ht2dyvgy/summary.json`.
+
+Source checks and unit/fake-adapter tests only; no installed or rendered UI
+acceptance is claimed. Next: commit the three intended documents, fetch again
+immediately before push, inspect divergence and verify the remote commit.
